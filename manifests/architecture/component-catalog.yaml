@@ -328,7 +328,7 @@ components:
     description: Runs one-off jobs against the cluster API.
     license: Apache-2.0
     layer: machinery
-    match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl"]
+    match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl", "docker.io/bitnamilegacy/kubectl"]
 
   - name: BusyBox
     description: Init steps that prepare a volume before its workload starts.
@@ -341,6 +341,42 @@ components:
     license: Apache-2.0
     layer: workload-infrastructure
     match: ["registry.k8s.io/agent-sandbox/*"]
+
+  - name: Kubernetes toolbox image
+    description: A container image with kubectl and other Kubernetes tools; runs the node labeler.
+    license: ""
+    layer: machinery
+    match: ["docker.io/alpine/k8s"]
+
+  - name: wait4x
+    description: Waits until a dependency, such as a database, accepts connections before its workload starts.
+    license: Apache-2.0
+    layer: machinery
+    match: ["docker.io/wait4x/*"]
+
+  - name: Cluster Autoscaler
+    description: Adds and removes worker nodes as workloads need them.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/autoscaling/*"]
+
+  - name: NATS
+    description: The message bus, with a leaf node on each managed cluster.
+    license: Apache-2.0
+    layer: capability
+    match: ["docker.io/library/nats", "docker.io/natsio/*"]
+
+  - name: PostgREST
+    description: Serves a PostgreSQL database as a REST API.
+    license: MIT
+    layer: capability
+    match: ["docker.io/postgrest/*"]
+
+  - name: curl
+    description: An HTTP client image for one-time setup jobs and network probes.
+    license: curl
+    layer: machinery
+    match: ["docker.io/curlimages/*"]
 
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
@@ -385,8 +421,8 @@ components:
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/support-agent]
 
-  - name: Credit Authority
-    description: Meters and enforces usage credits.
-    license: ""
+  - name: Formance Ledger
+    description: The ledger Credit Authority records every credit grant and spend in.
+    license: MIT
     layer: capability
-    match: ["ghcr.io/soloz-io/credit-authority*", "ghcr.io/soloz-io/zero-ops/credit-*"]
+    match: ["ghcr.io/formancehq/ledger"]

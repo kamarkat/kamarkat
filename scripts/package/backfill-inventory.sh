@@ -10,6 +10,10 @@
 # the wrong one. Versions are compared in the order given, each against the one
 # before it.
 #
+# Upstream renders and fetched manifests are cached in dist/inventory-cache, the
+# cache publish.sh uses, so a chart rendered for one version or release is not
+# downloaded again for the next.
+#
 # The catalog is read from THIS tree, so an older version is described with
 # today's descriptions; what it ran is read from its own commit.
 set -euo pipefail
@@ -46,7 +50,7 @@ for v in "$@"; do
     git -C "$HERE" worktree add --detach -q "$WORK/$v/src" "$commit"
 
     args=(--repo "$WORK/$v/src" --catalog "$HERE/manifests/architecture/component-catalog.yaml"
-          --expand "$WORK/cache")
+          --expand "$HERE/dist/inventory-cache")
     if [ -n "$previous" ]; then
         args+=(--previous-version "$previous")
         [ -f "$OUT/$previous.json" ] && args+=(--previous "$OUT/$previous.json")

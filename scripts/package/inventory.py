@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -130,6 +132,14 @@ def split_ref(ref: str) -> tuple[str, str, str]:
     return ref, tag, digest
 
 
+def atomic_write(path: Path, data: bytes) -> None:
+    """A cache file appears whole or not at all: a release and a backfill can
+    share the cache, and a half-written file would be read back as a result."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
 def one(repo: Path, pattern: str) -> Path:
     """The single file a pattern names; the CLI package was renamed once, so
     patterns span both names. More than one match is ambiguous and refused."""
@@ -182,6 +192,10 @@ class Inventory:
 
     def image(self, ref: str, *, cluster: str, nodes: set[str], where: str, boundary: str = "",
               via: str = "") -> None:
+        # A wildcard is a pattern an admission policy matches images against;
+        # it pins nothing and runs nowhere.
+        if any(ch in ref for ch in "*?"):
+            return
         repo, tag, digest = split_ref(ref)
         kind = "package" if PACKAGE_RE.match(repo) else "container"
         self.add(kind=kind, key=repo, name=repo.rsplit("/", 1)[-1], version=tag or "digest-pinned",
@@ -371,6 +385,14 @@ def upstream_charts(repo: Path) -> list[dict]:
                 continue
             block = re.search(r"^(\s+)helmValues:\s*\|\n((?:\1\s+.*\n|\s*\n)*)", chunk, re.M)
             values = "\n".join(l for l in block.group(2).splitlines() if "{{" not in l) if block else ""
+            # An element can name a values file in this repository instead; a
+            # released bundle carries the same file, so it is what the cluster renders.
+            vfile = re.search(r"^\s+valueFilesPath:\s*'([^'{]+)'", chunk, re.M)
+            if vfile:
+                path = repo / vfile.group(1)
+                if not path.exists():
+                    sys.exit(f"inventory: {app.group(1)} names values file {vfile.group(1)}, missing from {repo}")
+                values = path.read_text() + ("\n" + values if values else "")
             found.append({"app": app.group(1), "repo": url.group(1), "chart": chart.group(1),
                           "version": rev.group(1), "boundary": Path(f).name[:2], "values": values})
     seen, unique = set(), []
@@ -393,23 +415,32 @@ def scan_upstream_charts(inv: Inventory, repo: Path, cache: Path, helm: str) -> 
     for c in upstream_charts(repo):
         versions[c["chart"]] = c["version"]
         values = cache / f"{c['app']}-values.yaml"
-        text = c["values"]
+        # Lines carrying a bundle template expression are per-cluster values
+        # (a hostname) or hybrid-only placement, which renders nothing on hetzner.
+        text = "\n".join(l for l in c["values"].splitlines() if "{{" not in l)
         try:
             yaml.safe_load(text)
-        except yaml.YAMLError:
-            # A block that no longer parses once its per-cluster lines are gone
-            # renders on the chart's defaults; its images are then the chart's own.
-            text = ""
+        except yaml.YAMLError as e:
+            sys.exit(f"inventory: the values {c['app']} renders {c['chart']} with do not parse "
+                     f"once template lines are removed: {e}")
         values.write_text(text)
-        out = subprocess.run(
-            [helm, "template", c["app"], c["chart"], "--repo", c["repo"], "--version", c["version"],
-             "--values", str(values), "--namespace", "platform-ops", "--kube-version", f"v{kube}"],
-            capture_output=True, text=True,
-        )
-        if out.returncode != 0:
-            sys.exit(f"inventory: cannot render {c['chart']} {c['version']}: {out.stderr.strip()}")
+        # A render is a function of the chart version, its values and the
+        # Kubernetes version, so an unchanged one is read back rather than
+        # downloaded and rendered again. Only a successful render is kept.
+        key = hashlib.sha256("\0".join(
+            [c["repo"], c["chart"], c["version"], text, kube]).encode()).hexdigest()[:16]
+        rendered = cache / f"render-{c['chart']}-{c['version']}-{key}.yaml"
+        if not rendered.exists():
+            out = subprocess.run(
+                [helm, "template", c["app"], c["chart"], "--repo", c["repo"], "--version", c["version"],
+                 "--values", str(values), "--namespace", "platform-ops", "--kube-version", f"v{kube}"],
+                capture_output=True, text=True,
+            )
+            if out.returncode != 0:
+                sys.exit(f"inventory: cannot render {c['chart']} {c['version']}: {out.stderr.strip()}")
+            atomic_write(rendered, out.stdout.encode())
         found = 0
-        for doc in load_docs(out.stdout, f"{c['chart']} {c['version']}"):
+        for doc in load_docs(rendered.read_text(), f"{c['chart']} {c['version']}"):
             for ref, nodes in walk_images(doc):
                 found += 1
                 inv.image(ref, cluster="management", nodes=nodes, where=c["app"],
@@ -443,7 +474,7 @@ def scan_capi_providers(inv: Inventory, repo: Path, cache: Path) -> None:
             url = f"https://github.com/{project}/releases/download/{version}/{asset}"
             try:
                 with urllib.request.urlopen(url, timeout=60) as r:
-                    target.write_bytes(r.read())
+                    atomic_write(target, r.read())
             except OSError as e:
                 sys.exit(f"inventory: cannot fetch {url}: {e}")
         # Release manifests carry clusterctl variables; they are values, not structure.
