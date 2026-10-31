@@ -378,6 +378,18 @@ components:
     layer: machinery
     match: ["docker.io/curlimages/*"]
 
+  - name: Grafana dashboard sidecar
+    description: Loads dashboards and data sources into Grafana from config maps.
+    license: MIT
+    layer: capability
+    match: ["quay.io/kiwigrid/*"]
+
+  - name: Bats
+    description: The test runner in the Grafana chart's Helm test pod, which the chart renders alongside Grafana.
+    license: MIT
+    layer: capability
+    match: ["docker.io/bats/*"]
+
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
     description: Reconciles the management cluster's own platform state.

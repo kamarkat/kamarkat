@@ -42,8 +42,11 @@ for v in "$@"; do
     commit=$(awk -F'"' '/zero-ops.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
     [ -n "$commit" ] || commit=$(awk '/zero-ops.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
     if [ -z "$commit" ]; then
-        git -C "$HERE" rev-parse -q --verify "refs/tags/v$v" >/dev/null \
-            || { echo "backfill: $v records no source commit and has no tag; it cannot be tied to a tree" >&2; exit 1; }
+        if ! git -C "$HERE" rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            echo "   skipped: $v records no source commit and has no tag; it cannot be tied to a tree" >&2
+            echo "$v" >> "$WORK/skipped"
+            continue
+        fi
         commit="v$v"
     fi
     echo "   source: $commit"
@@ -55,7 +58,30 @@ for v in "$@"; do
         args+=(--previous-version "$previous")
         [ -f "$OUT/$previous.json" ] && args+=(--previous "$OUT/$previous.json")
     fi
-    python3 "$HERE/scripts/package/inventory.py" "$v" "$charts" "$OUT/$v.json" "${args[@]}"
+    rc=0
+    python3 "$HERE/scripts/package/inventory.py" "$v" "$charts" "$OUT/$v.json" "${args[@]}" \
+        2> "$WORK/$v.err" || rc=$?
+    cat "$WORK/$v.err" >&2
     git -C "$HERE" worktree remove --force "$WORK/$v/src"
+    if [ "$rc" -eq 3 ]; then
+        # Uncatalogued artefacts: keep going, so every version's gaps are
+        # reported together rather than one version per run.
+        grep -E '^  (container|package|binary|os) ' "$WORK/$v.err" | sed "s/^/$v /" >> "$WORK/uncatalogued"
+        continue
+    fi
+    [ "$rc" -eq 0 ] || exit "$rc"
     previous="$v"
 done
+
+if [ -s "$WORK/skipped" ]; then
+    echo >&2
+    echo "backfill: skipped, no source commit and no tag: $(tr '\n' ' ' < "$WORK/skipped")" >&2
+fi
+
+if [ -s "$WORK/uncatalogued" ]; then
+    echo >&2
+    echo "backfill: artefacts with no catalog entry, by first version that ships them:" >&2
+    sort -s -k2 -u "$WORK/uncatalogued" | awk '{v=$1; $1=""; print "  " v "  " substr($0,2)}' >&2
+    echo "backfill: the versions above were not written; add the entries and run them again." >&2
+    exit 3
+fi

@@ -105,6 +105,7 @@ BOOTSTRAP_TOOLS = ["clusterctl"]
 IMAGE_LINE = re.compile(r"""(?:image|imageName):\s*["']?[a-z0-9]""")
 PACKAGE_RE = re.compile(r"""^xpkg\.[a-z0-9.-]+/""")
 TEMPLATED = "TEMPLATED"
+UNCATALOGUED = 3
 
 # Content rendered only for the hybrid provider: a -hybrid subchart, a
 # hybrid-templated file, or a hybrid directory.
@@ -713,7 +714,8 @@ def main() -> None:
         for u in sorted(inv.unmatched):
             print(f"  {u}", file=sys.stderr)
         print("Add each to manifests/architecture/component-catalog.yaml.", file=sys.stderr)
-        sys.exit(1)
+        # A distinct status, so a backfill can collect every version's gaps in one pass.
+        sys.exit(UNCATALOGUED)
     check_seed_parity(inv, consts, chart_versions)
 
     rows = finish(inv)
