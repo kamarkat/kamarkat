@@ -132,6 +132,8 @@ cd - >/dev/null
 # 3. Publish. The existing script, unchanged -- one packaging path, one gate set.
 # ---------------------------------------------------------------------------
 say "3. Publish $VERSION"
+# The inventory compares this version against the one the box runs now.
+export PREVIOUS_VERSION="$CURRENT"
 run make publish-local VERSION="$VERSION" OWNER="$OWNER" \
   || die "publish failed -- nothing has been promoted, so the box is untouched"
 

@@ -19,6 +19,9 @@ on:
       version:
         description: "Version to publish (semver, no leading v)"
         required: true
+      previous:
+        description: "Version this one follows, for the component inventory (no leading v)"
+        required: false
 
 permissions:
   # write, not read: the release attaches the CLI a tenant installs and the
@@ -71,11 +74,34 @@ jobs:
       #
       # The login stays here and not in the script: the credential belongs to the
       # caller, and a script that logged in would need one to run at all.
+      # The inventory is compared against the version this one follows: the
+      # previous release tag for a release, or the version a dispatch names.
+      - name: Resolve the version this one follows
+        id: prev
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            prev="${{ inputs.previous }}"
+          else
+            git fetch --tags --quiet
+            prev=$(git tag --list 'v*' --sort=-v:refname | grep -v "^${{ github.event.release.tag_name }}$" | head -1)
+            prev="${prev#v}"
+          fi
+          echo "version=$prev" >> "$GITHUB_OUTPUT"
+
       - name: Package, gate and publish the bundle
         run: |
           set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           ./scripts/package/publish.sh "${{ steps.v.outputs.version }}" "${{ github.repository_owner }}"
+        env:
+          PREVIOUS_VERSION: ${{ steps.prev.outputs.version }}
+
+      - name: Attach the component inventory to the release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/charts/platform-bundle/components.json --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ADR-068: one run publishes the bundle and produces the build that
       # requests it. A release that shipped charts and no binary would leave the

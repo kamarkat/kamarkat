@@ -1,0 +1,392 @@
+# Every third-party and platform artefact a bundle version ships, described once.
+#
+# scripts/package/inventory.py lists what a release installs and joins each
+# artefact to an entry here by `match` (an exact key, or a prefix ending in *).
+# An artefact with no entry fails the release: a component is published only
+# with a description, a licence and a layer, so the inventory a tenant reads is
+# complete by construction rather than by someone remembering to update it.
+#
+# Keys: a container repository; pkg:<apt or versioned download>; url:<unversioned
+# download>; os:<image>; tool:<CLI binary>.
+#
+#   layer: machinery                 every box runs it
+#          capability                a platform tool a tenant selects
+#          workload-infrastructure   what applications rest on
+#
+# license is the SPDX identifier of the upstream project. An empty value means
+# it has not been verified, and the docs say so rather than guessing.
+
+components:
+  # ── Nodes ───────────────────────────────────────────────────────────────
+  - name: Ubuntu
+    description: The node operating system, the provider's stock image.
+    license: ""
+    layer: machinery
+    match: ["os:ubuntu"]
+
+  - name: containerd
+    description: The container runtime on every node.
+    license: Apache-2.0
+    layer: machinery
+    match: ["pkg:containerd", "url:raw.githubusercontent.com/containerd/*"]
+
+  - name: runc
+    description: The low-level runtime containerd starts containers with.
+    license: Apache-2.0
+    layer: machinery
+    match: ["pkg:runc"]
+
+  - name: Kubernetes node tools
+    description: kubelet runs the node's pods; kubeadm joins it to the cluster; kubectl is the command-line client.
+    license: Apache-2.0
+    layer: machinery
+    match: ["pkg:kubelet", "pkg:kubeadm", "pkg:kubectl"]
+
+  - name: Node utilities
+    description: Operating system utilities the node bootstrap uses, from the distribution's package archive.
+    license: ""
+    layer: machinery
+    match: ["pkg:at", "pkg:jq", "pkg:unzip", "pkg:wget", "pkg:socat", "pkg:mtr", "pkg:logrotate",
+            "pkg:apt-transport-https", "pkg:bash-completion"]
+
+  - name: Tailscale
+    description: Joins the node to the tailnet when a tailnet hostname is configured for it.
+    license: BSD-3-Clause
+    layer: machinery
+    match: ["url:tailscale.com/*"]
+
+  # ── Kubernetes control plane ────────────────────────────────────────────
+  - name: Kubernetes
+    description: The control plane kubeadm runs at the pinned Kubernetes version.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-controller-manager",
+            "registry.k8s.io/kube-scheduler", "registry.k8s.io/kube-proxy", "registry.k8s.io/pause"]
+
+  - name: etcd
+    description: The control plane's key-value store.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/etcd"]
+
+  - name: CoreDNS
+    description: Cluster DNS.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/coredns/*"]
+
+  # ── Cluster lifecycle ───────────────────────────────────────────────────
+  - name: Cluster API
+    description: Declarative cluster lifecycle. Creates, scales and replaces the management and managed clusters.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/cluster-api/*", "registry.k8s.io/capi-operator/*", "tool:clusterctl"]
+
+  - name: Cluster API provider for Hetzner
+    description: Creates cluster machines, networks and load balancers in the cloud account.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/syself/caph*"]
+
+  - name: cert-manager
+    description: Issues and renews the TLS certificates for every gateway and webhook.
+    license: Apache-2.0
+    layer: machinery
+    match: ["quay.io/jetstack/*"]
+
+  - name: cert-manager DNS-01 webhook
+    description: Proves domain ownership for certificates through the provider's DNS.
+    license: ""
+    layer: machinery
+    match: [docker.io/hetzner/cert-manager-webhook-hetzner]
+
+  # ── GitOps and composition ──────────────────────────────────────────────
+  - name: Argo CD
+    description: The GitOps engine. Reconciles every cluster to the GitOps repository and the pinned bundle.
+    license: Apache-2.0
+    layer: machinery
+    match: ["quay.io/argoproj/argocd", "ghcr.io/dexidp/*", "public.ecr.aws/docker/library/redis", "ecr-public.aws.com/docker/library/redis", "docker.io/library/haproxy"]
+
+  - name: Argo CD agent
+    description: Connects each workload cluster's GitOps engine to the management cluster over an outbound channel.
+    license: Apache-2.0
+    layer: machinery
+    match: ["quay.io/argoprojlabs/*"]
+
+  - name: Argo Rollouts
+    description: Progressive delivery for application workloads.
+    license: Apache-2.0
+    layer: workload-infrastructure
+    match: ["quay.io/argoproj/argo-rollouts"]
+
+  - name: capi2argo
+    description: Registers each cluster Cluster API creates with the GitOps engine.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/dntosas/*"]
+
+  - name: Crossplane
+    description: Composition. Turns one declaration into the set of resources behind it.
+    license: Apache-2.0
+    layer: machinery
+    match: ["xpkg.crossplane.io/crossplane/*"]
+
+  - name: Crossplane Kubernetes provider
+    description: Lets a composition create objects in any cluster the platform manages.
+    license: Apache-2.0
+    layer: machinery
+    match: [xpkg.upbound.io/crossplane-contrib/provider-kubernetes]
+
+  - name: Crossplane SQL provider
+    description: Creates application databases and roles inside the platform database.
+    license: Apache-2.0
+    layer: capability
+    match: [xpkg.upbound.io/crossplane-contrib/provider-sql]
+
+  - name: Patch and transform function
+    description: The composition function the platform's compositions are written in.
+    license: Apache-2.0
+    layer: machinery
+    match: [xpkg.upbound.io/crossplane-contrib/function-patch-and-transform]
+
+  - name: Reloader
+    description: Restarts a workload when a secret or config map it reads changes.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/stakater/*"]
+
+  # ── Networking ──────────────────────────────────────────────────────────
+  - name: Cilium
+    description: Container networking, network policy and the Gateway API implementation.
+    license: Apache-2.0
+    layer: machinery
+    match: ["quay.io/cilium/*"]
+
+  - name: agentgateway
+    description: The gateway that serves application and platform routes.
+    license: Apache-2.0
+    layer: workload-infrastructure
+    match: ["cr.agentgateway.dev/*"]
+
+  - name: ExternalDNS
+    description: Publishes DNS records for every public hostname.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/external-dns/*"]
+
+  - name: ExternalDNS provider webhook
+    description: Connects ExternalDNS to the provider's DNS service.
+    license: ""
+    layer: machinery
+    match: [docker.io/hetzner/external-dns-hetzner-webhook]
+
+  - name: NodeLocal DNSCache
+    description: A DNS cache on every node.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/dns/*"]
+
+  - name: Cluster proportional autoscaler
+    description: Scales cluster DNS with the size of the cluster.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/cpa/*"]
+
+  - name: NGINX
+    description: Serves static pages and public assets.
+    license: BSD-2-Clause
+    layer: workload-infrastructure
+    match: ["docker.io/nginxinc/*"]
+
+  # ── Cloud integration and storage ───────────────────────────────────────
+  - name: Hetzner cloud controller manager
+    description: Node lifecycle and load balancers in the cloud account.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/syself/hetzner-cloud-controller-manager"]
+
+  - name: Hetzner CSI driver
+    description: Block-storage volumes for persistent data.
+    license: MIT
+    layer: machinery
+    match: ["docker.io/hetznercloud/*"]
+
+  - name: CSI sidecars
+    description: The standard Kubernetes storage sidecars the CSI driver runs with.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/sig-storage/*"]
+
+  - name: Local path provisioner
+    description: Node-local volumes on clusters without cloud block storage.
+    license: Apache-2.0
+    layer: machinery
+    match: ["docker.io/rancher/*"]
+
+  # ── Policy and secrets ──────────────────────────────────────────────────
+  - name: Kyverno
+    description: Admission policy. Enforces the platform's rules on everything a cluster admits.
+    license: Apache-2.0
+    layer: machinery
+    match: ["reg.kyverno.io/*", "ghcr.io/kyverno/*"]
+
+  - name: External Secrets
+    description: Secret delivery. Copies each workload's secrets from the secret store into its namespace.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/external-secrets/*", "oci.external-secrets.io/*"]
+
+  - name: Infisical
+    description: The secret store. Holds every platform and application secret.
+    license: MIT
+    layer: machinery
+    match: ["docker.io/infisical/infisical"]
+
+  - name: Infisical PKI issuer
+    description: Issues internal certificates from the secret store's certificate authority.
+    license: ""
+    layer: machinery
+    match: ["docker.io/infisical/pki-issuer"]
+
+  # ── Identity ────────────────────────────────────────────────────────────
+  - name: ZITADEL
+    description: The identity provider. Sign-in for people and identities for applications.
+    license: AGPL-3.0-only
+    layer: machinery
+    match: ["ghcr.io/zitadel/*"]
+
+  # ── Data ────────────────────────────────────────────────────────────────
+  - name: CloudNativePG
+    description: The database operator. Runs PostgreSQL clusters with backups and failover.
+    license: Apache-2.0
+    layer: capability
+    match: ["ghcr.io/cloudnative-pg/cloudnative-pg"]
+
+  - name: PostgreSQL
+    description: The platform database and each application's database.
+    license: PostgreSQL
+    layer: capability
+    match: ["ghcr.io/cloudnative-pg/postgresql", docker.io/library/postgres]
+
+  - name: Redis
+    description: The platform cache.
+    license: ""
+    layer: capability
+    match: [docker.io/library/redis]
+
+  # ── Observability ───────────────────────────────────────────────────────
+  - name: Grafana Alloy
+    description: Collects metrics and logs on every node and cluster.
+    license: Apache-2.0
+    layer: capability
+    match: ["docker.io/grafana/alloy"]
+
+  - name: Loki
+    description: Log storage and search.
+    license: AGPL-3.0-only
+    layer: capability
+    match: ["docker.io/grafana/loki"]
+
+  - name: Grafana
+    description: Dashboards for metrics and logs.
+    license: AGPL-3.0-only
+    layer: capability
+    match: ["docker.io/grafana/grafana"]
+
+  - name: Grafana operator
+    description: Manages dashboards and data sources as declarations.
+    license: Apache-2.0
+    layer: capability
+    match: ["ghcr.io/grafana/grafana-operator"]
+
+  - name: VictoriaMetrics operator
+    description: Runs the metrics stores.
+    license: Apache-2.0
+    layer: capability
+    match: ["docker.io/victoriametrics/*"]
+
+  - name: kube-state-metrics
+    description: Exposes the state of Kubernetes objects as metrics.
+    license: Apache-2.0
+    layer: capability
+    match: ["registry.k8s.io/kube-state-metrics/*"]
+
+  - name: metrics-server
+    description: Resource metrics for autoscaling and `kubectl top`.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/metrics-server/*"]
+
+  - name: Headlamp
+    description: The cluster console.
+    license: Apache-2.0
+    layer: machinery
+    match: ["ghcr.io/headlamp-k8s/*"]
+
+  # ── Utilities ───────────────────────────────────────────────────────────
+  - name: kubectl
+    description: Runs one-off jobs against the cluster API.
+    license: Apache-2.0
+    layer: machinery
+    match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl"]
+
+  - name: BusyBox
+    description: Init steps that prepare a volume before its workload starts.
+    license: GPL-2.0-only
+    layer: machinery
+    match: [docker.io/library/busybox]
+
+  - name: Agent sandbox controller
+    description: Runs isolated, short-lived sandboxes for application jobs.
+    license: Apache-2.0
+    layer: workload-infrastructure
+    match: ["registry.k8s.io/agent-sandbox/*"]
+
+  # ── Kamarkat ────────────────────────────────────────────────────────────
+  - name: Platform operator
+    description: Reconciles the management cluster's own platform state.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/zero-ops/hub-operator]
+
+  - name: Tenant provisioning
+    description: Provisions each organization and application declared in the GitOps repository.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/zero-ops/kube-sbt]
+
+  - name: Control-plane API
+    description: The control plane's API.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/zero-ops/mcp-server]
+
+  - name: Login gateway
+    description: Signs people in before a request reaches a protected route.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/zero-ops/auth-proxy]
+
+  - name: Cluster identity operator
+    description: Gives each workload cluster its identity with the management cluster.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/spoke-identity-operator]
+
+  - name: Ephemeral job operator
+    description: Runs short-lived jobs on workload clusters.
+    license: ""
+    layer: workload-infrastructure
+    match: [ghcr.io/soloz-io/ephemeral-job-operator]
+
+  - name: Support agent
+    description: Reports allowlisted control-plane facts when an organization enrols. Does nothing until then.
+    license: ""
+    layer: machinery
+    match: [ghcr.io/soloz-io/zero-ops/support-agent]
+
+  - name: Credit Authority
+    description: Meters and enforces usage credits.
+    license: ""
+    layer: capability
+    match: ["ghcr.io/soloz-io/credit-authority*", "ghcr.io/soloz-io/zero-ops/credit-*"]

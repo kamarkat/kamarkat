@@ -213,6 +213,32 @@ EOF
 # this release publishes; an unsupported one must be refused by name.
 ./scripts/validate/support-matrix.sh dist/charts/platform-bundle "$VERSION" dist/charts
 
+# ── Inventory ───────────────────────────────────────────────────────────────
+
+# What this version installs, where, and at what version, written into the bundle
+# chart itself. It travels with the chart rather than with a GitHub release
+# because a prerelease has no release, and a tenant mirroring the bundle should
+# not need anything the bundle does not contain. Every artefact must be in
+# manifests/architecture/component-catalog.yaml or the release stops here.
+#
+# PREVIOUS_VERSION names the version this one is compared against. Its inventory
+# is read from its own published chart; a version published before inventories
+# existed carries none, and is said to rather than compared against nothing.
+inventory_args=(--expand dist/inventory-cache)
+if [ -n "${PREVIOUS_VERSION:-}" ]; then
+    rm -rf dist/previous && mkdir -p dist/previous
+    helm pull "oci://ghcr.io/${OWNER}/charts/environment-manager" --version "$PREVIOUS_VERSION" \
+        --untar -d dist/previous >/dev/null
+    inventory_args+=(--previous-version "$PREVIOUS_VERSION")
+    if [ -f dist/previous/environment-manager/components.json ]; then
+        inventory_args+=(--previous dist/previous/environment-manager/components.json)
+    else
+        echo "inventory: ${PREVIOUS_VERSION} was published before inventories; nothing to compare against"
+    fi
+fi
+python3 scripts/package/inventory.py "$VERSION" dist/charts \
+    dist/charts/platform-bundle/components.json "${inventory_args[@]}"
+
 # ── Push ────────────────────────────────────────────────────────────────────
 
 for c in dist/charts/*/; do

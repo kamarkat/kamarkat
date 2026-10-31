@@ -86,4 +86,32 @@ minimum="${BUNDLE_MINIMUM_FROM:-${PREVIOUS#v}}"
     # stated window" a sentence no tenant could act on and the platform could
     # not answer.
     python3 "$(dirname "$0")/support-window.py" "$VERSION"
+
+    # What moved, from the inventory publish.sh wrote into the bundle chart. The
+    # full list is in the chart and attached to this release as components.json.
+    inventory="${INVENTORY:-dist/charts/platform-bundle/components.json}"
+    if [ -f "$inventory" ]; then
+        python3 - "$inventory" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+changes = d.get("changes")
+print()
+print("## Components")
+print()
+if changes is None:
+    print(f"{len(d['components'])} components. No earlier inventory to compare against.")
+elif not changes:
+    print(f"{len(d['components'])} components. None changed since {d['previous']}.")
+else:
+    print(f"{len(d['components'])} components; {len(changes)} changed since {d['previous']}.")
+    print()
+    groups = {g["id"]: g["title"] for g in d["groups"]}
+    print("| Component | Where | Change | From | To |")
+    print("|---|---|---|---|---|")
+    for c in changes:
+        nodes = ", ".join(n.replace("-", " ") for n in c["nodes"])
+        where = groups[c["cluster"]] + (f" ({nodes})" if nodes else "")
+        print(f"| {c['name']} | {where} | {c['kind']} | {c['from']} | {c['to']} |")
+PY
+    fi
 } 
