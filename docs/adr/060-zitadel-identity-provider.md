@@ -427,9 +427,26 @@ loaded the current certificate, and the login pod passed readiness two seconds l
 ESO-delivered Secret, `zitadel-login-service-key-managed`, so the chart's generation
 branch is never reached.
 
-- **The material is the pair already trusted**, published to Infisical by
-  `CLISecretMappings` from the Secret the chart last generated. Naming it rotates
-  nothing: no new key, no second rollout, no session disruption.
+- **The material is the pair the chart last rendered**, published to Infisical by
+  `CLISecretMappings` from the live Secret.
+
+  This was first written as "the pair already trusted ... naming it rotates nothing:
+  no new key, no second rollout, no session disruption." That was wrong, and the
+  rc.183 rollout showed why. The defect being fixed regenerated the keypair on
+  *every* sync, so the live Secret held the most recently rendered pair — not the
+  pair the running Zitadel read at startup 29 hours earlier. Publishing it froze a
+  pair that was already newer than the one in the issuer's memory, the Zitadel pod
+  template changed with the certificate inside `SystemAPIUsers`, and a restart
+  became necessary rather than avoidable. Observed 2026-11-01: the new login pod
+  signed with the frozen pair, the running Zitadel rejected it
+  (`invalid signature`, AUTH-7fs1e), and sign-in survived only because the old login
+  pod was still serving the old pair to the old issuer.
+
+  The correct statement of the decision is narrower: **the material is frozen, not
+  chosen.** Whatever pair was live at publication becomes the permanent one, and
+  exactly one restart of the issuer is needed to adopt it. After that restart the
+  certificate never changes again, which is the whole point — the recurring
+  regeneration is what caused both incidents, not the value of any particular key.
 - **`kubernetes.io/tls` with `tls.crt` and `tls.key`**, the shape the chart's own
   Secret had and its volume mount expects.
 - **`deletionPolicy: Retain` and `Prune=false`.** Once the chart stops rendering a

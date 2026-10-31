@@ -255,7 +255,10 @@ login:
   # the replacement pod could not schedule on a worker 25Mi short.
   #
   # The Secret is ESO-owned (zitadel-login-service-key-es.yaml) and carries the
-  # pair already in use, so naming it here rotates nothing.
+  # pair the chart last rendered -- which is NOT the pair a long-running Zitadel
+  # read at startup, because the defect regenerated it on every sync. Naming it
+  # freezes that pair and costs exactly one restart of the issuer to adopt it
+  # (ADR-060, addendum 2026-10-31); after that the certificate never changes.
   loginServiceKeySecretName: zitadel-login-service-key-managed
 
   # The login UI carries its own probe block, so the top-level readinessProbe

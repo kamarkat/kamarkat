@@ -18,10 +18,12 @@
 # assertion failed AUTH-7fs1e for five hours. Sign-in survived only because the old
 # login pod was still serving.
 #
-# THE MATERIAL IS THE ONE ALREADY TRUSTED, not a new pair. The keypair in use was
-# published to Infisical as-is (hub-operator CLISecretMappings), so switching the
-# chart to this Secret changes nothing either service is holding: no rotation, no
-# session disruption, no second rollout.
+# THE MATERIAL IS FROZEN, NOT CHOSEN. The keypair the chart had last rendered was
+# published to Infisical as-is (hub-operator CLISecretMappings). That is not the
+# same as the pair a long-running Zitadel trusts: it reads SystemAPIUsers once at
+# startup, and every sync since then had minted a new pair. So this costs exactly
+# one restart of the issuer to adopt the frozen pair -- after which the certificate
+# never changes again, which is what both incidents were caused by.
 #
 # deletionPolicy Retain and Prune=false, together: the chart no longer renders a
 # login-service-key Secret, so ArgoCD sees this one as belonging to no rendered
