@@ -225,8 +225,28 @@
 # audience and role claim come from the viewer application registered there --
 # both are per box, and both are pinned against a real token before the query
 # endpoint is published.
+#
+# GATED ON THE AUDIENCE, both objects. The audience is the identifier Zitadel
+# mints when the box's observability client is first registered, so it cannot
+# exist before the release that registers it: a box declares it in its registry
+# afterwards, and until then there is no viewer endpoint here at all.
+#
+# Not rendered-with-an-empty-audience, which is the same mistake in a quieter
+# form: `matchClaims` with an empty `aud` matches any token this issuer signed,
+# so every client of the box's own identity provider would read its telemetry.
+# Not `required` on its own either -- that fails the WHOLE catalogue's render,
+# taking every VMSingle, Loki and Alloy object down with one unconfigured
+# endpoint, which is what blocked rc.182. The guard inside the substitution
+# stays: if the gate is ever opened by a value this cannot see, the aud must
+# still be real.
+#
+# cluster/078-viewer-audience-declared.sh asserts the other half -- that a box
+# provisioning a viewer identity does not leave the audience undeclared, so a
+# mistyped registry key is a failure rather than an endpoint that silently
+# never appeared.
 - kind: VMAuth
   name: viewer
+  when: 'dig "observability" "viewer" "audience" "" .Values.global'
   fields:
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
       value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
@@ -236,6 +256,7 @@
 
 - kind: VMUser
   name: viewer
+  when: 'dig "observability" "viewer" "audience" "" .Values.global'
   fields:
     - path: [spec, jwt, oidc, issuer]
       value: 'https://id.{{ .Values.global.hubDomain }}'

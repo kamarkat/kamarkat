@@ -33,6 +33,15 @@ for objects that carry the same per-instance value in every field. A `value:`
 field marked `type: int` renders as an integer, not a quoted string (replica
 counts that differ per environment).
 
+A spec may also carry `when:`, a Helm expression the whole object is gated on: it
+is emitted inside `{{- if <expr> }}`, so a box whose values do not satisfy it gets
+no such object at all. That is for an object which cannot be configured partially
+-- an authorization boundary whose audience the box has not declared yet is the
+case this was built for. Rendering it with an empty audience would admit every
+client of the issuer, and `required` cannot express it either: the value is minted
+by the release being packaged, so no value exists at package time and refusing to
+render the catalogue takes every other object in it down with the one.
+
 A component may render into several files. All of them are passed at once and a
 declared object must appear in exactly one of them: checked per file, a
 declaration would have to name objects that live in a different file, so every
@@ -292,6 +301,9 @@ def main() -> int:
     # Each pass also appended the document again, so the object was emitted twice.
     protected = set()
     collected = set()
+    # kind/name -> the Helm expression the object is gated on, if any.
+    guards = {}
+    conflicts = []
     for spec in wanted:
         key = (spec["kind"], spec["name"])
         doc = index.get(key)
@@ -305,7 +317,7 @@ def main() -> int:
             protected.add(id(doc))
             for field_name in list(doc):
                 doc[field_name] = protect(doc[field_name])
-        for field in spec["fields"]:
+        for field in spec.get("fields") or []:
             try:
                 if "replaceAll" in field:
                     # No path: the literal is replaced wherever it appears in the
@@ -329,10 +341,26 @@ def main() -> int:
                 where = ('.'.join(map(str, field["path"]))
                          if "path" in field else "anywhere in the object")
                 missing.append(f"{spec['kind']}/{spec['name']} {where}: {exc}")
+        if "when" in spec:
+            previous = guards.get(id(doc))
+            if previous is not None and previous != spec["when"]:
+                conflicts.append(
+                    f"{spec['kind']}/{spec['name']}: guarded by two different "
+                    f"conditions, {previous!r} and {spec['when']!r}")
+            guards[id(doc)] = spec["when"]
         claimed.add(key)
         if id(doc) not in collected:
             collected.add(id(doc))
             templated.append(doc)
+
+    if conflicts:
+        print("the templated-field declaration gates one object on two conditions:",
+              file=sys.stderr)
+        for item in conflicts:
+            print(f"  {item}", file=sys.stderr)
+        print("Which one wins would be the packager's choice to make, and it is not "
+              "the packager's to make.", file=sys.stderr)
+        return 1
 
     if missing:
         print("the templated-field declaration names content this component does "
@@ -361,7 +389,16 @@ def main() -> int:
             "*/ -}}\n"
         )
         for doc in templated:
-            handle.write("---\n" + _dump(doc))
+            expr = guards.get(id(doc))
+            if expr:
+                # The separator sits INSIDE the guard. Outside it, a gated-out
+                # object leaves a stray `---` behind, and a document of nothing
+                # between two separators is a null document that kustomize and
+                # helm disagree about.
+                handle.write("{{- if %s }}\n---\n%s{{- end }}\n"
+                             % (expr, _dump(doc)))
+            else:
+                handle.write("---\n" + _dump(doc))
 
     for rendered, keep in remaining.items():
         with open(rendered, "w") as handle:
@@ -371,7 +408,8 @@ def main() -> int:
     # the chart already has. Without them the chart renders nothing at all, and
     # the packager reports that as "renders no objects" -- the symptom, not the
     # cause.
-    defaults = global_defaults(_dump(doc) for doc in templated)
+    defaults = global_defaults(
+        [_dump(doc) for doc in templated] + list(guards.values()))
     if defaults:
         values_path = os.path.join(chart, "values.yaml")
         existing = {}

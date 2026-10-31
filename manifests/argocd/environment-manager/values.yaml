@@ -69,6 +69,21 @@ hubDomain: ""
 previewDomain: ""
 
 
+# ADR-078 add.5 §7: the box's observability viewer identity.
+#
+# The audience is the identifier the box's own issuer mints when its
+# observability client is registered, which the hub-operator does on the
+# release that introduces the capability. It is therefore EMPTY on a box that
+# has not reached that point, and declared here afterwards from Infisical's
+# hub-observability-project-id.
+#
+# Empty means the spoke's viewer query endpoint is not rendered at all. That is
+# deliberate: an endpoint whose token audience matched nothing would admit every
+# client of this issuer, so an unconfigured viewer is absent rather than open.
+observability:
+  viewer:
+    audience: ""
+
 # ADR-078 addenda 4 and 5: where each cluster's Alertmanager delivers. Required
 # while observability is enabled: an Alertmanager with no route delivers nothing.
 alerting:

@@ -1863,10 +1863,45 @@ the condition ADR-096 removed for the Gateway and ADR-046 §24 removed for
 assurance, not steady-state enforcement": a delivered resource that is pruned stays
 pruned until the payload hash changes.
 
-A missing project id fails rendering rather than producing a `VMUser` that matches
-nothing, and the declared id is verified against the issuer's actual id during
-provisioning and operational validation — reported on mismatch, never silently
-overwritten in Git.
+A missing audience leaves the endpoint **unrendered**, and the declared id is
+verified against the issuer's actual id during provisioning and operational
+validation — reported on mismatch, never silently overwritten in Git.
+
+**Correction, 2026-11-01.** This section first said a missing project id "fails
+rendering". It was implemented that way — `required` around the audience
+substitution — and the consequence was immediate: `publish-local` could not package
+the catalogue at all, because the audience is minted by the box's own issuer when
+the observability client is first registered, and that registration is what the
+release being packaged delivers. The guard asked at render time for a value only its
+own deployment could produce.
+
+Failing the render is the wrong severity even once a box has an audience. The
+catalogue is one Application carrying 435 objects; `required` fails the whole render,
+so an unconfigured query endpoint would stop every VMSingle, Loki and Alloy object on
+that spoke from reconciling, and Argo CD would report ComparisonError for all of them.
+One endpoint nobody has configured is not a reason to stop collecting telemetry.
+
+So the gate moved from the value to the object. `VMAuth/viewer` and `VMUser/viewer`
+are emitted inside `{{- if <the audience is declared> }}`, through a `when:` field
+added to the component packager for this: a box that has not declared an audience has
+no viewer endpoint, and the rest of the catalogue is untouched. Rendering with an
+empty audience was never an option — `matchClaims` with an empty `aud` matches every
+token the box's issuer signs, so every client of its identity provider would read its
+telemetry. Absent, not open.
+
+The sequence this implies is two releases, and that is accepted rather than worked
+around. The first ships the capability and registers the client, publishing
+`hub-observability-project-id`; the box declares that id in its registry; the next
+release renders the viewer against a real identifier. The audience travels the same
+path as every other box fact — the registry, through environment-manager's
+`globalValues`, into the catalogue's chart values.
+
+A gate that closes quietly needs its own assertion, because an audience written at the
+wrong registry path produces exactly the cluster a box with no viewer produces: no
+objects, no error, no event. `cluster/078-viewer-audience-declared.sh` pairs the two —
+where the capability's marker says a viewer identity **is** provisioned, an undeclared
+audience is a failure, and a declared one must have opened the gate on the spoke with
+a matching `aud`.
 
 ### Open: how the role is matched
 

@@ -129,6 +129,17 @@ global:
            the records it believes it owns, so two boxes sharing one would
            delete each other's. */}}
     ownerId: {{ $root.Values.dns.ownerId | default (include "environment-manager.clusterName" $root) | quote }}
+  {{- /* ADR-078 add.5 §7: the audience a viewer's query token must carry.
+         Minted by this box's issuer when its observability client is
+         registered, so it is empty until the box declares it -- and an empty
+         one leaves the spoke's viewer endpoint unrendered rather than matching
+         every token the issuer signed (spoke-catalog/templated-fields.yaml).
+         Emitted even when empty: the catalogue reads it through `dig`, and a
+         key that is absent on some boxes and present on others is read wrong
+         exactly once. */}}
+  observability:
+    viewer:
+      audience: {{ dig "viewer" "audience" "" ($root.Values.observability | default dict) | quote }}
   {{- /* The spoke this box's burst-capacity autoscaler watches. A global for the
          same reason as hubDomain: it is a fact about the box, and the
          alternative was the component carrying one box's spoke name as a
