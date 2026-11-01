@@ -323,9 +323,74 @@ def subchart_of(path: Path, charts: Path) -> str:
     return parts[2] if len(parts) > 2 and parts[1] == "charts" else parts[0]
 
 
-def scan_bundle(inv: Inventory, charts: Path, bmap: dict[str, str]) -> None:
-    """Every pod the platform's own charts render, and images assembled from values."""
+# Resources an operator turns into pods whose image the resource names only in
+# part, or not at all. The operator fills the rest from defaults compiled into
+# it, so each default below was read from the operator's source at the version
+# named, and a bundle running any other version is refused until they are read
+# again at that version.
+#   grafana-operator v5.24.0  controllers/config/operator_constants.go
+#   VictoriaMetrics operator v0.75.0  internal/config/config.go (images),
+#     internal/controller/operator/factory/build/defaults.go (config-reloader)
+OPERATED = {
+    "Grafana": {"operator": "Grafana operator", "verified": "v5.24.0",
+                "image": "docker.io/grafana/grafana", "tag": "13.0.1", "reloader": False},
+    "VMSingle": {"operator": "VictoriaMetrics operator", "verified": "v0.75.0",
+                 "image": "victoriametrics/victoria-metrics", "tag": "", "reloader": False},
+    "VMAlert": {"operator": "VictoriaMetrics operator", "verified": "v0.75.0",
+                "image": "victoriametrics/vmalert", "tag": "", "reloader": True},
+    "VMAuth": {"operator": "VictoriaMetrics operator", "verified": "v0.75.0",
+               "image": "victoriametrics/vmauth", "tag": "", "reloader": True},
+    "VMAlertmanager": {"operator": "VictoriaMetrics operator", "verified": "v0.75.0",
+                       "image": "prom/alertmanager", "tag": "v0.34.1", "reloader": True},
+}
+VM_CONFIG_RELOADER = "victoriametrics/operator:config-reloader-{v}"
+
+
+def operated_images(doc: dict) -> list[tuple[str, str]]:
+    """(image, operator) for each pod image the operator creates from this resource."""
+    d = OPERATED[doc["kind"]]
+    spec = doc.get("spec") or {}
+    if doc["kind"] == "Grafana":
+        # spec.version is a tag or a whole image reference; absent, the default.
+        v = str(spec.get("version") or "")
+        return [(v if "/" in v else f"{d['image']}:{v or d['tag']}", d["operator"])]
+    img = spec.get("image") if isinstance(spec.get("image"), dict) else {}
+    tag = str(img.get("tag") or d["tag"])
+    if not tag:
+        # Its default is the operator's own release version, which the operator's
+        # deployment does not state; a resource that leaves it out cannot be listed.
+        sys.exit(f"inventory: {doc['kind']} {doc.get('metadata', {}).get('name')} sets no image tag")
+    out = [(f"{img.get('repository') or d['image']}:{tag}", d["operator"])]
+    if d["reloader"]:
+        out.append((spec.get("configReloaderImage") or VM_CONFIG_RELOADER, d["operator"]))
+    return out
+
+
+def scan_operated(inv: Inventory, found: list[tuple[dict, str, str, str]]) -> None:
+    """Pods operators create from the bundle's resources, at the operator version
+    the bundle deploys."""
+    deployed = {}
+    for row in inv.rows.values():
+        if row["component"] in {d["operator"] for d in OPERATED.values()}:
+            deployed.setdefault(row["component"], set()).update(row["versions"])
+    for doc, cluster, sub, boundary in found:
+        d = OPERATED[doc["kind"]]
+        versions = deployed.get(d["operator"], set())
+        if versions != {d["verified"]}:
+            sys.exit(f"inventory: {doc['kind']} is reconciled by {d['operator']} "
+                     f"{', '.join(sorted(versions)) or '(not deployed)'}, but its defaults were read at "
+                     f"{d['verified']}; read them at the deployed version and update OPERATED")
+        nodes = placement(doc.get("spec") or {})
+        for ref, operator in operated_images(doc):
+            inv.image(ref.replace("{v}", d["verified"]), cluster=cluster, nodes=nodes, where=sub,
+                      boundary=boundary, via=f"{operator} {d['verified']}")
+
+
+def scan_bundle(inv: Inventory, charts: Path, bmap: dict[str, str]) -> list[tuple[dict, str, str, str]]:
+    """Every pod the platform's own charts render, and images assembled from values.
+    Returns the resources an operator turns into pods, for scan_operated."""
     templated_nodes: dict[str, set[str]] = {}
+    operated: list[tuple[dict, str, str, str]] = []
     for f in sorted(charts.rglob("*.yaml")):
         s = str(f)
         if ("/templates/" not in s and "/files/" not in s) or f.parent.name == "descriptors" \
@@ -336,6 +401,8 @@ def scan_bundle(inv: Inventory, charts: Path, bmap: dict[str, str]) -> None:
         sub = subchart_of(f, charts)
         cluster = "managed" if sub in MANAGED_CHARTS else "management"
         for doc in load_docs(f.read_text(errors="replace"), s):
+            if isinstance(doc, dict) and doc.get("kind") in OPERATED:
+                operated.append((doc, cluster, sub, bmap.get(sub, "")))
             for ref, nodes in walk_images(doc):
                 if TEMPLATED in ref:
                     templated_nodes.setdefault(sub, set()).update(nodes)
@@ -369,6 +436,7 @@ def scan_bundle(inv: Inventory, charts: Path, bmap: dict[str, str]) -> None:
         for ref in refs:
             inv.image(ref, cluster="managed" if sub in MANAGED_CHARTS else "management",
                       nodes=templated_nodes[sub], where=sub, boundary=bmap.get(sub, ""))
+    return operated
 
 
 def upstream_charts(repo: Path) -> list[dict]:
@@ -710,8 +778,9 @@ def main() -> None:
     scan_nodes(inv, repo, cache)
     scan_management_addons(inv, repo)
     scan_capi_providers(inv, repo, cache)
-    scan_bundle(inv, charts, boundaries_by_app(repo))
+    operated = scan_bundle(inv, charts, boundaries_by_app(repo))
     chart_versions = scan_upstream_charts(inv, repo, cache, a.helm)
+    scan_operated(inv, operated)
 
     if inv.unmatched:
         print("inventory: these artefacts ship in the bundle but have no catalog entry:", file=sys.stderr)

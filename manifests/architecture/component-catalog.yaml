@@ -296,7 +296,19 @@ components:
     description: Runs the metrics stores.
     license: Apache-2.0
     layer: capability
+    match: ["docker.io/victoriametrics/operator"]
+
+  - name: VictoriaMetrics
+    description: The metrics store, rule evaluation and the authenticating proxy in front of them, run by the VictoriaMetrics operator.
+    license: Apache-2.0
+    layer: capability
     match: ["docker.io/victoriametrics/*"]
+
+  - name: Alertmanager
+    description: Routes the alerts rule evaluation raises, run by the VictoriaMetrics operator.
+    license: Apache-2.0
+    layer: capability
+    match: ["docker.io/prom/alertmanager"]
 
   - name: kube-state-metrics
     description: Exposes the state of Kubernetes objects as metrics.
@@ -353,35 +365,11 @@ components:
     layer: machinery
     match: ["registry.k8s.io/autoscaling/*"]
 
-  - name: NATS
-    description: The message bus, with a leaf node on each managed cluster.
-    license: Apache-2.0
-    layer: capability
-    match: ["docker.io/library/nats", "docker.io/natsio/*"]
-
-  - name: PostgREST
-    description: Serves a PostgreSQL database as a REST API.
-    license: MIT
-    layer: capability
-    match: ["docker.io/postgrest/*"]
-
   - name: curl
     description: An HTTP client image for one-time setup jobs and network probes.
     license: curl
     layer: machinery
     match: ["docker.io/curlimages/*"]
-
-  - name: Grafana dashboard sidecar
-    description: Loads dashboards and data sources into Grafana from config maps.
-    license: MIT
-    layer: capability
-    match: ["quay.io/kiwigrid/*"]
-
-  - name: Bats
-    description: The test runner in the Grafana chart's Helm test pod, which the chart renders alongside Grafana.
-    license: MIT
-    layer: capability
-    match: ["docker.io/bats/*"]
 
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
