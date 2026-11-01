@@ -5,13 +5,18 @@
 # and sessions for every replica: Grafana's documented HA model. Grafana's own
 # alerting is not used; alerting is VMAlert and VMAlertmanager.
 #
-# Sign-in: the operator's generated admin credential (Secret
-# platform-admin-credentials). The viewer OIDC route of §7 waits on ListenerSet
-# with the spoke query endpoints, and arrives with it.
+# Sign-in: this box's own issuer, through the confidential `grafana` client
+# hub-operator registers in the box's observability project (§7), with the
+# operator's generated admin credential (Secret platform-admin-credentials)
+# remaining as the way in when the issuer itself is the thing that is broken.
 #
 # Datasources: the hub's own pair, through VMAuth's service route with Grafana's
-# own token. Spoke pairs are generated when spokes can be queried (ADR-083,
-# 2026-09-21 amendment).
+# own token -- and one pair per spoke, published by the platform-spoke-datasources
+# Application, which forwards the SIGNED-IN PERSON's token to that spoke's
+# viewer endpoint instead of a credential of Grafana's. That is why the hub pair
+# and the spoke pairs are reached so differently: the hub's stores sit in this
+# cluster behind a service route, and a spoke's sit behind a public endpoint that
+# admits a viewer by their own `aud` (ADR-078 add.5 §7).
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -36,6 +41,40 @@ spec:
       remoteRef:
         key: hub-grafana-db-password
 ---
+# The viewer client's credentials (§7), minted by hub-operator when it registers
+# the `grafana` application in this box's observability project and published to
+# the hub's own Infisical keys.
+#
+# The issuer discloses a client secret ONCE, at creation, so hub-operator
+# publishes it on the pass that creates the client and never again -- it does not
+# regenerate on a reconcile, because that would invalidate the credential this
+# deployment is holding and the failure would land on the next sign-in rather
+# than on the reconcile that caused it. So if this Secret never resolves, the
+# key is absent rather than wrong, and the client has to be re-created for a new
+# secret to exist at all.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-oidc
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: infisical-backend
+    kind: ClusterSecretStore
+  target:
+    name: grafana-oidc
+    creationPolicy: Owner
+  data:
+    - secretKey: clientId
+      remoteRef:
+        key: hub-grafana-oidc-client-id
+    - secretKey: clientSecret
+      remoteRef:
+        key: hub-grafana-oidc-client-secret
+---
 apiVersion: grafana.integreatly.org/v1beta1
 kind: Grafana
 metadata:
@@ -55,9 +94,56 @@ spec:
       name: grafana
       ssl_mode: require
     users:
+      # No account is created by this box. Everyone arrives through the issuer
+      # below, which is the only thing that knows who the box's operators are.
       allow_sign_up: "false"
+      # Viewers may open Explore and retune a panel without saving. Dashboards
+      # are GitOps objects (GrafanaDashboard), so there is nothing here for a
+      # person to author and lose -- and a read-only sign-in that cannot run a
+      # query against the cluster it just listed would not be worth having.
+      viewers_can_edit: "true"
     auth.anonymous:
       enabled: "false"
+    # §7: sign-in against the box's own issuer.
+    #
+    # allow_sign_up is TRUE here while the global one above is false, and the two
+    # are not in conflict: the global governs this box creating accounts, and
+    # this governs whether a person the ISSUER has already vouched for is given a
+    # Grafana record. The issuer is the gate -- the observability project refuses
+    # a token to anyone holding no role in it -- so a first sign-in that could
+    # not create its record would simply refuse everyone, forever, having already
+    # authenticated them.
+    #
+    # client_id and client_secret are NOT here. They are credentials, so they
+    # arrive as environment variables from the Secret below; Grafana reads
+    # GF_AUTH_GENERIC_OAUTH_* in preference to this file, and anything written
+    # here would be in the rendered manifest and in Git.
+    auth.generic_oauth:
+      enabled: "true"
+      name: Platform
+      allow_sign_up: "true"
+      scopes: openid profile email
+      auth_url: PLACEHOLDER_OIDC_AUTH_URL
+      token_url: PLACEHOLDER_OIDC_TOKEN_URL
+      api_url: PLACEHOLDER_OIDC_USERINFO_URL
+      use_pkce: "true"
+      # Kept so a session outlives the access token's lifetime. Without it the
+      # datasources below start answering 401 part-way through a sitting, which
+      # reads as the spoke having gone away.
+      use_refresh_token: "true"
+      email_attribute_path: email
+      login_attribute_path: preferred_username
+      name_attribute_path: name
+      # Everyone who gets in is a Grafana Viewer, as a LITERAL rather than a
+      # claim lookup.
+      #
+      # The issuer nests project roles under a URN key whose value is a map, so
+      # a JMESPath over it is both awkward and a second place the role model
+      # lives. There is one role in the observability project today and nothing
+      # in this Grafana for an editor to edit, so mapping it would express a
+      # distinction that does not exist. When a second role is added, this is
+      # where it is read -- not before.
+      role_attribute_path: "'Viewer'"
     analytics:
       reporting_enabled: "false"
       check_for_updates: "false"
@@ -92,6 +178,16 @@ spec:
                     secretKeyRef:
                       name: grafana-db
                       key: password
+                - name: GF_AUTH_GENERIC_OAUTH_CLIENT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-oidc
+                      key: clientId
+                - name: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-oidc
+                      key: clientSecret
               resources:
                 requests:
                   cpu: 50m

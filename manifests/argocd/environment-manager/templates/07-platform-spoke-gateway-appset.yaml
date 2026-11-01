@@ -78,10 +78,13 @@ spec:
               # ADR-078 add.5 §7: the spoke's query endpoint. The audience is the
               # single declaration that renders it -- here, and in the spoke
               # catalogue's VMAuth -- so the endpoint and the stores behind it
-              # appear and disappear together. The spoke's own name comes from
-              # the cluster generator because the hostname is derived from it.
-              - name: spokeName
-                value: '{{"{{"}} .name {{"}}"}}'
+              # appear and disappear together.
+              #
+              # The HOSTNAME is passed rather than derived in the chart, because
+              # the hub's Grafana datasource has to name the same string and a
+              # second derivation is a second producer (_viewer-host.tpl).
+              - name: observability.viewer.host
+                value: '{{ include "environment-manager.viewerHost" $ }}'
               - name: observability.viewer.audience
                 value: '{{ dig "viewer" "audience" "" (.Values.observability | default dict) }}'
               - name: observability.viewer.issuer

@@ -1,0 +1,88 @@
+{{- include "environment-manager.assertSupported" . -}}
+{{- $released := ne .Values.bundleVersion "development" }}
+{{- $audience := dig "viewer" "audience" "" (.Values.observability | default dict) }}
+{{- if $audience }}
+---
+# ADR-078 add.5 §7: each spoke, selectable in the hub's own Grafana.
+#
+# ONE APPLICATION PER SPOKE, RENDERED ON THE HUB. The generator walks the spokes
+# because the thing being described is a spoke; the destination is the hub
+# because Grafana is there. That split is the whole shape of this ApplicationSet
+# and the reason it is separate from 07, which renders on the spoke itself.
+#
+# The objects are named after the spoke they describe, so N Applications write
+# into one namespace without the ownership fight ADR-096 records: every ArgoCD
+# Application applies as the same field manager, so two of them declaring the
+# same object overwrite each other every reconcile.
+#
+# THE WHOLE SET IS GATED ON THE AUDIENCE, not passed it. The audience is the one
+# declaration that renders a spoke's query endpoint and the stores behind it
+# (07, and the spoke catalogue's VMAuth). A datasource for an endpoint that was
+# never published is a cluster in the dropdown whose every query fails, which is
+# a worse answer than the cluster not being listed -- so when the box has
+# declared no audience, this ApplicationSet does not exist.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-spoke-datasources
+  namespace: platform-ops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            spoke-type: pool
+  template:
+    metadata:
+      name: 'platform-spoke-datasources-{{"{{"}} .name {{"}}"}}'
+      namespace: platform-ops
+      labels:
+        app.kubernetes.io/part-of: platform
+        resource-type: observability-datasource
+    spec:
+      project: boundary-06
+      sources:
+{{- if $released }}
+        - repoURL: {{ .Values.bundleRegistry | quote }}
+          targetRevision: {{ .Values.bundleVersion | quote }}
+          chart: platform-spoke-datasources
+{{- else }}
+        - repoURL: {{ .Values.platformRepoURL | quote }}
+          targetRevision: '{{ .Values.environmentRevision }}'
+          path: manifests/tenants/charts/platform-spoke-datasources
+{{- end }}
+          helm:
+            parameters:
+              - name: spokeName
+                value: '{{"{{"}} .name {{"}}"}}'
+              # The spoke's endpoint, from the ONE producer of it. The spoke's
+              # own gateway chart is passed the same value from the same place,
+              # so the host this queries is the host that spoke terminates.
+              - name: viewerHost
+                value: '{{ include "environment-manager.viewerHost" $ }}'
+      destination:
+        # The HUB. Grafana runs here, and this Application describes a spoke
+        # without touching it.
+        server: https://kubernetes.default.svc
+        namespace: platform-observability
+      syncPolicy:
+        automated:
+          # prune: true, and safe: these two objects have exactly one declarer,
+          # so pruning removes a spoke that was rotated out rather than
+          # something another Application still wants. A datasource left behind
+          # for a spoke that no longer exists is a cluster in the dropdown that
+          # times out.
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
+          - RespectIgnoreDifferences=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+{{- end }}

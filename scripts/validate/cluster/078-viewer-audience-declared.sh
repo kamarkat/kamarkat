@@ -148,3 +148,101 @@ PYCHECK
         pass "the viewer endpoint's certificate is issued"
     fi
 }
+
+# ADR-078 add.5 §7: the hub half of the query path.
+#
+# The endpoint being reachable is not the same as the box being able to use it.
+# Three more things have to hold, each of which fails in a way that reads as the
+# SPOKE being broken:
+#
+#   * the viewer client's credentials exist, or Grafana starts with generic OAuth
+#     configured and no client, and the sign-in button returns an issuer error.
+#   * generic OAuth is actually on. Without it the only way in is the admin
+#     credential, and an admin session carries no OIDC token -- so every spoke
+#     datasource answers 401 while the hub's own pair keep working, which looks
+#     exactly like a broken spoke.
+#   * the hub names the host the spoke terminates. Four objects carry that
+#     string, three on the spoke and one here, and nothing reconciles them
+#     against each other. They are compared rather than recomputed: a check that
+#     re-derives the hostname from the same rule the producer used agrees with
+#     itself and says nothing about whether the two ends agree.
+validate_adr078_viewer_queryable_from_grafana() {
+    section "ADR-078 add.5 §7: the box's Grafana can query what its spokes publish"
+
+    if ! kc get configmap observability-viewer -n platform-observability >/dev/null 2>&1; then
+        note "no observability-viewer marker on this box, so there is no viewer"
+        note "identity and nothing for Grafana to sign a viewer in with"
+        return 0
+    fi
+
+    # PRESENCE ONLY. The values are a client credential; this reports that both
+    # keys resolved, never what they hold.
+    local cid csec
+    cid=$(kc get secret grafana-oidc -n platform-observability -o jsonpath='{.data.clientId}' 2>/dev/null || true)
+    csec=$(kc get secret grafana-oidc -n platform-observability -o jsonpath='{.data.clientSecret}' 2>/dev/null || true)
+    if [[ -z "$cid" || -z "$csec" ]]; then
+        hard_fail "platform-observability/grafana-oidc is missing its clientId or clientSecret, so Grafana has no viewer client: the issuer discloses a client secret only when it mints one, and hub-operator does not regenerate on a reconcile, so the key is absent rather than wrong and the client has to be re-created for a secret to exist at all"
+    else
+        pass "the viewer client's id and secret both resolved into grafana-oidc"
+    fi
+
+    local enabled authurl
+    enabled=$(kc get grafana platform -n platform-observability \
+        -o jsonpath='{.spec.config.auth\.generic_oauth.enabled}' 2>/dev/null || true)
+    authurl=$(kc get grafana platform -n platform-observability \
+        -o jsonpath='{.spec.config.auth\.generic_oauth.auth_url}' 2>/dev/null || true)
+    if [[ "$enabled" != "true" ]]; then
+        hard_fail "the hub Grafana has generic OAuth ${enabled:-unset}, so the only way in is the admin credential -- and an admin session carries no OIDC token, so every spoke datasource answers 401 while the hub's own pair keep working"
+    elif [[ -z "$authurl" ]]; then
+        hard_fail "the hub Grafana has generic OAuth enabled with no auth_url, so the sign-in button leads nowhere"
+    else
+        pass "the hub Grafana signs viewers in against $authurl"
+    fi
+
+    local spoke url logurl pass_thru
+    while read -r spoke; do
+        [[ -z "$spoke" ]] && continue
+        url=$(kc get grafanadatasource "${spoke}-metrics" -n platform-observability \
+            -o jsonpath='{.spec.datasource.url}' 2>/dev/null || true)
+        logurl=$(kc get grafanadatasource "${spoke}-logs" -n platform-observability \
+            -o jsonpath='{.spec.datasource.url}' 2>/dev/null || true)
+        if [[ -z "$url" || -z "$logurl" ]]; then
+            hard_fail "the hub has no datasource pair for spoke $spoke, so its telemetry is published and nothing lists it: the platform-spoke-datasources Application is gated on the same audience as the endpoint, so a declared audience with no datasource means that ApplicationSet is not reconciling"
+            continue
+        fi
+        pass_thru=$(kc get grafanadatasource "${spoke}-metrics" -n platform-observability \
+            -o jsonpath='{.spec.datasource.jsonData.oauthPassThru}' 2>/dev/null || true)
+        if [[ "$pass_thru" != "true" ]]; then
+            hard_fail "datasource ${spoke}-metrics does not forward the viewer's token (oauthPassThru=${pass_thru:-unset}), so it reaches the spoke's VMAuth with no token at all and every query answers 401"
+        else
+            pass "the hub lists $spoke and forwards each viewer's own token to it"
+        fi
+    done < <(kc get applications.argoproj.io -n platform-ops -o name 2>/dev/null \
+        | sed -n 's|.*/platform-spoke-catalog-||p')
+
+    # THE TWO ENDS, COMPARED. Only for the spoke this run can reach.
+    if ! ensure_spoke_kubeconfig; then
+        note "spoke unreachable, so the host the hub queries was not compared with"
+        note "the host the spoke terminates"
+        return 0
+    fi
+    local listener_host hub_host
+    listener_host=$(kc_spoke get gateway tenant-tls-gateway -n platform-ops \
+        -o jsonpath='{.spec.listeners[?(@.name=="observability-viewer")].hostname}' 2>/dev/null || true)
+    [[ -n "$listener_host" ]] || return 0
+    hub_host=$(kc get grafanadatasource -n platform-observability -o json 2>/dev/null \
+        | python3 -c '
+import json, sys
+from urllib.parse import urlparse
+hosts = set()
+for d in json.load(sys.stdin).get("items", []):
+    ds = (d.get("spec") or {}).get("datasource") or {}
+    if (ds.get("jsonData") or {}).get("oauthPassThru"):
+        hosts.add(urlparse(ds.get("url") or "").hostname or "")
+print("\n".join(sorted(h for h in hosts if h)))' || true)
+    if grep -qxF "$listener_host" <<< "$hub_host"; then
+        pass "the hub queries $listener_host, which is the host that spoke terminates"
+    else
+        hard_fail "the spoke terminates $listener_host and the hub's viewer datasources name ${hub_host:-nothing}; the listener, the certificate, the route and the datasource all carry that string and nothing reconciles them, so the one that disagrees fails TLS or resolves nowhere while every object reports Ready"
+    fi
+}

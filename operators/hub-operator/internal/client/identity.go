@@ -251,6 +251,55 @@ func (c *IdentityClient) EnsurePlatformProject(ctx context.Context, name string)
 	return out.OrgID, out.ProjectID, nil
 }
 
+// EnsurePlatformProjectAccess admits the platform's own people to a platform
+// project: the named role exists on it, and every human member of the platform
+// organisation holding no grant there is given that role (ADR-078 add.5 §7).
+//
+// Called for the observability project and no other. Every project this
+// platform creates carries projectRoleCheck, so the issuer refuses a token for
+// an application inside it to anyone holding no role -- which is exactly what
+// makes an `aud` claim naming the observability project mean "someone granted
+// observability access", and exactly what locks the box's own operators out of
+// Grafana until this runs. The refusal arrives at the issuer, so neither
+// Grafana nor the gateway can explain it.
+func (c *IdentityClient) EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID, roleKey, roleDisplay string) error {
+	body, err := json.Marshal(map[string]any{
+		"orgId":       orgID,
+		"projectId":   projectID,
+		"roleKey":     roleKey,
+		"roleDisplay": roleDisplay,
+	})
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/internal/platform/projects/access", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("identity service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotImplemented {
+		return ErrIdentityProvisioningUnsupported
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(raw))
+		if len(msg) > 300 {
+			msg = msg[:300]
+		}
+		return fmt.Errorf("identity service: POST %s -> %d: %s", url, resp.StatusCode, msg)
+	}
+	return nil
+}
+
 // ErrIdentityProvisioningUnsupported is returned when the configured identity
 // provider has no tenant to provision. Sentinel so a caller can treat it as a
 // steady state rather than a failure to retry.

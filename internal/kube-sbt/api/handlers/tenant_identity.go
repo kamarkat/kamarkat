@@ -244,6 +244,17 @@ func (h *TenantIdentityHandler) EnsureIdentity(c *gin.Context) {
 type PlatformAppProvisioner interface {
 	EnsurePlatformApp(ctx context.Context, appName string, redirectURIs, postLogoutURIs []string) (string, error)
 	EnsurePlatformProject(ctx context.Context, name string) (orgID, projectID string, err error)
+	// EnsurePlatformProjectAccess admits the platform's own people to a
+	// platform project: the named role exists on it, and every human member of
+	// the platform organisation holding no grant there is given that role.
+	//
+	// Asked for explicitly, per project, because every project this platform
+	// creates refuses a token to a user holding no role in it. That is the
+	// point of a project people SIGN IN to -- the observability one, whose
+	// audience is what a spoke's VMAuth matches (ADR-078 add.5 §7) -- and wrong
+	// for one that exists only as an audience for a single machine caller, like
+	// the credit authority's (ADR-109).
+	EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID, roleKey, roleDisplay string) error
 	// EnsureConfidentialClient provisions a client that authenticates with a
 	// SECRET, in a project the caller has already resolved.
 	//
@@ -280,6 +291,42 @@ func (h *PlatformAppHandler) EnsureProject(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"orgId": orgID, "projectId": projectID})
+}
+
+type ensurePlatformProjectAccessRequest struct {
+	OrgID       string `json:"orgId" binding:"required"`
+	ProjectID   string `json:"projectId" binding:"required"`
+	RoleKey     string `json:"roleKey" binding:"required"`
+	RoleDisplay string `json:"roleDisplay"`
+}
+
+// EnsureProjectAccess admits the platform's own people to a platform project.
+//
+// Separate from provisioning the project because the two answer different
+// questions: that one asks for an audience to exist, this one asks who may be
+// issued a token for an application inside it. Grafana's viewer client is the
+// first case where the answer is "the box's operators" rather than "one machine
+// caller", and without it the issuer refuses every sign-in with
+// Errors.User.GrantRequired -- a refusal nothing between Grafana and the issuer
+// explains.
+func (h *PlatformAppHandler) EnsureProjectAccess(c *gin.Context) {
+	if h.provisioner == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"error": "the configured identity provider does not provision platform projects",
+		})
+		return
+	}
+	var req ensurePlatformProjectAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.provisioner.EnsurePlatformProjectAccess(
+		c.Request.Context(), req.OrgID, req.ProjectID, req.RoleKey, req.RoleDisplay); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projectId": req.ProjectID, "roleKey": req.RoleKey})
 }
 
 // PlatformAppHandler provisions a platform-level OIDC client.

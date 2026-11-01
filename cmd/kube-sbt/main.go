@@ -99,6 +99,11 @@ func main() {
 			internal.POST("/platform/apps", pa.EnsureApp)
 			internal.POST("/platform/projects", pa.EnsureProject)
 			internal.POST("/platform/clients", pa.EnsureConfidentialClient)
+			// Who may be issued a token for an application in a platform
+			// project. Separate from creating the project because the credit
+			// authority's admits one machine caller and the observability one
+			// admits the box's operators (ADR-078 add.5 §7).
+			internal.POST("/platform/projects/access", pa.EnsureProjectAccess)
 		}
 	}
 

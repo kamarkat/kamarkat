@@ -1886,6 +1886,12 @@ behind it do not, or the reverse. The hostname is derived from the spoke's name 
 the box's domain rather than declared, so the host a listener terminates, a
 certificate is issued for and a route matches cannot drift apart.
 
+Amended the same day: the hostname is produced ONCE, by the environment manager
+(`_viewer-host.tpl`), and passed to both the spoke's gateway chart and the hub's
+datasource for that spoke. Deriving it inside the gateway chart was right while the
+spoke was the only reader; the moment the hub had to name the same string, a second
+derivation in a second chart became a second producer, fed from a different path.
+
 `cluster/078-viewer-audience-declared.sh` asserts reachability, not rendering: the
 listener Programmed, the route's `ResolvedRefs`, the certificate Ready. Each of
 those fails quietly on its own — an unprogrammed listener answers nothing, an
@@ -2022,3 +2028,64 @@ whose 5.x → 8.x jump keeps all four values we set but moves RBAC from `endpoin
 bump. Then Reloader's chart major. The Grafana pair moves with the Kubernetes
 upgrade tracked in `docs/plans/k8s-cnpg-upgrade-and-restore-drill.md`, never ahead
 of it.
+
+### The box's own Grafana is where a spoke is read (2026-11-01)
+
+The endpoint above answers queries. Nothing was *asking* them: the hub's Grafana
+listed its own two datasources and no spoke, and the only way in was the operator's
+admin credential. Three things closed that, and they ship together because each one
+alone leaves the path broken in a way that reads as one of the others being at
+fault.
+
+**Sign-in is the box's own issuer.** `generic_oauth` against the confidential
+`grafana` client hub-operator registers in the box's observability project. Not a
+convenience: a spoke's VMAuth admits a viewer by the `aud` in *their* token, so
+there has to be a token belonging to a person. An admin session carries none, and
+with one the hub's own datasources keep working while every spoke answers 401 —
+which looks precisely like a broken spoke.
+
+**The issuer had to be told who may sign in.** Every project this platform creates
+carries `projectRoleCheck` with `hasProjectCheck`, which is exactly what makes an
+`aud` naming the observability project mean "someone granted observability access"
+rather than "any client of this issuer". The same property refused the box's own
+operators: the client was registered, its credentials published, and every sign-in
+answered `Errors.User.GrantRequired` at the issuer, where neither Grafana nor the
+gateway can explain it. So hub-operator now also ensures a `viewer` role on that
+project and grants it to every **human** member of the platform organisation holding
+no grant there — reconciled, because there is no signup hook to hang it on, which
+makes it eventually-consistent for an operator added between two passes.
+
+Asked for per project, never folded into provisioning one. Handing that role to
+every administrator is right for a project people sign in to and wrong for one that
+exists only as an audience for a single machine caller, which is what the credit
+authority's is (ADR-109).
+
+**One datasource pair per spoke, on the hub, with `oauthPassThru`.** The spoke
+pairs forward the signed-in person's own token; the hub's pair send a bearer token
+Grafana holds, because the stores they query sit in that cluster behind a service
+route and the authority there is Grafana's. The two are reached differently because
+they are authorized differently.
+
+Rendered by `platform-spoke-datasources`, one Application per spoke: the generator
+walks the spokes because the subject is a spoke, and the destination is the hub
+because Grafana is there. The objects are named after the spoke they describe, so N
+Applications write into one namespace without the ownership fight ADR-096 records.
+The whole ApplicationSet is gated on the audience rather than passed it — a
+datasource for an endpoint that was never published is a cluster in the dropdown
+whose every query fails, which is a worse answer than the cluster not being listed.
+
+**Everyone who signs in is a Grafana Viewer, as a literal.** The issuer nests
+project roles under a URN key whose value is a map, so reading one is both awkward
+and a second place the role model would live; there is one role in that project and
+nothing in this Grafana for an editor to edit, because dashboards are
+`GrafanaDashboard` objects from Git. `viewers_can_edit` is on, so a viewer can open
+Explore and retune a panel without saving — a read-only sign-in that cannot query
+the cluster it just listed would not be worth having. A second role is the first
+thing that would make the claim worth mapping, and `role_attribute_path` is where
+that is read when it exists.
+
+The issuer is also now ONE global (`global.oidcIssuer`). The spoke's VMAuth
+validates a viewer's token against it and the hub sends people to it to sign in; a
+box federating to its own issuer had the spoke deriving `id.<hubDomain>` while
+everything else used the declared one, and a token issued by somebody else is
+simply refused, with nothing in the refusal naming which end was wrong.

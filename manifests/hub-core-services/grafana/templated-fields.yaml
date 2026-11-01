@@ -9,6 +9,22 @@
       value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else }}2{{ end }}'
     - path: [spec, deployment, spec, template, spec, topologySpreadConstraints, 0, whenUnsatisfiable]
       value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+    # The box's issuer (§7), from the ONE global every reader of it uses -- the
+    # spoke's VMAuth validates a viewer's token against the same value, and an
+    # issuer those two disagree about refuses the token as signed by somebody
+    # else, with nothing in the refusal naming which of them was wrong.
+    #
+    # The three PATHS are Zitadel's, exactly as the JWKS path is in
+    # environment-manager's _oidc-issuer.tpl. A box federating to an issuer that
+    # is not Zitadel sets `oidcIssuer` and these are the next thing it has to
+    # declare; nothing here guesses them from a discovery document, because a
+    # value fetched at render time cannot be reviewed in a diff.
+    - path: [spec, config, auth.generic_oauth, auth_url]
+      value: '{{ .Values.global.oidcIssuer }}/oauth/v2/authorize'
+    - path: [spec, config, auth.generic_oauth, token_url]
+      value: '{{ .Values.global.oidcIssuer }}/oauth/v2/token'
+    - path: [spec, config, auth.generic_oauth, api_url]
+      value: '{{ .Values.global.oidcIssuer }}/oidc/v1/userinfo'
 
 - kind: HTTPRoute
   name: grafana

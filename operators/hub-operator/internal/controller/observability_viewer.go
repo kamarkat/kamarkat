@@ -46,10 +46,23 @@ const (
 	observabilityViewerNamespace  = "platform-observability"
 
 	// Hub keys, beside the platform services' own.
-	observabilityProjectIDKey     = "hub-observability-project-id"
-	grafanaOIDCClientIDKey        = "hub-grafana-oidc-client-id"
-	grafanaOIDCClientSecretKey    = "hub-grafana-oidc-client-secret"
-	observabilityViewerRoleKeyFmt = "viewer" // the role VMAuth matches
+	observabilityProjectIDKey  = "hub-observability-project-id"
+	grafanaOIDCClientIDKey     = "hub-grafana-oidc-client-id"
+	grafanaOIDCClientSecretKey = "hub-grafana-oidc-client-secret"
+	// The role the box's operators hold in the observability project.
+	//
+	// NOT what authorizes a query -- the spoke's VMAuth matches the project
+	// `aud` alone, because the project is dedicated and a token for it is
+	// already a token belonging to someone granted access. This role exists
+	// because the ISSUER requires one: every project this platform creates
+	// carries projectRoleCheck, so without a grant every sign-in is refused
+	// with Errors.User.GrantRequired, before Grafana sees anything.
+	//
+	// One role, deliberately. A second one -- an editor beside a viewer -- is
+	// the first thing that would make the role claim worth matching, and
+	// dashboards come from Git, so there is nothing to edit yet.
+	observabilityViewerRole        = "viewer"
+	observabilityViewerRoleDisplay = "Observability Viewer"
 )
 
 // ObservabilityViewerReconciler provisions the box's observability project and
@@ -102,6 +115,19 @@ func (r *ObservabilityViewerReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 	if err := r.publishHubSecret(ctx, observabilityProjectIDKey, projectID); err != nil {
 		return ctrl.Result{}, fmt.Errorf("publish the observability project id: %w", err)
+	}
+
+	// Who may be issued a token for the client below. The project refuses one to
+	// a user holding no role in it, so this is not a convenience: without it the
+	// client is registered, its credentials are published, Grafana is configured
+	// and every sign-in is refused at the issuer.
+	//
+	// Reconciled rather than event-driven, because there is no signup hook to
+	// hang it on -- so an operator added between two passes is refused until the
+	// next one, the same bounded delay a tenant's members have (ADR-060).
+	if err := r.IdentityClient.EnsurePlatformProjectAccess(
+		ctx, orgID, projectID, observabilityViewerRole, observabilityViewerRoleDisplay); err != nil {
+		return ctrl.Result{}, fmt.Errorf("admit the platform's operators to the observability project: %w", err)
 	}
 
 	// Grafana's generic OAuth callback. One URI: the box has one Grafana, and a

@@ -75,7 +75,7 @@ spec:
     - name: observability-viewer
       protocol: HTTPS
       port: 443
-      hostname: {{ include "platform-spoke-gateway.viewerHost" . | quote }}
+      hostname: {{ .Values.observability.viewer.host | quote }}
       tls:
         mode: Terminate
         certificateRefs:

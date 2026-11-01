@@ -1,0 +1,86 @@
+{{/*
+One spoke, selectable in the hub's Grafana (ADR-078 add.5 §7).
+
+TWO DATASOURCES PER SPOKE, NOT ONE PER STORE. A spoke runs two metric stores
+behind its VMAuth and one log store, and the viewer endpoint is the only way in
+to any of them, so what the hub names is the spoke's query path -- `prometheus`
+for metrics and `logs` for logs, which are the two prefixes that endpoint
+routes (spoke-catalog/infra/victoriametrics/vmauth.yaml).
+
+WHY THE SIGNED-IN PERSON'S TOKEN, and not a credential of Grafana's.
+
+The hub's own pair send a bearer token Grafana holds, because the stores they
+query sit in this cluster behind a service route and the authority is Grafana's.
+A spoke's endpoint is public and admits a viewer by the `aud` in their own
+token, which is the box's observability project -- so the thing that must reach
+VMAuth is the token the person signed in with. `oauthPassThru` is what forwards
+it, and it is why sign-in through the box's issuer is a PRECONDITION of these
+datasources rather than a convenience: with a Grafana admin session and no OIDC
+token, every query here answers 401 and the spoke looks broken rather than
+unauthenticated.
+
+RENDERED ON THE HUB, one Application per spoke, each owning the two objects
+named after its own spoke. Distinct names are what lets N Applications write
+into one namespace without the ownership fight ADR-096 describes: every ArgoCD
+Application applies as the same field manager, so two of them declaring the same
+object overwrite each other on every reconcile.
+*/}}
+{{- if not .Values.spokeName }}
+{{- fail "spokeName is empty: it names the datasource a person picks and the `cluster` label the spoke stamps on everything it sends, and the two have to be the same string" }}
+{{- end }}
+{{- if not .Values.viewerHost }}
+{{- fail "viewerHost is empty: the hostname is produced once, by the environment's _viewer-host.tpl, and passed to this chart and to the spoke's gateway from there -- a datasource pointing at https:/// resolves nowhere and reports it as a query failure" }}
+{{- end }}
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: {{ printf "%s-metrics" .Values.spokeName }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    app.kubernetes.io/managed-by: platform
+    app.kubernetes.io/part-of: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: {{ .Values.instanceLabel }}
+  datasource:
+    name: {{ printf "%s-metrics" .Values.spokeName }}
+    uid: {{ printf "%s-metrics" .Values.spokeName }}
+    type: prometheus
+    # proxy, not browser: the request leaves Grafana, so the viewer's browser
+    # never needs to reach the spoke and the token is not handed to it.
+    access: proxy
+    url: {{ printf "https://%s/prometheus" .Values.viewerHost }}
+    jsonData:
+      # The longest scrape interval on a spoke, so $__rate_interval suits its
+      # slowest target -- the same reasoning as the hub's pair (§5).
+      timeInterval: 30s
+      oauthPassThru: true
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: {{ printf "%s-logs" .Values.spokeName }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    app.kubernetes.io/managed-by: platform
+    app.kubernetes.io/part-of: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: {{ .Values.instanceLabel }}
+  datasource:
+    name: {{ printf "%s-logs" .Values.spokeName }}
+    uid: {{ printf "%s-logs" .Values.spokeName }}
+    # Loki, not VictoriaLogs: add.5 §4 made the log store Loki, and the endpoint
+    # routes /logs to Loki's own paths.
+    type: loki
+    access: proxy
+    url: {{ printf "https://%s/logs" .Values.viewerHost }}
+    jsonData:
+      oauthPassThru: true

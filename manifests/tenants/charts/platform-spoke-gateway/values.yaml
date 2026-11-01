@@ -48,11 +48,6 @@ preview:
 # domain inside it is refused at render: it would share the platform's cookies.
 hubDomain: ""
 
-# This spoke's name, passed by the environment manager from the cluster
-# generator. The viewer hostname below is derived from it, so one box's spokes
-# cannot collide on a hostname and nobody writes a host per spoke by hand.
-spokeName: ""
-
 # ADR-078 add.5 §7: the query endpoint this spoke's telemetry is read through.
 #
 # ONE DECLARATION GATES THE WHOLE PATH. `audience` is the box's observability
@@ -68,6 +63,12 @@ spokeName: ""
 observability:
   viewer:
     audience: ""
+    # The hostname this spoke's endpoint is published on. PRODUCED ONCE, by the
+    # environment manager (_viewer-host.tpl), and passed to both this chart and
+    # the hub's Grafana datasource for this spoke -- the listener, the
+    # certificate, the route and the datasource all name it, and nothing
+    # reconciles the four against each other.
+    host: ""
     tlsSecret: observability-viewer-tls
     # The box's ACME issuer, passed by the environment manager rather than
     # defaulted, so this certificate comes from the same authority as every

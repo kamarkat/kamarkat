@@ -69,7 +69,7 @@
   # domain. env[1..3] by contract (config/preview-access/deployment.yaml).
   fields:
     - path: [spec, template, spec, containers, 0, env, 1, value]
-      value: 'https://id.{{ .Values.global.hubDomain }}'
+      value: '{{ .Values.global.oidcIssuer }}'
     - path: [spec, template, spec, containers, 0, env, 2, value]
       value: 'https://id.{{ .Values.global.hubDomain }}/oauth/v2/keys'
     - path: [spec, template, spec, containers, 0, env, 3, value]

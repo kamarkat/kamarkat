@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-spoke-datasources
+description: One spoke's telemetry, selectable in the hub's Grafana (ADR-078 add.5 §7)
+type: application
+version: 0.1.0

@@ -129,6 +129,15 @@ global:
            the records it believes it owns, so two boxes sharing one would
            delete each other's. */}}
     ownerId: {{ $root.Values.dns.ownerId | default (include "environment-manager.clusterName" $root) | quote }}
+  {{- /* The box's OIDC issuer. ONE producer, because three things must agree
+         about it: the spoke's VMAuth validates a viewer's token against it, the
+         hub Grafana sends people to it to sign in, and the tenants' gateways
+         authenticate against it. Derived from the hub domain unless the box
+         federates to an issuer of its own, which `oidcIssuer` sets -- and a box
+         that does federate had the spoke deriving `id.<hubDomain>` while
+         everything else used the declared one, which is a mismatch no error
+         names: the token is simply refused as issued by somebody else. */}}
+  oidcIssuer: {{ include "environment-manager.oidcIssuer" $root | quote }}
   {{- /* ADR-078 add.5 §7: the audience a viewer's query token must carry.
          Minted by this box's issuer when its observability client is
          registered, so it is empty until the box declares it -- and an empty

@@ -77,7 +77,7 @@ components:
 
   # ── Cluster lifecycle ───────────────────────────────────────────────────
   - name: Cluster API
-    description: Declarative cluster lifecycle. Creates, scales and replaces the management and managed clusters.
+    description: Declarative cluster lifecycle. Creates, scales and replaces the management cluster and managed clusters.
     license: Apache-2.0
     layer: machinery
     match: ["registry.k8s.io/cluster-api/*", "registry.k8s.io/capi-operator/*", "tool:clusterctl"]
@@ -108,7 +108,7 @@ components:
     match: ["quay.io/argoproj/argocd", "ghcr.io/dexidp/*", "public.ecr.aws/docker/library/redis", "ecr-public.aws.com/docker/library/redis", "docker.io/library/haproxy"]
 
   - name: Argo CD agent
-    description: Connects each workload cluster's GitOps engine to the management cluster over an outbound channel.
+    description: Connects each managed cluster's GitOps engine to the management cluster over an outbound channel.
     license: Apache-2.0
     layer: machinery
     match: ["quay.io/argoprojlabs/*"]
@@ -397,7 +397,7 @@ components:
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/hub-operator]
 
-  - name: Tenant provisioning
+  - name: Organization provisioning
     description: Provisions each organization and application declared in the GitOps repository.
     license: ""
     layer: machinery
@@ -416,13 +416,13 @@ components:
     match: [ghcr.io/soloz-io/zero-ops/auth-proxy]
 
   - name: Cluster identity operator
-    description: Gives each workload cluster its identity with the management cluster.
+    description: Gives each managed cluster its identity with the management cluster.
     license: ""
     layer: machinery
     match: [ghcr.io/soloz-io/spoke-identity-operator]
 
   - name: Ephemeral job operator
-    description: Runs short-lived jobs on workload clusters.
+    description: Runs short-lived jobs on managed clusters.
     license: ""
     layer: workload-infrastructure
     match: [ghcr.io/soloz-io/ephemeral-job-operator]

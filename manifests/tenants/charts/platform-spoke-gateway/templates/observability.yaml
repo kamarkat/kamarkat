@@ -17,7 +17,7 @@ both read the same declaration. There is no state in which the endpoint exists
 and the stores behind it do not, or the reverse.
 */}}
 {{- if .Values.observability.viewer.audience }}
-{{- $host := include "platform-spoke-gateway.viewerHost" . }}
+{{- $host := .Values.observability.viewer.host }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

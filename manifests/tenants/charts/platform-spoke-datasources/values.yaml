@@ -1,0 +1,20 @@
+# One spoke's datasource pair, rendered ON THE HUB (ADR-078 add.5 §7).
+#
+# Every value here is passed by the environment manager from the cluster
+# generator, because the thing being described is a spoke and the chart runs
+# where Grafana does.
+
+# The spoke's name, which is what a person sees in the datasource dropdown and
+# what `cluster` is labelled with on everything the spoke sends (add.1 §7). The
+# same name in both places is what makes a dashboard's cluster variable and the
+# datasource list agree.
+spokeName: ""
+
+# The spoke's query endpoint. PRODUCED ONCE, by the environment manager
+# (_viewer-host.tpl), and passed to the spoke's gateway chart from the same
+# place, so the host this queries is the host that spoke terminates.
+viewerHost: ""
+
+# Where Grafana is, and the label its CR selects datasources by.
+namespace: platform-observability
+instanceLabel: platform

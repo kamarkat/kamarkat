@@ -62,6 +62,10 @@ CP_KEYS = {"node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/mas
 
 # Charts delivered to managed clusters. Everything else in the platform chart
 # runs on the management cluster.
+#
+# DESTINATION, not subject. platform-spoke-datasources is deliberately absent:
+# it describes a spoke and is applied to the HUB, where Grafana runs, so listing
+# it here would place it on the cluster it only names.
 MANAGED_CHARTS = {
     "platform-spoke-catalog", "platform-spoke-bootstrap-templates", "platform-spoke-gateway",
     "universal-tenant", "platform-workload", "tenant-public-tls",
