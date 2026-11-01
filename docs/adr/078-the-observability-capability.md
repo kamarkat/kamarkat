@@ -2178,3 +2178,25 @@ writer was added. Rendering it is also how a real defect was found: `printf "%s"
 against an id Helm had parsed as an integer wrote `%!s(int64=…)` into the claim
 name — a claim that matches nothing, so every query is denied, by an object that
 passes schema validation and reads correctly in a diff.
+
+### The claim the issuer does not emit (2026-11-01)
+
+`vmauth` admits a JWT only if it carries a `vm_access` claim describing the
+VictoriaMetrics tenancy the bearer may read. The box's issuer does not emit one
+and has no reason to: it is an identity provider, not a party to this project's
+storage layout. So `VMUser.jwt.defaultVMAccessClaim` supplies it, empty, which is
+both the documented form and the truthful one — these are single-node stores with
+one tenant, and there is no account or project here to name.
+
+Without it the design fails in its least visible direction. The two claims that
+*are* the authorization are evaluated, they match, and the request is refused
+anyway for want of a third claim nobody asked the issuer for. The attacker is
+denied and so is the viewer; the VMUser reports healthy, the VMAuth reports
+healthy, and the endpoint is dead. It was found by running the authorization
+matrix against a fixture derived from the released chart — the authorized row,
+not the adversarial ones. Ten denials in a row can be a working gate or a
+uniformly broken one, and only the eleventh row tells them apart.
+
+The preflight now reads the field, because a denial for the wrong reason is
+indistinguishable from a denial for the right one at every layer that reports
+status.

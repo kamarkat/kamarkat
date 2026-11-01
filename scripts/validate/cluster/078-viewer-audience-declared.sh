@@ -129,6 +129,19 @@ print("\n".join(k for k in claims if ":roles." in k))' || true)
         pass "VMUser/viewer matches the viewer role in project $audience"
     fi
 
+    # vmauth refuses a JWT that carries no `vm_access` claim, and this issuer
+    # emits none. The two claims above would match, and the request would still
+    # be denied -- the authorized viewer with everybody else. The object is
+    # valid either way, so only reading the field catches it.
+    local vm_access
+    vm_access=$(kc_spoke get vmuser viewer -n platform-observability \
+        -o jsonpath='{.spec.jwt.defaultVMAccessClaim}' || true)
+    if [[ -z "$vm_access" ]]; then
+        hard_fail "VMUser/viewer declares no defaultVMAccessClaim: vmauth requires a vm_access claim on every JWT it admits and the box's issuer emits none, so every viewer query is denied -- the authorized viewer included -- while the object itself reports healthy"
+    else
+        pass "VMUser/viewer supplies the vm_access default the issuer cannot"
+    fi
+
     live_issuer=$(kc_spoke get vmuser viewer -n platform-observability \
         -o jsonpath='{.spec.jwt.oidc.issuer}' || true)
     hub_issuer=$(kc get grafana platform -n platform-observability \

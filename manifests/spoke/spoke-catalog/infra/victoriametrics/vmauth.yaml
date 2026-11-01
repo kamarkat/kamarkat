@@ -1,10 +1,13 @@
 # ADR-078 addendum 5 §7: VMAuth is the only query entry. Reads fail over from
 # platform-a to platform-b (`first_available`, retried on 5xx).
 #
-# This cluster's route is the in-cluster SERVICE route: each caller holds its own
-# bearer token, generated in-cluster by ESO's Password generator, and
-# NetworkPolicy admits only the callers' pods. The external viewer route (OIDC
-# access tokens) waits on ListenerSet (ADR-083, 2026-09-21) and is not built.
+# TWO ROUTES, and they authenticate differently. The in-cluster SERVICE route is
+# the VMAuth `platform` below: each caller holds its own bearer token, generated
+# in-cluster by ESO's Password generator, and NetworkPolicy admits only the
+# callers' pods. The external VIEWER route is the VMAuth `viewer` below, reached
+# from the hub's Grafana over the box's public address space and authenticated by
+# the signed-in person's own OIDC access token. It is built; it renders only once
+# the box declares observability.viewer.audience.
 #
 # Read-only by construction: only query, series and label paths are routed.
 # Ingestion, admin and delete APIs are never reachable through VMAuth.
@@ -278,6 +281,15 @@ spec:
   jwt:
     oidc:
       issuer: PLACEHOLDER_OIDC_ISSUER
+    # vmauth requires every JWT it admits to carry a `vm_access` claim, and the
+    # box's issuer does not emit one -- it has no notion of VictoriaMetrics
+    # tenancy and no reason to acquire one. Absent this default, the two claims
+    # matched below are evaluated, pass, and the request is refused anyway: the
+    # authorized viewer is denied along with the attacker, and the endpoint is
+    # simply dead. An empty value is the documented form, and empty is also what
+    # is meant -- these are single-node stores with one tenant, so there is no
+    # account or project here to name.
+    defaultVMAccessClaim: {}
     matchClaims:
       # REPLACED WHOLE at package time (spoke-catalog/templated-fields.yaml).
       # Both entries are per-box and one of them is a per-box KEY, so the map is
