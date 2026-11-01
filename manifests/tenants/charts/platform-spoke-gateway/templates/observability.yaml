@@ -1,0 +1,64 @@
+{{- /*
+ADR-078 add.5 §7: this spoke's query endpoint, obs-<spoke>.<hubDomain>, on the
+shared :443 Gateway (the listener is added in gateway.yaml).
+
+WHY THE SPOKE PUBLISHES AT ALL. The box's Grafana runs on the hub and must read
+this spoke's stores. They are in a different cluster with no shared network, so
+the only path between them is the box's own public address space -- which is why
+the endpoint is authenticated by a token rather than by being unreachable. VMAuth
+matches the viewer audience on every request; nothing here authorizes anybody.
+
+ONE HOSTNAME PER SPOKE, not a wildcard and not a shared one. Each spoke's
+telemetry is a separate datasource in Grafana, and a certificate per host is what
+the rest of this Gateway already does (ADR-096).
+
+EMPTY AUDIENCE RENDERS NOTHING, here and in the spoke catalogue both, because
+both read the same declaration. There is no state in which the endpoint exists
+and the stores behind it do not, or the reverse.
+*/}}
+{{- if .Values.observability.viewer.audience }}
+{{- $host := include "platform-spoke-gateway.viewerHost" . }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: observability-viewer
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: platform-spoke-gateway
+spec:
+  secretName: {{ .Values.observability.viewer.tlsSecret }}
+  issuerRef:
+    name: {{ .Values.observability.viewer.issuer }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ $host | quote }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: observability-viewer
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: platform-spoke-gateway
+spec:
+  parentRefs:
+    - name: {{ .Values.gatewayName }}
+      namespace: {{ .Values.namespace }}
+      sectionName: observability-viewer
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    # No path match: VMAuth owns the path space behind this host. It routes
+    # /prometheus/... to the metric stores and /logs/... to Loki, dropping the
+    # first path element as it goes, so a rule here that admitted only known
+    # prefixes would have to be edited every time VMAuth's own routing changed.
+    - backendRefs:
+        # Cross-namespace, and permitted by the ReferenceGrant the spoke
+        # catalogue renders beside the VMAuth itself -- which names this one
+        # Service, so the grant cannot widen to the rest of that namespace.
+        - group: ""
+          kind: Service
+          name: vmauth-viewer
+          namespace: platform-observability
+          port: 8427
+{{- end }}

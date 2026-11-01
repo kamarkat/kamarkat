@@ -70,6 +70,27 @@ spec:
           # platform-ops, so issuance and routing still work.
           from: Same
   {{- end }}
+  {{- if .Values.observability.viewer.audience }}
+    # ADR-078 add.5 §7: this spoke's query endpoint (templates/observability.yaml).
+    - name: observability-viewer
+      protocol: HTTPS
+      port: 443
+      hostname: {{ include "platform-spoke-gateway.viewerHost" . | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ .Values.observability.viewer.tlsSecret }}
+      allowedRoutes:
+        namespaces:
+          # from: Same, as every listener here is. The route lives in this
+          # namespace and reaches across to the VMAuth in platform-observability
+          # through a ReferenceGrant that names that one Service -- which is a
+          # platform route to a platform backend, not the tenant bypass ADR-050
+          # closes.
+          from: Same
+  {{- end }}
   {{- if .Values.preview.domain }}
     # ADR-108: every preview host (templates/preview.yaml).
     - name: preview

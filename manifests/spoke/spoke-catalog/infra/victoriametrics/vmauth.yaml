@@ -239,6 +239,31 @@ spec:
 #
 # skipVerify is absent, which means false: a verifier that does not verify is the
 # one failure this design cannot survive.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: observability-viewer
+  namespace: platform-observability
+  labels:
+    app.kubernetes.io/managed-by: platform
+spec:
+  # The spoke's :443 Gateway admits routes from its own namespace only (ADR-050
+  # no-bypass), so the route to this endpoint lives in platform-ops and reaches
+  # across. This grant is the other half of that reach, and it is written HERE,
+  # beside the Service it exposes, because accepting a cross-namespace reference
+  # is this namespace's decision to make and nobody else's.
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: platform-ops
+  to:
+    # ONE Service by name. Without `name` the grant would admit routes to every
+    # Service in platform-observability -- the stores and Loki directly among
+    # them, which is precisely the path VMAuth exists to be in front of.
+    - group: ""
+      kind: Service
+      name: vmauth-viewer
+---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMUser
 metadata:
@@ -254,20 +279,28 @@ spec:
     oidc:
       issuer: PLACEHOLDER_OIDC_ISSUER
     matchClaims:
-      aud: PLACEHOLDER_VIEWER_AUDIENCE
-      # The claim NAME is a platform constant, not a per-box value: the platform
-      # owns the issuer and therefore owns what the token says. A per-box name
-      # could not be rendered anyway -- templated-fields substitutes values and
-      # cannot rename a key -- and a box-specific claim name would mean every
-      # spoke's VMUser disagreeing about what to look for.
+      # The audience IS the authorization, because the project is dedicated.
       #
-      # The issuer must emit it FLAT. Zitadel nests project roles under a URN key
-      # whose value is a map, and matchClaims compares strings, so the viewer
-      # application is configured to add `observability_role` as a string claim.
-      # That configuration is part of the viewer identity work; until it exists,
-      # no token carries this claim and every request is refused, which is the
-      # correct state for an endpoint that is not published.
-      observability_role: viewer
+      # This carried a second claim, `observability_role: viewer`, which required
+      # the issuer to emit a flat role claim: Zitadel nests project roles under a
+      # URN key whose value is a map, and `matchClaims` compares strings. Settling
+      # whether vmauth can match a leaf of that nesting was holding the whole query
+      # path, and it is not worth holding, because the role adds nothing here yet.
+      #
+      # The box's observability project exists for this and nothing else, and the
+      # issuer refuses a token to a user with no role in it (`projectRoleCheck`
+      # with `hasProjectCheck`). So a token whose `aud` carries this project id is
+      # a token belonging to someone granted observability access -- which is
+      # exactly the set the role claim would have selected while the project has
+      # one role.
+      #
+      # The role match returns when a SECOND role exists -- an editor beside a
+      # viewer -- because that is the first moment the distinction means anything.
+      # At that point the claim must be flat, and the honest options are a Zitadel
+      # Action that adds it or vmauth gaining nested matching; neither is needed
+      # until then. The residual is stated plainly: today, anyone holding a role in
+      # this project may read this box's telemetry.
+      aud: PLACEHOLDER_VIEWER_AUDIENCE
   load_balancing_policy: first_available
   retry_status_codes: [500, 502, 503, 504]
   targetRefs:

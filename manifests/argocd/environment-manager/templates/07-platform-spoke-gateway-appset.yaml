@@ -75,6 +75,17 @@ spec:
                 value: '{{ .Values.previewDomain }}'
               - name: hubDomain
                 value: '{{ include "environment-manager.hubDomain" $ }}'
+              # ADR-078 add.5 §7: the spoke's query endpoint. The audience is the
+              # single declaration that renders it -- here, and in the spoke
+              # catalogue's VMAuth -- so the endpoint and the stores behind it
+              # appear and disappear together. The spoke's own name comes from
+              # the cluster generator because the hostname is derived from it.
+              - name: spokeName
+                value: '{{"{{"}} .name {{"}}"}}'
+              - name: observability.viewer.audience
+                value: '{{ dig "viewer" "audience" "" (.Values.observability | default dict) }}'
+              - name: observability.viewer.issuer
+                value: '{{ .Values.publicTlsIssuer }}'
               - name: externalDnsTarget
                 value: '{{"{{"}} (splitList ":" (trimPrefix "https://" .server)) | first {{"}}"}}'
         - repoURL: {{ include "environment-manager.instanceRepoURL" . | quote }}

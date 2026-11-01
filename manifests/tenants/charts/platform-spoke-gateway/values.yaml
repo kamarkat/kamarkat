@@ -47,3 +47,29 @@ preview:
 # The platform's own domain, passed by the environment manager, so a preview
 # domain inside it is refused at render: it would share the platform's cookies.
 hubDomain: ""
+
+# This spoke's name, passed by the environment manager from the cluster
+# generator. The viewer hostname below is derived from it, so one box's spokes
+# cannot collide on a hostname and nobody writes a host per spoke by hand.
+spokeName: ""
+
+# ADR-078 add.5 §7: the query endpoint this spoke's telemetry is read through.
+#
+# ONE DECLARATION GATES THE WHOLE PATH. `audience` is the box's observability
+# project id, declared in the box registry once the issuer has minted it. Empty
+# renders nothing here -- no listener, no certificate, no route -- and the spoke
+# catalogue renders no VMAuth or VMUser either, because both read the same value.
+# A reachable endpoint with nothing behind it, or an endpoint behind nothing
+# reachable, are each worse than neither.
+#
+# The audience is not used as a value by this chart; it is read only to know
+# whether the endpoint exists. The authorization it expresses is enforced by
+# VMAuth on the spoke, which matches it as a token claim.
+observability:
+  viewer:
+    audience: ""
+    tlsSecret: observability-viewer-tls
+    # The box's ACME issuer, passed by the environment manager rather than
+    # defaulted, so this certificate comes from the same authority as every
+    # other public hostname on the box.
+    issuer: ""

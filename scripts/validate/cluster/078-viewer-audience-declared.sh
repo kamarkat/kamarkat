@@ -112,4 +112,39 @@ PYCHECK
     else
         pass "VMUser/viewer matches the declared audience"
     fi
+
+    # RENDERED IS NOT REACHABLE. The stores answer on a ClusterIP; the box's
+    # Grafana runs on the hub, in another cluster, and reaches them over the
+    # box's own public address. So the endpoint is only finished when its
+    # listener is programmed, its certificate is issued and its route resolves
+    # to the VMAuth -- three objects in two namespaces, each of which fails
+    # quietly on its own: an unprogrammed listener answers nothing, an unissued
+    # certificate answers with a TLS error no Grafana message explains, and an
+    # unresolved backendRef answers 503.
+    local gw listener route cert ready
+    gw=$(kc_spoke get gateway tenant-tls-gateway -n platform-ops \
+        -o jsonpath='{.status.listeners[?(@.name=="observability-viewer")].conditions[?(@.type=="Programmed")].status}' || true)
+    if [[ "$gw" != "True" ]]; then
+        hard_fail "the spoke's Gateway has no programmed observability-viewer listener (${gw:-absent}), so nothing terminates TLS for this endpoint"
+    else
+        pass "the observability-viewer listener is programmed on the spoke's Gateway"
+    fi
+
+    route=$(kc_spoke get httproute observability-viewer -n platform-ops \
+        -o jsonpath='{.status.parents[0].conditions[?(@.type=="ResolvedRefs")].status}' || true)
+    if [[ "$route" != "True" ]]; then
+        hard_fail "HTTPRoute platform-ops/observability-viewer does not resolve its backend (${route:-absent}) — the ReferenceGrant in platform-observability is what permits it to name vmauth-viewer across namespaces, and without it every query answers 503"
+    else
+        pass "the viewer route resolves to the VMAuth across namespaces"
+    fi
+
+    cert=$(kc_spoke get certificate observability-viewer -n platform-ops \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' || true)
+    if [[ "$cert" != "True" ]]; then
+        ready=$(kc_spoke get certificate observability-viewer -n platform-ops \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' || true)
+        hard_fail "the viewer endpoint's certificate is not issued (${cert:-absent}: ${ready:-no message}); the hostname resolves and then fails TLS, which Grafana reports only as a datasource error"
+    else
+        pass "the viewer endpoint's certificate is issued"
+    fi
 }

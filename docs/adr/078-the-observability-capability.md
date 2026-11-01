@@ -1852,6 +1852,46 @@ signature and expiry through `jwt.oidc.issuer`; `matchClaims` requires the
 observability project's audience; and `matchClaims` requires the viewer role.
 Audience alone is not sufficient and is not used alone.
 
+### The endpoint is published on the spoke's own Gateway (2026-11-01)
+
+The stores answer on a ClusterIP. Grafana runs on the hub, in a different cluster
+with no shared network, so the only path between them is the box's own public
+address space — which is why this endpoint is authenticated by a token rather than
+by being unreachable.
+
+`obs-<spoke>.<hubDomain>`, one hostname per spoke, on the spoke's existing shared
+:443 Gateway. Not a second Gateway: one cannot bind :443 beside the first under
+host networking, which the spoke's own dual-gateway probe established. Not a
+wildcard either — a certificate per hostname is what the rest of that Gateway
+already does (ADR-096), and each spoke is a separate datasource in Grafana.
+
+**The listener set still has one producer.** ADR-096 governs the *tenant* listeners,
+which come from the generated aggregate and from nothing else. This listener is
+platform-owned and rendered by the chart that owns the Gateway object, exactly as
+ADR-108's preview listener is. No tenant declaration produces it, and the aggregate
+is not edited to carry it.
+
+The route lives in `platform-ops`, because that Gateway admits routes from its own
+namespace only (ADR-050 no-bypass), and reaches the VMAuth in
+`platform-observability` through a `ReferenceGrant` that names **one Service**. The
+grant is rendered beside the VMAuth rather than beside the route: accepting a
+cross-namespace reference is the target namespace's decision. Named, because a grant
+without `name` would admit routes to every Service there — the stores and Loki
+directly among them, which is the path VMAuth exists to be in front of.
+
+**One declaration gates all five objects.** The audience renders the listener, the
+certificate and the route in the gateway chart, and the VMAuth, VMUser and grant in
+the spoke catalogue. There is no state in which the endpoint exists and the stores
+behind it do not, or the reverse. The hostname is derived from the spoke's name and
+the box's domain rather than declared, so the host a listener terminates, a
+certificate is issued for and a route matches cannot drift apart.
+
+`cluster/078-viewer-audience-declared.sh` asserts reachability, not rendering: the
+listener Programmed, the route's `ResolvedRefs`, the certificate Ready. Each of
+those fails quietly on its own — an unprogrammed listener answers nothing, an
+unissued certificate fails TLS with no message Grafana explains, an unresolved
+backend answers 503.
+
 ### `VMUser/viewer` has one owner
 
 The spoke catalogue and Argo CD own it. No ClusterResourceSet copy, no imperative
@@ -1903,13 +1943,27 @@ where the capability's marker says a viewer identity **is** provisioned, an unde
 audience is a failure, and a declared one must have opened the gate on the spoke with
 a matching `aud`.
 
-### Open: how the role is matched
+### Resolved: the audience is the authorization, and the role waits for a second role
 
-`VMUser.matchClaims` is `map[string]string` in the installed CRD, and Zitadel asserts
-roles **nested** — `urn:zitadel:iam:org:project:roles` carrying a map keyed by role.
-Whether vmauth can match a leaf of that natively is unresolved, and it is being
-settled against a real token on the dev spoke before anything is written to the
-registry or published.
+**Decided 2026-11-01.** `VMUser.matchClaims` is `map[string]string` in the installed
+CRD, and Zitadel asserts roles **nested** — `urn:zitadel:iam:org:project:roles`
+carrying a map keyed by role. Whether vmauth can match a leaf of that natively was
+left open, to be settled against a real token before anything was published.
+
+That question is no longer on the path, because the role claim earns nothing while
+the project has one role. The box's observability project exists for this capability
+and nothing else, and the issuer refuses a token to a user with no role in it
+(`projectRoleCheck` with `hasProjectCheck`). A token whose `aud` carries that project
+id therefore belongs to someone who was granted observability access — the same set
+`observability_role: viewer` would have selected. `matchClaims` keeps `aud` alone.
+
+The residual is stated rather than hidden: **anyone holding any role in this project
+may read this box's telemetry.** That is acceptable while the only role is the viewer
+and the grant is deliberate, and it stops being acceptable the moment a second role
+exists — an editor beside a viewer — which is when the role match returns. At that
+point the claim must be flat, and the options are a Zitadel Action that adds it or
+vmauth gaining nested matching. Neither is needed first, and holding the query path
+for it cost more than it bought.
 
 What is already verified: `VMUser` v1beta1 carries `spec.jwt` with `oidc.issuer`,
 `matchClaims`, `publicKeyRefs` and `defaultVMAccessClaim` (operator `v0.75.0`), and the

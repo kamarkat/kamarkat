@@ -129,10 +129,26 @@ gateway:
 nodeSelector:
   node-role.kubernetes.io/worker: ""
 
+# REQUESTS ARE A SCHEDULING CONTRACT, not a reservation of what the process uses,
+# and a request larger than the process needs costs the box a rollout.
+#
+# The hub's only worker carries 10,409Mi of requests against 10,790Mi allocatable
+# -- 96.4%, 381Mi free -- while a 512Mi request means any rolling update of this
+# Deployment needs a second 512Mi pod before the first one goes. It cannot fit, so
+# the replacement pod stays Pending indefinitely: observed on 2026-10-30 (five
+# hours of AUTH-7fs1e) and again on 2026-11-01, when the login service's frozen
+# keypair could not be adopted because the issuer could not restart to read it.
+#
+# 256Mi is the request; the limit stays 1Gi, so nothing constrains what the
+# process may actually use. Dev adds no nodes, so the only honest way to roll a
+# singleton on a full worker is to stop claiming more than it needs. The TM
+# confirms the figure against measured usage and it is raised if measurement says
+# so -- a request below real usage trades a stuck rollout for eviction under
+# pressure, which is not an improvement.
 resources:
   requests:
     cpu: 100m
-    memory: 512Mi
+    memory: 256Mi
   limits:
     memory: 1Gi
 
