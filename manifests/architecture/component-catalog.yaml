@@ -20,7 +20,7 @@ components:
   # ── Nodes ───────────────────────────────────────────────────────────────
   - name: Ubuntu
     description: The node operating system, the provider's stock image.
-    license: ""
+    license: "Per package; see /usr/share/doc/<package>/copyright on the node"
     layer: machinery
     match: ["os:ubuntu"]
 
@@ -28,7 +28,7 @@ components:
     description: The container runtime on every node.
     license: Apache-2.0
     layer: machinery
-    match: ["pkg:containerd", "url:raw.githubusercontent.com/containerd/*"]
+    match: ["pkg:containerd"]
 
   - name: runc
     description: The low-level runtime containerd starts containers with.
@@ -42,18 +42,11 @@ components:
     layer: machinery
     match: ["pkg:kubelet", "pkg:kubeadm", "pkg:kubectl"]
 
-  - name: Node utilities
-    description: Operating system utilities the node bootstrap uses, from the distribution's package archive.
-    license: ""
-    layer: machinery
-    match: ["pkg:at", "pkg:jq", "pkg:unzip", "pkg:wget", "pkg:socat", "pkg:mtr", "pkg:logrotate",
-            "pkg:apt-transport-https", "pkg:bash-completion"]
-
   - name: Tailscale
     description: Joins the node to the tailnet when a tailnet hostname is configured for it.
     license: BSD-3-Clause
     layer: machinery
-    match: ["url:tailscale.com/*"]
+    match: ["pkg:tailscale"]
 
   # ── Kubernetes control plane ────────────────────────────────────────────
   - name: Kubernetes
@@ -96,7 +89,7 @@ components:
 
   - name: cert-manager DNS-01 webhook
     description: Proves domain ownership for certificates through the provider's DNS.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [docker.io/hetzner/cert-manager-webhook-hetzner]
 
@@ -176,7 +169,7 @@ components:
 
   - name: ExternalDNS provider webhook
     description: Connects ExternalDNS to the provider's DNS service.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [docker.io/hetzner/external-dns-hetzner-webhook]
 
@@ -238,13 +231,13 @@ components:
 
   - name: Infisical
     description: The secret store. Holds every platform and application secret.
-    license: MIT
+    license: "MIT (enterprise directory unused)"
     layer: machinery
     match: ["docker.io/infisical/infisical"]
 
   - name: Infisical PKI issuer
     description: Issues internal certificates from the secret store's certificate authority.
-    license: ""
+    license: MIT
     layer: machinery
     match: ["docker.io/infisical/pki-issuer"]
 
@@ -270,7 +263,7 @@ components:
 
   - name: Redis
     description: The platform cache.
-    license: ""
+    license: "BSD-3-Clause (7.x); AGPL-3.0-only (8.x)"
     layer: capability
     match: [docker.io/library/redis]
 
@@ -344,7 +337,7 @@ components:
 
   - name: Kubernetes toolbox image
     description: A container image with kubectl and other Kubernetes tools; runs the node labeler.
-    license: ""
+    license: MIT
     layer: machinery
     match: ["docker.io/alpine/k8s"]
 
@@ -393,43 +386,43 @@ components:
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
     description: Reconciles the management cluster's own platform state.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/hub-operator]
 
   - name: Organization provisioning
     description: Provisions each organization and application declared in the GitOps repository.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/kube-sbt]
 
   - name: Control-plane API
     description: The control plane's API.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/mcp-server]
 
   - name: Login gateway
     description: Signs people in before a request reaches a protected route.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/auth-proxy]
 
   - name: Cluster identity operator
     description: Gives each managed cluster its identity with the management cluster.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/spoke-identity-operator]
 
   - name: Ephemeral job operator
     description: Runs short-lived jobs on managed clusters.
-    license: ""
+    license: Apache-2.0
     layer: workload-infrastructure
     match: [ghcr.io/soloz-io/ephemeral-job-operator]
 
   - name: Support agent
     description: Reports allowlisted control-plane facts when an organization enrols. Does nothing until then.
-    license: ""
+    license: Apache-2.0
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/support-agent]
 

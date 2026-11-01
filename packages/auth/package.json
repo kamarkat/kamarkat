@@ -1,6 +1,7 @@
 {
   "name": "zero-ops-auth",
   "version": "0.22.0",
+  "license": "Apache-2.0",
   "private": false,
   "type": "module",
   "main": "./dist/index.cjs",

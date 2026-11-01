@@ -8,7 +8,7 @@ spec:
     ref:
       apiVersion: controlplane.cluster.x-k8s.io/v1beta1
       kind: KubeadmControlPlaneTemplate
-      name: hetzner-mgmt-control-plane-v4
+      name: hetzner-mgmt-control-plane-v5
     machineInfrastructure:
       ref:
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -27,7 +27,7 @@ spec:
           ref:
             apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
             kind: KubeadmConfigTemplate
-            name: hetzner-mgmt-worker-bootstrap
+            name: hetzner-mgmt-worker-bootstrap-v2
         infrastructure:
           ref:
             apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -386,7 +386,7 @@ apiVersion: controlplane.cluster.x-k8s.io/v1beta1
 # material live: see docs/runbooks/encrypt-secrets-at-rest.md.
 kind: KubeadmControlPlaneTemplate
 metadata:
-  name: hetzner-mgmt-control-plane-v4
+  name: hetzner-mgmt-control-plane-v5
   namespace: platform-capi
 spec:
   template:
@@ -652,25 +652,25 @@ spec:
             permissions: "0744"
         preKubeadmCommands:
           - set -x
-          - export CONTAINERD=1.7.26
-          - export RUNC=1.2.5
+          - export CONTAINERD=2.4.2
+          - export RUNC=1.5.2
+          - export TAILSCALE=1.104.4
           - export KUBERNETES_VERSION=1.31.6
           - export TRIMMED_KUBERNETES_VERSION=1.31
           - ARCH="$(dpkg --print-architecture)"
           - localectl set-locale LANG=en_US.UTF-8
           - localectl set-locale LANGUAGE=en_US.UTF-8
           - apt-get update -y
-          - apt-get -y install at jq unzip wget socat mtr logrotate apt-transport-https
           - sed -i '/swap/d' /etc/fstab
           - swapoff -a
           - modprobe overlay && modprobe br_netfilter && sysctl --system
-          - wget https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.$ARCH
-          - wget https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.sha256sum
+          - curl -fsSLO https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.$ARCH
+          - curl -fsSLO https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.sha256sum
           - sha256sum --check --ignore-missing runc.sha256sum
           - install runc.$ARCH /usr/local/sbin/runc
           - rm -f runc.$ARCH runc.sha256sum
-          - wget https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz
-          - wget https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
+          - curl -fsSLO https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz
+          - curl -fsSLO https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
           - sha256sum --check containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
           - tar -zxf containerd-$CONTAINERD-linux-$ARCH.tar.gz -C /usr/local
           - rm -f containerd-$CONTAINERD-linux-$ARCH.tar.gz containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
@@ -682,7 +682,7 @@ spec:
           - curl -fsSL https://pkgs.k8s.io/core:/stable:/v$TRIMMED_KUBERNETES_VERSION/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
           - echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$TRIMMED_KUBERNETES_VERSION/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
           - apt-get update
-          - apt-get install -y kubelet="$KUBERNETES_VERSION-*" kubeadm="$KUBERNETES_VERSION-*" kubectl="$KUBERNETES_VERSION-*" bash-completion && apt-mark hold kubelet kubectl kubeadm && systemctl enable kubelet
+          - apt-get install -y kubelet="$KUBERNETES_VERSION-*" kubeadm="$KUBERNETES_VERSION-*" kubectl="$KUBERNETES_VERSION-*" && apt-mark hold kubelet kubectl kubeadm && systemctl enable kubelet
           - kubeadm config images pull --kubernetes-version $KUBERNETES_VERSION
           - echo 'source <(kubectl completion bash)' >>/root/.bashrc
           - echo 'export KUBECONFIG=/etc/kubernetes/admin.conf' >>/root/.bashrc
@@ -695,7 +695,7 @@ spec:
           # and runs no daemon — the files above are present but inert. (The shared
           # spoke ClusterClass still installs unconditionally; not changed here
           # because that is a separately tested path.)
-          - 'if [ -s /etc/tailscale-hostname ]; then curl -fsSL https://tailscale.com/install.sh | sh || true; fi'
+          - 'if [ -s /etc/tailscale-hostname ]; then curl -fsSLO https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE}_$ARCH.tgz && echo "$(curl -fsSL https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE}_$ARCH.tgz.sha256)  tailscale_${TAILSCALE}_$ARCH.tgz" | sha256sum --check && tar -xzf tailscale_${TAILSCALE}_$ARCH.tgz && install tailscale_${TAILSCALE}_$ARCH/tailscale /usr/bin/tailscale && install tailscale_${TAILSCALE}_$ARCH/tailscaled /usr/sbin/tailscaled && install -m 0644 tailscale_${TAILSCALE}_$ARCH/systemd/tailscaled.service /etc/systemd/system/tailscaled.service && install -m 0644 tailscale_${TAILSCALE}_$ARCH/systemd/tailscaled.defaults /etc/default/tailscaled && rm -rf tailscale_${TAILSCALE}_$ARCH tailscale_${TAILSCALE}_$ARCH.tgz && systemctl daemon-reload; fi'
           - 'if [ -s /etc/tailscale-hostname ]; then systemctl enable --now tailscaled || true; fi'
           - 'if [ -s /etc/tailscale-hostname ]; then tailscale up --authkey="$(cat /etc/tailscale-authkey)" --hostname="$(cat /etc/tailscale-hostname)" --accept-dns=false; fi'
           - 'if [ -s /etc/tailscale-hostname ]; then for i in $(seq 1 30); do tailscale ip -4 >/dev/null 2>&1 && break; sleep 2; done; fi'
@@ -735,7 +735,7 @@ spec:
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
 kind: KubeadmConfigTemplate
 metadata:
-  name: hetzner-mgmt-worker-bootstrap
+  name: hetzner-mgmt-worker-bootstrap-v2
   namespace: platform-capi
 spec:
   template:
@@ -822,25 +822,24 @@ spec:
           permissions: "0744"
       preKubeadmCommands:
         - set -x
-        - export CONTAINERD=1.7.26
-        - export RUNC=1.2.5
+        - export CONTAINERD=2.4.2
+        - export RUNC=1.5.2
         - export KUBERNETES_VERSION=1.31.6
         - export TRIMMED_KUBERNETES_VERSION=1.31
         - ARCH="$(dpkg --print-architecture)"
         - localectl set-locale LANG=en_US.UTF-8
         - localectl set-locale LANGUAGE=en_US.UTF-8
         - apt-get update -y
-        - apt-get -y install at jq unzip wget socat mtr logrotate apt-transport-https
         - sed -i '/swap/d' /etc/fstab
         - swapoff -a
         - modprobe overlay && modprobe br_netfilter && sysctl --system
-        - wget https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.$ARCH
-        - wget https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.sha256sum
+        - curl -fsSLO https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.$ARCH
+        - curl -fsSLO https://github.com/opencontainers/runc/releases/download/v$RUNC/runc.sha256sum
         - sha256sum --check --ignore-missing runc.sha256sum
         - install runc.$ARCH /usr/local/sbin/runc
         - rm -f runc.$ARCH runc.sha256sum
-        - wget https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz
-        - wget https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
+        - curl -fsSLO https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz
+        - curl -fsSLO https://github.com/containerd/containerd/releases/download/v$CONTAINERD/containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
         - sha256sum --check containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
         - tar -zxf containerd-$CONTAINERD-linux-$ARCH.tar.gz -C /usr/local
         - rm -f containerd-$CONTAINERD-linux-$ARCH.tar.gz containerd-$CONTAINERD-linux-$ARCH.tar.gz.sha256sum
@@ -852,7 +851,7 @@ spec:
         - curl -fsSL https://pkgs.k8s.io/core:/stable:/v$TRIMMED_KUBERNETES_VERSION/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         - echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$TRIMMED_KUBERNETES_VERSION/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
         - apt-get update
-        - apt-get install -y kubelet="$KUBERNETES_VERSION-*" kubeadm="$KUBERNETES_VERSION-*" kubectl="$KUBERNETES_VERSION-*" bash-completion && apt-mark hold kubelet kubectl kubeadm && systemctl enable kubelet
+        - apt-get install -y kubelet="$KUBERNETES_VERSION-*" kubeadm="$KUBERNETES_VERSION-*" kubectl="$KUBERNETES_VERSION-*" && apt-mark hold kubelet kubectl kubeadm && systemctl enable kubelet
         - apt-get -y autoremove && apt-get -y clean all
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
