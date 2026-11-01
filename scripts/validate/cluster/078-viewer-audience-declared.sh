@@ -102,15 +102,44 @@ PYCHECK
     fi
     pass "the spoke renders VMAuth/viewer"
 
-    local live_aud
-    live_aud=$(kc_spoke get vmuser viewer -n platform-observability \
-        -o jsonpath='{.spec.jwt.matchClaims.aud}' || true)
-    if [[ -z "$live_aud" ]]; then
-        hard_fail "VMUser/viewer on the spoke matches no audience, so a token from any client of this issuer satisfies it"
-    elif [[ "$live_aud" != "$audience" ]]; then
-        hard_fail "VMUser/viewer on the spoke matches audience '$live_aud' while the box declares '$audience'; one is stale and the endpoint enforces whichever is live"
+    # NOT the audience against itself. Comparing what the Application passes
+    # with what the object rendered from it is a value compared against its own
+    # source: it agrees whenever the pipeline worked and says nothing about
+    # whether the result authorizes anybody. What matters is INDEPENDENT -- the
+    # claims the object actually matches, and the issuer it trusts, against the
+    # hub that sends people there.
+    local claims role_claim live_issuer hub_issuer
+    claims=$(kc_spoke get vmuser viewer -n platform-observability \
+        -o jsonpath='{.spec.jwt.matchClaims}' || true)
+    role_claim=$(printf '%s' "$claims" | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+try:
+    claims = json.loads(raw) if raw else {}
+except ValueError:
+    claims = {}
+print("\n".join(k for k in claims if ":roles." in k))' || true)
+    if [[ -z "$role_claim" ]]; then
+        hard_fail "VMUser/viewer matches no project role claim, only an audience: a client of this issuer may add any project to its own token's audience with the urn:zitadel:iam:org:project:id:<id>:aud scope and the issuer does not check for a grant, so a tenant application's token would be accepted here"
+    elif [[ "$role_claim" != *":${audience}:roles."* ]]; then
+        hard_fail "VMUser/viewer matches the role claim '$role_claim', which is not scoped to the declared project $audience: role keys repeat across projects -- every tenant project defines a 'viewer' -- so an unscoped or mis-scoped claim admits their users"
+    elif [[ "$role_claim" == *"%!"* ]]; then
+        hard_fail "VMUser/viewer's role claim '$role_claim' contains a Go format error, so the claim name matches nothing and every viewer query is denied; an id that reached the template as a number rather than a string does this"
     else
-        pass "VMUser/viewer matches the declared audience"
+        pass "VMUser/viewer matches the viewer role in project $audience"
+    fi
+
+    live_issuer=$(kc_spoke get vmuser viewer -n platform-observability \
+        -o jsonpath='{.spec.jwt.oidc.issuer}' || true)
+    hub_issuer=$(kc get grafana platform -n platform-observability \
+        -o jsonpath='{.spec.config.auth\.generic_oauth.auth_url}' || true)
+    hub_issuer="${hub_issuer%/oauth/v2/authorize}"
+    if [[ -z "$live_issuer" || -z "$hub_issuer" ]]; then
+        note "issuer not declared on both ends yet, so the pair was not compared"
+    elif [[ "$live_issuer" != "$hub_issuer" ]]; then
+        hard_fail "the spoke validates tokens from '$live_issuer' while the hub signs people in at '$hub_issuer': a token from one is refused by the other as signed by somebody else, and neither end's status says which is wrong"
+    else
+        pass "the hub and the spoke name the same issuer, $live_issuer"
     fi
 
     # RENDERED IS NOT REACHABLE. The stores answer on a ClusterIP; the box's

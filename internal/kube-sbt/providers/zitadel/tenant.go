@@ -24,6 +24,13 @@ import (
 // has to mean the smallest one rather than none.
 const defaultUserRole = "member"
 
+// The access token form an application issues. JWT, so a receiver validates the
+// token by its signature instead of asking the issuer about every request --
+// which is what lets a spoke's vmauth authorize a viewer with no call back to
+// the hub. Switched to Bearer in the console it becomes an opaque string, and
+// the only symptom is 401 from every query.
+const accessTokenTypeOIDCJWT = "OIDC_TOKEN_TYPE_JWT"
+
 var defaultRoles = []struct{ Key, Display string }{
 	{"admin", "Admin"},
 	{"member", "Member"},
@@ -722,7 +729,7 @@ func (a *Auth) ensureApp(ctx context.Context, orgID, projectID, appName string, 
 		"grantTypes":               grantTypes,
 		"appType":                  "OIDC_APP_TYPE_WEB",
 		"authMethodType":           authMethod,
-		"accessTokenType":          "OIDC_TOKEN_TYPE_JWT",
+		"accessTokenType":          accessTokenTypeOIDCJWT,
 		"accessTokenRoleAssertion": true,
 		"idTokenRoleAssertion":     true,
 		"idTokenUserinfoAssertion": true,
@@ -739,6 +746,13 @@ func (a *Auth) ensureApp(ctx context.Context, orgID, projectID, appName string, 
 				RedirectURIs           []string `json:"redirectUris"`
 				PostLogoutRedirectURIs []string `json:"postLogoutRedirectUris"`
 				GrantTypes             []string `json:"grantTypes"`
+				// Read back because it is the difference between a token a
+				// receiver can validate by itself and an opaque string it
+				// cannot. Nothing else in this platform would notice it
+				// changing: the spoke's vmauth simply fails to parse what it
+				// is given and answers 401, naming neither the token type nor
+				// the application it came from.
+				AccessTokenType string `json:"accessTokenType"`
 			} `json:"oidcConfig"`
 		} `json:"result"`
 	}
@@ -790,7 +804,8 @@ func (a *Auth) ensureApp(ctx context.Context, orgID, projectID, appName string, 
 		if authMethod == authMethodBasic &&
 			(!sameSet(app.OIDCConfig.RedirectURIs, redirectURIs) ||
 				!sameSet(app.OIDCConfig.PostLogoutRedirectURIs, postLogoutURIs) ||
-				!sameSet(app.OIDCConfig.GrantTypes, grantTypes)) {
+				!sameSet(app.OIDCConfig.GrantTypes, grantTypes) ||
+				app.OIDCConfig.AccessTokenType != accessTokenTypeOIDCJWT) {
 			err := a.api.do(ctx, http.MethodPut,
 				"/management/v1/projects/"+projectID+"/apps/"+app.ID+"/oidc_config",
 				orgID, config, nil)
@@ -938,7 +953,53 @@ func (a *Auth) EnsurePlatformProject(ctx context.Context, name string) (orgID, p
 	if err != nil {
 		return "", "", fmt.Errorf("ensure platform project %q: %w", name, err)
 	}
+	// RECONCILED, not assumed from creation. projectSettings is sent by the
+	// CREATE alone, so a project made before these settings existed -- or one an
+	// operator edited in the console -- keeps whatever it has. That matters more
+	// here than anywhere else in this file: projectRoleCheck and hasProjectCheck
+	// are the properties that make a token for this project mean "someone
+	// granted access to it", which is what the spoke's vmauth relies on. Lost,
+	// they fail OPEN, and the box's telemetry becomes readable by any client of
+	// the issuer -- while sign-in starts working better, not worse.
+	if err := a.ensureProjectSettings(ctx, orgID, projectID, name); err != nil {
+		return "", "", fmt.Errorf("reconcile settings of platform project %q: %w", name, err)
+	}
 	return orgID, projectID, nil
+}
+
+// ensureProjectSettings brings an existing project to the tenancy policy.
+//
+// The project's OWN name is sent, read back from the issuer, for the same reason
+// ensureRoleAssertion does it: this PUT replaces the whole project, so a name
+// taken from configuration renames whatever project this is.
+func (a *Auth) ensureProjectSettings(ctx context.Context, orgID, projectID, name string) error {
+	var current struct {
+		Project struct {
+			Name                 string `json:"name"`
+			ProjectRoleAssertion bool   `json:"projectRoleAssertion"`
+			ProjectRoleCheck     bool   `json:"projectRoleCheck"`
+			HasProjectCheck      bool   `json:"hasProjectCheck"`
+		} `json:"project"`
+	}
+	if err := a.api.do(ctx, http.MethodGet,
+		"/management/v1/projects/"+projectID, orgID, nil, &current); err != nil {
+		return fmt.Errorf("read project %q (%s): %w", name, projectID, err)
+	}
+	if current.Project.ProjectRoleAssertion &&
+		current.Project.ProjectRoleCheck &&
+		current.Project.HasProjectCheck {
+		return nil
+	}
+	settings := projectSettings(name)
+	if current.Project.Name != "" {
+		settings["name"] = current.Project.Name
+	}
+	err := a.api.do(ctx, http.MethodPut,
+		"/management/v1/projects/"+projectID, orgID, settings, nil)
+	if err != nil && !isUnchanged(err) {
+		return err
+	}
+	return nil
 }
 
 // platformOrg resolves the organisation the platform's own clients belong to.

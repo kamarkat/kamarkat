@@ -28,6 +28,12 @@ object overwrite each other on every reconcile.
 {{- if not .Values.spokeName }}
 {{- fail "spokeName is empty: it names the datasource a person picks and the `cluster` label the spoke stamps on everything it sends, and the two have to be the same string" }}
 {{- end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.spokeName) }}
+{{- fail (printf "spokeName %q is not a single DNS label: it is used unchanged as the name of these objects and as the first label of the query endpoint's hostname, so an uppercase, dotted or underscored name yields either an object the API server refuses or a hostname no certificate covers" .Values.spokeName) }}
+{{- end }}
+{{- if eq .Values.spokeName "hub" }}
+{{- fail "spokeName \"hub\" collides with the hub's own datasources: hub-metrics and hub-logs are rendered by the Grafana component, a DIFFERENT Application, so both would claim the same objects and overwrite each other on every reconcile -- in both directions, with each sync looking successful" }}
+{{- end }}
 {{- if not .Values.viewerHost }}
 {{- fail "viewerHost is empty: the hostname is produced once, by the environment's _viewer-host.tpl, and passed to this chart and to the spoke's gateway from there -- a datasource pointing at https:/// resolves nowhere and reports it as a query failure" }}
 {{- end }}

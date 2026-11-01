@@ -279,27 +279,39 @@ spec:
     oidc:
       issuer: PLACEHOLDER_OIDC_ISSUER
     matchClaims:
-      # The audience IS the authorization, because the project is dedicated.
+      # REPLACED WHOLE at package time (spoke-catalog/templated-fields.yaml).
+      # Both entries are per-box and one of them is a per-box KEY, so the map is
+      # declared there rather than here; what follows is the contract it must
+      # satisfy.
       #
-      # This carried a second claim, `observability_role: viewer`, which required
-      # the issuer to emit a flat role claim: Zitadel nests project roles under a
-      # URN key whose value is a map, and `matchClaims` compares strings. Settling
-      # whether vmauth can match a leaf of that nesting was holding the whole query
-      # path, and it is not worth holding, because the role adds nothing here yet.
+      # TWO CLAIMS, AND THE SECOND IS THE AUTHORIZATION.
       #
-      # The box's observability project exists for this and nothing else, and the
-      # issuer refuses a token to a user with no role in it (`projectRoleCheck`
-      # with `hasProjectCheck`). So a token whose `aud` carries this project id is
-      # a token belonging to someone granted observability access -- which is
-      # exactly the set the role claim would have selected while the project has
-      # one role.
+      # The audience alone is not one, and the comment that used to stand here
+      # said it was. The reasoning was that this box's observability project
+      # exists for nothing else, so a token naming it belongs to someone granted
+      # access. That is false at the issuer: any client may add any project to
+      # its own token's audience with the reserved scope
+      # urn:zitadel:iam:org:project:id:<id>:aud, and the issuer does not check
+      # that the requester holds a grant for it -- its own guidance is to
+      # authorize on roles, not on `aud`. A tenant's application could therefore
+      # mint a token this endpoint accepted, and every layer here would report
+      # it working.
       #
-      # The role match returns when a SECOND role exists -- an editor beside a
-      # viewer -- because that is the first moment the distinction means anything.
-      # At that point the claim must be flat, and the honest options are a Zitadel
-      # Action that adds it or vmauth gaining nested matching; neither is needed
-      # until then. The residual is stated plainly: today, anyone holding a role in
-      # this project may read this box's telemetry.
+      # So the role is matched, per project. vmauth traverses nested claims by
+      # dot-notation (v1.138.0+) and treats values as regular expressions, which
+      # is what makes the issuer's nested role claim reachable -- the objection
+      # that removed the role match before. This spoke runs v1.152.0, which is
+      # also past v1.148.4 and its fix for GHSA-f99m-22fh-qw96, an authorization
+      # bypass in this exact matcher.
+      #
+      # The project-scoped claim is used, never urn:zitadel:iam:org:project:roles,
+      # because role KEYS repeat across projects: every tenant project defines a
+      # `viewer`, so the unscoped claim would admit tenant users.
+      #
+      # THE RESIDUAL, stated plainly: anyone holding the viewer role in this
+      # box's observability project may read every spoke's telemetry. There is
+      # one audience per box by decision, so the role is a box-level permission
+      # and not a per-cluster one.
       aud: PLACEHOLDER_VIEWER_AUDIENCE
   load_balancing_policy: first_available
   retry_status_codes: [500, 502, 503, 504]
@@ -321,6 +333,13 @@ spec:
         - /prometheus/api/v1/labels
         - /prometheus/api/v1/label/.+/values
         - /prometheus/api/v1/metadata
+        # Feature detection and exemplars. Grafana's Prometheus datasource calls
+        # buildinfo when it initialises and decides which query features to
+        # offer from the answer; refused, the datasource loads in a degraded
+        # mode that reads as the spoke being broken rather than as a missing
+        # route. Read-only, both of them.
+        - /prometheus/api/v1/status/buildinfo
+        - /prometheus/api/v1/query_exemplars
     # Logs: /logs/... -> Loki's own /loki/api/v1/...
     #
     # Loki, not VictoriaLogs: addendum 5 §4 made this cluster's log store Loki,
@@ -337,3 +356,15 @@ spec:
         - /logs/loki/api/v1/label/.+/values
         - /logs/loki/api/v1/series
         - /logs/loki/api/v1/index/stats
+        # What Grafana's Loki datasource calls beyond a bare query: the log
+        # volume histogram above Explore's results, the field and label
+        # detection that fills its sidebar, and buildinfo for the same feature
+        # detection as above. Without them Explore returns logs and nothing
+        # else works, which is a half-functioning datasource -- a worse answer
+        # than a missing one, because it looks like the spoke's fault.
+        - /logs/loki/api/v1/index/volume
+        - /logs/loki/api/v1/index/volume_range
+        - /logs/loki/api/v1/detected_fields
+        - /logs/loki/api/v1/detected_labels
+        - /logs/loki/api/v1/patterns
+        - /logs/loki/api/v1/status/buildinfo

@@ -71,7 +71,11 @@
     - path: [spec, template, spec, containers, 0, env, 1, value]
       value: '{{ .Values.global.oidcIssuer }}'
     - path: [spec, template, spec, containers, 0, env, 2, value]
-      value: 'https://id.{{ .Values.global.hubDomain }}/oauth/v2/keys'
+      # From the issuer above, not from the domain. Taking one from the declared
+      # issuer and the other from the derivation made them disagree on a box
+      # that federates -- the service would fetch keys from a host its issuer
+      # never signs with, and every token would be refused as unverifiable.
+      value: '{{ .Values.global.oidcIssuer }}/oauth/v2/keys'
     - path: [spec, template, spec, containers, 0, env, 3, value]
       value: '{{ .Values.global.previewDomain }}'
 
@@ -267,9 +271,45 @@
   when: 'dig "observability" "viewer" "audience" "" .Values.global'
   fields:
     - path: [spec, jwt, oidc, issuer]
-      value: 'https://id.{{ .Values.global.hubDomain }}'
-    - path: [spec, jwt, matchClaims, aud]
-      value: '{{ required "observability.viewer.audience is required while the query endpoint is declared: a JWT with no audience match is accepted by any client of this issuer" (dig "observability" "viewer" "audience" "" .Values.global) }}'
+      value: '{{ .Values.global.oidcIssuer }}'
+    # THE WHOLE MAP, because one of its KEYS is per-box.
+    #
+    # The role claim's name carries the project and organisation ids, so it
+    # cannot be produced by substituting a value: this pipeline rewrites values
+    # and never keys. A `value:` holding a mapping is assigned after the
+    # object's own delimiters are escaped, so a Go template in a key survives to
+    # the chart and is rendered there -- which is why the map is declared whole
+    # rather than field by field.
+    #
+    # `toString` on both ids is not decoration. Rendered with %s against a value
+    # Helm had parsed as an integer, printf emitted "%!s(int64=...)" INTO THE
+    # CLAIM NAME -- a key that matches nothing, so every query is denied, by a
+    # VMUser that passes schema validation and reads correctly in a diff.
+    - path: [spec, jwt, matchClaims]
+      value:
+        # Anchored. match_claims values are regular expressions, so an
+        # unanchored id also matches any longer id containing it.
+        aud: '^{{ required "observability.viewer.audience is required while the query endpoint is declared: a JWT with no audience match is accepted by any client of this issuer" (dig "observability" "viewer" "audience" "" .Values.global | toString) }}$'
+        # THE ROLE, project-scoped, which is the authorization.
+        #
+        # `aud` alone is not one. A client of this issuer may add any project to
+        # its own token's audience with the reserved scope
+        # urn:zitadel:iam:org:project:id:<id>:aud, and the issuer does not check
+        # that the requester was granted that project -- its own guidance is to
+        # authorize on roles rather than on the audience. So a tenant's
+        # application could mint a token this endpoint accepted.
+        #
+        # The claim is read per project (urn:...:project:<id>:roles), never the
+        # unscoped urn:...:project:roles, because role KEYS are not unique
+        # across projects: every tenant project this platform creates defines a
+        # role called `viewer`, and matching the unscoped claim would admit
+        # their users.
+        #
+        # The organisation id is the leaf's parent because the claim records
+        # WHERE a role is held. The value is `.+` -- the issuer writes the
+        # organisation's primary domain there, which is a fact about the box
+        # that would go stale, and its presence is the whole assertion.
+        '{{ printf "urn:zitadel:iam:org:project:%s:roles.%s.%s" (required "observability.viewer.audience is required while the query endpoint is declared" (dig "observability" "viewer" "audience" "" .Values.global | toString)) "viewer" (required "observability.viewer.orgId is required while the query endpoint is declared: the role claim records which organisation a role is held in, and a claim name missing it matches nothing, so every viewer query is denied" (dig "observability" "viewer" "orgId" "" .Values.global | toString)) }}': '.+'
 
 - kind: VMAuth
   name: platform

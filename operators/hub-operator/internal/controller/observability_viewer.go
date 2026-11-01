@@ -47,6 +47,7 @@ const (
 
 	// Hub keys, beside the platform services' own.
 	observabilityProjectIDKey  = "hub-observability-project-id"
+	observabilityOrgIDKey      = "hub-observability-org-id"
 	grafanaOIDCClientIDKey     = "hub-grafana-oidc-client-id"
 	grafanaOIDCClientSecretKey = "hub-grafana-oidc-client-secret"
 	// The role the box's operators hold in the observability project.
@@ -63,6 +64,20 @@ const (
 	// dashboards come from Git, so there is nothing to edit yet.
 	observabilityViewerRole        = "viewer"
 	observabilityViewerRoleDisplay = "Observability Viewer"
+
+	// The one-shot bootstrap record. Holds the PROJECT ID the owners were
+	// granted on, not a boolean.
+	//
+	// Project-specific because a boolean survives the thing it describes: a
+	// project deleted and re-created mints a new id, and a box carrying
+	// `bootstrapped: true` would never grant anyone on the new project, leaving
+	// every operator locked out with a marker claiming the work was done.
+	//
+	// Published only AFTER the grants succeeded, so a partial pass is retried
+	// rather than recorded. That ordering is the whole mechanism: it is what
+	// makes a revocation durable, because a reconcile that found the marker
+	// does not look at the grants at all.
+	observabilityBootstrapKey = "hub-observability-viewer-bootstrapped"
 )
 
 // ObservabilityViewerReconciler provisions the box's observability project and
@@ -116,18 +131,36 @@ func (r *ObservabilityViewerReconciler) Reconcile(ctx context.Context, req ctrl.
 	if err := r.publishHubSecret(ctx, observabilityProjectIDKey, projectID); err != nil {
 		return ctrl.Result{}, fmt.Errorf("publish the observability project id: %w", err)
 	}
+	// The organisation too, because the spoke needs BOTH to name the role claim
+	// it authorizes on: the claim records which organisation a role is held in.
+	// Published beside the project id so a box declares the pair from one place.
+	if err := r.publishHubSecret(ctx, observabilityOrgIDKey, orgID); err != nil {
+		return ctrl.Result{}, fmt.Errorf("publish the observability organisation id: %w", err)
+	}
 
 	// Who may be issued a token for the client below. The project refuses one to
 	// a user holding no role in it, so this is not a convenience: without it the
 	// client is registered, its credentials are published, Grafana is configured
 	// and every sign-in is refused at the issuer.
 	//
-	// Reconciled rather than event-driven, because there is no signup hook to
-	// hang it on -- so an operator added between two passes is refused until the
-	// next one, the same bounded delay a tenant's members have (ADR-060).
-	if err := r.IdentityClient.EnsurePlatformProjectAccess(
-		ctx, orgID, projectID, observabilityViewerRole, observabilityViewerRoleDisplay); err != nil {
-		return ctrl.Result{}, fmt.Errorf("admit the platform's operators to the observability project: %w", err)
+	// ONCE PER PROJECT, AND NEVER AGAIN. Granting whatever is missing on every
+	// reconcile cannot distinguish a user who never held the role from one whose
+	// role was taken away, so it would restore a revocation -- an operator
+	// removing someone's access in the issuer would watch it come back. So the
+	// box records the project it bootstrapped and, having done it, stops looking
+	// at the grants entirely. Anyone added afterwards is granted the role
+	// explicitly, in the issuer, by one of the owners this pass admitted.
+	bootstrapped, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, observabilityBootstrapKey)
+	if err != nil || bootstrapped != projectID {
+		if err := r.IdentityClient.EnsurePlatformProjectAccess(
+			ctx, orgID, projectID, observabilityViewerRole, observabilityViewerRoleDisplay); err != nil {
+			return ctrl.Result{}, fmt.Errorf("admit the platform organisation's owners to the observability project: %w", err)
+		}
+		if err := r.publishHubSecret(ctx, observabilityBootstrapKey, projectID); err != nil {
+			return ctrl.Result{}, fmt.Errorf("record the observability bootstrap: %w", err)
+		}
+		logger.Info("The platform organisation's owners were granted observability access",
+			"project", observabilityProjectName, "projectId", projectID, "role", observabilityViewerRole)
 	}
 
 	// Grafana's generic OAuth callback. One URI: the box has one Grafana, and a

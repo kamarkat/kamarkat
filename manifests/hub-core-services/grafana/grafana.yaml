@@ -10,6 +10,15 @@
 # operator's generated admin credential (Secret platform-admin-credentials)
 # remaining as the way in when the issuer itself is the thing that is broken.
 #
+# That last sentence was false when it was written. The client's credentials
+# reach the container as required environment variables, so a box where they had
+# not been published yet -- every box on its first rollout, and permanently any
+# box whose client existed before its secret could be captured -- had no Secret
+# for them, and every Grafana pod sat in CreateContainerConfigError. An issuer
+# failure took the whole of Grafana down, admin login included: the exact
+# inverse of the recovery route claimed above. They are optional now, so Grafana
+# starts, logs the misconfiguration, and still serves the admin form.
+#
 # Datasources: the hub's own pair, through VMAuth's service route with Grafana's
 # own token -- and one pair per spoke, published by the platform-spoke-datasources
 # Application, which forwards the SIGNED-IN PERSON's token to that spoke's
@@ -122,7 +131,17 @@ spec:
       enabled: "true"
       name: Platform
       allow_sign_up: "true"
-      scopes: openid profile email
+      # offline_access, or the issuer mints no refresh token and the setting
+      # below does nothing: the session ends at the access token's expiry, and
+      # before that oauthPassThru has nothing to forward, so every SPOKE
+      # datasource answers 401 while the hub's own pair keep working. That reads
+      # as the spoke having gone away.
+      #
+      # The roles scope is what makes the issuer assert project-scoped roles in
+      # the token, which is the claim the spokes authorize on. Without it the
+      # claim is absent and every spoke query is denied -- the safe direction,
+      # and still a release that does not work.
+      scopes: PLACEHOLDER_OIDC_SCOPES
       auth_url: PLACEHOLDER_OIDC_AUTH_URL
       token_url: PLACEHOLDER_OIDC_TOKEN_URL
       api_url: PLACEHOLDER_OIDC_USERINFO_URL
@@ -178,16 +197,22 @@ spec:
                     secretKeyRef:
                       name: grafana-db
                       key: password
+                # optional, so the absence of a client is a broken SIGN-IN and
+                # not a broken Grafana. Required, these take every pod down
+                # before it starts, which removes the admin credential that is
+                # the way back in when the issuer is what failed.
                 - name: GF_AUTH_GENERIC_OAUTH_CLIENT_ID
                   valueFrom:
                     secretKeyRef:
                       name: grafana-oidc
                       key: clientId
+                      optional: true
                 - name: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
                   valueFrom:
                     secretKeyRef:
                       name: grafana-oidc
                       key: clientSecret
+                      optional: true
               resources:
                 requests:
                   cpu: 50m

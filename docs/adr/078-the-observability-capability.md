@@ -1879,6 +1879,25 @@ cross-namespace reference is the target namespace's decision. Named, because a g
 without `name` would admit routes to every Service there — the stores and Loki
 directly among them, which is the path VMAuth exists to be in front of.
 
+**Superseded 2026-11-01: the audience is NOT the authorization.** This section
+recorded that an `aud` naming the box's dedicated observability project was
+sufficient, because the issuer refuses a token for that project to anyone
+holding no role in it. That is false at the issuer. Any client may add any
+project to its own token's audience with the reserved scope
+`urn:zitadel:iam:org:project:id:<id>:aud`, and the issuer does not check that
+the requester was granted that project — its own guidance is to authorize on
+roles rather than on the audience. A tenant application could therefore mint a
+token the spoke's VMAuth accepted. What the project's `projectRoleCheck` governs
+is *its own* authorization flow, which a token requested through another client
+never enters.
+
+The endpoint now matches the project-scoped role claim as well as the audience,
+and the reasoning that removed the role match is also superseded: VMAuth
+traverses nested claims by dot-notation and treats values as regular
+expressions, so the issuer's nested role claim is reachable after all. The claim
+is read per project, never `urn:zitadel:iam:org:project:roles`, because role keys
+repeat — every tenant project this platform creates defines a `viewer`.
+
 **One declaration gates all five objects.** The audience renders the listener, the
 certificate and the route in the gateway chart, and the VMAuth, VMUser and grant in
 the spoke catalogue. There is no state in which the endpoint exists and the stores
@@ -2089,3 +2108,73 @@ validates a viewer's token against it and the hub sends people to it to sign in;
 box federating to its own issuer had the spoke deriving `id.<hubDomain>` while
 everything else used the declared one, and a token issued by somebody else is
 simply refused, with nothing in the refusal naming which end was wrong.
+
+### Access is granted once, to the organisation's owners (2026-11-01)
+
+Three properties were wanted at the same time: the box's operators can sign in
+without anyone editing the issuer by hand; the platform does not decide that
+everyone in its organisation may read the box's telemetry; and an access removed
+in the issuer stays removed.
+
+The first pass satisfied only the first. It granted the viewer role to every
+human in the platform organisation, on every reconcile — which is a wider
+statement than it looks, because that organisation is where every service
+account lives and where a self-registered account would land, and which made
+revocation impossible: taking the role away in the console restored it on the
+next pass.
+
+**Owners, once.** The role is granted to the organisation's `ORG_OWNER` members,
+which is the provider's own administrator model and the same authority a tenant
+administrator holds — so it is the set that already means "runs this box".
+Anyone else is granted the role explicitly, in the issuer, by one of those
+owners. There is no allowlist to maintain here and no deny list to forget.
+
+**And once is load-bearing.** Nothing can distinguish a user who never held the
+role from one whose role was taken away, so a function that grants whatever is
+missing cannot do anything but restore a revocation. The box records the project
+it bootstrapped — the project *id*, not a flag, because a project deleted and
+re-created mints a new one and a boolean would outlive what it described — and a
+reconcile that finds the record does not look at the grants at all. The record is
+written only after every grant has succeeded, so a partial pass is retried rather
+than remembered.
+
+Grants are counted and failures are returned. Discarding them reproduced the
+exact silent lockout this work exists to fix: a service credential lacking
+`PROJECT_OWNER` would have every grant refused, every refusal dropped, and the
+reconcile would log that the identity was provisioned while every sign-in was
+refused at the issuer.
+
+**The project's own settings are reconciled, not assumed from its creation.**
+`projectRoleAssertion`, `projectRoleCheck` and `hasProjectCheck` were sent by the
+CREATE alone, so a project made before they existed, or edited in a console, kept
+whatever it had. They fail OPEN — lose them and the box's telemetry becomes
+readable by any client of the issuer, while sign-in starts working *better*, not
+worse. The access-token type is reconciled for the same reason: switched to
+opaque, every spoke query answers 401 and nothing names the token's form as the
+cause.
+
+### Sign-in, scopes, and the claim that is a key (2026-11-01)
+
+`offline_access` is requested, or the issuer mints no refresh token: the session
+ends at the access token's expiry, and before that `oauthPassThru` has nothing to
+forward, so every *spoke* datasource answers 401 while the hub's own pair keep
+working. The box also asks for its observability project by name — both the roles
+scope and the project's audience scope — rather than relying on the client's
+default audience, because the role claim the spokes match is asserted for the
+projects in the token's audience and a default is not a stated request.
+
+The client's credentials are **optional** environment variables. Required, they
+took every Grafana pod down before it started on any box whose client had not yet
+been registered, which removed the admin credential that is the way back in when
+the issuer is what failed — the inverse of the recovery route the component
+claimed to preserve.
+
+The role claim's name carries the project and organisation ids, so it is a
+per-box **key**, and the packaging pipeline substitutes values and never keys. A
+`value:` holding a whole mapping is assigned after the object's own delimiters
+are escaped, so a template in a key survives to the chart and renders there; the
+map is therefore declared whole rather than field by field, and no second field
+writer was added. Rendering it is also how a real defect was found: `printf "%s"`
+against an id Helm had parsed as an integer wrote `%!s(int64=…)` into the claim
+name — a claim that matches nothing, so every query is denied, by an object that
+passes schema validation and reads correctly in a diff.

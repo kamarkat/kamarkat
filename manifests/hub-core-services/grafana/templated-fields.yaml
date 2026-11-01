@@ -6,7 +6,7 @@
       value: 'https://grafana.{{ .Values.global.hubDomain }}'
     - path: [spec, deployment, spec, replicas]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else }}2{{ end }}'
+      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "prod" }}3{{ else }}2{{ end }}'
     - path: [spec, deployment, spec, template, spec, topologySpreadConstraints, 0, whenUnsatisfiable]
       value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
     # The box's issuer (§7), from the ONE global every reader of it uses -- the
@@ -25,6 +25,19 @@
       value: '{{ .Values.global.oidcIssuer }}/oauth/v2/token'
     - path: [spec, config, auth.generic_oauth, api_url]
       value: '{{ .Values.global.oidcIssuer }}/oidc/v1/userinfo'
+    # The scopes, with the box's own observability project named in two of them.
+    #
+    # The project is asked for explicitly rather than relied on as the client's
+    # default audience: the issuer asserts the project-scoped role claim for the
+    # projects in the token's audience, and the claim the spokes match is that
+    # one. Relying on the default would make the authorization depend on a
+    # behaviour not stated in the request.
+    #
+    # Empty audience keeps the base scopes, because this component renders on
+    # every box and a box with no viewer identity still runs Grafana for its own
+    # metrics. Sign-in works; there is simply no spoke to query.
+    - path: [spec, config, auth.generic_oauth, scopes]
+      value: 'openid profile email offline_access{{ with (dig "observability" "viewer" "audience" "" .Values.global) }} urn:zitadel:iam:org:projects:roles urn:zitadel:iam:org:project:id:{{ . }}:aud{{ end }}'
 
 - kind: HTTPRoute
   name: grafana

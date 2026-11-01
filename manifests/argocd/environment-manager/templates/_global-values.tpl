@@ -149,6 +149,17 @@ global:
   observability:
     viewer:
       audience: {{ dig "viewer" "audience" "" ($root.Values.observability | default dict) | quote }}
+      {{- /* The organisation the viewer role is held in. Required alongside the
+             audience, because the issuer's role claim records WHERE a role is
+             held: the claim the spoke matches is
+             urn:zitadel:iam:org:project:<audience>:roles.viewer.<orgId>, and a
+             claim name missing the organisation matches nothing at all -- which
+             denies every query rather than admitting too many, but denies them
+             with a VMUser that looks correct. Published by hub-operator as
+             hub-observability-org-id when the client is registered, declared
+             here once, quoted because an unquoted id is a number and a number
+             formatted into a claim name is not the same string. */}}
+      orgId: {{ dig "viewer" "orgId" "" ($root.Values.observability | default dict) | quote }}
   {{- /* The spoke this box's burst-capacity autoscaler watches. A global for the
          same reason as hubDomain: it is a fact about the box, and the
          alternative was the component carrying one box's spoke name as a
