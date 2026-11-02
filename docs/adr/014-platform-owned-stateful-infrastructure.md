@@ -43,6 +43,30 @@ Incrementing a suffix by hand remains necessary in one case the derivation canno
 distinguish: one named cluster rebuilt from an empty database, whose predecessor's
 segments are still under the same prefix.
 
+## Addendum 3: backups move to the Barman Cloud plugin (2026-11-02, ADR-111, ADR-112)
+
+The backup contract below is written against CloudNativePG's in-tree Barman integration
+(`spec.backup.barmanObjectStore`). That integration is deprecated and is removed in
+CloudNativePG 1.31.0. Every platform-owned cluster, hub and spoke, moves to the official
+Barman Cloud plugin. The contract's rules stand; their mechanism changes:
+
+* Each cluster archives and takes base backups through the plugin, against an `ObjectStore`
+  resource of its own. Under ADR-112 that is one per application cluster on the hub, never
+  shared between applications. `endpointURL` remains mandatory, on the `ObjectStore`.
+* `ScheduledBackup` resources use the plugin method.
+* The plugin is installed at a pinned version compatible with the deployed operator.
+  Compatibility is a row in ADR-111's version matrix (Revision 5 §7).
+
+**Archive history is preserved.** A running cluster moves through the upstream in-tree-to-plugin
+migration, and only after its archive has been proven restorable (ADR-111 Revision 5 §6).
+Its `serverName` and prefix are carried over as they are: an archive identity is never renamed
+on a running cluster to normalise naming, and barman's refusal to archive into a non-empty
+prefix is never disabled. The incarnation rules below apply unchanged.
+
+**One change at a time.** The plugin migration of an existing cluster and ADR-112's database
+separation are separate, separately verified operations. New clusters ADR-112 creates start
+on the plugin.
+
 ## Context
 
 Applications requiring stateful infrastructure (PostgreSQL, Redis, ClickHouse) can either deploy embedded databases via Helm chart dependencies or consume platform-provided centralized services.

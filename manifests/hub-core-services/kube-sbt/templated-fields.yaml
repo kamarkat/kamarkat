@@ -1,6 +1,6 @@
 # kube-sbt provisions tenants at the issuer, so it holds the issuer URL and the
-# Zitadel default-organisation admin -- zitadel.id.<zone>, the ZitadelOrg that
-# DeriveHubEndpoints derives. Both were the platform's.
+# platform administrator's address, both at the box's own domain. Both were the
+# platform's.
 - kind: Deployment
   name: kube-sbt
   fields: [{replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}}]

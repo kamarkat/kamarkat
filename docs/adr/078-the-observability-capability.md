@@ -1405,6 +1405,9 @@ own alerting is not used. **The database is a `grafana` database on the hub's
 existing CNPG cluster, under that cluster's existing environment profile** (one
 instance in development, two in staging, three in production). Its topology is
 not changed here; Grafana's availability is that profile's.
+**Amended 2026-11-02 (ADR-112):** the database moves to Grafana's own CNPG cluster,
+`grafana-db`, with its own size, archive and backup schedule, on the platform's 1/2/3 replica
+ladder. Grafana's availability is that cluster's.
 
 **grafana-operator** reconciles an in-cluster `Grafana` (replacing addendum 3 §4's
 external instance), the Platform folder's dashboards, and the datasources.
@@ -1555,7 +1558,7 @@ configuration makes a single node HA.
 | One pod | standby VMSingle serves; Alloy backfills on return | RF 3 keeps reads and writes | other evaluator replica; Alertmanager peer | other Grafana replica |
 | One node (≥3 nodes) | as above | 2 of 3 replicas remain | as above | as above |
 | Object store outage | unaffected | bounded buffering (§4); recent logs only | unaffected | log panels degrade |
-| `platform-db` outage | unaffected | unaffected | unaffected | Grafana down |
+| `grafana-db` outage (ADR-112) | unaffected | unaffected | unaffected | Grafana down |
 | Hub down | spokes keep storing | spokes keep storing | spokes keep evaluating and paging | none |
 | Hub–spoke link down | spoke unaffected | spoke unaffected | spoke pages if its own internet path is up | that spoke's panels fail |
 | Whole cluster down | not viewable | not viewable | none from it; **its heartbeat stops and pages** | its panels fail |

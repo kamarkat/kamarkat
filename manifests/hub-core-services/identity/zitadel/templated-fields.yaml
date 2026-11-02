@@ -1,8 +1,7 @@
-# The platform-admin binding names Zitadel's default-organisation admin, whose
-# username is zitadel.id.<zone> -- the ZitadelOrg that DeriveHubEndpoints
-# derives, not a name anyone chose. It was the platform's, so a tenant's cluster
-# granted cluster-admin to a subject in the PLATFORM's Zitadel and to no one in
-# its own.
+# The platform-admin binding names the platform administrator -- the account
+# kube-sbt's PLATFORM_ADMIN_EMAIL creates in the box's platform organisation --
+# at the box's own domain. Unsubstituted, a tenant's cluster would grant
+# cluster-admin to a subject in the PLATFORM's Zitadel and to no one in its own.
 #
 # The two ExternalSecrets alongside it carry no domain: they name Infisical keys,
 # which the hub-operator produces per box.

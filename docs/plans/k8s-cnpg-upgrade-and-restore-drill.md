@@ -1,4 +1,4 @@
-# Plan: Kubernetes / CNPG upgrade track, then database restore drills (ADR-104)
+# Plan: Kubernetes / CNPG upgrade track, then database restore drills (ADR-111 Revision 5)
 
 **Owner:** Platform team (lead: Claude; execution: team member; approvals: user)
 **Started:** 2026-10-15 · **Last updated:** 2026-10-20
@@ -40,7 +40,7 @@
    recovery point**; row counts are sanity only.
 7. Janitor never deletes an active restore: absent owner + expired Lease + timeout + grace;
    verify PVC/PV per reclaim policy.
-8. Alerts in Grafana Cloud; failed / skipped / overdue (35 days) are distinct; a skip does
+8. Alerts in the in-box evaluator (ADR-078 add.5 replaced Grafana Cloud); failed / skipped / overdue (35 days) are distinct; a skip does
    not reset the last-success clock.
 9. GitOps owns durable config; the runner has namespaced rights over drill resources only;
    a hub-database drill's scheduler must be **outside the hub's failure domain**.
@@ -137,7 +137,7 @@ Kyverno supports 1.36** (Kyverno 1.19.x = K8s 1.33–1.35; 1.20 does not exist).
 | 5 | **Interim restore proof** (decision 2): one manual restore of the hub archive on `flatcar-hub-node-1`, user-run from a runbook, read-only key | Not started | depends on 4 |
 | 6 | Execute the upgrade, step by step | Not started | each step's checks; user-run |
 | 7 | Built-in Barman → Barman Cloud plugin migration (own ADR) | Not started | after 6 reaches a CNPG version with the plugin path validated |
-| 8 | **ADR-104** restore drills (plugin-based) + implementation: namespace/quota/netpol/RBAC, CronJob + Lease, runner image via CI, fail-closed preflight `104-restore-drill.sh`, evidence store, janitor, Grafana alerts | Not started | after 7 |
+| 8 | **ADR-111 Revision 5 §6** restore drills (plugin-based) + implementation: namespace/quota/netpol/RBAC, CronJob + Lease, runner image via CI, fail-closed preflight `111-restore-drill.sh`, evidence store, janitor, in-box alerts (ADR-078 add.5) | Not started | after 7 |
 
 ## 7. Immediate next step
 
@@ -154,3 +154,38 @@ Kyverno supports 1.36** (Kyverno 1.19.x = K8s 1.33–1.35; 1.20 does not exist).
 - Existing recovery runbooks to reuse (not to run for drills): `docs/runbooks/platform-db-restore.md`,
   `docs/runbooks/spoke-database-loss-and-recovery.md`. Do **not** run `make cnpg-bump-incarnation`
   or `cnpg-settle-incarnation` for a drill: they change the production incarnation.
+
+
+## Restore proofs and drills (moved from ADR-111 Revision 5 §6, 2026-11-02)
+
+These decisions were approved on 2026-10-15. They are operational practice and are recorded
+here rather than in ADR-111, which states recovery contracts and sets no acceptance or release
+condition on demonstration.
+
+These decisions were approved on 2026-10-15 and recorded only in the plan; they are decided
+here.
+
+1. **One interim proof of the current archive**, before any migration: a restore of
+   `platform-db` from its in-tree archive, with isolated capacity and read-only access to the
+   source. Without either, the proof is recorded BLOCKED, never skipped.
+2. **Read-only restore access.** The restore key comes from a separate Hetzner project, with a
+   bucket policy granting only read actions on the source prefixes, and a test that write and
+   delete are denied. Evidence is written with a separate key to a separate bucket.
+3. **A capacity gate** covering restored size, WAL replay, temporary files, PVC and
+   storage-class limits, peak recovery CPU and memory, and headroom for the running
+   platform. A skipped drill leaves durable evidence and an alert, never a green result.
+4. **Monthly drills** in development, scheduled from GitOps in UTC, one at a time (a
+   `concurrencyPolicy` of `Forbid`, a Lease and an idempotent run id). CI tests and releases
+   the drill runner; it does not run drills.
+5. **Validation** checks databases and owners, and versioned application assertions relative
+   to the backup's recovery point. Row counts are a sanity check only.
+6. **Cleanup** never removes an active restore: it requires an absent owner, an expired
+   Lease, a timeout and a grace period, and verifies volumes by their reclaim policy.
+7. **Alerts** distinguish failed, skipped and overdue (35 days). A skip does not reset the
+   last-success clock. They are platform rules in the in-box evaluator (ADR-078 addendum 5).
+8. **Rights.** GitOps owns the drill's durable configuration; the runner holds namespaced
+   rights over drill resources only. A drill of a hub database is scheduled from outside the
+   hub's failure domain.
+
+Under ADR-112, every application cluster is drilled from its own archive.
+

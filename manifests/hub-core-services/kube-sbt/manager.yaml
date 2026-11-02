@@ -99,7 +99,7 @@ spec:
         - name: KUBERNETES_OIDC_REDIRECT_URIS
           value: "http://localhost:8000,http://localhost:18000,http://127.0.0.1:8000,http://127.0.0.1:18000"
         - name: PLATFORM_ADMIN_EMAIL
-          value: "zitadel-admin@zitadel.id.dev.nutgraf.in"
+          value: "arun4infra@dev.nutgraf.in"
         - name: IDENTITY_SERVICE_TOKEN
           valueFrom:
             secretKeyRef:

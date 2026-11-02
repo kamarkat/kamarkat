@@ -117,3 +117,11 @@ acknowledges with `TODO(ADR-023)`. That migration to Crossplane `provider-sql` i
 unaffected by this addendum — when it happens, the six move to Crossplane and the
 Day-0 role stays with CNPG.
 
+### Amended 2026-11-02 (ADR-112)
+
+`platform-db` is replaced by one cluster per platform application. The Day-0 `infisical`
+role and database are declared on `infisical-db`, Infisical's own cluster, and the exception
+stays limited to that one case. Every other role is declared against its application's
+cluster, by whichever reconciler owns application roles at the time. The `control_plane` and
+`hub` roles have no consuming workload and go with their databases (ADR-112 §1).
+

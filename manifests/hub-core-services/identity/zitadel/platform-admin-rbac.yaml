@@ -30,7 +30,7 @@ subjects:
   # somebody else, with no bindings, and every request is forbidden with a name
   # that looks correct.
   - kind: User
-    name: zitadel-admin@zitadel.id.dev.nutgraf.in
+    name: arun4infra@dev.nutgraf.in
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: ClusterRole
