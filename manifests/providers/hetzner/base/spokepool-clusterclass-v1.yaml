@@ -4,36 +4,61 @@ kind: ClusterClass
 metadata:
   name: spokepool-v1
   namespace: platform-capi
+# EVERY FIELD CAPI DEFAULTS IS DECLARED HERE, and that is not tidiness.
+#
+# The webhook adds `namespace` to each ref and an empty `metadata` to the
+# control plane, each machineDeployment template and each variable. Those were
+# previously left out and suppressed with ignoreDifferences instead. This
+# Application syncs with RespectIgnoreDifferences=true, which means the ignored
+# paths are taken from the LIVE object and folded into what is applied -- and for
+# a path inside a LIST, what is carried over is the live list element, not the
+# one field. `machineDeployments` is an atomic list in a CRD, so the live entry
+# replaced the rendered one wholesale and the bootstrap ref never moved: rc.186
+# applied control-plane v5 and left both worker bootstraps on v6, reported
+# "successfully synced (all tasks run)", and sat OutOfSync on exactly those two
+# fields. Every new worker and burst node would have kept booting the superseded
+# bootstrap -- the containerd and runc pins of 55cc83cf silently absent.
+#
+# Declaring the defaults removes the diff, so nothing needs ignoring and no live
+# value is ever substituted into what is applied. A field CAPI starts or stops
+# defaulting is then a visible diff here, which is the correct place to see it.
 spec:
   controlPlane:
+    metadata: {}
     ref:
       apiVersion: controlplane.cluster.x-k8s.io/v1beta1
       kind: KubeadmControlPlaneTemplate
       name: spokepool-control-plane-v5
+      namespace: platform-capi
     machineInfrastructure:
       ref:
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
         kind: HCloudMachineTemplate
         name: spokepool-control-plane-machine-v1
+        namespace: platform-capi
   infrastructure:
     ref:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
       kind: HetznerClusterTemplate
       name: spokepool-cluster-v3
+      namespace: platform-capi
   workers:
     machineDeployments:
     - class: default-worker
       template:
+        metadata: {}
         bootstrap:
           ref:
             apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
             kind: KubeadmConfigTemplate
             name: spokepool-worker-bootstrap-v7
+            namespace: platform-capi
         infrastructure:
           ref:
             apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
             kind: HCloudMachineTemplate
             name: spokepool-worker-machine-v1
+            namespace: platform-capi
     # ADR-052: the elastic tenant-execution pool. A SEPARATE class, not a
     # modification of default-worker.
     #
@@ -45,16 +70,19 @@ spec:
     # workload-class and not on location.
     - class: burst-worker
       template:
+        metadata: {}
         bootstrap:
           ref:
             apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
             kind: KubeadmConfigTemplate
             name: spokepool-burst-bootstrap-v7
+            namespace: platform-capi
         infrastructure:
           ref:
             apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
             kind: HCloudMachineTemplate
             name: spokepool-burst-machine-v1
+            namespace: platform-capi
   patches:
   - name: region
     definitions:
@@ -190,30 +218,35 @@ spec:
   variables:
   - name: region
     required: true
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: string
         default: "hel1"
   - name: workerMachineType
     required: false
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: string
         default: "cx33"
   - name: controlPlaneMachineType
     required: false
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: string
         default: "cx33"
   - name: controlPlaneLoadBalancerEnabled
     required: false
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: boolean
         default: true
   - name: controlPlaneEndpointHost
     required: false
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: string
@@ -226,6 +259,7 @@ spec:
   # it is needed (the reason 1bfa9d3f added a key here in the first place).
   - name: hcloudSSHKeyName
     required: false
+    metadata: {}
     schema:
       openAPIV3Schema:
         type: string

@@ -613,18 +613,24 @@ spec:
     {{"{{-"}} if eq .appName "infrastructure-provider" {{"}}"}}
     spec:
       ignoreDifferences:
-        # CAPI webhook defaulting adds namespace refs and empty metadata
-        # blocks to ClusterClass refs/variables after creation.
-        - group: cluster.x-k8s.io
-          kind: ClusterClass
-          jqPathExpressions:
-            - .spec.controlPlane.ref.namespace
-            - .spec.controlPlane.metadata
-            - .spec.infrastructure.ref.namespace
-            - .spec.variables[].metadata
-            - .spec.workers.machineDeployments[].template.infrastructure.ref.namespace
-            - .spec.workers.machineDeployments[].template.bootstrap.ref.namespace
-            - .spec.workers.machineDeployments[].template.metadata
+        # NO ClusterClass RULE, deliberately. CAPI's defaulted namespaces and
+        # empty metadata blocks are declared in the ClusterClass source instead,
+        # so there is no diff to suppress.
+        #
+        # Ignoring them here was worse than redundant. This Application syncs
+        # with RespectIgnoreDifferences=true, so an ignored path is taken from
+        # the live object and folded into what is applied -- and for a path
+        # inside a list, the live LIST ELEMENT is what carries over, because an
+        # atomic CRD list cannot be merged field by field. Two of the seven
+        # expressions reached inside .spec.workers.machineDeployments[], so the
+        # live entries replaced the rendered ones and rc.186 applied the new
+        # control-plane template while silently keeping both worker bootstrap
+        # refs on the superseded v6. The sync reported success and the
+        # Application sat OutOfSync on exactly the two fields it had discarded.
+        #
+        # A rule here must therefore never address a path inside a list. Prefer
+        # declaring the defaulted value at the source, as the ClusterClass now
+        # does.
         # External Secrets controller adds finalizers, defaulted fields and
         # status to ExternalSecrets after creation.
         - group: external-secrets.io
