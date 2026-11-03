@@ -1,11 +1,17 @@
 package versions
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
 	"github.com/soloz-io/zero-ops/internal/assets"
 )
+
+// The ClusterClass that provisions the management cluster, and so the authority
+// for the Kubernetes version its nodes install.
+const managementClassPath = "classes/hetzner-mgmt-ubuntu-v1.yaml"
 
 type providerManifestSpec struct {
 	Spec struct {
@@ -31,10 +37,6 @@ func readProviderManifestVersion(t *testing.T, path string) string {
 
 func TestProviderManifestVersionParity(t *testing.T) {
 	// THE PARITY CONTRACT (ADR-100 Workstream 3).
-	//
-	// Deployed versions:
-	//   kubeadm: v1.8.5
-	//   CAPH:    v1.0.7
 	//
 	// Constants in versions.go must match the versions specified in the CAPI operator
 	// provider manifests exactly. A mismatch means the Go driver and the applied
@@ -77,21 +79,87 @@ func TestProviderManifestVersionParity(t *testing.T) {
 	}
 }
 
-func TestFailsOnDivergence(t *testing.T) {
-	// Assert deployed versions are kubeadm v1.8.5 and CAPH v1.0.7, not bumped
-	if KubeadmBootstrapProviderVersion != "v1.8.5" {
-		t.Errorf("KubeadmBootstrapProviderVersion is %q; expected deployed v1.8.5", KubeadmBootstrapProviderVersion)
-	}
-	if KubeadmControlPlaneProviderVersion != "v1.8.5" {
-		t.Errorf("KubeadmControlPlaneProviderVersion is %q; expected deployed v1.8.5", KubeadmControlPlaneProviderVersion)
-	}
-	if HetznerInfraProviderVersion != "v1.0.7" {
-		t.Errorf("HetznerInfraProviderVersion is %q; expected deployed v1.0.7", HetznerInfraProviderVersion)
+// TestProviderVersionsAreWellFormed checks the shape of the provider constants,
+// not their values.
+//
+// It replaces a test that asserted the literal versions then deployed. That
+// froze the versions in a fourth place -- the provider CR, the constant, and the
+// test -- so every legitimate upgrade failed it, and its other half compared the
+// constant against a made-up literal that could never match, which asserted
+// nothing. Parity is already held by TestProviderManifestVersionParity, which
+// compares each constant against the manifest that installs it; a test that also
+// pins the value turns that check into a second thing to edit rather than a
+// guard.
+func TestProviderVersionsAreWellFormed(t *testing.T) {
+	semver := regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	for name, got := range map[string]string{
+		"CAPIOperatorVersion":                CAPIOperatorVersion,
+		"CAPIVersion":                        CAPIVersion,
+		"KubernetesVersion":                  KubernetesVersion,
+		"KubeadmBootstrapProviderVersion":    KubeadmBootstrapProviderVersion,
+		"KubeadmControlPlaneProviderVersion": KubeadmControlPlaneProviderVersion,
+		"HetznerInfraProviderVersion":        HetznerInfraProviderVersion,
+		"CertManagerVersion":                 CertManagerVersion,
+	} {
+		if !semver.MatchString(got) {
+			t.Errorf("%s is %q; want a v-prefixed three-part version", name, got)
+		}
 	}
 
-	// Deliberate divergence simulation
-	fakeManifestVersion := "v1.99.0"
-	if fakeManifestVersion == HetznerInfraProviderVersion {
-		t.Fatal("simulated divergence unexpectedly matched")
+	// The two kubeadm providers are released together as part of Cluster API, so
+	// they are never independently chosen.
+	if KubeadmBootstrapProviderVersion != KubeadmControlPlaneProviderVersion {
+		t.Errorf("kubeadm providers disagree: bootstrap %q, control-plane %q",
+			KubeadmBootstrapProviderVersion, KubeadmControlPlaneProviderVersion)
+	}
+}
+
+// managementClassKubernetesVersion returns the KUBERNETES_VERSION and
+// TRIMMED_KUBERNETES_VERSION the management ClusterClass installs on its nodes.
+func managementClassKubernetesVersion(t *testing.T) (full, trimmed string) {
+	t.Helper()
+	raw, err := assets.ReadManifest(managementClassPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", managementClassPath, err)
+	}
+	for _, m := range regexp.MustCompile(`export KUBERNETES_VERSION=(\S+)`).FindAllStringSubmatch(string(raw), -1) {
+		if full != "" && full != m[1] {
+			t.Fatalf("%s exports two different KUBERNETES_VERSION values: %q and %q",
+				managementClassPath, full, m[1])
+		}
+		full = m[1]
+	}
+	for _, m := range regexp.MustCompile(`export TRIMMED_KUBERNETES_VERSION=(\S+)`).FindAllStringSubmatch(string(raw), -1) {
+		if trimmed != "" && trimmed != m[1] {
+			t.Fatalf("%s exports two different TRIMMED_KUBERNETES_VERSION values: %q and %q",
+				managementClassPath, trimmed, m[1])
+		}
+		trimmed = m[1]
+	}
+	if full == "" || trimmed == "" {
+		t.Fatalf("%s exports no KUBERNETES_VERSION or TRIMMED_KUBERNETES_VERSION", managementClassPath)
+	}
+	return full, trimmed
+}
+
+// TestKubernetesVersionParity guards the one version with no single home: the
+// constant below is rendered into the Cluster's spec.topology.version, while the
+// ClusterClass cloud-init installs kubelet and kubeadm from the apt repository
+// its own exports name. If they disagree, CAPI asks for one version and the
+// nodes come up on another -- version skew on a control plane that is being
+// created, which is both the worst time for it and the hardest place to see it.
+func TestKubernetesVersionParity(t *testing.T) {
+	full, trimmed := managementClassKubernetesVersion(t)
+
+	if got, want := KubernetesVersion, "v"+full; got != want {
+		t.Fatalf("divergence between %s and versions.go: the class installs %s, versions.go declares %s",
+			managementClassPath, want, got)
+	}
+
+	// The trimmed value builds the package repository URL, so a stale copy sends
+	// nodes to the wrong apt repository rather than failing outright.
+	if want := strings.Join(strings.Split(full, ".")[:2], "."); trimmed != want {
+		t.Fatalf("%s exports TRIMMED_KUBERNETES_VERSION=%s, which is not the major.minor of %s (%s)",
+			managementClassPath, trimmed, full, want)
 	}
 }

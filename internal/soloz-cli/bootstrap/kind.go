@@ -25,10 +25,11 @@ type KindManager struct {
 const kindRemoteAPIPort = "6443"
 
 // kindNodeImage is the kind node image used for the ephemeral bootstrap cluster.
-// Pinned to a modern Kubernetes (>=1.28) because current control-plane
-// components (cert-manager v1.20.2 CRDs use spec.versions[].selectableFields)
-// reject the kind v0.20 default node image (v1.27.3).
-const kindNodeImage = "kindest/node:v1.31.14"
+// Pinned to the platform's target Kubernetes minor, so a local Kind run tests
+// the version the boxes actually get. v1.35.8 is the newest 1.35 node image kind
+// publishes; kind does not publish one per upstream patch, so this trails
+// KUBERNETES_VERSION (1.35.10) by patch and that is expected.
+const kindNodeImage = "kindest/node:v1.35.8"
 
 // Create creates a kind cluster. When the active docker context targets a
 // remote host (ssh:// or tcp://), the cluster is created on that host and the

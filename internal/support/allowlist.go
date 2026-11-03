@@ -44,8 +44,16 @@ type Source struct {
 	Kind      SourceKind `yaml:"kind"`
 	Namespace string     `yaml:"namespace"`
 	Service   string     `yaml:"service"`
-	Query     string     `yaml:"query"`
-	Path      string     `yaml:"path"`
+	// Port the component serves /metrics on. Required for a metrics source.
+	//
+	// Per collector, because exporters do not agree on a port: kube-state-metrics
+	// serves 8080 and a CloudNativePG instance serves 9187. One port for the whole
+	// agent could only ever be right for some of them, and the collectors it was wrong
+	// for failed into the payload's Skipped map -- which reads as a component with
+	// nothing to report rather than a collector pointed at the wrong port.
+	Port  int    `yaml:"port"`
+	Query string `yaml:"query"`
+	Path  string `yaml:"path"`
 }
 
 // Collector is one allowlist entry.
@@ -109,6 +117,11 @@ func Parse(doc []byte) (*Allowlist, error) {
 					"wrong, or it is not and this emits nothing under a name "+
 					"that looks reviewed", c.Name, f)
 			}
+		}
+		if c.Source.Kind == KindMetrics && c.Source.Port <= 0 {
+			return nil, fmt.Errorf("collector %q reads metrics and names no port; "+
+				"exporters do not share one, and a scrape of the wrong port is "+
+				"recorded as a collector that found nothing", c.Name)
 		}
 		if c.Source.Kind == KindMetrics && c.Source.Query == "" {
 			return nil, fmt.Errorf("collector %q reads metrics and names no "+

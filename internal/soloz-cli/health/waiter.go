@@ -35,7 +35,7 @@ import (
 // owns the polling cadence.
 type HealthChecker interface {
 	// Name returns a short, human-readable identifier used in log output
-	// (e.g., "Infisical", "CNPG cluster platform-db", "CAPI CRDs").
+	// (e.g., "Infisical", "CNPG cluster zitadel-db", "CAPI CRDs").
 	Name() string
 	// Check returns nil if the service is healthy, or a non-nil error
 	// describing WHY it is not yet ready. The error message is shown to

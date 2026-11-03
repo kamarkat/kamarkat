@@ -3,7 +3,10 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,7 +45,7 @@ import (
 type HubEnvironmentReconciler struct {
 	client.Client
 	// UncachedClient reads secrets directly from API server (bypasses cache)
-	// Use for operational secrets: platform-db-superuser, platform-db-ca, infisical-auth
+	// Use for operational secrets: infisical-db-superuser, infisical-db-ca, infisical-auth
 	// These must not have their data stripped by the cache transformer
 	UncachedClient client.Client
 	Scheme         *runtime.Scheme
@@ -173,6 +176,23 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
 
+	// The box this cluster belongs to, which is what the escrow keys everything
+	// that must outlive the cluster by (ADR-111 ss1).
+	//
+	// Not defaulted from the cluster name. A default would put one box's master
+	// keys under its first cluster's name, so the successor that replaced that
+	// cluster would look for them under its own and find nothing -- the secret
+	// store unrecoverable at precisely the moment the escrow exists to serve.
+	boxID := strings.TrimSpace(hubEnv.Spec.BoxID)
+	if boxID == "" {
+		err := fmt.Errorf("spec.boxId is empty: the escrow keys this box's master keys " +
+			"and its identity provider's encryption key by the box, because they outlive " +
+			"any one cluster, and there is no safe value to assume for it (ADR-111)")
+		logger.Error(err, "Refusing to reconcile a box with no id")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
+	escrowID := escrow.ForCluster(boxID, clusterID)
+
 	// Fatal. This was an Info log and a nil client, which meant a box whose escrow
 	// credentials were missing, wrong, or unreachable bootstrapped normally and
 	// reported healthy while nothing was ever escrowed -- the master keys existing
@@ -186,7 +206,7 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				"not exist only inside the cluster (ADR-076): %w", err)
 	}
 
-	if err := r.reconcileEscrow(ctx, escrowClient, clusterID); err != nil {
+	if err := r.reconcileEscrow(ctx, escrowClient, escrowID); err != nil {
 		logger.Error(err, "Failed to reconcile the escrow", "clusterID", clusterID)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
@@ -216,7 +236,13 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 
 		dataNamespace := hubEnv.Spec.Database.Namespace
-		dbHost := fmt.Sprintf("platform-db-rw.%s.svc", dataNamespace)
+		// The bootstrap cluster the CR declares, not a literal. These secrets carry
+		// Infisical's own database connection, so the cluster is Infisical's
+		// (Spec.Database.ClusterRef, ADR-112) and no other application's.
+		dbHost := database.Endpoint{
+			Cluster:   hubEnv.Spec.Database.ClusterRef,
+			Namespace: dataNamespace,
+		}.PrimaryHost()
 
 		// Create owner reference.
 		//
@@ -235,9 +261,8 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// Build list of bootstrap secret names only
 		// These are required for infrastructure bootstrap (CNPG, Infisical, Redis)
 		secretNamesInData := []string{
-			"platform-db-app",             // CNPG bootstrap superuser
 			"infisical-db-credentials",    // Infisical database user
-			"platform-db-ca",              // TLS certificate authority
+			"infisical-db-ca",             // TLS certificate authority
 			"infisical-redis-credentials", // Redis authentication
 		}
 
@@ -272,7 +297,7 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		logger.Info("Starting bootstrap secrets generation", "clusterID", clusterID)
 
 		// Generate Bootstrap Secrets with AWS backup/restore support
-		result, err := secrets.GenerateBootstrapSecrets(ctx, dataNamespace, securityNamespace, dbHost, owner, existingSecrets, isFirstTime, clusterID, escrowClient)
+		result, err := secrets.GenerateBootstrapSecrets(ctx, dataNamespace, securityNamespace, dbHost, owner, existingSecrets, isFirstTime, escrowID, escrowClient)
 		if err != nil {
 			logger.Error(err, "Failed to generate Bootstrap Secrets")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -282,8 +307,6 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		// Create bootstrap secrets only
 		secretsToCreate := []*corev1.Secret{
-			result.PlatformDBCA,
-			result.PlatformDBApp,
 			result.InfisicalDBCredentials,
 			result.InfisicalSecrets,
 			result.InfisicalRedisCredentials,
@@ -380,7 +403,7 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Upload application secrets directly to Infisical (without creating K8s secrets)
 	// ESO will create K8s secrets by syncing from Infisical
-	appSecretUploader := infisical.NewApplicationSecretUploader(r.Client, r.UncachedClient, escrowClient, clusterID)
+	appSecretUploader := infisical.NewApplicationSecretUploader(r.Client, r.UncachedClient, escrowClient, escrowID)
 	if err := appSecretUploader.UploadApplicationSecrets(ctx); err != nil {
 		logger.Error(err, "Failed to upload application secrets, continuing...")
 	} else {
@@ -403,14 +426,20 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		dataNamespace := hubEnv.Spec.Database.Namespace
 
-		// Map of application secrets to their namespaces.
+		// The application credentials to wait for, DERIVED from the roles this box
+		// declares rather than listed here.
 		//
-		// The Ory databases are gone with the stack that used them (ADR-060);
-		// Zitadel's credentials are delivered by its own ExternalSecret and are
-		// not waited on here.
-		requiredSecrets := map[string]string{
-			"control-plane-db-credentials": dataNamespace, // platform-data
-			"hub-db-credentials":           dataNamespace, // platform-data
+		// A hardcoded list is a second declaration of the same fact, and it drifts: it
+		// outlives the roles it was written for, so the gate waits a minute for
+		// credentials nothing will deliver and then reports the box not ready.
+		//
+		// Derived, the gate covers exactly the roles RoleManager will provision -- it
+		// reads the same declaration through the same naming function -- so a role added
+		// to the CR cannot be left out of the gate, and one removed cannot linger in it.
+		requiredSecrets := map[string]string{}
+		for _, role := range hubEnv.Spec.Database.Roles {
+			requiredSecrets[database.RoleSecretName(role.Name)] =
+				database.RoleSecretNamespace(role.Name, dataNamespace)
 		}
 
 		var missingSecrets []string
@@ -499,18 +528,29 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// self-healing one.
 	rolesProvisioned := isConditionTrueAndUpToDate(hubEnv.Status.Conditions, "DatabaseRolesProvisioned", hubEnv.Generation)
 	if rolesProvisioned {
-		verifier, err := database.NewRoleManager(ctx, r.UncachedClient, hubEnv.Spec.Database.Namespace)
-		if err != nil {
-			// Unreachable database is not evidence the roles are gone. Retry
-			// rather than re-provisioning against a cluster we cannot see.
-			logger.Error(err, "Failed to create RoleManager for role verification")
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		}
-		missing, err := verifier.MissingRoles(ctx, hubEnv)
-		verifier.Close()
-		if err != nil {
-			logger.Error(err, "Failed to verify database roles")
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		// Every cluster the declared roles live on, not just the box's own. After
+		// ADR-112 a role can be on an application's cluster, and verifying only the
+		// shared one reports roles as present because it never looked where they are.
+		var missing []string
+		for _, cluster := range hubEnv.Spec.DatabaseClusters() {
+			verifier, err := database.NewRoleManager(ctx, r.UncachedClient, database.Endpoint{
+				Cluster:   cluster,
+				Namespace: hubEnv.Spec.Database.Namespace,
+			})
+			if err != nil {
+				// Unreachable database is not evidence the roles are gone. Retry
+				// rather than re-provisioning against a cluster we cannot see.
+				logger.Error(err, "Failed to create RoleManager for role verification",
+					"cluster", cluster)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+			absent, err := verifier.MissingRoles(ctx, hubEnv)
+			verifier.Close()
+			if err != nil {
+				logger.Error(err, "Failed to verify database roles", "cluster", cluster)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+			missing = append(missing, absent...)
 		}
 		if len(missing) > 0 {
 			logger.Info("Declared database roles are absent despite DatabaseRolesProvisioned=True; re-provisioning",
@@ -532,16 +572,29 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !rolesProvisioned {
 		logger.Info("Phase 2: Provisioning database roles")
 
-		roleManager, err := database.NewRoleManager(ctx, r.UncachedClient, hubEnv.Spec.Database.Namespace)
-		if err != nil {
-			logger.Error(err, "Failed to create RoleManager")
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
-		}
-		defer roleManager.Close()
-
-		// TODO(ADR-023): Replace with Crossplane provider-sql for roles. Migrations have
-		// no declarative owner since Atlas Operator was removed.
-		if err := roleManager.CreateOrUpdateRoles(ctx, hubEnv); err != nil {
+		// One manager per cluster. Each acts only on the roles declared for it
+		// (RolesFor), so a role on an application's cluster is created there and
+		// nowhere else.
+		provisionErr := func() error {
+			for _, cluster := range hubEnv.Spec.DatabaseClusters() {
+				roleManager, err := database.NewRoleManager(ctx, r.UncachedClient, database.Endpoint{
+					Cluster:   cluster,
+					Namespace: hubEnv.Spec.Database.Namespace,
+				})
+				if err != nil {
+					return fmt.Errorf("role manager for %s: %w", cluster, err)
+				}
+				// TODO(ADR-023): Replace with Crossplane provider-sql for roles.
+				// Migrations have no declarative owner since Atlas Operator was removed.
+				err = roleManager.CreateOrUpdateRoles(ctx, hubEnv)
+				roleManager.Close()
+				if err != nil {
+					return fmt.Errorf("roles on %s: %w", cluster, err)
+				}
+			}
+			return nil
+		}()
+		if err := provisionErr; err != nil {
 			// This phase blocks every phase after it, so the message says so.
 			// A reconcile that stops here leaves the identity provider unable to
 			// authenticate to Postgres, and the only visible symptom is a
@@ -679,7 +732,13 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
-// isCNPGReady checks if the CNPG Cluster is ready
+// isCNPGReady reports whether the BOOTSTRAP cluster is ready.
+//
+// Spec.Database.ClusterRef, not every cluster the box runs: this gate exists so the
+// operator does not act before the database it reads itself is up. An application's own
+// cluster is a prerequisite for that application, and RoleManager already fails on it
+// per cluster rather than holding up the others.
+//
 // Requirement 9.11: Implement dependency readiness checks
 func (r *HubEnvironmentReconciler) isCNPGReady(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) (bool, error) {
 	cluster := &cnpgv1.Cluster{}
@@ -764,9 +823,17 @@ func (r *HubEnvironmentReconciler) handlePasswordRotation(ctx context.Context, h
 		}
 
 		// Requirement 23.15: Execute ALTER ROLE to update PostgreSQL password
-		roleManager, err := database.NewRoleManager(ctx, r.UncachedClient, namespace)
+		// The cluster this ROLE lives on, which after ADR-112 is not necessarily the
+		// box's shared one. Rotating a password against the wrong cluster either fails
+		// on a role that is not there or, if a role of the same name happens to exist,
+		// changes a credential nothing is using while the real one goes stale.
+		roleManager, err := database.NewRoleManager(ctx, r.UncachedClient, database.Endpoint{
+			Cluster:   hubEnv.Spec.ClusterFor(roleSpec),
+			Namespace: namespace,
+		})
 		if err != nil {
-			logger.Error(err, "Failed to create role manager for password rotation")
+			logger.Error(err, "Failed to create role manager for password rotation",
+				"cluster", hubEnv.Spec.ClusterFor(roleSpec), "role", roleSpec.Name)
 			continue
 		}
 
@@ -902,12 +969,17 @@ func (r *HubEnvironmentReconciler) restartStatefulSet(ctx context.Context, name,
 // Writing an existing key back is not a rotation: BackupMasterKeys stores what is
 // already in use, so a box that is working keeps working and a box that was one
 // disk failure from unrecoverable stops being so.
-func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store escrow.EscrowClient, clusterID string) error {
+func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store escrow.EscrowClient, escrowID escrow.Identity) error {
 	logger := log.FromContext(ctx)
 
-	backup, err := store.RestoreMasterKeys(ctx, clusterID)
+	// Both names, because this function needs both: the master keys are the BOX's
+	// and the kubeconfig Secret CAPI writes is the CLUSTER's.
+	boxID := escrowID.BoxID
+	clusterID := escrowID.ClusterName
+
+	backup, err := store.RestoreMasterKeys(ctx, escrowID)
 	if err != nil {
-		return fmt.Errorf("read the escrow for %s: %w", clusterID, err)
+		return fmt.Errorf("read the escrow for %s: %w", boxID, err)
 	}
 
 	if backup == nil {
@@ -939,14 +1011,14 @@ func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store es
 			return fmt.Errorf("%s holds an AUTH_SECRET that cannot be escrowed: %w", key, err)
 		}
 
-		if err := store.BackupMasterKeys(ctx, clusterID, map[string]interface{}{
+		if err := store.BackupMasterKeys(ctx, escrowID, map[string]interface{}{
 			"encryptionKey": encryptionKey,
 			"authSecret":    authSecret,
 			"createdAt":     time.Now().UTC(),
-			"clusterId":     clusterID,
+			"clusterId":     boxID,
 			"version":       "1",
 		}); err != nil {
-			return fmt.Errorf("escrow the master keys for %s: %w", clusterID, err)
+			return fmt.Errorf("escrow the master keys for %s: %w", boxID, err)
 		}
 		logger.Info("master keys escrowed from the cluster's own copy", "clusterID", clusterID)
 	}
@@ -974,7 +1046,20 @@ func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store es
 		return fmt.Errorf("read %s: %w", capiKey, err)
 	}
 
-	if err := r.escrowKubeconfig(ctx, store, clusterID); err != nil {
+	if err := r.ensureBackupEncryptionKey(ctx, store, escrowID); err != nil {
+		return fmt.Errorf("establish the management-state backup encryption key for %s: %w", boxID, err)
+	}
+
+	if err := r.escrowClusterPKI(ctx, store, escrowID); err != nil {
+		return fmt.Errorf("escrow the certificate authorities for %s: %w", clusterID, err)
+	}
+
+	if err := r.labelBootstrapData(ctx, clusterID); err != nil {
+		return fmt.Errorf("mark %s's bootstrap data for the management-state backup: %w",
+			clusterID, err)
+	}
+
+	if err := r.escrowKubeconfig(ctx, store, escrowID); err != nil {
 		return fmt.Errorf("escrow the admin kubeconfig for %s: %w", clusterID, err)
 	}
 	logger.Info("admin kubeconfig escrowed", "clusterID", clusterID)
@@ -991,7 +1076,7 @@ func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store es
 	// kubeconfig Secret lives in this cluster's platform-capi namespace, and so does
 	// the escrow client. Splitting it would put half the recovery contract in a
 	// reconciler that would have to be given both.
-	if err := r.escrowWorkloadKubeconfigs(ctx, logger, store, clusterID); err != nil {
+	if err := r.escrowWorkloadKubeconfigs(ctx, logger, store, escrowID); err != nil {
 		return fmt.Errorf("escrow workload cluster kubeconfigs: %w", err)
 	}
 	return nil
@@ -1005,7 +1090,7 @@ func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store es
 // none and the next reconcile catches it. A cluster whose escrow write FAILS is an
 // error, because that is the state the contract forbids.
 func (r *HubEnvironmentReconciler) escrowWorkloadKubeconfigs(
-	ctx context.Context, logger logr.Logger, store escrow.EscrowClient, hubClusterID string,
+	ctx context.Context, logger logr.Logger, store escrow.EscrowClient, hubID escrow.Identity,
 ) error {
 	// Unstructured, as this operator reads every other CAPI resource. A typed client
 	// would add the cluster-api module to this binary for one field read.
@@ -1020,10 +1105,25 @@ func (r *HubEnvironmentReconciler) escrowWorkloadKubeconfigs(
 	var failed []string
 	for i := range clusters.Items {
 		name := clusters.Items[i].GetName()
-		if name == hubClusterID {
+		if name == hubID.ClusterName {
 			continue
 		}
-		if err := r.escrowKubeconfig(ctx, store, name); err != nil {
+		// Keyed by the SPOKE, under the same box: a spoke's break-glass credential
+		// must not move when the hub managing it is replaced (ADR-111 ss1).
+		spokeID := escrow.ForCluster(hubID.BoxID, name)
+		if err := r.labelBootstrapData(ctx, name); err != nil {
+			logger.Error(err, "could not mark a workload cluster's bootstrap data for backup",
+				"cluster", name)
+			failed = append(failed, name)
+			continue
+		}
+		if err := r.escrowClusterPKI(ctx, store, spokeID); err != nil {
+			logger.Error(err, "could not escrow a workload cluster's certificate authorities",
+				"cluster", name)
+			failed = append(failed, name)
+			continue
+		}
+		if err := r.escrowKubeconfig(ctx, store, spokeID); err != nil {
 			// Not yet written by CAPI is not a failure; anything else is.
 			if apierrors.IsNotFound(err) || strings.Contains(err.Error(), "not found") {
 				logger.Info("workload cluster has no kubeconfig secret yet; will escrow on a later pass",
@@ -1045,7 +1145,8 @@ func (r *HubEnvironmentReconciler) escrowWorkloadKubeconfigs(
 	return nil
 }
 
-func (r *HubEnvironmentReconciler) escrowKubeconfig(ctx context.Context, store escrow.EscrowClient, clusterID string) error {
+func (r *HubEnvironmentReconciler) escrowKubeconfig(ctx context.Context, store escrow.EscrowClient, escrowID escrow.Identity) error {
+	clusterID := escrowID.ClusterName
 	// UncachedClient, because the cache strips Secret payloads.
 	//
 	// cmd/main.go installs a cache transform that removes .data from every Secret
@@ -1071,7 +1172,7 @@ func (r *HubEnvironmentReconciler) escrowKubeconfig(ctx context.Context, store e
 		return fmt.Errorf("%s carries no kubeconfig under .data.value", key)
 	}
 
-	return store.BackupArtifact(ctx, clusterID, escrow.ArtifactKubeconfig, string(payload))
+	return store.BackupArtifact(ctx, escrowID, escrow.ArtifactKubeconfig, string(payload))
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -1125,17 +1226,28 @@ func (r *HubEnvironmentReconciler) findHubEnvironmentForCNPG(ctx context.Context
 		return []reconcile.Request{}
 	}
 
-	// Find HubEnvironment that references this cluster
+	// Find the HubEnvironment that references this cluster.
+	//
+	// EVERY cluster it declares, not just the bootstrap one. A box runs one cluster per
+	// platform application (ADR-112), and each one becoming Ready is what unblocks that
+	// application's roles. Matching a single name meant an event from any other cluster
+	// mapped to no request at all, so its roles waited for an unrelated reconcile.
 	var requests []reconcile.Request
 	for _, hubEnv := range hubEnvList.Items {
-		if hubEnv.Spec.Database.ClusterRef == cluster.Name &&
-			hubEnv.Spec.Database.Namespace == cluster.Namespace {
+		if hubEnv.Spec.Database.Namespace != cluster.Namespace {
+			continue
+		}
+		for _, declared := range hubEnv.Spec.DatabaseClusters() {
+			if declared != cluster.Name {
+				continue
+			}
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      hubEnv.Name,
 					Namespace: hubEnv.Namespace,
 				},
 			})
+			break
 		}
 	}
 
@@ -1315,7 +1427,7 @@ func (r *HubEnvironmentReconciler) ensureInfisicalDBRootCert(ctx context.Context
 
 	caSecret := &corev1.Secret{}
 	if err := r.UncachedClient.Get(ctx, client.ObjectKey{
-		Name: "platform-db-ca", Namespace: "platform-data",
+		Name: "infisical-db-ca", Namespace: "platform-data",
 	}, caSecret); err != nil {
 		// Before CNPG exists there is nothing to mirror; that is not an error.
 		return client.IgnoreNotFound(err)
@@ -1344,5 +1456,271 @@ func (r *HubEnvironmentReconciler) ensureInfisicalDBRootCert(ctx context.Context
 		return err
 	}
 	logger.Info("Refreshed Infisical DB_ROOT_CERT from the live CNPG CA")
+	return nil
+}
+
+// escrowClusterPKI copies a cluster's Cluster API trust roots into the escrow.
+//
+// WHY THIS IS THE ONE WRITE THAT REFUSES TO UPDATE. Every other escrow write takes
+// the live cluster as the source of truth and rewrites its copy, which is right for
+// a credential that rotates. A certificate authority does not rotate: it is created
+// once with the cluster and lasts its life, so a LIVE value that differs from the
+// escrowed one does not mean the escrow is stale. It means something generated a new
+// trust root -- a reconstructed hub whose Cluster API found no PKI and made its own
+// is exactly how that happens -- and rewriting would replace the only copy of the
+// authority the running nodes actually trust with one that cannot talk to them.
+//
+// So the first write wins and a divergence is an error. The cost of being wrong in
+// the other direction is unbounded: without the original `ca` key no hub can ever
+// issue a node certificate for that cluster again, and no amount of later
+// reconciliation recovers it (ADR-111 ss2, Class E).
+//
+// A cluster whose Secret does not exist yet is skipped, as for the kubeconfig: CAPI
+// writes these when it creates the control plane, so a cluster mid-provision has
+// none and the next pass catches it.
+func (r *HubEnvironmentReconciler) escrowClusterPKI(
+	ctx context.Context, store escrow.EscrowClient, id escrow.Identity,
+) error {
+	logger := log.FromContext(ctx)
+
+	for _, purpose := range escrow.SpokePKIPurposes {
+		name := types.NamespacedName{
+			Name:      id.ClusterName + "-" + purpose,
+			Namespace: "platform-capi",
+		}
+		var secret corev1.Secret
+		if err := r.UncachedClient.Get(ctx, name, &secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("no certificate authority secret yet; will escrow on a later pass",
+					"cluster", id.ClusterName, "purpose", purpose)
+				continue
+			}
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+
+		// The whole data map, not one key: `ca`, `etcd` and `proxy` carry tls.crt
+		// and tls.key, and `sa` carries a key pair under the same two names. Taking
+		// the map whole means a purpose that carries something else is still
+		// escrowed faithfully rather than silently truncated.
+		if len(secret.Data) == 0 {
+			return fmt.Errorf("%s carries no data, so there is nothing to escrow and "+
+				"escrowing nothing would report this cluster as covered", name)
+		}
+		payload, err := json.Marshal(secret.Data)
+		if err != nil {
+			return fmt.Errorf("serialise %s: %w", name, err)
+		}
+
+		// Keep this Secret out of the management-state backup, every pass.
+		//
+		// WHY A LABEL AND WHY HERE. The PKI is Class E and must have exactly ONE
+		// recovery authority (ADR-111 §2), so it has to be absent from the Class M
+		// archive -- and it cannot be filtered out by anything else. A bootstrap-data
+		// Secret and a certificate authority carry the SAME type
+		// (cluster.x-k8s.io/secret) and the SAME cluster-name label, so no selector
+		// over type or those labels separates them. Cluster API's own discriminator is
+		// the name suffix (`-ca`, `-etcd`, `-sa`, `-proxy`; util/secret's
+		// HasPurposeSuffix), and Velero cannot select on a name suffix.
+		//
+		// So the per-object exclusion label is the mechanism, and this loop is where
+		// it is maintained: it already reads every one of these Secrets on every
+		// reconcile, so a newly created authority is marked on the next pass and a
+		// label someone removed is put back.
+		if err := r.excludeFromManagementBackup(ctx, &secret); err != nil {
+			return fmt.Errorf("mark %s out of the management-state backup: %w", name, err)
+		}
+
+		artifact := escrow.SpokePKIArtifact(purpose)
+		existing, err := store.RestoreArtifact(ctx, id, artifact)
+		if err != nil {
+			// Unreadable is not absent. Treating it as absent would write over a
+			// copy that may be the only one.
+			return fmt.Errorf("read the escrowed %s for %s: %w", artifact, id.ClusterName, err)
+		}
+		switch {
+		case existing == string(payload):
+			continue
+		case existing != "":
+			return fmt.Errorf("the escrowed %s for %s does NOT match the live one, and a "+
+				"certificate authority does not rotate: something has generated a new trust "+
+				"root for this cluster. Refusing to overwrite the escrowed copy, because the "+
+				"nodes trust that one and nothing can re-create it", artifact, id.ClusterName)
+		}
+
+		if err := store.BackupArtifact(ctx, id, artifact, string(payload)); err != nil {
+			return fmt.Errorf("escrow %s for %s: %w", artifact, id.ClusterName, err)
+		}
+		logger.Info("certificate authority escrowed", "cluster", id.ClusterName, "purpose", purpose)
+	}
+	return nil
+}
+
+// ensureBackupEncryptionKey establishes the key the management-state backups are
+// encrypted with, once per BOX, and never again.
+//
+// The key is the tenant's half of SSE-C on the object store holding Class M
+// (ADR-111 ss10). It is escrowed rather than merely held in the secret store because
+// it has to be readable when neither the hub that wrote those backups nor the
+// Infisical inside it is running -- which is every circumstance in which the backups
+// are wanted.
+//
+// GENERATE-IF-ABSENT IS SAFE HERE ONLY BECAUSE THE ARTEFACT IS BOX-SCOPED. A
+// reconstructed hub reads the same box path its predecessor wrote, finds the key and
+// leaves it alone, so the only way to reach the empty case is a box that has never
+// had one -- a box with no backups to make unreadable. Were this cluster-scoped, the
+// first successor would find nothing, mint a second key, and every backup taken by
+// its predecessor would become undecryptable with nothing reporting it.
+//
+// An unreadable escrow is not an absent key, and the difference is the whole point:
+// treating a failed read as absent is how a second key gets minted over a first.
+func (r *HubEnvironmentReconciler) ensureBackupEncryptionKey(
+	ctx context.Context, store escrow.EscrowClient, id escrow.Identity,
+) error {
+	logger := log.FromContext(ctx)
+
+	existing, err := store.RestoreArtifact(ctx, id, escrow.ArtifactBackupSSECKey)
+	if err != nil {
+		return fmt.Errorf("read the escrowed backup encryption key: %w", err)
+	}
+	if existing != "" {
+		// Present. Not re-derived, not rotated, not compared against anything in
+		// the cluster: the escrow is the authority for this one, because the
+		// backups it protects outlive every cluster that held a copy.
+		return nil
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("generate the backup encryption key: %w", err)
+	}
+	key := hex.EncodeToString(raw)
+
+	if err := store.BackupArtifact(ctx, id, escrow.ArtifactBackupSSECKey, key); err != nil {
+		return fmt.Errorf("the backup encryption key was generated but could not be escrowed, "+
+			"so it is discarded rather than used: %w", err)
+	}
+	logger.Info("management-state backup encryption key generated and escrowed", "box", id.BoxID)
+	return nil
+}
+
+// veleroExcludeLabel is Velero's documented per-object opt-out.
+const veleroExcludeLabel = "velero.io/exclude-from-backup"
+
+// excludeFromManagementBackup marks one Secret as not belonging in Class M.
+//
+// Idempotent, and a patch rather than an update so nothing else on the object is
+// touched: these are Cluster API's Secrets, and this adds one label to them.
+//
+// The residual window is worth naming rather than hiding. A certificate authority
+// created between one reconcile and the next could be captured by a backup taken in
+// that gap. It is harmless rather than merely unlikely: `soloz spoke restore-pki` is
+// the only writer of PKI, it reads from the escrow alone, and Velero does not replace
+// an existing resource -- so a stray copy in an archive is never promoted into a
+// second authority. The label removes it from the archive; the single-writer rule is
+// what makes the gap safe.
+func (r *HubEnvironmentReconciler) excludeFromManagementBackup(
+	ctx context.Context, secret *corev1.Secret,
+) error {
+	if secret.Labels[veleroExcludeLabel] == "true" {
+		return nil
+	}
+	patch := []byte(`{"metadata":{"labels":{"` + veleroExcludeLabel + `":"true"}}}`)
+	if err := r.Client.Patch(ctx, secret, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return fmt.Errorf("label %s/%s: %w", secret.Namespace, secret.Name, err)
+	}
+	log.FromContext(ctx).Info("certificate authority marked out of the management-state backup",
+		"secret", secret.Name)
+	return nil
+}
+
+// classMBootstrapLabel marks the Secrets the management-state backup's credentials
+// stream SELECTS. It is an inclusion label, not an exclusion one.
+const classMBootstrapLabel = "recovery.platform.io/class-m"
+
+// labelBootstrapData marks a cluster's bootstrap-data Secrets for inclusion in Class M.
+//
+// POSITIVE SELECTION, because exclusion alone was not safe. Excluding the certificate
+// authorities by label leaves a window: an authority created between two reconciles can
+// be captured by a backup taken in that gap, and a captured authority is a private
+// trust root inside a Class M archive -- outside the Class E boundary it is supposed to
+// live in. Worse, if it were later restored, VELERO would create it, and Velero is a
+// writer. An earlier revision of this design argued the window was harmless because
+// `soloz spoke restore-pki` reads only the escrow; that conclusion was wrong, because
+// it reasoned about one writer and there are two.
+//
+// So the credentials stream selects on this label and takes nothing else. Any Secret
+// that has not been identified here -- including an unlabelled authority -- is excluded
+// by construction rather than by a rule that has to keep up with it. The exclusion
+// label on the authorities stays as well: two independent reasons for the same object
+// to be absent.
+//
+// WHICH SECRETS, from Cluster API's own contract rather than from a name convention:
+// a Machine names its bootstrap data at `spec.bootstrap.dataSecretName`, and a nil
+// value means the Machine is still Pending (api/v1beta1/machine_types.go at the
+// deployed version). So a Machine without one is mid-provision and not a gap; a Machine
+// WITH one whose Secret cannot be found or labelled is a real gap, and is returned as
+// an error rather than counted as covered.
+func (r *HubEnvironmentReconciler) labelBootstrapData(ctx context.Context, clusterName string) error {
+	logger := log.FromContext(ctx)
+
+	machines := &unstructured.UnstructuredList{}
+	machines.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.x-k8s.io", Version: "v1beta1", Kind: "MachineList",
+	})
+	if err := r.List(ctx, machines, client.InNamespace("platform-capi"),
+		client.MatchingLabels{"cluster.x-k8s.io/cluster-name": clusterName}); err != nil {
+		return fmt.Errorf("list machines for %s: %w", clusterName, err)
+	}
+
+	var gaps []string
+	pending, labelled := 0, 0
+
+	for i := range machines.Items {
+		m := machines.Items[i]
+		name, found, err := unstructured.NestedString(m.Object, "spec", "bootstrap", "dataSecretName")
+		if err != nil {
+			gaps = append(gaps, fmt.Sprintf("%s: reading spec.bootstrap.dataSecretName: %v",
+				m.GetName(), err))
+			continue
+		}
+		if !found || name == "" {
+			// Pending by Cluster API's own definition. Nothing to protect yet.
+			pending++
+			continue
+		}
+
+		key := types.NamespacedName{Name: name, Namespace: "platform-capi"}
+		var secret corev1.Secret
+		if err := r.UncachedClient.Get(ctx, key, &secret); err != nil {
+			// A Machine naming bootstrap data that is not there is a COVERAGE GAP,
+			// not a transient state: that Machine cannot be recovered, because
+			// `IsBootstrapDataReady` gates adoption on this Secret existing.
+			gaps = append(gaps, fmt.Sprintf("%s names bootstrap data %s, which cannot be read: %v",
+				m.GetName(), name, err))
+			continue
+		}
+
+		if secret.Labels[classMBootstrapLabel] == "bootstrap-data" {
+			labelled++
+			continue
+		}
+		patch := []byte(`{"metadata":{"labels":{"` + classMBootstrapLabel + `":"bootstrap-data"}}}`)
+		if err := r.Client.Patch(ctx, &secret, client.RawPatch(types.MergePatchType, patch)); err != nil {
+			gaps = append(gaps, fmt.Sprintf("%s's bootstrap data %s could not be marked: %v",
+				m.GetName(), name, err))
+			continue
+		}
+		labelled++
+		logger.Info("bootstrap data marked for the management-state backup",
+			"cluster", clusterName, "secret", name)
+	}
+
+	if len(gaps) > 0 {
+		return fmt.Errorf("%d machine(s) of %s have bootstrap data that is NOT covered by the "+
+			"management-state backup, and a backup of the rest would report success while "+
+			"leaving them unrecoverable:\n  %s", len(gaps), clusterName, strings.Join(gaps, "\n  "))
+	}
+	logger.Info("bootstrap data coverage", "cluster", clusterName,
+		"covered", labelled, "pending", pending)
 	return nil
 }

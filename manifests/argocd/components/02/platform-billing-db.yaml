@@ -1,0 +1,23 @@
+# The billing engine's PostgreSQL cluster (ADR-112 §1, ADR-113 §3).
+#
+# Invoices and subscriptions, which cannot be re-derived -- hence 90d retention.
+#
+# BOUNDARY 02 while the engine is boundary 03, and UNGATED like every database
+# on this box, for the reasons platform-credits-db.yaml gives: the database
+# exists before its consumer reconciles, and turning the capability off removes
+# the service and keeps the records.
+#
+# Placement comes from the component's own templated-fields.yaml.
+---
+boundary: '02'
+appName: platform-billing-db
+destinationNamespace: platform-data
+isPlatformOwned: 'true'
+repoURL: ''
+targetRevision: ''
+path: manifests/hub-core-services/billing-engine/database
+chart: ''
+directoryRecurse: ''
+directoryInclude: ''
+helmValues: ''
+helmReleaseName: ''

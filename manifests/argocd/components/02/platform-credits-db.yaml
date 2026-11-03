@@ -1,0 +1,34 @@
+# The credit authority's PostgreSQL cluster (ADR-112 §1).
+#
+# The ledger, which cannot be re-derived -- hence 90d retention.
+#
+# BOUNDARY 02, while the application that owns it is boundary 03 or 04. The data layer is
+# its own boundary so that a database exists before its consumer reconciles; declaring the
+# cluster beside the service would create both in one sync and crash-loop the application
+# until CloudNativePG finished provisioning.
+#
+# The MANIFEST still lives with the service, in <service>/database/. Those are not in
+# tension: a boundary's inventory is the union of these descriptors and the template's
+# inline elements (ADR-061), and `identity/auth-proxy` and `identity/zitadel` already show
+# a service's subdirectory being a component in its own right.
+#
+# UNGATED, like every database on this box. The credit authority's capability gate removes
+# the SERVICE and keeps its data -- 03-platform-services-appset.yaml is explicit that the
+# database, role and credential are platform prerequisites present on every box. Gating
+# the cluster would make turning a capability off destructive.
+#
+# Placement comes from the component's own templated-fields.yaml rather than from a
+# providers/<class>/ overlay, because this is its own component and not an overlay of one.
+---
+boundary: '02'
+appName: platform-credits-db
+destinationNamespace: platform-data
+isPlatformOwned: 'true'
+repoURL: ''
+targetRevision: ''
+path: manifests/hub-core-services/credit-authority/database
+chart: ''
+directoryRecurse: ''
+directoryInclude: ''
+helmValues: ''
+helmReleaseName: ''

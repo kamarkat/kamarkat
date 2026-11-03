@@ -142,28 +142,28 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if got, err := e.RestoreArtifact(ctx, "devbox", ArtifactKubeconfig); err != nil || got != "" {
+	if got, err := e.RestoreArtifact(ctx, ForCluster("devbox", "devbox"), ArtifactKubeconfig); err != nil || got != "" {
 		t.Fatalf("an un-escrowed cluster read as %q, %v; want empty and no error", got, err)
 	}
 
-	if err := e.BackupArtifact(ctx, "devbox", ArtifactKubeconfig, "apiVersion: v1"); err != nil {
+	if err := e.BackupArtifact(ctx, ForCluster("devbox", "devbox"), ArtifactKubeconfig, "apiVersion: v1"); err != nil {
 		t.Fatalf("BackupArtifact: %v", err)
 	}
-	got, err := e.RestoreArtifact(ctx, "devbox", ArtifactKubeconfig)
+	got, err := e.RestoreArtifact(ctx, ForCluster("devbox", "devbox"), ArtifactKubeconfig)
 	if err != nil || got != "apiVersion: v1" {
 		t.Fatalf("round trip returned %q, %v", got, err)
 	}
 
 	// The second backup of a cluster is the normal case, not a conflict.
-	if err := e.BackupArtifact(ctx, "devbox", ArtifactKubeconfig, "apiVersion: v2"); err != nil {
+	if err := e.BackupArtifact(ctx, ForCluster("devbox", "devbox"), ArtifactKubeconfig, "apiVersion: v2"); err != nil {
 		t.Fatalf("re-escrowing failed: %v", err)
 	}
-	if got, _ := e.RestoreArtifact(ctx, "devbox", ArtifactKubeconfig); got != "apiVersion: v2" {
+	if got, _ := e.RestoreArtifact(ctx, ForCluster("devbox", "devbox"), ArtifactKubeconfig); got != "apiVersion: v2" {
 		t.Errorf("re-escrow left %q", got)
 	}
 
 	// Clusters must not collide.
-	if got, _ := e.RestoreArtifact(ctx, "other", ArtifactKubeconfig); got != "" {
+	if got, _ := e.RestoreArtifact(ctx, ForCluster("other", "other"), ArtifactKubeconfig); got != "" {
 		t.Errorf("another cluster's escrow returned %q", got)
 	}
 }
@@ -244,4 +244,235 @@ func withEnv(t *testing.T, kv map[string]string) {
 	for k, v := range kv {
 		t.Setenv(k, v)
 	}
+}
+
+// Every artefact whose misplacement loses or overwrites irreplaceable material must
+// have a DECLARED scope, not a defaulted one.
+//
+// The default exists for the per-application credentials the secret uploader names at
+// runtime, and it must never be what places a key: the difference between declared
+// and defaulted is invisible in the path, so it is asserted here instead.
+func TestScopeIsDeclaredForSecurityCriticalArtefacts(t *testing.T) {
+	cluster := []string{
+		ArtifactKubeconfig,
+		ArtifactSecretEncryptionKey,
+		ArtifactSecretEncryptionKeyPrevious,
+		SpokePKIArtifact("ca"),
+		SpokePKIArtifact("etcd"),
+		SpokePKIArtifact("sa"),
+		SpokePKIArtifact("proxy"),
+		// A purpose this platform did not anticipate still belongs to its cluster:
+		// two spokes sharing a trust-root path would overwrite each other's.
+		SpokePKIArtifact("apiserver-etcd-client"),
+	}
+	for _, a := range cluster {
+		scope, declared := DeclaredScope(a)
+		if scope != ScopeCluster {
+			t.Errorf("%s is box-scoped; it must be keyed to its cluster", a)
+		}
+		if !declared {
+			t.Errorf("%s falls through to the default rather than being declared", a)
+		}
+	}
+
+	box := []string{escrowSecretName, ArtifactZitadelMasterkey, ArtifactBackupSSECKey}
+	for _, a := range box {
+		scope, declared := DeclaredScope(a)
+		if scope != ScopeBox {
+			t.Errorf("%s is cluster-scoped; it would be lost when the cluster is replaced", a)
+		}
+		if !declared {
+			t.Errorf("%s falls through to the default rather than being declared", a)
+		}
+	}
+
+	// A runtime-composed application credential: box-scoped, and openly undeclared.
+	scope, declared := DeclaredScope("waypoint-db-password")
+	if scope != ScopeBox {
+		t.Error("a dynamically named application credential must stay box-scoped")
+	}
+	if declared {
+		t.Error("a dynamically named credential reports as declared, which would let a " +
+			"verifier treat the default as a decision")
+	}
+}
+
+// A successor hub must not overwrite its predecessor's recovery material, and one
+// spoke must not overwrite another's. Box-scoped material is shared on purpose.
+func TestClusterScopedArtefactsDoNotCollide(t *testing.T) {
+	store := map[string]string{}
+	srv := fakeInfisical(t, store)
+	defer srv.Close()
+	e := testEscrow(t, srv.URL)
+	ctx := context.Background()
+
+	first := ForCluster("acme", "acme-hub")
+	second := ForCluster("acme", "acme-hub-v2")
+	spokeA := ForCluster("acme", "acme-01")
+	spokeB := ForCluster("acme", "acme-02")
+
+	for id, want := range map[Identity]string{
+		first: "first-incarnation", second: "second-incarnation",
+	} {
+		if err := e.BackupArtifact(ctx, id, ArtifactSecretEncryptionKey, want); err != nil {
+			t.Fatalf("BackupArtifact(%s): %v", id.ClusterName, err)
+		}
+	}
+	for id, want := range map[Identity]string{spokeA: "ca-A", spokeB: "ca-B"} {
+		if err := e.BackupArtifact(ctx, id, SpokePKIArtifact("ca"), want); err != nil {
+			t.Fatalf("BackupArtifact(%s): %v", id.ClusterName, err)
+		}
+	}
+
+	for id, want := range map[Identity]string{
+		first: "first-incarnation", second: "second-incarnation",
+	} {
+		if got, _ := e.RestoreArtifact(ctx, id, ArtifactSecretEncryptionKey); got != want {
+			t.Errorf("%s's encryption key read back as %q, want %q — a hub incarnation "+
+				"overwrote another's", id.ClusterName, got, want)
+		}
+	}
+	for id, want := range map[Identity]string{spokeA: "ca-A", spokeB: "ca-B"} {
+		if got, _ := e.RestoreArtifact(ctx, id, SpokePKIArtifact("ca")); got != want {
+			t.Errorf("%s's CA read back as %q, want %q — one spoke's trust root "+
+				"overwrote another's", id.ClusterName, got, want)
+		}
+	}
+
+	// The box's own material is deliberately one copy, reached from either
+	// incarnation: that is what lets a successor decrypt the restored secret store.
+	if err := e.BackupArtifact(ctx, first, escrowSecretName, "master"); err != nil {
+		t.Fatalf("BackupArtifact(master keys): %v", err)
+	}
+	if got, _ := e.RestoreArtifact(ctx, second, escrowSecretName); got != "master" {
+		t.Errorf("the successor read the box's master keys as %q; it must find its "+
+			"predecessor's", got)
+	}
+}
+
+// The migration copies exact bytes, is idempotent, leaves the old copy in place, and
+// reports a fingerprint rather than the value.
+func TestMigratePreservesBytesAndIsIdempotent(t *testing.T) {
+	store := map[string]string{}
+	srv := fakeInfisical(t, store)
+	defer srv.Close()
+	e := testEscrow(t, srv.URL)
+	ctx := context.Background()
+
+	id := ForCluster("acme", "acme-01")
+	const key = "d34db33f00000000000000000000000000000000000000000000000000000000"
+	store[legacyPath(id.ClusterName)+"/"+ArtifactSecretEncryptionKey] = key
+
+	m, err := e.MigrateArtifactPath(ctx, id, ArtifactSecretEncryptionKey)
+	if err != nil {
+		t.Fatalf("MigrateArtifactPath: %v", err)
+	}
+	if m.Action != MigrationCopied {
+		t.Errorf("action is %q, want %q", m.Action, MigrationCopied)
+	}
+	if m.Digest == "" || strings.Contains(m.Digest, key) {
+		t.Errorf("the report must carry a fingerprint and not the value, got %q", m.Digest)
+	}
+	if got, _ := e.RestoreArtifact(ctx, id, ArtifactSecretEncryptionKey); got != key {
+		t.Fatalf("the migrated key reads back as %q; the bytes were not preserved", got)
+	}
+	if store[legacyPath(id.ClusterName)+"/"+ArtifactSecretEncryptionKey] != key {
+		t.Error("the legacy copy was removed; it is retained until the new path has " +
+			"actually been used to recover something")
+	}
+
+	again, err := e.MigrateArtifactPath(ctx, id, ArtifactSecretEncryptionKey)
+	if err != nil || again.Action != MigrationAlreadyPresent {
+		t.Errorf("a second run gave %q, %v; want %q and no error",
+			again.Action, err, MigrationAlreadyPresent)
+	}
+}
+
+// A destination holding DIFFERENT bytes is a conflict, never an overwrite: the ways
+// to reach it are a successor that has written its own or a run aimed at the wrong
+// box, and both become unrecoverable after a blind overwrite.
+func TestMigrateRefusesAConflictingDestination(t *testing.T) {
+	store := map[string]string{}
+	srv := fakeInfisical(t, store)
+	defer srv.Close()
+	e := testEscrow(t, srv.URL)
+	ctx := context.Background()
+
+	id := ForCluster("acme", "acme-01")
+	store[legacyPath(id.ClusterName)+"/"+ArtifactSecretEncryptionKey] = "the-original"
+	if err := e.BackupArtifact(ctx, id, ArtifactSecretEncryptionKey, "something-else"); err != nil {
+		t.Fatalf("seeding the destination: %v", err)
+	}
+
+	if _, err := e.MigrateArtifactPath(ctx, id, ArtifactSecretEncryptionKey); err == nil {
+		t.Fatal("a conflicting destination was overwritten")
+	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Errorf("the refusal does not say why:\n%v", err)
+	}
+	if got, _ := e.RestoreArtifact(ctx, id, ArtifactSecretEncryptionKey); got != "something-else" {
+		t.Errorf("the destination changed to %q despite the refusal", got)
+	}
+}
+
+// Nothing at the old path is "absent", not a failure: an unrotated cluster has no
+// previous-generation key, and a cluster mid-provision has no kubeconfig yet.
+// Whether an absent artefact is REQUIRED is `escrow verify`'s question, not this one.
+func TestMigrateReportsAbsentWithoutFailing(t *testing.T) {
+	store := map[string]string{}
+	srv := fakeInfisical(t, store)
+	defer srv.Close()
+	e := testEscrow(t, srv.URL)
+	ctx := context.Background()
+
+	id := ForCluster("acme", "acme-01")
+	m, err := e.MigrateArtifactPath(ctx, id, ArtifactSecretEncryptionKeyPrevious)
+	if err != nil {
+		t.Fatalf("an absent artefact was reported as an error: %v", err)
+	}
+	if m.Action != MigrationAbsent {
+		t.Errorf("action is %q, want %q", m.Action, MigrationAbsent)
+	}
+	if got, _ := e.RestoreArtifact(ctx, id, ArtifactSecretEncryptionKeyPrevious); got != "" {
+		t.Errorf("migrating an absent artefact wrote %q to the new path", got)
+	}
+}
+
+// An identity missing either half is refused, because both halves place the path and
+// neither has a safe value to assume.
+func TestIdentityRefusesAMissingHalf(t *testing.T) {
+	store := map[string]string{}
+	srv := fakeInfisical(t, store)
+	defer srv.Close()
+	e := testEscrow(t, srv.URL)
+	ctx := context.Background()
+
+	for _, id := range []Identity{ForCluster("", "acme-01"), ForCluster("acme", "")} {
+		if err := e.BackupArtifact(ctx, id, ArtifactKubeconfig, "x"); err == nil {
+			t.Errorf("an incomplete identity %+v was accepted for a write", id)
+		}
+		if _, err := e.RestoreArtifact(ctx, id, ArtifactKubeconfig); err == nil {
+			t.Errorf("an incomplete identity %+v was accepted for a read", id)
+		}
+	}
+}
+
+// testEscrow builds a client against the fake, with the concrete type's migration
+// capability available.
+func testEscrow(t *testing.T, url string) *infisicalEscrow {
+	t.Helper()
+	withEnv(t, map[string]string{
+		"INFISICAL_ESCROW_URL":           url,
+		"INFISICAL_ESCROW_PROJECT_ID":    "proj",
+		"INFISICAL_ESCROW_CLIENT_ID":     "id",
+		"INFISICAL_ESCROW_CLIENT_SECRET": "secret",
+	})
+	c, err := NewEscrowClient(context.Background(), "")
+	if err != nil {
+		t.Fatalf("NewEscrowClient: %v", err)
+	}
+	e, ok := c.(*infisicalEscrow)
+	if !ok {
+		t.Fatalf("NewEscrowClient returned %T, not the concrete escrow", c)
+	}
+	return e
 }

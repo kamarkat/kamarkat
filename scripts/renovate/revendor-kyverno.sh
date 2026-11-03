@@ -33,8 +33,12 @@ sys.exit(1)
 ")
   else
     APPSET="${PROJECT_ROOT}/manifests/argocd/environment-manager/templates/01-platform-infra-appset.yaml"
-    NEW_VERSION=$(grep -A1 "repoURL: 'https://kyverno.github.io/kyverno'" "$APPSET" \
-      | grep targetRevision | sed "s/.*targetRevision: '//;s/'//")
+    # The element's targetRevision is tens of lines below its repoURL, not the
+    # next line: `grep -A1` found nothing, and under `set -o pipefail` the
+    # assignment aborted the script before the guard below could name the
+    # reason. Read from the repoURL to the first targetRevision after it.
+    NEW_VERSION=$(awk "/repoURL: 'https:\/\/kyverno.github.io\/kyverno'/,0" "$APPSET" \
+      | grep -m1 targetRevision | sed "s/.*targetRevision: '//;s/'.*//") || true
   fi
 fi
 
@@ -88,7 +92,7 @@ helm template kyverno "$WORK_DIR/kyverno" \
   --set webhooksCleanup.enabled=true \
   --set webhooksCleanup.image.registry=registry.k8s.io \
   --set webhooksCleanup.image.repository=kubectl \
-  --set webhooksCleanup.image.tag=v1.31.6 \
+  --set webhooksCleanup.image.tag=v1.35.10 \
   --set templating.enabled=false \
   --set policyReportsCleanup.enabled=false \
   --set cleanupJobs.admissionReports.enabled=false \

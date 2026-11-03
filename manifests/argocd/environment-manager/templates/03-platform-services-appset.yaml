@@ -125,6 +125,38 @@ spec:
             ignoreDifferencesNamespace: ''
             extraManifestsPath: ''
           {{- end }}
+          {{- if .Values.capabilities.billing.enabled }}
+          # ADR-113: the box's billing engine -- the engine, its queue, its
+          # document renderer and its gateway. Its database, role and credential
+          # are platform prerequisites present on every box (billing-engine/
+          # database, boundary 02), so turning this off removes the service and
+          # keeps the records. Inline for the reason the Credit Authority is.
+          - boundary: '03'
+            appName: 'billing-engine'
+            destinationNamespace: 'platform-billing'
+            isPlatformOwned: 'true'
+            repoURL: ''
+            targetRevision: ''
+            path: 'manifests/hub-core-services/billing-engine'
+            chart: ''
+            directoryRecurse: ''
+            directoryInclude: ''
+            helmValues: |
+              {{- if $released }}
+              billing-engine:
+                enabled: true
+                oidcIssuer: {{ include "environment-manager.oidcIssuer" . | quote }}
+                oidcJwksUrl: {{ include "environment-manager.oidcJwksUrl" . | quote }}
+              {{- include "environment-manager.globalValues" $ | nindent 14 }}
+              {{- else }}
+              oidcIssuer: {{ include "environment-manager.oidcIssuer" . | quote }}
+              oidcJwksUrl: {{ include "environment-manager.oidcJwksUrl" . | quote }}
+              {{- include "environment-manager.globalValues" . | nindent 14 }}
+              {{- end }}
+            helmReleaseName: ''
+            ignoreDifferencesNamespace: ''
+            extraManifestsPath: ''
+          {{- end }}
 
           {{- if .Values.capabilities.support.enabled }}
           # ADR-077. Ships to every box and is inert until enrolled; enrolment is
@@ -351,12 +383,16 @@ spec:
                   target: {{ .Values.hubIngressAddress | quote }}
                 creditAuthority:
                   enabled: {{ .Values.capabilities.credits.enabled }}
+                billingEngine:
+                  enabled: {{ .Values.capabilities.billing.enabled }}
               {{- include "environment-manager.globalValues" $ | nindent 14 }}
               {{- else }}
               externalDns:
                 target: {{ .Values.hubIngressAddress | quote }}
               creditAuthority:
                 enabled: {{ .Values.capabilities.credits.enabled }}
+              billingEngine:
+                enabled: {{ .Values.capabilities.billing.enabled }}
               {{- include "environment-manager.globalValues" . | nindent 14 }}
               {{- end }}
             helmReleaseName: ''

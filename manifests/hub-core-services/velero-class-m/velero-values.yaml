@@ -1,0 +1,76 @@
+# Chart values for the Velero installation that owns Class M.
+#
+# NOT YET APPLIED: the chart is not vendored, so this records the pinned versions and
+# the configuration they will be installed with.
+#
+# PINNED VERSIONS
+#
+#   Velero Helm chart      12.2.2
+#   Velero server          1.18.4   (the chart declares appVersion 1.18.2; the image is
+#                                    overridden rather than the chart being edited)
+#   AWS plugin             1.14.4   (1.14.3 carried SSE-C corrections, so a version at
+#                                    or above it matters for this design specifically)
+#
+# The schema this design depends on was read at v1.18.2 and re-checked at v1.18.4: the
+# only difference in internal/resourcemodifiers and pkg/archive between those tags is a
+# swap from github.com/pkg/errors to github.com/cockroachdb/errors, so the restore
+# modifiers and the archive behaviour are unchanged.
+#
+# DIGESTS ARE PLACEHOLDERS ON PURPOSE. Every image this platform runs is pinned by tag
+# AND digest, and a digest cannot be resolved without registry access. A placeholder
+# left unsubstituted renders an invalid image reference and fails loudly, which is the
+# wanted outcome -- an invented digest would resolve to nothing or, worse, to something.
+image:
+  repository: velero/velero
+  tag: v1.18.4
+  digest: PLACEHOLDER_VELERO_DIGEST
+
+initContainers:
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.14.4@PLACEHOLDER_VELERO_AWS_PLUGIN_DIGEST
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+
+# Class M is Kubernetes API objects only. Volumes belong to Class B, which Barman owns
+# (ADR-111/112), so the node agent that exists to back up volumes is not installed --
+# the surest way for Velero never to become a second authority for database state is
+# for it to have no mechanism to be one.
+deployNodeAgent: false
+snapshotsEnabled: false
+
+# ONE DECLARATIVE OWNER FOR THE BACKUP LOCATION. The chart can create a
+# BackupStorageLocation from values and the manifest beside this one creates it
+# directly; both doing so would leave two writers for one object and a BSL that
+# flips between them. The chart is told to create none, so the manifest owns it.
+#
+# `backupsEnabled: false` DOES NOT TURN BACKUPS OFF, and the name invites exactly that
+# reading -- which would make the three Schedules beside this file look pointless. In
+# this chart it suppresses the chart-generated BackupStorageLocation and nothing else;
+# Velero's backup controller runs regardless. It is set here for the ownership reason
+# above, not to disable anything.
+#
+# The chart does not create the backup location or the schedules. They are declared in
+# this directory instead: the location references credentials delivered from escrow,
+# and the schedules carry the three-stream split, both of which are recovery contracts
+# rather than installation settings.
+backupsEnabled: false
+configuration:
+  backupStorageLocation: []
+  volumeSnapshotLocation: []
+
+# No credential is created from values. The chart's own secret mechanism would put the
+# credential in Git or in a release's values; this box's arrives from tenant-controlled
+# escrow (ADR-111 §10).
+credentials:
+  useSecret: false
+
+# The plugin reads the SSE-C Secret with an in-cluster client of its own, from the
+# namespace in VELERO_NAMESPACE (verified at plugin v1.14.4). Chart 12.2.2 supplies that
+# variable from the Pod's own namespace field, and its default RBAC already permits the
+# Secret read, so this works on the chart's defaults and needs nothing added here.
+#
+# The requirement is therefore a CONSTRAINT ON CHANGING IT rather than something to set
+# up: if this installation's RBAC is ever narrowed from the chart's default, the
+# service account must keep `get` on Secrets in this namespace, or the backup location
+# fails validation.

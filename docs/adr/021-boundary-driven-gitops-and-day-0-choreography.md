@@ -71,6 +71,24 @@ deserves a deliberate decision rather than an incidental split. Until then, a
 bootstrap that needs a database-layer change while Infisical is down requires the
 manifests to be applied directly.
 
+**Closed 2026-11-03 by ADR-112.** One Application per platform application cluster
+is the deliberate change in boundary composition this asked for, and the cycle is
+gone by construction rather than by care:
+
+- `platform-infisical-db` carries the Cluster that lets Infisical start and **no
+  ExternalSecret**. Infisical's role and database come from CNPG — `managed.roles`
+  and an `initdb.secret` the CLI writes at Day-0 — so nothing in that Application
+  waits on Infisical running.
+- The other three carry their own ExternalSecret beside their own Cluster, which is
+  still health coupling. It is no longer a cycle: none of those Clusters brings up
+  the service their ExternalSecrets resolve from, so the sync waits where waiting
+  is correct and does not block its own precondition.
+
+The rule stated above is what makes this checkable: anything whose readiness depends
+on a running platform service must not share an Application with the resource that
+brings that service up. Boundary 02 now satisfies it per Application rather than by
+not containing the pair.
+
 
 ## Amendment (2026-10-29): what orders what — **Proposed**
 

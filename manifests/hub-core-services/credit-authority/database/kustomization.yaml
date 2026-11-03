@@ -1,0 +1,13 @@
+# The credit authority's PostgreSQL cluster as its own component (ADR-112 §1).
+#
+# A kustomization rather than a bare directory of manifests, so the recovery overlay in
+# ../database-recovery can reference this DIRECTORY. kustomize refuses a resource file
+# that sits outside the kustomization reading it ("file is not in or below"), so naming
+# the manifest from the overlay is not possible -- only naming this directory is.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - credits-db.yaml
+  # The role credential RoleManager derives by name, not by reference.
+  - hub-credits-db-credentials-es.yaml

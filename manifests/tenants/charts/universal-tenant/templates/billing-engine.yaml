@@ -1,0 +1,18 @@
+{{- if and (not .Values.deployXR) ((.Values.capabilities).billing).enabled }}
+{{- $url := required "capabilities.billing is declared, but this box does not run the billing engine: turn on capabilities.billing.enabled for the box, or remove the declaration (ADR-113)" .Values.billingEngineUrl }}
+---
+# Where this application reaches the box's billing engine (ADR-113), because it
+# declares capabilities.billing. The URL is the platform's, never the fleet's;
+# the credential it presents there is its service identity
+# (<app>-service-identity), whose audience includes the capability's project.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "universal-tenant.appId" . }}-billing
+  namespace: {{ include "universal-tenant.namespace" . }}
+  labels:
+    tenant-id: {{ include "universal-tenant.tenantId" . }}
+    app-id: {{ include "universal-tenant.appId" . }}
+data:
+  PROVIDER_BILLING_BASE_URL: {{ $url | quote }}
+{{- end }}

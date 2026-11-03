@@ -13,3 +13,6 @@ resources:
   # The login service's signing keypair, published once rather than minted by
   # every render (2026-10-30 incident; see the file's header).
   - zitadel-login-service-key-es.yaml
+  # The identity provider's own PostgreSQL cluster (ADR-112), declared beside it.
+  # Its DSN, assembled by ESO so the password never reaches a values file.
+  - zitadel-db-credentials-es.yaml

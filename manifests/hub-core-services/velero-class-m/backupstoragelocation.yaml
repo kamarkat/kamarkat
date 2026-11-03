@@ -1,0 +1,76 @@
+# Where this box's management-state backups live, and how they are encrypted.
+#
+# NOT WIRED INTO AN APPLICATIONSET, like the rest of this directory: Velero is not
+# installed on any box yet, so this object's CRD does not exist. It is the declared
+# configuration, applied with the chart.
+#
+# Object shape verified against Velero v1.18.4 (pkg/apis/velero/v1/
+# backupstoragelocation_types.go): `spec.provider`, `spec.config` as a free-form
+# map the plugin interprets, `spec.credential` as a name/key selector, and
+# `spec.objectStorage.{bucket,prefix}` inlined from StorageType.
+#
+# THE PREFIX IS KEYED BY THE BOX, not by the cluster incarnation (ADR-111 §1). A
+# successor must read what its predecessor wrote, so the location cannot move when the
+# cluster does. The consequence is the one §6 names: two live hubs writing here would
+# produce a set in which no backup says which hub made it, so activation stops the
+# predecessor's schedules.
+#
+# Distinct from every CNPG archive: a different bucket and a different credential, so
+# compromise or revocation of one recovery authority does not yield the other
+# (ADR-111 §10).
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: class-m
+  namespace: velero
+spec:
+  provider: aws
+  default: true
+  objectStorage:
+    bucket: PLACEHOLDER_CLASS_M_BUCKET
+    prefix: PLACEHOLDER_BOX_ID
+  # The credential that reaches the bucket. Delivered from tenant-controlled escrow by
+  # `soloz escrow deliver-backup-credentials`, never through this box's Infisical --
+  # a credential whose purpose is to work when Infisical is gone cannot depend on it.
+  #
+  # Rotatable, unlike the key below: replacing it is part of fencing a replaced hub,
+  # and it changes nothing about what is already readable.
+  credential:
+    name: velero-backup-store
+    key: cloud
+  config:
+    region: PLACEHOLDER_CLASS_M_REGION
+    s3Url: PLACEHOLDER_CLASS_M_ENDPOINT
+    s3ForcePathStyle: "true"
+    # SSE-C with a customer-provided key, so the TENANT is the encryption authority
+    # rather than the infrastructure provider (ADR-111 §10). The key is a box-scoped
+    # Class E artefact, escrowed outside the box and delivered into this namespace by
+    # the same command as the credential above; its decoded value is exactly 32 bytes.
+    #
+    # IMMUTABLE while any backup written under it is retained. A replacement decrypts
+    # none of them, which is why there is no rotation path for it and why a missing key
+    # fails closed instead of being regenerated.
+    #
+    # VERIFIED IN THE PLUGIN AT v1.14.4 (velero-plugin-for-aws/object_store.go), and
+    # an earlier note here had the failure model backwards: the plugin passes its
+    # config through `ValidateObjectStoreConfigKeys` against an allow-list, so an
+    # unknown or misspelled key is REJECTED rather than ignored. There is no silent
+    # path to unencrypted backups through a typo here.
+    #
+    # Four requirements read from that source, all of which this configuration meets:
+    #
+    #   * the value is `secretName/key`, split on '/' into exactly two parts;
+    #   * the Secret is read from the namespace named by the VELERO_NAMESPACE
+    #     environment variable, and an unset variable is a hard error -- chart 12.2.2
+    #     sets it, so the chart is a dependency of this line working at all;
+    #   * `secret.Data[key]` must be EXACTLY 32 bytes. `soloz escrow
+    #     deliver-backup-credentials` writes the 32 raw bytes, not their hex form,
+    #     which is why it decodes the escrowed value first;
+    #   * only one of kmsKeyId, customerKeyEncryptionFile or customerKeyEncryptionSecret
+    #     may be set. Only this one is.
+    #
+    # The plugin reads the Secret with an in-cluster client of its own, so VELERO'S
+    # SERVICE ACCOUNT NEEDS `get` ON SECRETS IN ITS NAMESPACE. That is not the chart's
+    # default concern and must be confirmed on the rendered RBAC: without it the
+    # backup location fails validation rather than silently writing in the clear.
+    customerKeyEncryptionSecret: velero-sse-c-key/customer-key

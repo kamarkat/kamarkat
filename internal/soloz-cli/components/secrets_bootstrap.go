@@ -15,7 +15,7 @@ import (
 // Creates:
 //   - infisical-secrets (ENCRYPTION_KEY, AUTH_SECRET, REDIS_URL — no DB_ROOT_CERT yet)
 //   - infisical-redis-credentials
-//   - platform-db-app (CNPG Secret Zero — initdb reads this immediately)
+//   - infisical-db-credentials (CNPG Secret Zero — initdb reads this immediately)
 //   - infisical-postgres-connection (Infisical DB credentials — prevents
 //     CreateContainerConfigError deadlock in B03)
 //
@@ -108,7 +108,7 @@ func (i *Installer) BootstrapInfisicalAPI(ctx context.Context) error {
 // The pipeline order guarantees that every K8s Secret exists before the workload
 // that consumes it is deployed, preventing CreateContainerConfigError deadlocks.
 //
-//	Step 1: GenerateInfisicalCryptoSecrets (crypto keys + platform-db-app)
+//	Step 1: GenerateInfisicalCryptoSecrets (crypto keys + infisical-db-credentials)
 //	Step 2: InstallPostgresConnectionSecret (infisical-db-credentials + connection)
 //	Step 3: UpdateInfisicalSecretsWithCNPGCert (wait for CNPG → inject DB_ROOT_CERT)
 //	Step 4: WaitForInfisicalHealth (data layer + Infisical pods)

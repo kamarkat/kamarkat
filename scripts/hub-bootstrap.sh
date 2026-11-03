@@ -351,7 +351,7 @@ auto_install_tool() {
             ;;
         clusterctl)
             log "  Auto-installing clusterctl..."
-            if curl -fsSLo "$install_dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.9.6/clusterctl-windows-amd64.exe" 2>/dev/null; then
+            if curl -fsSLo "$install_dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe" 2>/dev/null; then
                 chmod +x "$install_dir/clusterctl.exe"
                 export PATH="$PATH:$install_dir"
                 log "  ✓ clusterctl installed to $install_dir/clusterctl.exe"
@@ -455,7 +455,7 @@ check_prerequisites() {
                                 log "  Docs: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
                                 ;;
                             clusterctl)
-                                log "  Install (Windows): curl -Lo clusterctl.exe https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.9.6/clusterctl-windows-amd64.exe"
+                                log "  Install (Windows): curl -Lo clusterctl.exe https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe"
                                 log "  Then add to PATH"
                                 log "  Docs: https://cluster-api.sigs.k8s.io/user/quick-start#install-clusterctl"
                                 ;;
@@ -1391,8 +1391,11 @@ step9_wait_database() {
 
     log "Step 9: Waiting for database deployment (timeout: 1800s)..."
 
-    log "Running: kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db --timeout=1800s"
-    kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
+    # The BOOTSTRAP cluster only. Each platform application owns its own (ADR-112)
+    # and the rest arrive with boundary 02, after this step; Day-0 cannot proceed
+    # without this one, because Infisical's database is on it.
+    log "Running: kubectl wait --for=condition=ready pod -l cnpg.io/cluster=infisical-db --timeout=1800s"
+    kubectl wait --for=condition=ready pod -l cnpg.io/cluster=infisical-db \
         -n platform-data --timeout=1800s \
         --kubeconfig="$KUBECONFIG_PATH"
 

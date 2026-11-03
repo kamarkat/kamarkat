@@ -100,7 +100,7 @@ latent disaster: it behaves identically until the day the hub is gone.
 |---|---|---|
 | **R — Regenerated** | ClusterClass and machine templates, desired `Cluster` specs, Crossplane Compositions, all platform software, dashboards, policies, ACME certificates | GitOps at a pinned `environmentRevision` |
 | **B — Restored data** | Each platform application's PostgreSQL cluster, physically and independently (ADR-112): `infisical-db`, `zitadel-db`, `credits-db`, `grafana-db`. `control_plane` and `hub` get no cluster and no archive — ADR-112 §1 records that nothing in the platform connects to either, so they are **retired state**: not newly created in the successor and not recovered into it, with their credentials retiring alongside `platform-db` after the last application has moved. Retiring them requires its own recorded decision about whatever historical data they hold, which ADR-112's transition owns and this ADR does not presume | that cluster's own object-store archive (Revision 5 §2) |
-| **M — Management state** | CAPI core, bootstrap, control-plane and infrastructure-provider **objects**: their names, specs, labels and reference graph, plus the bootstrap-data and cluster-PKI Secrets they depend on | Versioned Kubernetes resource backup in external object storage (§10 governs its custody) |
+| **M — Management state** | CAPI core, bootstrap, control-plane and infrastructure-provider **objects**: their names, specs, labels and reference graph, plus the bootstrap-data Secrets they depend on. **Not the cluster PKI** — that is Class E, and duplicating it here would create a second recovery authority whose disagreement with the escrow nothing would notice | Versioned Kubernetes resource backup in external object storage (§10 governs its custody) |
 | **E — Escrowed keys** | Keys that must return byte-identical | Tenant-controlled Infisical, scoped per §1 |
 | **N — Newly created** | Hub etcd and cluster PKI, control-plane endpoint and node addresses, node identities, service-account tokens, the successor's archive prefix, Argo CD instance state, Tailscale registrations | created fresh |
 
@@ -144,8 +144,10 @@ the manifests, so the bare-metal host-inventory model is out of scope.
 At CAPH v1.0.7, `Service.Reconcile` for an `HCloudMachine`
 (`pkg/services/hcloud/server/server.go`) proceeds: refuse until `IsBootstrapDataReady()`;
 `findServer` — resolve the provider ID and `GetServer`, and failing that list servers by a
-label selector built from `createLabels()` (the owning `HetznerCluster` name, the machine-name
-label set to the `HCloudMachine` name, and `machine_type`); **if no server is found,
+label selector built from `createLabels()` — `caph-cluster-<HetznerCluster name>: owned`,
+`machine.caph-name: <HCloudMachine name>` and `machine_type: control_plane|worker`, whose
+literals are in `api/v1beta1/tags.go` at v1.0.7 (the prefix is `caph-`, not a
+`cluster.x-k8s.io` form) —; **if no server is found,
 `createServer`**; then `SetProviderID`, then `Status = statusFromHCloudServer(server)`, then
 `validateLabels`.
 
@@ -362,6 +364,15 @@ because an unenumerated one is the whole failure:
 | Tailnet identity | revoke the auth key and remove the predecessor's devices | the tailnet is tenant-owned and administered outside the box |
 | **Spoke Kubernetes API** | **see below — no revocation exists** | — |
 
+**A predecessor that is still writing backups is a fencing dimension of its own.** Revoking
+the object-store credential (above) stops it, but the ordering matters and the reference
+implementation makes it explicit: once a successor activates, the predecessor's backup
+schedules must no longer run. Two hubs writing management-state backups to one location
+produce a set in which no backup says which hub produced it, so a later reconstruction cannot
+tell a predecessor's fleet from a successor's. Activation therefore stops the predecessor's
+schedules, and because activation is a commit (Revision 6 §2) that is a declarative act rather
+than a remembered one.
+
 **The spoke API credential is the one authority that cannot be revoked, and it is a real
 limitation.** A hub holds each spoke's administrative kubeconfig, whose client certificate is
 signed by that spoke's certificate authority. Kubernetes has no certificate revocation list,
@@ -538,11 +549,19 @@ has:
   Within the successor, restored Secrets are protected by the accepted at-rest mechanism
   (ADR-105, `secretbox`, active on every cluster). That protects them *after* restoration and
   does nothing for the archive, which is the reason the row above matters: Class M holds
-  control-plane PKI private keys and bootstrap Secrets as **plaintext API objects**, carrying
-  none of their original etcd protection.
+  bootstrap Secrets as **plaintext API objects**, carrying none of their original etcd
+  protection. (The PKI is not among them — it is Class E only, per §2.)
 * **Tenant-owned custody.** The bucket is the tenant's, in the tenant's account, consistent
   with ADR-065 — the platform holds no credential of theirs — and with ADR-076's placement of
   recovery material outside the box.
+* **Two authorities, both escrowed.** Encryption and authentication are different things, and a
+  successor needs both: the SSE-C customer key *and* the object-store credential that reaches the
+  bucket at all. Keeping only the key outside the box would leave the credential inside the
+  Infisical that has to be recovered from that bucket. Both are box-scoped Class E
+  (`backup-ssec-key`, `backup-store-credential`), delivered straight into the cluster by
+  `soloz escrow deliver-backup-credentials` and never through Infisical or ESO -- routing the
+  delivery of a value whose purpose is to work without Infisical through Infisical is the
+  circularity ADR-076 exists to break.
 * **Credential isolation.** A dedicated credential for the Class M bucket, distinct from the
   CNPG archive credential and from any workload credential, so compromise of one recovery
   authority does not yield the others. This also matters for §6: the Class M credential is one
@@ -565,9 +584,22 @@ has:
   `secret-encryption-key-previous` continues to cover a rotation window, which is a different
   requirement from this one. Historical generations are not retained on a dependency that does
   not exist.
-* **Secure restoration.** Secrets are restored directly into the successor's API server
-  without transiting a shared or plaintext intermediate, and the restore credential is held
-  only for the duration of the reconstruction.
+* **Restoration has a plaintext intermediate, and the earlier claim that it does not was
+  wrong.** Velero extracts a resource-backup archive into a temporary directory inside its own
+  container and writes every object in it to a file before restoring them
+  (`pkg/archive/extractor.go`, `readBackup` → `fs.TempDir("", "")` → `writeFile`, read at
+  v1.18.2), so the bootstrap-data Secrets in a Class M restore exist as
+  plaintext files in that container's filesystem for the duration of the restore. No
+  configuration removes that step, and building a restoration engine to avoid it would be a
+  custom replacement for the mechanism this design chose precisely because it is standard.
+
+  What follows is that the Velero workload itself is part of the custody boundary, not merely
+  the bucket: its node, its container filesystem and anything with access to them are in scope
+  for as long as a restore runs. The protections that remain available are the ones to state --
+  the archive is encrypted at rest under SSE-C (above), the extraction is transient and local to
+  a pod on the successor, and the restore credential is held only for the duration of the
+  reconstruction. The PKI is not exposed this way at all, because it is Class E and is never in
+  a Class M archive (§2).
 * **Retention bounded by purpose.** A Class M backup is retained while its recovery point is
   meaningful and destroyed thereafter, because an indefinitely retained copy of the fleet's
   PKI is a liability rather than an asset.
@@ -637,14 +669,41 @@ Terraform-managed.
    exposure itself.
 7. **CNPG distributed topology is unverified at the deployed 1.29.0.** If unavailable there,
    planned succession falls back to physical recovery with a longer quiesce.
-8. **Velero's behaviour is unverified at any version**, because it is not adopted anywhere in
-   the platform. §5, §9, §10 and Revision 5 §5 state the contract it must satisfy; whether it
-   satisfies it is not established.
+8. **Velero is pinned and verified from source, but not yet installed.** The schema this design
+   depends on was read at v1.18.2 and re-checked at v1.18.4 — restore modifiers
+   (`internal/resourcemodifiers`), the Backup and BackupStorageLocation specs, and the
+   archive's temp-file extraction — and the SSE-C configuration was read in the AWS plugin at
+   v1.14.4 (`velero-plugin-for-aws/object_store.go`). Pinned: chart **12.2.2**, server
+   **1.18.4** by image override, AWS plugin **1.14.4**.
+
+   The config-key uncertainty recorded here earlier is **closed, and its failure model was
+   wrong**: the plugin validates its configuration against an allow-list, so a misspelled key
+   is rejected rather than ignored, and there is no silent path to unencrypted backups through
+   a typo. Reading that source also added two requirements this design now depends on — the
+   plugin resolves the Secret from `VELERO_NAMESPACE`, so the chart setting that variable is
+   load-bearing, and it reads the Secret with its own in-cluster client, so Velero's service
+   account needs `get` on Secrets in its namespace.
+
+   What remains open is narrower: the chart and plugin are not vendored, so image digests are
+   unresolved placeholders that fail loudly; **Hetzner-specific S3 interoperability at these
+   versions is unverified**; and that the credentials stream's selector captures every
+   bootstrap-data Secret in practice needs a live cluster, because the label is applied by our
+   own reconcile and its coverage is only as current as the last pass.
 9. **Class M is restorable only into a successor serving the same CAPI contract version.**
    Cross-contract conversion is out of scope.
 10. **Spoke etcd is not backed up by this design.** Spokes survive hub loss, but a spoke's own
    loss remains governed by its per-spoke archive and ADR-092.
-11. **Bare-metal hosts are out of scope.** CAPH's bare-metal host-inventory consumption model
+11. **Failback is not designed.** This ADR covers succeeding from a predecessor to a successor.
+    It does not cover going back -- succeed, test, and return to the original -- which the
+    reference implementation treats as a first-class scenario and guards against explicitly,
+    because stale management-state backups from the other hub otherwise collide. Nothing here
+    forbids failback; nothing here makes it safe either, and the Class M location is where it
+    would go wrong first.
+12. **A run that does nothing must not read as a run that succeeded.** The reference encodes
+    this as a skip-all check. Provider-inventory matching refuses an empty object set for the
+    same reason, but the principle is not yet asserted across every recovery step, and each new
+    one has to be checked for the shape of it.
+13. **Bare-metal hosts are out of scope.** CAPH's bare-metal host-inventory consumption model
     differs and §3 does not transfer to it.
 
 ## Revision 5 (2026-11-02): recovery is proven first, and Class B is per application
@@ -738,6 +797,13 @@ financial data, so each cross-application relationship is placed in one of three
 and the mechanisms are point-in-time recovery and idempotent reconciliation — not a
 distributed transaction, and no attempt to make independent backups appear atomic.
 
+*Never the newest by default.* Each Class M stream is restored from a **named** backup, never
+from `latest`. If the newest backup for a stream is missing or invalid while an older one
+exists, the alternatives are reported and an explicit choice is required: silently falling back
+to an older backup would move the recovery point without anyone deciding to, and the streams
+would then disagree about when the fleet was. This is the same rule as the database's below,
+applied to management state.
+
 *One declared target.* A reconstruction chooses **one explicit target timestamp that every
 archive can actually reach**, and recovers each cluster to that timestamp by point-in-time
 recovery. The target is chosen from the archives' common reachable range rather than declared
@@ -783,6 +849,16 @@ their volumes, which are Class B.
   present, and paused. An earlier revision released the Cluster first; that order was wrong and
   §3's release order supersedes it: complete the graph, classify, then unpause the Cluster
   (which now finds nothing missing), then release matched leaves, then release the creators.
+* **Finalizers are kept, and the consequence is accepted deliberately.** Cluster API puts
+  finalizers on `Cluster` and `Machine` so that deleting one cannot skip tearing down the
+  infrastructure behind it. A restored graph therefore arrives with them, and every controller
+  that would remove them is paused -- so an abandoned restore cannot simply be deleted: its
+  objects would sit in Terminating until something is unpaused or a finalizer is removed by
+  hand. Stripping them on restore would make that tidier and is rejected, because a `Cluster`
+  without its finalizer can be deleted without its servers being released, and a recovery that
+  quietly enables silent infrastructure orphaning is worse than one that is awkward to abandon.
+  The reference implementation's own tests are full of finalizer-ordering failures, which is
+  what prompted making this choice explicit rather than inheriting it.
 * **Leaving the paused state is a GitOps change, not a patch.** Because the rendered `Cluster`
   carries `spec.paused: true` while a box is reconstructing (§3), removing the pause in the
   cluster would simply be re-applied on the next sync. The registry's reconstruction
@@ -848,9 +924,55 @@ manages — because only the third makes a hub the fleet's manager. Class M adop
 
 | Class M stream | Contents | Confers ownership |
 |---|---|---|
-| **credentials** | bootstrap-data Secrets, cluster-PKI Secrets | no |
+| **credentials** | bootstrap-data Secrets. **PKI is excluded** — see below | no |
 | **resources** | CAPI metadata and relationships that do not themselves command infrastructure | no |
 | **activation** | `Cluster`, `KubeadmControlPlane`, `MachineDeployment`, `MachineSet`, `Machine`, `HCloudMachine` | **yes** |
+
+**Exactly one recovery authority per artefact, and the PKI is where that rule bites.** An
+earlier revision put the cluster PKI in both Class E and Class M's credentials stream. Velero's
+default policy leaves an existing resource alone, and an earlier draft treated that as
+sufficient — but skipping is not verifying: a Secret already restored from escrow would be
+silently passed over, and a Secret restored from the backup first would become the live trust
+root with nothing ever comparing the two. Restore order would decide which authority won.
+
+So the PKI is excluded from the Class M backup outright. The escrow is its only source, and
+`soloz spoke restore-pki` its only writer.
+
+**Separating it needs more than exclusion, and an earlier revision got this wrong.** A
+bootstrap-data Secret and a certificate authority carry the same type
+(`cluster.x-k8s.io/secret`) and the same `cluster.x-k8s.io/cluster-name` label, so no selector
+over type or those labels tells them apart. Cluster API's own discriminator is the name suffix
+— which `util/secret.HasPurposeSuffix` formalises — and Velero filters by resource, namespace
+and label, not by name suffix.
+
+The first answer here was to label the authorities `velero.io/exclude-from-backup` and argue the
+reconciliation window was harmless. **It is not.** An authority created between two reconciles
+can be captured by a backup taken in that gap, which puts a private trust root inside a Class M
+archive, outside the Class E boundary it exists to stay within. And if such a Secret were later
+restored, **Velero would create it** — the earlier argument reasoned from "`restore-pki` reads
+only the escrow" to "there is no second writer", and Velero is the second writer.
+
+So the credentials stream uses **positive selection**: `hub-operator` marks each
+bootstrap-data Secret `recovery.platform.io/class-m: bootstrap-data`, the stream selects on that
+label and takes nothing else, and every Secret that has not been identified — an unlabelled
+authority included — is excluded **by construction** rather than by a rule that has to keep up
+with it. The `velero.io/exclude-from-backup` label on the authorities is retained as well, so
+two independent reasons keep each of them out. The resources and activation streams exclude
+Secrets outright, so neither can pick one up incidentally.
+
+**Which Secrets, from the bootstrap contract rather than a name convention.** A Machine names
+its bootstrap data at `spec.bootstrap.dataSecretName`, and a nil value means the Machine is
+still Pending. So a Machine without one is mid-provision and not a gap; a Machine **with** one
+whose Secret cannot be read or marked is a coverage gap, and `hub-operator` returns it as an
+error rather than counting it as protected. A backup that succeeded is not evidence that every
+machine is recoverable — only that what was marked was captured.
+
+**The inclusion side is not yet verified.** That bootstrap-data Secrets carry the labels a
+Class M selector would need is unconfirmed here: the kubeadm bootstrap provider is not vendored
+in this repository, so its Secret's labels have not been read at the deployed version. The
+schedules must be checked against a live cluster before they are trusted to capture every
+bootstrap-data Secret. Bootstrap data is the mirror case: no escrow copy
+exists, so Class M is its only source. Neither artefact has two authorities to reconcile.
 
 **This is stronger than pausing, and it is why the split is worth adopting.** §3's three pause
 tiers keep a restored object inert; withholding the activation stream means the object **is not

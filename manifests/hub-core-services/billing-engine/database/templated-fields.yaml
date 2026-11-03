@@ -1,0 +1,14 @@
+# Per-box values for the billing engine's PostgreSQL cluster (ADR-112 §§2-3).
+# The same fields, and the same rules, as credit-authority/database.
+- kind: Cluster
+  name: billing-db
+  fields:
+    - path: [spec, backup, barmanObjectStore, destinationPath]
+      value: 's3://hub-db-backups/{{ .Values.global.clusterName }}/'
+    - path: [spec, instances]
+      type: int
+      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "prod" }}3{{ else }}2{{ end }}'
+    - path: [spec, affinity, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
+    - path: [spec, storage, storageClass]
+      value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'

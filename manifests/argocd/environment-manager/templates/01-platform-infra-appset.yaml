@@ -87,13 +87,13 @@ spec:
           # tailnet identity: it CrashLoopBackOff'd and intermittently broke
           # apiserver -> kubelet reachability, which surfaces as `kubectl logs`
           # failing against home workers. Do not reintroduce it.
-          # ADR-046 §11: the local-path StorageClass + provisioner for home-class
-          # stateful workloads (platform-db). Previously present in the repo but
-          # referenced by NO ApplicationSet, so the class never existed on the hub
-          # and platform-db's PVC stayed Pending forever, hanging the bootstrap at
-          # inject-ca-cert. The class must exist before boundary-02 creates the CNPG
-          # cluster that asks for it; boundary activation provides that order (ADR-055),
-          # not a wave on this Application (ADR-021 amendment 2026-10-29).
+          # ADR-046 §11: the local-path StorageClass + provisioner every home-class
+          # CNPG cluster's PVC binds to. It must exist before boundary 02 creates the
+          # clusters that ask for it, or their PVCs stay Pending forever and the
+          # bootstrap hangs at inject-ca-cert -- measured, when this Application was
+          # absent and nothing else declared the class. Boundary activation provides
+          # that order (ADR-055), not a wave on this Application (ADR-021 amendment
+          # 2026-10-29).
           - appName: 'platform-storage'
             destinationNamespace: 'kube-system'
             isPlatformOwned: 'true'
@@ -200,7 +200,7 @@ spec:
             # which eight templates dereferenced and which had to be supplied
             # here or the chart would not render at all. Those templates are
             # gone, so that block is gone with them; 3.9.1 renders on defaults.
-            targetRevision: '3.9.1'
+            targetRevision: '3.9.2'
             path: ''
             chart: 'kyverno'
             directoryRecurse: ''
@@ -395,7 +395,7 @@ spec:
             destinationNamespace: 'platform-ops'
             isPlatformOwned: 'false'
             repoURL: 'https://charts.external-secrets.io'
-            targetRevision: '2.2.0'
+            targetRevision: '2.14.0'
             path: ''
             chart: 'external-secrets'
             directoryRecurse: ''

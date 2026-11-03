@@ -4,7 +4,7 @@ metadata:
   name: kubeadm
   namespace: platform-capi
 spec:
-  version: v1.8.5
+  version: v1.13.7
   manager:
     featureGates:
       ClusterTopology: true

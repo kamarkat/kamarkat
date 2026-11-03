@@ -83,7 +83,7 @@ var _ = Describe("HubEnvironment Controller", func() {
 						// addressing objects with an empty namespace, which the API server
 						// rejects on create.
 						Database: opsv1alpha1.DatabaseConfig{
-							ClusterRef: "platform-db",
+							ClusterRef: "infisical-db",
 							Namespace:  "default",
 						},
 					},

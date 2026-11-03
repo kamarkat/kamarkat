@@ -4,7 +4,7 @@ appName: platform-argocd
 destinationNamespace: platform-ops
 isPlatformOwned: 'false'
 repoURL: https://argoproj.github.io/argo-helm
-targetRevision: 7.9.1
+targetRevision: 10.11.7
 path: ''
 chart: argo-cd
 directoryRecurse: ''
@@ -20,7 +20,6 @@ helmValues: |
       admin.enabled: "true"
       application.instanceLabelKey: argocd.argoproj.io/instance
       exec.enabled: "false"
-      server.rbac.log.enforce.enable: "false"
       timeout.hard.reconciliation: "0s"
       timeout.reconciliation: "60s"
 
@@ -78,13 +77,6 @@ helmValues: |
       # Cilium copies argocd.argoproj.io/instance labels from pods onto CiliumIdentity
       # objects it creates. ArgoCD then treats them as orphaned managed resources and
       # marks the owning app as OutOfSync. Excluding them globally prevents this.
-      resource.exclusions: |
-        - apiGroups:
-            - cilium.io
-          kinds:
-            - CiliumIdentity
-          clusters:
-            - '*'
       # Ensures ArgoCD waits for the Provider CRD to be fully registered before
       # advancing to wave 4 (ProviderConfig), preventing the CRD-not-found race condition.
       resource.customizations.health.pkg.crossplane.io_Provider: |
@@ -152,6 +144,21 @@ helmValues: |
         end
         return hs
 
+    # Logs RBAC is always enforced from ArgoCD 3.0; the
+    # `server.rbac.log.enforce.enable` escape hatch that used to sit in `cm`
+    # above no longer exists, so log visibility now has to be granted.
+    #
+    # Granted explicitly rather than relied on from a wildcard: `role:readonly`
+    # is built on `*, get`, which happens to cover logs today, and a platform
+    # that depends on that coincidence loses log access the next time the
+    # built-in roles are narrowed.
+    #
+    # `policy.default` is deliberately left empty -- an unmapped SSO user gets
+    # nothing. There is no group-to-role mapping on this box at all, which is a
+    # gap that predates ArgoCD 3.x and is not closed here.
+    rbac:
+      policy.csv: |
+        p, role:readonly, logs, get, */*, allow
     params:
       # The Cilium Gateway terminates TLS (hub-gateway.yaml mode: Terminate)
       # and forwards plaintext to argocd-server:80 (httproutes.yaml). In its

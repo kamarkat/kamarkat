@@ -89,7 +89,6 @@ func newSupportPreviewCmd() *cobra.Command {
 		keyFile   string
 		deny      []string
 		asJSON    bool
-		port      int
 	)
 	cmd := &cobra.Command{
 		Use:   "preview",
@@ -116,7 +115,7 @@ func newSupportPreviewCmd() *cobra.Command {
 				identity = "(not enrolled: no client certificate)"
 			}
 
-			r := &support.ClusterReader{GitopsDir: gitopsDir, Port: port}
+			r := &support.ClusterReader{GitopsDir: gitopsDir}
 			p := support.Collect(cmd.Context(), a, r, identity)
 
 			if asJSON {
@@ -137,7 +136,6 @@ func newSupportPreviewCmd() *cobra.Command {
 		"the client certificate whose subject is the identity this box reports as")
 	f.StringVar(&keyFile, "key", "/etc/support-agent/tls/tls.key", "the matching key")
 	f.StringSliceVar(&deny, "deny", nil, "collectors or fields this tenant subtracts")
-	f.IntVar(&port, "metrics-port", 8080, "port the platform's metrics Services expose")
 	f.BoolVar(&asJSON, "json", false, "print the payload as JSON")
 	return cmd
 }

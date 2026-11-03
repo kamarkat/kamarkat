@@ -1,7 +1,8 @@
 # Zitadel's masterkey encrypts everything it stores at rest.
 #
 # Unlike the database credential that used to sit beside this (now in
-# hub-core-services/database/, with the other role credentials), this is
+# hub-core-services/database/, with the other role credentials -- it now sits beside
+# this file, with Zitadel's own manifests, per ADR-112), this is
 # Zitadel's own secret and has no meaning to any other component. It belongs with
 # the component that uses it.
 ---

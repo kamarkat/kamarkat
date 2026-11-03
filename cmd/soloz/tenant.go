@@ -358,6 +358,7 @@ what a tenant would receive before any repository exists.`,
 			"Pass 0 to run on nodes on your own premises alone, which then have to "+
 			"be there (ADR-075)")
 	f.StringVar(&scaffoldSpec.ClusterName, "cluster", "", "control plane cluster name (default <tenant>-hub)")
+	f.StringVar(&scaffoldSpec.BoxID, "box-id", "", "the logical hub, pinned forever (default: the cluster name, this box's first incarnation)")
 	// Defaults to the version this binary carries (ADR-068). "main" was the old
 	// default and is a branch name where a chart version belongs: a repository
 	// scaffolded on it pins a version that does not resolve, and the workflow it
@@ -460,6 +461,14 @@ func runTenantScaffold(cmd *cobra.Command, _ []string) error {
 
 	if scaffoldSpec.ClusterName == "" && scaffoldSpec.TenantID != "" {
 		scaffoldSpec.ClusterName = scaffoldSpec.TenantID + "-hub"
+	}
+
+	// The box's id starts as its first cluster's name, and the two diverge the
+	// first time the hub is replaced (ADR-111 §1). Written into the tenant's
+	// repository as its own value rather than left to be derived later: once a
+	// successor exists, nothing can recompute which name the escrow was keyed by.
+	if scaffoldSpec.BoxID == "" {
+		scaffoldSpec.BoxID = scaffoldSpec.ClusterName
 	}
 	// Only when actually passed. The sentinel keeps "zero workers" distinguishable
 	// from "no opinion", so the environment's own default survives.

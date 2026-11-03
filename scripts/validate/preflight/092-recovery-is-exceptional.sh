@@ -43,10 +43,21 @@ except ImportError:
 
 # Deployable provider manifests only. Not docs/, not runbooks, not examples:
 # showing a recovery stanza is how the restore procedure is written down.
+# The hub's clusters are matched by DIRECTORY, not by filename. Each platform
+# application owns its own cluster (ADR-112) in <application>/database/, and the
+# filename is the cluster's own name -- so a pattern spelling "cluster" matched
+# none of them, and the hub went unscanned by the gate that exists to stop a
+# data-destroying manifest sitting in the repository.
+#
+# database-recovery/ is deliberately NOT matched: an overlay declaring
+# spec.bootstrap.recovery is what a restore IS, and it is not deployable
+# steady-state. The two live in sibling directories so this distinction is a path
+# and not a judgement.
 PATTERNS = [
     "manifests/spoke/spoke-catalog/providers/*/cnpg-cluster.yaml",
     "manifests/providers/*/cnpg-cluster.yaml",
-    "manifests/hub-core-services/database/*cluster*.yaml",
+    "manifests/hub-core-services/*/database/*.yaml",
+    "manifests/hub-core-services/*/*/database/*.yaml",
 ]
 
 seen = set()

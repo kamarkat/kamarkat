@@ -655,8 +655,8 @@ spec:
           - export CONTAINERD=2.4.2
           - export RUNC=1.5.2
           - export TAILSCALE=1.104.4
-          - export KUBERNETES_VERSION=1.31.6
-          - export TRIMMED_KUBERNETES_VERSION=1.31
+          - export KUBERNETES_VERSION=1.35.10
+          - export TRIMMED_KUBERNETES_VERSION=1.35
           - ARCH="$(dpkg --print-architecture)"
           - localectl set-locale LANG=en_US.UTF-8
           - localectl set-locale LANGUAGE=en_US.UTF-8
@@ -824,8 +824,8 @@ spec:
         - set -x
         - export CONTAINERD=2.4.2
         - export RUNC=1.5.2
-        - export KUBERNETES_VERSION=1.31.6
-        - export TRIMMED_KUBERNETES_VERSION=1.31
+        - export KUBERNETES_VERSION=1.35.10
+        - export TRIMMED_KUBERNETES_VERSION=1.35
         - ARCH="$(dpkg --print-architecture)"
         - localectl set-locale LANG=en_US.UTF-8
         - localectl set-locale LANGUAGE=en_US.UTF-8

@@ -23,6 +23,7 @@ import (
 // produce cluster access, which is no use in every case this is for.
 func newKubeconfigCmd() *cobra.Command {
 	var clusterName string
+	var boxID string
 	var out string
 
 	cmd := &cobra.Command{
@@ -49,6 +50,10 @@ something to use and discard.`,
 			if strings.TrimSpace(clusterName) == "" {
 				return fmt.Errorf("--cluster is required: the escrow holds one kubeconfig per cluster")
 			}
+			if strings.TrimSpace(boxID) == "" {
+				return fmt.Errorf("--box is required: a cluster's artefacts live under the box " +
+					"that owns it, so the box cannot be inferred from the cluster name (ADR-111)")
+			}
 
 			// An in-cluster URL is not passed: there is no cluster to compare
 			// against here, and the guard that refuses one exists to stop a box
@@ -60,7 +65,7 @@ something to use and discard.`,
 					"escrows to. They are the same ones on the cluster's repository.", err)
 			}
 
-			payload, err := store.RestoreArtifact(cmd.Context(), clusterName, escrow.ArtifactKubeconfig)
+			payload, err := store.RestoreArtifact(cmd.Context(), escrow.ForCluster(boxID, clusterName), escrow.ArtifactKubeconfig)
 			if err != nil {
 				return fmt.Errorf("could not read the escrow: %w", err)
 			}
@@ -88,6 +93,7 @@ something to use and discard.`,
 	}
 
 	cmd.Flags().StringVar(&clusterName, "cluster", "", "the cluster whose kubeconfig to retrieve (required)")
+	cmd.Flags().StringVar(&boxID, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
 	cmd.Flags().StringVar(&out, "out", "", "write to this file instead of stdout")
 	return cmd
 }

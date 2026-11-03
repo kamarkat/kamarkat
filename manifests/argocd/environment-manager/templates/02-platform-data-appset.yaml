@@ -16,35 +16,6 @@ spec:
   generators:
     - list:
         elements:
-          {{- if .Values.capabilities.database.enabled }}
-          - appName: 'platform-database'
-            destinationNamespace: 'platform-data'
-            isPlatformOwned: 'true'
-            repoURL: {{ .Values.platformRepoURL | quote }}
-            targetRevision: ''
-            # ADR-046 §11: the provider overlay supplies the placement class
-            # (workload-location + matching storage class). The base under
-            # hub-core-services/database is provider-neutral and must not be
-            # deployed directly. Same convention as
-            # spoke-catalog/providers/<provider>.
-            path: 'manifests/hub-core-services/providers/{{ include "environment-manager.placementClass" . }}/database'
-            chart: ''
-            directoryRecurse: ''
-            directoryInclude: ''
-            helmValues: |
-              {{- if $released }}
-              # One artefact (ADR-063): enable this component and
-              # give it the topology, or the distribution renders
-              # nothing and reports the Application healthy.
-              platform-database:
-                enabled: true
-              # global.provider here is the PLACEMENT CLASS, not the box's
-              # provider: the variant selector must follow where the data is
-              # placed (ADR-046 §11, ADR-075). See placementGlobalValues.
-              {{- include "environment-manager.placementGlobalValues" $ | nindent 14 }}
-              {{- end }}
-            helmReleaseName: ''
-          {{- end }}
           - appName: 'platform-redis'
             destinationNamespace: 'platform-data'
             isPlatformOwned: 'true'
@@ -72,6 +43,40 @@ spec:
               {{- include "environment-manager.placementGlobalValues" $ | nindent 14 }}
               {{- end }}
             helmReleaseName: ''
+
+    # Components whose source is fixed in the repository are declared one file per
+    # component under manifests/argocd/components/02/ and discovered here, the same way
+    # boundary 03 discovers its own. The two elements above stay inline because their path
+    # is a function of the placement class, which is ADR-061's test for where a component
+    # is declared: a value known at chart render time and not at generator evaluation time.
+    #
+    # The per-application clusters (ADR-112) need no such substitution -- each has one
+    # fixed path -- so each is a descriptor, and adding one is adding a file.
+    {{- if $released }}
+    # Released: the descriptors are files of this chart, so a cluster reconciling a
+    # published bundle fetches nothing from the platform's repository to learn what its
+    # own boundaries contain (ADR-063).
+    - list:
+        elements:
+    {{- $descriptors := $.Files.Glob "descriptors/02/*.yaml" }}
+    {{- if not $descriptors }}{{ fail "released bundle carries no descriptors for boundary 02: they are copied in at package time, and a chart without them would generate a data boundary holding no application databases and report it healthy" }}{{ end }}
+    {{- range $path, $_ := $descriptors }}
+{{- $d := $.Files.Get $path | fromYaml }}
+          -{{ include "environment-manager.releasedElement" (dict "descriptor" $d "root" $) | nindent 12 }}
+    {{- end }}
+    {{- else }}
+    - git:
+        repoURL: {{ .Values.platformRepoURL | quote }}
+        revision: {{ .Values.environmentRevision | quote }}
+        # ADR-061: the git files generator injects a `path` parameter of its own and, with
+        # goTemplate, writes it AFTER merging the file's contents -- silently overwriting
+        # the `path` every descriptor declares. This prefix moves the generator's
+        # parameters under .descriptorPath and leaves .path meaning what the descriptor says.
+        pathParamPrefix: descriptorPath
+        files:
+          - path: 'manifests/argocd/components/02/*.yaml'
+    {{- end }}
+
   template:
     metadata:
       name: '{{"{{"}} .appName {{"}}"}}'

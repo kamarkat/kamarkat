@@ -36,11 +36,14 @@ const (
 
 // Config holds cluster configuration
 type Config struct {
-	ClusterName             string
+	ClusterName string
+	// BoxID is the logical hub this cluster belongs to, and what the escrow
+	// keys box-scoped artefacts by (ADR-111 §1). Separate from ClusterName so a
+	// cluster can be replaced without re-keying what the box owns.
+	BoxID                   string
 	Namespace               string
 	Region                  string
 	OSType                  string // node OS; "ubuntu" is the only supported value (ADR-001)
-	ImageID                 string // node image name (Hetzner's official ubuntu-24.04)
 	KubernetesVersion       string
 	NetworkCIDR             string
 	SubnetCIDR              string
@@ -269,7 +272,7 @@ func (p *Provisioner) applySecretboxEncryptionConfig(ctx context.Context) error 
 			"never be read (ADR-076)")
 	}
 
-	key, err := p.EscrowClient.RestoreArtifact(ctx, p.Config.ClusterName, escrow.ArtifactSecretEncryptionKey)
+	key, err := p.EscrowClient.RestoreArtifact(ctx, escrow.ForCluster(p.Config.BoxID, p.Config.ClusterName), escrow.ArtifactSecretEncryptionKey)
 	if err != nil {
 		// An unreadable escrow is not an absent one. Treating it as absent would mint
 		// a second key for a cluster that already has one.
@@ -317,7 +320,7 @@ func (p *Provisioner) applySecretboxEncryptionConfig(ctx context.Context) error 
 	// because a restored key is already there and rewriting it is one more chance to
 	// write something different.
 	if generated {
-		if err := p.EscrowClient.BackupArtifact(ctx, p.Config.ClusterName, escrow.ArtifactSecretEncryptionKey, key); err != nil {
+		if err := p.EscrowClient.BackupArtifact(ctx, escrow.ForCluster(p.Config.BoxID, p.Config.ClusterName), escrow.ArtifactSecretEncryptionKey, key); err != nil {
 			// Fatal. The cluster would come up encrypted with a key held nowhere else,
 			// which is worse than not encrypting it: a lost control plane would then
 			// take every Secret AND every backup of them.
@@ -516,8 +519,6 @@ spec:
       value: {{.ControlPlaneSchedulable}}
     - name: region
       value: {{.Region}}
-    - name: imageId
-      value: "{{.ImageID}}"
     - name: hcloudNetwork
       value:
         enabled: true

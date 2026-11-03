@@ -1,0 +1,53 @@
+{{- $img := .Values.images -}}
+# The engine's document renderer, as its v1.55.0 release pins it. Stateless; the
+# engine is its only client (billing-pdf-ingress).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-pdf
+  namespace: platform-billing
+  labels:
+    app.kubernetes.io/name: billing-pdf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: billing-pdf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: billing-pdf
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # The renderer image's gotenberg user.
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pdf
+          image: {{ printf "%s@%s" $img.pdf.repository (required "images.pdf.digest is required (ADR-113)" $img.pdf.digest) }}
+          ports:
+            - {name: http, containerPort: 3000, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-pdf
+  namespace: platform-billing
+spec:
+  selector:
+    app.kubernetes.io/name: billing-pdf
+  ports:
+    - {name: http, port: 3000, targetPort: http, protocol: TCP}

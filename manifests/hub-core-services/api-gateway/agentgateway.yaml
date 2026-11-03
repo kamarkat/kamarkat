@@ -24,7 +24,7 @@ spec:
         # same manifest can silently change the gateway binary. Digest captured from
         # the running hub pods; v1.4.1 is the release matching the vendored source at
         # reference-projects/agentgateway (v1.4.1-166-g25664ff5).
-        image: cr.agentgateway.dev/agentgateway:v1.4.1@sha256:efd79355b89094a8225a9db465d9a01dc656b377f0bab458761b935a13231d29
+        image: cr.agentgateway.dev/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
         args: ["-f", "/etc/agentgateway/config.yaml"]
         ports:
         - containerPort: 3000

@@ -1,0 +1,123 @@
+# Build, verify and publish the billing engine's PostgreSQL image (ADR-113 §3),
+# and pin its digest in the cluster that runs it.
+#
+# The image is built and verified (images/postgres-partman/verify.sh) before it
+# is pushed, and pinned only while the branch tip still has the inputs it was
+# built from: a database must never be pinned back to an older build.
+name: postgres-partman
+
+on:
+  push:
+    branches: [main, feat/**]
+    paths:
+      - images/postgres-partman/**
+      - .github/workflows/postgres-partman.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/soloz-io/zero-ops/postgres-partman
+  INPUTS: images/postgres-partman
+  MANIFEST: manifests/hub-core-services/billing-engine/database/billing-db.yaml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The pin step compares this commit's inputs with the branch tip's.
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The registry credential every other image workflow here uses: the
+      # organisation's packages are pushed by that account, and a package one
+      # workflow creates with a different identity is not writable by the next.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: arun-soloz
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      # Built into the runner first, so nothing is published unverified.
+      - name: Build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.INPUTS }}
+          # amd64 only: every node in the fleet is x86.
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Verify PostgreSQL and pg_partman
+        run: ./${{ env.INPUTS }}/verify.sh "${IMAGE}:${GITHUB_SHA}"
+
+      # The same build, from cache, pushed. Tagged by commit only: nothing
+      # consumes a moving tag, and the manifest is pinned by digest.
+      - name: Publish
+        id: publish
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.INPUTS }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          provenance: false
+
+      - name: Pin the cluster to the digest just published
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [ -n "$DIGEST" ] || { echo "::error::the publish step reported no digest"; exit 1; }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Re-derived from the branch tip on every attempt and never rebased, as
+          # kube-sbt.yml does. And pinned only while the tip's image inputs are the
+          # ones this run built: a later commit that changed them has its own run,
+          # and this older build must not replace what that run pins.
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin "${GITHUB_REF_NAME}"
+            git reset --quiet --hard "origin/${GITHUB_REF_NAME}"
+
+            if ! git diff --quiet "${GITHUB_SHA}" HEAD -- "${INPUTS}"; then
+              echo "the branch tip's ${INPUTS} differs from ${GITHUB_SHA}: a newer build owns the pin; not pinning"
+              exit 0
+            fi
+
+            # The whole reference after the repository: the :unbuilt placeholder
+            # the first run replaces, or the digest a previous run pinned.
+            sed -i -E \
+              "s|^([[:space:]]*imageName: )${IMAGE//./\\.}[@:].*$|\1${IMAGE}@${DIGEST}|" \
+              "${MANIFEST}"
+            grep -q "imageName: ${IMAGE}@${DIGEST}" "${MANIFEST}" || {
+              echo "::error::the cluster's image reference did not update; the pattern no longer matches"
+              exit 1
+            }
+
+            git add "${MANIFEST}"
+            if git diff --cached --quiet; then
+              echo "digest already pinned on ${GITHUB_REF_NAME}; nothing to do"
+              exit 0
+            fi
+
+            git commit --quiet -m "chore(postgres-partman): pin image to ${GITHUB_SHA}"
+            if git push --quiet origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "pinned on attempt ${attempt}"
+              exit 0
+            fi
+
+            echo "attempt ${attempt} lost a push race; re-deriving from the new tip"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not pin the image digest after 5 attempts"
+          exit 1

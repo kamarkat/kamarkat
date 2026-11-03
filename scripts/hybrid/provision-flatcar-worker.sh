@@ -10,7 +10,7 @@
 #   - OS: Flatcar Container Linux (Immutable, read-only /usr, native cgroups v2)
 #   - Storage: Zero host disk formatting; VM runs from isolated 20GB VHDX
 #   - Provisioning: Declarative Ignition config + offline binaries delivered via DVD ISO
-#   - Kubernetes: Kubeadm join v1.31.6 via one-shot systemd service
+#   - Kubernetes: Kubeadm join v1.35.10 via one-shot systemd service
 #   - CNI: Cilium v1.17.18 (clean native cgroup & eBPF, no cgroup hacks)
 #   - Storage Addon: local-path-provisioner on persistent /var/local-path-provisioner
 #   - Network Mesh: Native Tailscale daemon connecting to tailnet
@@ -73,7 +73,7 @@ HUB_DISK_GB_DEFAULT=100    # whole platform + platform-db PVC
 SPOKE_DISK_GB_DEFAULT=60   # tenant workloads + shared-cnpg PVC
 DISK_SIZE_BYTES=""         # set only by --disk-gb; empty means "use the target default"
 CLI_DISK_SET=0
-K8S_VERSION="v1.31.6"
+K8S_VERSION="v1.35.10"
 TAILSCALE_VERSION="1.102.2"
 FLATCAR_RELEASE_CHANNEL="stable"
 UPGRADE_FLATCAR="false"
@@ -91,7 +91,7 @@ CACHE_DIR="${HOME}/.cache/soloz/flatcar-bin"
 # manifests/providers/hybrid/k8s/cilium-addon-hybrid.yaml and
 # manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml — a drift here means the
 # node caches one image and the pod requests another, silently reintroducing a pull.
-GATE_IMAGE_REF="registry.k8s.io/kubectl:v1.31.6@sha256:0340f50e46e77889398f41becf071e8d0f6be7672652a30e209112002147c06f"
+GATE_IMAGE_REF="registry.k8s.io/kubectl:v1.35.10@sha256:4e1d541a3d62f74637974e4c71f3cea91b9a36ffd059ab45e355648898783837"
 MODE="provision"
 
 usage() {
@@ -106,6 +106,9 @@ Options:
   --env FILE           Path to environment file (default: scripts/hybrid/home-lab.env)
   --ts-authkey KEY     Tailscale auth-key (auto-loaded from k8-secrets/tailscale/authkey if omitted).
   --vswitch NAME       Hyper-V Virtual Switch name (default: 'Default Switch').
+  --host-cpu-max N     Host PROCTHROTTLEMAX percent (default 70, ADR-046 §24.5):
+                       the thermal cap that keeps a thin box from tripping ACPI
+                       critical and powering off mid-provision.
   --upgrade-flatcar    Re-download fresh Flatcar base VHDX image from current release.
   --memory-gb N        OVERRIDE startup memory in GB (default: per-node from home-lab.env registry).
   --max-memory-gb N    OVERRIDE maximum memory ceiling in GB (default: per-node from registry).

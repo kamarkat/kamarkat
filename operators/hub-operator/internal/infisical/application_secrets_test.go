@@ -134,6 +134,7 @@ func TestOnlyUnrotatableSecretsAreEscrowed(t *testing.T) {
 		"hub-zitadel-db-password":         true,  // same
 		"hub-credits-db-password":         true,  // same: the ledger's records are in the database, not the credential
 		"hub-grafana-db-password":         true,  // same: Grafana's state is in the database, not the credential
+		"hub-billing-db-password":         true,  // set ALTER ROLE as the cluster superuser; the engine's records are in the database
 		"hub-zitadel-masterkey":           false, // encrypts every column written
 		"agentgateway-oidc-cookie-secret": true,  // rotating only ends sessions
 		"hub-secret-encryption-key":       false, // etcd AND every etcd backup are encrypted with it

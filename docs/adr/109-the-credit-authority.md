@@ -38,6 +38,8 @@ The facts this decision rests on:
 
 The platform offers a Credit Authority: an authoritative ledger of credits with transactional guarantees, isolated per tenant. It offers no monetary billing, payment collection or pricing capability. Those belong to the product layer that coordinates credits, and to the external providers it integrates.
 
+*Amended by ADR-113 (2026-11-03):* the platform also offers a billing capability, a billing engine with one caller run as this capability is. Payment collection and pricing remain the product layer's.
+
 ### 2. The Credit Authority
 
 - **Formance Ledger v2.4.16**, on a database the platform provisions (ADR-099). Ledger v3 is not eligible.

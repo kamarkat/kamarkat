@@ -36,7 +36,7 @@ type Payload struct {
 // standing anything up.
 type Reader interface {
 	// Metrics returns the raw Prometheus text a component exposes.
-	Metrics(ctx context.Context, namespace, service string) (string, error)
+	Metrics(ctx context.Context, namespace, service string, port int) (string, error)
 	// Artefact returns a file the platform rendered, by repository-relative
 	// glob.
 	Artefact(ctx context.Context, path string) ([]byte, error)
@@ -103,7 +103,7 @@ var labelPair = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"
 // expose under a longer name, because the schema was written for one series and
 // the extra labels of another would be projected against it.
 func collectMetrics(ctx context.Context, r Reader, c Collector) ([]map[string]string, error) {
-	body, err := r.Metrics(ctx, c.Source.Namespace, c.Source.Service)
+	body, err := r.Metrics(ctx, c.Source.Namespace, c.Source.Service, c.Source.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +186,6 @@ func collectArtefact(ctx context.Context, r Reader, c Collector) ([]map[string]s
 type ClusterReader struct {
 	HTTP      *http.Client
 	GitopsDir string
-	// Port the platform's metrics Services expose.
-	Port int
 }
 
 func (c *ClusterReader) client() *http.Client {
@@ -197,11 +195,7 @@ func (c *ClusterReader) client() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
 }
 
-func (c *ClusterReader) Metrics(ctx context.Context, namespace, service string) (string, error) {
-	port := c.Port
-	if port == 0 {
-		port = 8080
-	}
+func (c *ClusterReader) Metrics(ctx context.Context, namespace, service string, port int) (string, error) {
 	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/metrics", service, namespace, port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

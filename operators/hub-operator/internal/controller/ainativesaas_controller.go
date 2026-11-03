@@ -237,11 +237,12 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			// uses and nobody rotates -- and a credential whose compromise has no
 			// observable effect is the hardest kind to notice (ADR-097).
 			declaredDeps := backendDependenciesOf(ainativesaas)
-			// The Credit Authority, when this application owns its declaration
-			// (ADR-109): its caller is this application's service identity.
-			ownsCredits := r.ownsCreditAuthority(ctx, logger, ainativesaas)
+			// The platform capabilities whose declaration this application owns
+			// (ADR-109, ADR-113): their caller is this application's service
+			// identity.
+			ownedCapabilities := r.ownedCapabilities(ctx, logger, ainativesaas)
 			serviceClient := ""
-			if len(declaredDeps) > 0 || ownsCredits {
+			if len(declaredDeps) > 0 || len(ownedCapabilities) > 0 {
 				serviceClient = serviceUserName(appId)
 			}
 
@@ -439,15 +440,15 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 						logger.Info("Backend dependencies waiting on the target's project",
 							"tenant", tenantId, "app", appId, "pending", pendingDeps)
 					}
-					if ownsCredits {
-						if capability := r.creditAuthorityDependency(ctx); capability != nil {
+					for _, c := range ownedCapabilities {
+						if capability := r.capabilityDependency(ctx, c); capability != nil {
 							deps = append(deps, *capability)
 						} else {
 							// Written to Infisical by the capability's own reconcile, which
 							// raises no event here.
-							logger.Info("The Credit Authority has no project yet (not enabled, or not provisioned); its audience waits on it",
-								"tenant", tenantId, "app", appId)
-							requeue = creditAuthorityPendingRequeue
+							logger.Info("A capability has no project yet (not enabled, or not provisioned); its audience waits on it",
+								"tenant", tenantId, "app", appId, "capability", c.name)
+							requeue = capabilityPendingRequeue
 						}
 					}
 					actingClient, aerr := actingClientOf(oauthClients)
@@ -846,10 +847,10 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 	}
 	if len(entries) > 0 {
 		for _, d := range deps {
-			// The Credit Authority admits ONE client, which its own reconcile
-			// publishes from the capability declaration (ADR-109). It has no
+			// A platform capability admits ONE client, which its own reconcile
+			// publishes from the declaration (ADR-109, ADR-113). It has no
 			// caller map, and a `user` entry must never reach it.
-			if d.AppID == creditAuthorityAppID {
+			if isPlatformCapabilityAudience(d.AppID) {
 				continue
 			}
 			if err := r.publishAllowedCallers(ctx, cellId, tenantId, d, appId, entries); err != nil {
@@ -1336,12 +1337,12 @@ func (r *AINativeSaaSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Kind:    "AINativeSaaS",
 	})
 
-	// The Credit Authority being enabled or disabled changes its owner's
+	// A platform capability being enabled or disabled changes its owner's
 	// audience, so its ConfigMap's changes reconcile the declarers.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(u).
-		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.creditAuthorityDeclarers),
-			builder.WithPredicates(predicate.NewPredicateFuncs(isCreditAuthorityMarker))).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.capabilityDeclarers),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isCapabilityMarker))).
 		Complete(r)
 }
 

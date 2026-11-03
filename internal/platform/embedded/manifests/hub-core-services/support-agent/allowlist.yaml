@@ -52,6 +52,7 @@ data:
         kind: metrics
         namespace: platform-ops
         service: argocd-applicationset-controller-metrics
+        port: 8080
         query: argocd_app_info
       schema: [name, project, sync_status, health_status, dest_server]
       # NOT `name`: an Application's name can carry a tenant's own naming, and
@@ -66,6 +67,7 @@ data:
         kind: metrics
         namespace: platform-ops
         service: kyverno-reports-controller-metrics
+        port: 8080
         query: kyverno_policy_results_total
       schema: [policy_name, policy_type, rule_result, resource_namespace, resource_name]
       emit: [policy_name, policy_type, rule_result]
@@ -78,24 +80,83 @@ data:
         kind: metrics
         namespace: platform-ops
         service: cert-manager-metrics
+        port: 8080
         query: certmanager_certificate_expiration_timestamp_seconds
-      schema: [name, namespace, issuer_name, expiration_timestamp]
+      # `value` is the sample's own number. The expiry is the series' VALUE and no
+      # label carries it, so a schema naming `expiration_timestamp` projected
+      # nothing under a field that read as reviewed -- the one number this
+      # collector exists for never left the box.
+      schema: [name, namespace, issuer_name, value]
       # The DNS names on a certificate are the tenant's hostnames. The expiry and
       # the issuer are what support needs.
-      emit: [issuer_name, expiration_timestamp]
+      emit: [issuer_name, value]
 
     # ── Backup health ──────────────────────────────────────────────────────
-    # ADR-014 makes the platform responsible for the database it ships. A backup
-    # that silently stopped is a fault the tenant cannot be expected to notice
-    # and the platform cannot be accountable for without seeing.
-    - collector: backup-health
+    # ADR-014 makes the platform responsible for the databases it ships, and
+    # ADR-077 names this series as the evidence. A backup that silently stopped is
+    # a fault the tenant cannot be expected to notice and the platform cannot be
+    # accountable for without seeing.
+    #
+    # ONE COLLECTOR PER CLUSTER, because `service` is one name and a box runs one
+    # cluster per platform application (ADR-112). A Service selecting every CNPG
+    # pod in the namespace would be worse than this repetition: a scrape resolves
+    # to a single endpoint, so it would report one arbitrary cluster's backup as
+    # though it covered all of them.
+    #
+    # Each cluster's instance exporter is reached through a Service declared beside
+    # the cluster itself, in <application>/database/, so an application that ships
+    # its database ships the thing that watches it.
+    - collector: backup-health-infisical
       source:
         kind: metrics
         namespace: platform-data
-        service: platform-db-metrics
+        service: infisical-db-metrics
+        port: 9187
         query: cnpg_collector_last_available_backup_timestamp
-      schema: [cluster, last_available_backup, last_failed_backup]
-      emit: [last_available_backup, last_failed_backup]
+      # `value` is the sample's own number: the timestamp is the series' value and
+      # no label carries it. The cluster is this collector's own name, so nothing
+      # here depends on a label the exporter may or may not attach.
+      schema: [value]
+      emit: [value]
+
+    - collector: backup-health-zitadel
+      source:
+        kind: metrics
+        namespace: platform-data
+        service: zitadel-db-metrics
+        port: 9187
+        query: cnpg_collector_last_available_backup_timestamp
+      # `value` is the sample's own number: the timestamp is the series' value and
+      # no label carries it. The cluster is this collector's own name, so nothing
+      # here depends on a label the exporter may or may not attach.
+      schema: [value]
+      emit: [value]
+
+    - collector: backup-health-grafana
+      source:
+        kind: metrics
+        namespace: platform-data
+        service: grafana-db-metrics
+        port: 9187
+        query: cnpg_collector_last_available_backup_timestamp
+      # `value` is the sample's own number: the timestamp is the series' value and
+      # no label carries it. The cluster is this collector's own name, so nothing
+      # here depends on a label the exporter may or may not attach.
+      schema: [value]
+      emit: [value]
+
+    - collector: backup-health-credits
+      source:
+        kind: metrics
+        namespace: platform-data
+        service: credits-db-metrics
+        port: 9187
+        query: cnpg_collector_last_available_backup_timestamp
+      # `value` is the sample's own number: the timestamp is the series' value and
+      # no label carries it. The cluster is this collector's own name, so nothing
+      # here depends on a label the exporter may or may not attach.
+      schema: [value]
+      emit: [value]
 
     # ── Node capacity ──────────────────────────────────────────────────────
     # Pressure and allocatable capacity, which is what an upgrade pre-flight
@@ -116,6 +177,7 @@ data:
         # collector names no namespace gate 82 forbids.
         namespace: platform-ops
         service: kube-state-metrics
+        port: 8080
         query: kube_node_status_condition
       schema: [node, condition, status]
       # NOT `node`: a node name carries the cluster name and often the tenant's.

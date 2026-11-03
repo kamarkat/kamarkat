@@ -1,0 +1,47 @@
+# Rebuild the billing engine's database from its object-store archive instead of
+# initialising empty. The same overlay, for the same reasons and with the same two
+# values to set by hand, as credit-authority/database-recovery: read that file and
+# the runbook first. Not referenced by any descriptor.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../database
+
+patches:
+  - target:
+      kind: Cluster
+      name: billing-db
+    patch: |-
+      - op: remove
+        path: /spec/bootstrap/initdb
+      - op: add
+        path: /spec/bootstrap/recovery
+        value:
+          source: billing-db-archive
+      - op: add
+        path: /spec/externalClusters
+        value:
+          - name: billing-db-archive
+            barmanObjectStore:
+              destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+              # The incarnation being RESTORED FROM: what the lost cluster wrote.
+              serverName: billing-db-v1
+              endpointURL: https://hel1.your-objectstorage.com
+              s3Credentials:
+                accessKeyId:
+                  name: s3-credentials
+                  key: access-key-id
+                secretAccessKey:
+                  name: s3-credentials
+                  key: secret-access-key
+                region:
+                  name: s3-credentials
+                  key: region
+              wal:
+                compression: gzip
+                maxParallel: 2
+      # The incarnation the REPLACEMENT writes. Must not equal the one above.
+      - op: replace
+        path: /spec/backup/barmanObjectStore/serverName
+        value: billing-db-v2

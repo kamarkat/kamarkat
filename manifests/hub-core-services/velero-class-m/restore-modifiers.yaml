@@ -1,0 +1,173 @@
+# The transformations a Class M restore applies BEFORE it creates anything.
+#
+# Beside the steady-state components rather than inside them, and not wired into any
+# ApplicationSet, for the same reason `database-recovery/` is not: this is what the
+# cluster must be told at the moment a reconstruction happens, not something that
+# reconciles continuously. It is inert until a Restore references it by name.
+#
+# WHY THESE EXIST AT ALL. A recovered Cluster API object must never exist unpaused for
+# even an instant (ADR-111 §3). Velero applies restore resource modifiers before the
+# resources are created, so a paused object is what gets created -- as opposed to
+# anything that pauses afterwards, which leaves a window in which the controllers own a
+# fleet nobody has verified. There is no safe version of that window: an unpaused
+# `MachineDeployment` reconciles toward its replica count, and the topology controller
+# creates whatever the ClusterClass says is missing.
+#
+# THREE TIERS, because pausing the leaves is not enough. A paused `Machine` does not
+# stop its `MachineSet` creating another one, and nothing stops the topology controller
+# except `Cluster.spec.paused`. Release order is the reverse: complete the graph,
+# classify against the provider's inventory (`soloz spoke match-inventory`), unpause the
+# Cluster, release matched leaves, release the creators last.
+#
+# MERGE PATCHES, not JSON patches. A JSON patch `remove` on a path that is absent fails
+# the whole restore, and `ownerReferences`, `annotations` and `spec.paused` are all
+# optional -- an object without annotations is ordinary. A JSON Merge Patch adds what is
+# missing, merges the annotation map instead of replacing it, and deletes a key by
+# setting it to null. So one patch per kind does both jobs without caring what was
+# already there.
+#
+# OWNER REFERENCES ARE REMOVED. A UID from the cluster that is gone resolves to nothing
+# here, and an ownerReference naming a UID that does not exist makes its object eligible
+# for garbage collection -- a faithful restore would invite Kubernetes to delete the
+# fleet. Cluster API re-establishes them itself on the first reconcile it is allowed.
+#
+# FINALIZERS ARE NOT TOUCHED, deliberately (ADR-111 Rev5 §5). Removing them would make
+# an abandoned reconstruction easier to delete, at the cost of letting a `Cluster` be
+# deleted without its servers being released. Abandoning a restore is therefore a
+# deliberate procedure, not a `kubectl delete`.
+#
+# Referenced explicitly from the Restore, never left to a server-level default: an
+# invalid modifier configuration fails restore validation, which is the outcome wanted.
+# A restore that silently proceeded without these would be the failure they prevent.
+#
+# VERIFIED AGAINST SOURCE AT v1.18.2, in internal/resourcemodifiers/ -- note the
+# package sits under pkg/ on main, so the tag matters when checking this again. Four
+# constraints this file is shaped by, each read from that code rather than assumed:
+#
+#   * `GetResourceModifiersFromConfig` refuses a ConfigMap whose data does not hold
+#     EXACTLY ONE key. So this holds one file and must keep holding one: adding a
+#     second would make every restore referencing it fail to parse.
+#   * `ResourceModifierRule.Validate` refuses a rule carrying more than one of
+#     patches / mergePatches / strategicPatches. Each rule below uses mergePatches
+#     alone.
+#   * `Conditions.Validate` requires only a non-empty groupResource, and `match`
+#     compiles it as a GLOB split on '.'. The values below are literal and match
+#     exactly; a wildcard would be legal and is not wanted here.
+#   * `match` applies the namespace filter only when `Conditions.Namespaces` is set,
+#     and an empty list includes every namespace.
+#
+# `namespaces` IS DELIBERATELY OMITTED, and it looks like an oversight otherwise.
+# Restricting these rules to platform-capi would be more precise and would fail OPEN:
+# if a restore ever remapped namespaces, the condition would stop matching and the
+# object would be created UNPAUSED -- a silent loss of the entire safety contract, in
+# exchange for precision worth nothing. Omitted, a recovered object is paused wherever
+# it lands.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capi-passive-restore
+  namespace: velero
+data:
+  # The schema is Velero's: `version`, then one rule per kind with a `conditions`
+  # selector and either `patches` (JSON Patch) or `mergePatches` (JSON Merge Patch,
+  # whose body is a string in `patchData`).
+  capi-passive-restore.yaml: |
+    version: v1
+    resourceModifierRules:
+      # The outer gate. `spec.paused` is the only thing that holds the topology
+      # controller, so it is set on the object itself rather than by annotation.
+      - conditions:
+          groupResource: clusters.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null},"spec":{"paused":true}}
+
+      # The creators. These are the objects that bring infrastructure into
+      # existence, so they are released last and must be paused in their own right.
+      - conditions:
+          groupResource: kubeadmcontrolplanes.controlplane.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+      - conditions:
+          groupResource: machinedeployments.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+      - conditions:
+          groupResource: machinesets.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+
+      # The bootstrap reconciler. PASSIVE MEANS RESTORED WITHOUT ACTIVE
+      # RECONCILIATION, not merely restored before the activation stream -- the
+      # bootstrap provider generates bootstrap data and creates its Secret when the
+      # one it expects is missing, so an unpaused KubeadmConfig can mint new material
+      # while the recovered graph is still being classified. Paused by the same
+      # contract as everything else: `cluster.x-k8s.io/paused` applies to any Cluster
+      # API object, and controllers working with them must honour it.
+      #
+      # Released only once its Machine and its bootstrap-data Secret are known good,
+      # with the creators.
+      - conditions:
+          groupResource: kubeadmconfigs.bootstrap.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+
+      # The bootstrap-data Secrets themselves, which the credentials stream carries.
+      #
+      # They are owned by their KubeadmConfig, so they arrive with an ownerReference
+      # naming a UID from the hub that is gone -- and an ownerReference whose UID does
+      # not resolve makes its object eligible for garbage collection. Left alone, the
+      # material a Machine cannot be adopted without would be collected out from under
+      # the restore.
+      #
+      # SCOPED BY LABEL, so this is not a blanket modification of every Secret in a
+      # restore: `Conditions.LabelSelector` is native (verified in
+      # internal/resourcemodifiers at v1.18.2, unchanged at v1.18.4), and the label is
+      # the one hub-operator applies from Cluster API's bootstrap contract.
+      #
+      # The merge patch names only ownerReferences, so data, type, labels, annotations
+      # and finalizers all survive untouched.
+      #
+      # One consequence, accepted: a recovered Secret is left UNOWNED. Nothing
+      # re-establishes the reference, so it is cleaned up with its Machine rather than
+      # by garbage collection. A leaked Secret is the right trade against one deleted
+      # mid-recovery.
+      - conditions:
+          groupResource: secrets
+          labelSelector:
+            matchLabels:
+              recovery.platform.io/class-m: bootstrap-data
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null}}
+
+      # The infrastructure object, which is restored PASSIVELY rather than at
+      # activation -- `soloz spoke match-inventory` derives the provider label
+      # (`caph-cluster-<HetznerCluster name>`) from it, and matching has to happen
+      # before activation, so it cannot be in the activation stream. Paused anyway:
+      # with no Cluster yet restored its controller has nothing to own it and waits,
+      # but relying on that absence rather than on the annotation would make the
+      # safety depend on restore order.
+      - conditions:
+          groupResource: hetznerclusters.infrastructure.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+
+      # The leaves. Released first, once every one has been matched to a server that
+      # actually exists -- a released leaf whose server is gone is remediated, and a
+      # released leaf whose name matches nothing is duplicated.
+      - conditions:
+          groupResource: machines.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}
+      - conditions:
+          groupResource: hcloudmachines.infrastructure.cluster.x-k8s.io
+        mergePatches:
+          - patchData: |
+              {"metadata":{"ownerReferences":null,"annotations":{"cluster.x-k8s.io/paused":"true"}}}

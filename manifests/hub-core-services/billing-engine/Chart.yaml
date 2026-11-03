@@ -1,0 +1,16 @@
+# The billing engine (ADR-113): Lago OSS, unmodified, a selectable platform
+# capability run on the hub like the Credit Authority, and turned on by
+# capabilities.billing.enabled.
+#
+# One pod: its queue (Redis) on loopback as a native sidecar, the schema
+# migration and the organisation's seeding as a one-shot, the API on loopback,
+# its worker and clock, and the gateway that is the pod's only port. Its
+# document renderer is its own Deployment, reached only from the engine. Its
+# database, role and credential are platform prerequisites (database/), present
+# on every box.
+apiVersion: v2
+name: billing-engine
+description: The box's billing engine, reachable only through its authorising gateway
+type: application
+version: 0.1.0
+appVersion: "1.55.0"

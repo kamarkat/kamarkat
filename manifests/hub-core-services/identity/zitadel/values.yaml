@@ -178,8 +178,8 @@ replicaCount: 1
 # in-cluster it answered in 0.007s, 0.462s, 0.463s, 0.233s, 0.008s and 0.689s --
 # six samples against a one-second budget.
 #
-# The slowness has a cause. platform-db shares its node with Zitadel and runs on
-# local-path, and while its WAL archive prefix collided it retried barman
+# The slowness has a cause. Zitadel's database shares its node with Zitadel and runs
+# on local-path, and while its WAL archive prefix collided it retried barman
 # continuously -- 36 wal-archive log lines in 120 seconds -- loading the node and
 # the database this endpoint reads. The per-box archive prefix (ADR-014) is the
 # root fix; the archiver going quiet is what removes the 503. This is the
@@ -423,7 +423,7 @@ setupJob:
     # FIRST, because cleanup below queries the eventstore this creates.
     - name: ensure-schema
       # chart 10.0.4 -> appVersion v4.15.3
-      image: ghcr.io/zitadel/zitadel:v4.15.3
+      image: ghcr.io/zitadel/zitadel:v4.20.0
       args:
         - init
         - --config
@@ -456,7 +456,7 @@ setupJob:
 
     - name: cleanup-stuck-migration
       # chart 10.0.4 -> appVersion v4.15.3
-      image: ghcr.io/zitadel/zitadel:v4.15.3
+      image: ghcr.io/zitadel/zitadel:v4.20.0
       args:
         - setup
         - cleanup

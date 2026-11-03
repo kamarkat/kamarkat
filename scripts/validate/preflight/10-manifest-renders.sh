@@ -31,7 +31,7 @@ validate_manifest_renders() {
     # ADR-055: environment-manager renders every boundary on every render, so it
     # must be given the environment values the seed Application carries.
     # publicTlsIssuer deliberately has no default (ADR-051) and must be named.
-    local em_values=(--set environmentSlug=prod --set provider=hetzner
+    local em_values=(--set environmentSlug=prod --set boxId=example-box --set provider=hetzner
                      --set topology=single --set publicTlsIssuer=letsencrypt-prod
                      --set environmentRevision=main \
                      --set instanceRepoURL=https://github.com/example-org/example-gitops --set hubDomain=dev.example.test --set previewDomain=example-preview.test --set 'alerting.emailTo[0]=alerts@example.test')

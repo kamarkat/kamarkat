@@ -50,6 +50,14 @@ type Spec struct {
 	// hardware (ADR-075) -- and defaulting an unset flag to it would silently
 	// strip workers from a box that needs them.
 	Workers *int
+	// BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
+	//
+	// Separate from ClusterName because the two have different lifetimes. The box
+	// owns the escrow path and the DNS records; the cluster owns the WAL archive
+	// prefix and the CAPI object names. Pinned at scaffolding and never changed,
+	// for the same reason dns.ownerId is not: everything already written under it
+	// is orphaned by a change.
+	BoxID string
 	// ClusterName is the tenant's control plane, the first cluster in the box.
 	ClusterName string
 	// BundleVersion is the platform version this box starts on.
@@ -325,6 +333,7 @@ func (s Spec) clusterTokens() map[string]string {
 		"<SUBDOMAIN>":      strings.TrimSpace(strings.Trim(s.Subdomain, ".")),
 		"<CHART_SOURCE>":   s.chartSource(),
 		"<WORKER_COUNT>":   strconv.Itoa(s.workerCount()),
+		"<BOX_ID>":         s.BoxID,
 		"<CLUSTER_NAME>":   s.ClusterName,
 		"<ENVIRONMENT>":    s.Environment,
 		"<CLOUD_PROVIDER>": s.Provider,

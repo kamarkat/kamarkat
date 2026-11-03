@@ -106,9 +106,9 @@ func (i *Installer) InstallInfisicalAuth(ctx context.Context, clientID, clientSe
 
 // GenerateInfisicalCryptoSecrets generates the initial cryptographic keys and creates
 // the Kubernetes Secrets that Infisical and CNPG need to boot. This MUST run before
-// B02 (CNPG Cluster) so that platform-db-app exists when CNPG's initdb runs.
+// B02 (CNPG Cluster) so that infisical-db-credentials exists when CNPG's initdb runs.
 //
-// Creates: infisical-secrets (without DB_ROOT_CERT — deferred), infisical-redis-credentials, platform-db-app
+// Creates: infisical-secrets (without DB_ROOT_CERT — deferred), infisical-redis-credentials, infisical-db-credentials
 //
 // Called by: GenerateLocalSecrets (between B01 and B02)
 func (i *Installer) GenerateInfisicalCryptoSecrets(ctx context.Context) error {
@@ -188,49 +188,62 @@ func (i *Installer) GenerateInfisicalCryptoSecrets(ctx context.Context) error {
 
 	// infisical-redis-credentials generation removed per ADR-014
 
-	_, err = clientset.CoreV1().Secrets(dataNamespace).Get(ctx, "platform-db-app", metav1.GetOptions{})
+	// Secret Zero: the bootstrap cluster's owner credential, created HERE because of
+	// ordering.
+	//
+	// infisical-db's initdb reads this Secret (ADR-112), so it must exist before
+	// boundary 02 creates the cluster. hub-operator also generates it and reuses an
+	// existing one, but the operator is installed in B01 and reconciles on the
+	// HubEnvironment CR -- later than this phase. Creating it here is what guarantees
+	// initdb finds it rather than racing the operator.
+	//
+	// username is `infisical` to match the cluster's declared owner:
+	// CloudNativePG takes the role name from this Secret when initdb is given one, so
+	// the two must agree or the owner is created under the wrong name.
+	_, err = clientset.CoreV1().Secrets(dataNamespace).Get(ctx, "infisical-db-credentials", metav1.GetOptions{})
 	if err != nil {
 		if !k8serrors.IsNotFound(err) {
-			return fmt.Errorf("failed to check platform-db-app secret: %w", err)
+			return fmt.Errorf("failed to check infisical-db-credentials secret: %w", err)
 		}
 
-		fmt.Println("[bootstrap-secrets] Generating platform-db-app (CNPG Secret Zero)...")
+		fmt.Println("[bootstrap-secrets] Generating infisical-db-credentials (CNPG Secret Zero)...")
 		appPassword, err := generateSecurePassword(32)
 		if err != nil {
-			return fmt.Errorf("failed to generate app password: %w", err)
+			return fmt.Errorf("failed to generate bootstrap database password: %w", err)
 		}
 
 		appSecretObj := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "platform-db-app",
+				Name:      "infisical-db-credentials",
 				Namespace: dataNamespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/managed-by": "zero-ops-hub-cli",
-					"app.kubernetes.io/component":  "secret-zero",
+					"app.kubernetes.io/managed-by":  "zero-ops-hub-cli",
+					"app.kubernetes.io/component":   "secret-zero",
+					"ops.nutgraf.in/db-credentials": "true",
 				},
 			},
 			Type: corev1.SecretTypeBasicAuth,
 			StringData: map[string]string{
-				"username": "app",
+				"username": "infisical",
 				"password": appPassword,
 			},
 		}
 
 		_, err = clientset.CoreV1().Secrets(dataNamespace).Create(ctx, appSecretObj, metav1.CreateOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to create platform-db-app secret: %w", err)
+			return fmt.Errorf("failed to create infisical-db-credentials secret: %w", err)
 		}
-		fmt.Println("[bootstrap-secrets] ✓ platform-db-app created")
+		fmt.Println("[bootstrap-secrets] ✓ infisical-db-credentials created")
 	} else {
-		fmt.Println("[bootstrap-secrets] ✓ platform-db-app already exists")
+		fmt.Println("[bootstrap-secrets] ✓ infisical-db-credentials already exists")
 	}
 
-	fmt.Println("[bootstrap-secrets] ✓ Cryptographic secrets ready (infisical-secrets, platform-db-app)")
+	fmt.Println("[bootstrap-secrets] ✓ Cryptographic secrets ready (infisical-secrets, infisical-db-credentials)")
 	return nil
 }
 
 // UpdateInfisicalSecretsWithCNPGCert waits for the CNPG Cluster to be Ready,
-// reads the ca.crt from the CNPG-generated platform-db-ca Secret, and injects
+// reads the ca.crt from the CNPG-generated infisical-db-ca Secret, and injects
 // DB_ROOT_CERT into infisical-secrets. This MUST run after B02 (CNPG Cluster)
 // has been applied and the Cluster is healthy.
 //
@@ -252,8 +265,8 @@ func (i *Installer) UpdateInfisicalSecretsWithCNPGCert(ctx context.Context) erro
 	// Poll for CNPG Cluster to be Ready
 	clusterWaiter := &health.HealthWaiter{
 		Checkers: []health.HealthChecker{
-			health.NewKubectlChecker("CNPG cluster platform-db",
-				[]string{"get", "clusters.postgresql.cnpg.io", "platform-db",
+			health.NewKubectlChecker("CNPG cluster "+constants.BootstrapDBCluster,
+				[]string{"get", "clusters.postgresql.cnpg.io", constants.BootstrapDBCluster,
 					"-n", dataNamespace,
 					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
 				},
@@ -263,18 +276,19 @@ func (i *Installer) UpdateInfisicalSecretsWithCNPGCert(ctx context.Context) erro
 	}
 	clusterWaiter.Checkers[0].(*health.KubectlChecker).Expected = "True"
 	if err := clusterWaiter.Wait(ctx, i.Kubeconfig); err != nil {
-		return fmt.Errorf("CNPG cluster platform-db not ready: %w\nEnsure the CNPG Cluster CR is deployed and the operator is running", err)
+		return fmt.Errorf("CNPG cluster %s not ready: %w\nEnsure %s created it and the CNPG operator is running",
+			constants.BootstrapDBCluster, err, constants.BootstrapDBOwnerApplication)
 	}
-	fmt.Println("✓ CNPG cluster platform-db is Ready")
+	fmt.Printf("✓ CNPG cluster %s is Ready\n", constants.BootstrapDBCluster)
 
-	// Poll for platform-db-ca Secret to exist and contain ca.crt.
+	// Poll for infisical-db-ca Secret to exist and contain ca.crt.
 	// CNPG creates this Secret during cluster bootstrap, but there is a
 	// brief propagation window between "Cluster Ready" and the Secret being
 	// fully populated. This bounded poll handles that edge case.
-	fmt.Println("Waiting for platform-db-ca Secret to be populated...")
+	fmt.Println("Waiting for infisical-db-ca Secret to be populated...")
 	var caCert []byte
 	pollErr := wait.PollImmediateWithContext(ctx, 2*time.Second, 1*time.Minute, func(ctx context.Context) (bool, error) {
-		caSecret, err := clientset.CoreV1().Secrets(dataNamespace).Get(ctx, "platform-db-ca", metav1.GetOptions{})
+		caSecret, err := clientset.CoreV1().Secrets(dataNamespace).Get(ctx, "infisical-db-ca", metav1.GetOptions{})
 		if err != nil {
 			return false, nil // keep polling
 		}
@@ -286,9 +300,9 @@ func (i *Installer) UpdateInfisicalSecretsWithCNPGCert(ctx context.Context) erro
 		return true, nil
 	})
 	if pollErr != nil {
-		return fmt.Errorf("platform-db-ca Secret not populated: %w", pollErr)
+		return fmt.Errorf("infisical-db-ca Secret not populated: %w", pollErr)
 	}
-	fmt.Println("✓ platform-db-ca Secret found and populated")
+	fmt.Println("✓ infisical-db-ca Secret found and populated")
 
 	dbRootCert := base64.StdEncoding.EncodeToString(caCert)
 	fmt.Println("Updating infisical-secrets with DB_ROOT_CERT...")
@@ -330,22 +344,23 @@ func (i *Installer) UpgradeInfisicalTLS(ctx context.Context) error {
 
 	namespace := constants.NamespaceData
 
-	fmt.Println("\n[1/3] Reading platform-db-ca secret...")
+	fmt.Println("\n[1/3] Reading infisical-db-ca secret...")
 
 	// Read CA certificate from CNPG-managed secret
-	caSecret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "platform-db-ca", metav1.GetOptions{})
+	caSecret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "infisical-db-ca", metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to read platform-db-ca secret: %w\nEnsure database is deployed: kubectl get clusters.postgresql.cnpg.io platform-db -n platform-data", err)
+		return fmt.Errorf("failed to read infisical-db-ca secret: %w\nEnsure the cluster is deployed: kubectl -n %s get clusters.postgresql.cnpg.io %s",
+			err, constants.NamespaceData, constants.BootstrapDBCluster)
 	}
 
 	caCert, ok := caSecret.Data["ca.crt"]
 	if !ok {
-		return fmt.Errorf("ca.crt not found in platform-db-ca secret")
+		return fmt.Errorf("ca.crt not found in infisical-db-ca secret")
 	}
 
 	// Base64 encode the CA certificate for Infisical
 	dbRootCert := base64.StdEncoding.EncodeToString(caCert)
-	fmt.Println("✓ Read CA certificate from platform-db-ca")
+	fmt.Println("✓ Read CA certificate from infisical-db-ca")
 
 	fmt.Println("\n[2/3] Updating infisical-secrets with DB_ROOT_CERT...")
 

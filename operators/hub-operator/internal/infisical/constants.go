@@ -27,7 +27,6 @@ const (
 	SecretHetznerDNS         = "hetzner-dns"         // For external-dns and cert-manager
 	SecretHetznerCredentials = "hetzner-credentials" // For CAPI/CCM/CSI
 	SecretHCloudDeprecated   = "hcloud"              // Deprecated: use SecretHetznerCredentials
-	SecretPlatformDBApp      = "platform-db-app"
 	SecretInfisicalDB        = "infisical-db-credentials"
 	SecretGHCRPull           = "ghcr-pull-secret"
 	SecretPlatformGit        = "platform-git-secret"
@@ -43,32 +42,26 @@ const (
 	NamespaceObservability = "platform-observability"
 
 	// Infisical Secret Keys
-	KeyHetznerDNSAPIKey      = "hetzner-dns-api-key"
-	KeyHCloudToken           = "hcloud-token"
-	KeyTailscaleAuthkey      = "tailscale-authkey"
-	KeyTailscaleHostname     = "tailscale-hostname"
-	KeyClientID              = constant.KeyClientID
-	KeyClientSecret          = constant.KeyClientSecret
-	KeyAdminToken            = "admin-token"
-	KeyAdminEmail            = "admin-email"
-	KeyOrgID                 = "org-id"
-	KeyProjectID             = constant.KeyProjectID
-	KeyProjectSlug           = "project-slug"
-	KeyAPIKey                = "api-key"
-	KeyToken                 = "token"
-	KeyPlatformDBAppUsername = "platform-db-app-username"
-	KeyPlatformDBAppPassword = "platform-db-app-password"
-	KeyInfisicalDBUsername   = "infisical-db-username"
-	KeyInfisicalDBPassword   = "infisical-db-password"
-	KeyGHCRPullSecret        = "ghcr-pull-secret"
-	KeyGitHubUsername        = "github-username"
-	KeyGitHubToken           = "github-token"
+	KeyHetznerDNSAPIKey    = "hetzner-dns-api-key"
+	KeyHCloudToken         = "hcloud-token"
+	KeyTailscaleAuthkey    = "tailscale-authkey"
+	KeyTailscaleHostname   = "tailscale-hostname"
+	KeyClientID            = constant.KeyClientID
+	KeyClientSecret        = constant.KeyClientSecret
+	KeyAdminToken          = "admin-token"
+	KeyAdminEmail          = "admin-email"
+	KeyOrgID               = "org-id"
+	KeyProjectID           = constant.KeyProjectID
+	KeyProjectSlug         = "project-slug"
+	KeyAPIKey              = "api-key"
+	KeyToken               = "token"
+	KeyInfisicalDBUsername = "infisical-db-username"
+	KeyInfisicalDBPassword = "infisical-db-password"
+	KeyGHCRPullSecret      = "ghcr-pull-secret"
+	KeyGitHubUsername      = "github-username"
+	KeyGitHubToken         = "github-token"
 
 	// Application Secret Keys (Operator uploads directly to Infisical)
-	KeyControlPlaneDBUsername   = "hub-control-plane-db-username"
-	KeyControlPlaneDBPassword   = "hub-control-plane-db-password"
-	KeyHubCentralizedDBUsername = "hub-centralized-db-username"
-	KeyHubCentralizedDBPassword = "hub-centralized-db-password"
 
 	// Labels
 	LabelManagedBy = "app.kubernetes.io/managed-by"

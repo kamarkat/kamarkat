@@ -1,0 +1,243 @@
+{{- /*
+The billing engine's pod, in the order Kubernetes starts it (ADR-113 §4):
+
+  1. queue     a native sidecar: Redis, bound to 127.0.0.1, its append-only file
+               on the engine's volume, for the pod's life. Nothing outside the
+               pod can reach it.
+  2. migrate   one-shot: creates or migrates the schema and seeds the one
+               organisation with its API key (the engine's scripts/migrate.sh).
+               The engine does not start until it succeeds.
+  3. api       the engine's API, bound to 127.0.0.1.
+     worker    its job worker, and clock, its billing schedule.
+     gateway   the pod's only port, reached only through the hub Gateway.
+*/ -}}
+{{- $img := .Values.images -}}
+{{- $hubDomain := required "global.hubDomain is required: the engine's public address" .Values.global.hubDomain -}}
+{{- $hardened := dict "allowPrivilegeEscalation" false "readOnlyRootFilesystem" true "capabilities" (dict "drop" (list "ALL")) -}}
+{{- $engineImage := printf "%s@%s" $img.engine.repository (required "images.engine.digest is required (ADR-113)" $img.engine.digest) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-engine
+  namespace: platform-billing
+  labels:
+    app.kubernetes.io/name: billing-engine
+spec:
+  # One writer: the clock schedules billing, and two clocks would bill twice.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: billing-engine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: billing-engine
+      annotations:
+        checksum/gateway: {{ include (print $.Template.BasePath "/gateway-config.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # The engine image's nonroot user; the queue runs as the same user so
+        # both write the one volume.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: queue
+          image: {{ printf "%s@%s" $img.queue.repository (required "images.queue.digest is required (ADR-113)" $img.queue.digest) }}
+          restartPolicy: Always
+          command: ["redis-server"]
+          args:
+            - --bind
+            - 127.0.0.1
+            - --port
+            - "6379"
+            - --dir
+            - /data
+            # Jobs survive a restart: an invoice or a notification enqueued and
+            # not yet run is not lost with the pod.
+            - --appendonly
+            - "yes"
+          startupProbe:
+            exec: {command: ["redis-cli", "-h", "127.0.0.1", "ping"]}
+            periodSeconds: 2
+            failureThreshold: 30
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          volumeMounts:
+            - {name: storage, mountPath: /data, subPath: queue}
+        - name: migrate
+          image: {{ $engineImage }}
+          command: ["./scripts/migrate.sh"]
+          envFrom: &engineSecrets
+            - secretRef: {name: billing-engine-keys}
+          env: &engineEnv
+            - name: RAILS_ENV
+              value: production
+            - name: RAILS_LOG_TO_STDOUT
+              value: "true"
+            - name: DB_USERNAME
+              valueFrom: {secretKeyRef: {name: billing-engine-db, key: username}}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: billing-engine-db, key: password}}
+            - name: DATABASE_URL
+              # The engine's own cluster (ADR-112 §1), ../database/billing-db.yaml.
+              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@billing-db-rw.platform-data.svc.cluster.local:5432/lago?sslmode=require"
+            - name: REDIS_URL
+              value: "redis://127.0.0.1:6379"
+            - name: LAGO_REDIS_CACHE_URL
+              value: "redis://127.0.0.1:6379"
+            # The engine's public address: the documents it links to are served
+            # through the gateway there.
+            - name: LAGO_API_URL
+              value: {{ printf "https://billing.%s" $hubDomain | quote }}
+            - name: LAGO_FRONT_URL
+              value: {{ printf "https://billing.%s" $hubDomain | quote }}
+            - name: LAGO_PDF_URL
+              value: "http://billing-pdf.platform-billing.svc.cluster.local:3000"
+            - name: LAGO_USE_AWS_S3
+              value: "false"
+            - name: LAGO_USE_GCS
+              value: "false"
+            - name: LAGO_SIDEKIQ_WEB
+              value: "false"
+            - name: LAGO_DISABLE_SEGMENT
+              value: "true"
+            - name: LAGO_DISABLE_SIGNUP
+              value: "true"
+            - name: LAGO_CREATE_ORG
+              value: "true"
+            - name: LAGO_ORG_NAME
+              value: {{ required "organisation.name is required" .Values.organisation.name | quote }}
+            - name: LAGO_ORG_USER_EMAIL
+              value: {{ required "organisation.adminEmail is required" .Values.organisation.adminEmail | quote }}
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts: &engineMounts
+            - {name: storage, mountPath: /app/storage, subPath: documents}
+            - {name: app-tmp, mountPath: /app/tmp}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: api
+          image: {{ $engineImage }}
+          # The engine's scripts/start.api.sh, bound to loopback: the gateway is
+          # the only way in.
+          command: ["/bin/bash", "-c", "rm -f ./tmp/pids/server.pid && exec bundle exec rails s -b 127.0.0.1 -p 3000"]
+          # No probe of its own: it listens on loopback, which the kubelet
+          # cannot reach. The gateway's readiness is the API's health check.
+          envFrom: *engineSecrets
+          env: *engineEnv
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts: *engineMounts
+        - name: worker
+          image: {{ $engineImage }}
+          command: ["./scripts/start.worker.sh"]
+          envFrom: *engineSecrets
+          env: *engineEnv
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts: *engineMounts
+        - name: clock
+          image: {{ $engineImage }}
+          command: ["./scripts/start.clock.sh"]
+          envFrom: *engineSecrets
+          env: *engineEnv
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 20m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts: *engineMounts
+        - name: gateway
+          image: {{ printf "%s@%s" $img.gateway.repository (required "images.gateway.digest is required (ADR-113)" $img.gateway.digest) }}
+          command: ["/app/agentgateway", "-f", "/etc/agentgateway/config.yaml"]
+          ports:
+            - {name: http, containerPort: 8080, protocol: TCP}
+          env:
+            - name: OIDC_ISSUER_URL
+              value: {{ required "oidcIssuer is required: the box's issuer" .Values.oidcIssuer | quote }}
+            - name: OIDC_JWKS_URL
+              value: {{ required "oidcJwksUrl is required: the box's JWKS" .Values.oidcJwksUrl | quote }}
+            # The key the gateway presents to the engine for the one caller it
+            # admits. Only the gateway and the engine hold it.
+            - name: LAGO_ORG_API_KEY
+              valueFrom: {secretKeyRef: {name: billing-engine-keys, key: LAGO_ORG_API_KEY}}
+          envFrom:
+            # The capability's project, and its one caller with that caller's
+            # organisation. With no declared caller the second Secret does not
+            # exist and the gateway does not start: it admits nobody.
+            - secretRef: {name: billing-engine-identity}
+            - secretRef: {name: billing-engine-caller}
+          # The image has no shell, so the drain before stop is the kubelet's own.
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}
+          startupProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+          securityContext: {{- toYaml $hardened | nindent 12 }}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: gateway-config, mountPath: /etc/agentgateway, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: billing-engine-storage
+        - name: gateway-config
+          configMap: {name: billing-engine-gateway}
+        - name: app-tmp
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# The engine's volume: rendered documents and the queue's append-only file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: billing-engine-storage
+  namespace: platform-billing
+  annotations:
+    # Turning the capability off removes the engine and keeps what it rendered.
+    argocd.argoproj.io/sync-options: Delete=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ if eq (required "global.provider is required: it selects the volume's storage class" .Values.global.provider) "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+---
+# The gateway's port, and the only one: the API, the queue and the worker have none.
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-engine
+  namespace: platform-billing
+spec:
+  selector:
+    app.kubernetes.io/name: billing-engine
+  ports:
+    - {name: http, port: 8080, targetPort: http, protocol: TCP}

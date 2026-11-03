@@ -353,11 +353,15 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "AINativeSaaS")
 		os.Exit(1)
 	}
-	// The box's Credit Authority (ADR-109): its identity while enabled and its
-	// one caller, with the same clients as the applications it serves.
-	if err := (&controller.CreditAuthorityReconciler{AINativeSaaSReconciler: tenantResources}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "CreditAuthority")
-		os.Exit(1)
+	// The box's platform capabilities with one caller -- the Credit Authority
+	// (ADR-109) and the billing engine (ADR-113): each one's identity while
+	// enabled and its one caller, with the same clients as the applications
+	// they serve.
+	for _, capability := range controller.PlatformCapabilityReconcilers(tenantResources) {
+		if err := capability.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", capability.Name())
+			os.Exit(1)
+		}
 	}
 
 	// The box's observability viewer identity (ADR-078 add.5 §7): one project for

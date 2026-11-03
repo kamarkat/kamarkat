@@ -32,6 +32,18 @@ provider: <CLOUD_PROVIDER>
 #   * the external-dns owner id, when dns.ownerId is not pinned separately.
 #
 # Changing it after the box exists orphans everything written under the old name.
+# The logical hub (ADR-111 ss1): this box, stable for as long as it exists.
+#
+# Keyed on by everything that must survive a cluster being replaced -- the escrow
+# path holding this box's Infisical master keys and its identity provider's
+# encryption key, and the DNS records this box owns. Written once at scaffolding
+# and NEVER changed afterwards, for the same reason dns.ownerId is not.
+#
+# Separate from clusterName below because the two have different lifetimes. While
+# they were one value a hub could not be replaced without re-keying everything the
+# box owns, which is why replacing one was not possible at all.
+boxId: <BOX_ID>
+
 clusterName: <CLUSTER_NAME>
 environmentRevision: <BUNDLE_VERSION>
 # The ACME issuer this environment's public certificates come from.
@@ -178,6 +190,11 @@ dns:
 #                  (ADR-109). Off unless this box grants and spends credits -- a
 #                  box run as an internal platform bills nobody. An application
 #                  declaring capabilities.credits does not render while it is off.
+#   billing        removes the billing engine and its billing.<domain> endpoint
+#                  and revokes its caller; its database and records stay
+#                  (ADR-113). Off unless this box's product sells plans; an
+#                  application declaring capabilities.billing does not render
+#                  while it is off.
 capabilities:
   database:
     enabled: true
@@ -186,6 +203,8 @@ capabilities:
   support:
     enabled: true
   credits:
+    enabled: false
+  billing:
     enabled: false
 
 # On-prem nodes (ADR-075). Machines on your own premises, joining this cluster

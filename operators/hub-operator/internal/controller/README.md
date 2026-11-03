@@ -10,52 +10,50 @@ The HubEnvironmentReconciler is the core controller that orchestrates Day-2 oper
 
 The controller executes phases sequentially, updating status conditions after each phase:
 
-1. **Phase 1: Secret Zero Generation**
-   - Generates cryptographically secure bootstrap secrets
-   - Creates 8 Kubernetes secrets with ownerReferences
-   - Idempotent: reuses existing passwords if secrets exist
-   - Sets `SecretZeroGenerated` condition to True
+1. **Phase 1: Bootstrap secret generation**
+   - Generates the Secret Zero credentials infrastructure needs before Infisical exists
+   - Idempotent: an existing password is reused, never regenerated
+   - Addresses the bootstrap cluster the CR names (`Spec.Database.ClusterRef`)
+   - Sets `BootstrapSecretsGenerated`
 
-2. **Phase 2a: Database Migrations**
-   - Waits for CNPG Cluster to be Ready
-   - Executes golang-migrate migrations from embedded filesystem
-   - Connects to platform-db-rw (primary), not pooler
-   - Handles dirty database state (permanent error, no requeue)
-   - Sets `MigrationsComplete` condition to True
+2. **Phase 2: Application secret readiness**
+   - Waits for the credential of every declared role, derived from the role list
+     through `database.RoleSecretName` — the same function that applies it
+   - Sets `ApplicationSecretsReady`
 
-3. **Phase 2b: Database Role Provisioning**
-   - Creates 7 database roles via database/sql
-   - Grants permissions based on CR spec
-   - Detects password drift and executes ALTER ROLE
-   - Prunes orphaned roles not in CR spec
-   - Sets `DatabaseRolesConfigured` condition to True
+3. **Phase 3: Database role provisioning**
+   - One `RoleManager` per cluster the CR declares (`Spec.DatabaseClusters()`),
+     each acting only on `Spec.RolesFor(cluster)` — a role is provisioned on its
+     own application's cluster and no other (ADR-112)
+   - Grants permissions from the CR spec, detects password drift, issues
+     `ALTER ROLE`, prunes roles the CR no longer declares
+   - Sets `DatabaseRolesProvisioned`
 
-4. **Phase 3a: Infisical Secret Upload**
-   - Waits for Infisical Deployment to be Ready
-   - Uploads database credentials to Infisical API
-   - Tracks uploaded secrets in `Status.UploadedSecrets` array
-   - Skips secrets already uploaded (idempotency)
-   - Suspends if infisical-auth secret missing
-   - Sets `SecretsBackedUp` condition to True
+4. **Phase 4: Infisical secret upload**
+   - Waits for Infisical to be Ready
+   - Uploads credentials to the Infisical API, tracking them in
+     `Status.UploadedSecrets` and skipping what is already there
+   - Suspends if `infisical-auth` is missing
+   - Sets `SecretsBackedUp`
 
-5. **Phase 3b: OAuth Client Registration**
-   - Waits for Hydra Deployment to be Ready
-   - Registers OAuth clients using Ory Hydra Go SDK
-   - Idempotent client_id check
-   - Prunes orphaned clients not in CR spec
-   - Sets `OAuthClientsRegistered` condition to True
+5. **Phase 5: Identity**
+   - Registers the platform's OAuth clients with the box's own issuer
+   - Idempotent on client id; prunes clients the CR no longer declares
+   - Sets `IdentityReady`
 
-7. **Ready Condition**
-   - Set when all phases complete successfully
-   - Indicates Hub environment is fully operational
+6. **Ready**
+   - Set when every phase above has completed
+   - Schema is NOT a phase here: each application migrates its own, at its own
+     cluster (ADR-074, amended 2026-11-03)
 
 ### Dependency Readiness Checks
 
 The controller implements readiness checks for external dependencies:
 
-- `isCNPGReady()`: Checks CNPG Cluster Ready condition
-- `isInfisicalReady()`: Checks Infisical Deployment status
-- `isHydraReady()`: Checks Hydra Deployment status
+- `isCNPGReady()`: the bootstrap cluster's Ready condition — the database the
+  operator itself reads. An application's own cluster is that application's
+  prerequisite, and `RoleManager` fails per cluster rather than holding up the rest
+- `isInfisicalReady()`: Infisical's workload status
 
 Reconciliation waits (requeues after 10 seconds) if dependencies are not ready.
 
@@ -67,7 +65,7 @@ The controller distinguishes between transient and permanent errors:
 
 **Transient Errors** (requeue with backoff):
 - Database connection failures
-- API timeouts (Hydra, Infisical)
+- API timeouts (the issuer, Infisical)
 - Network failures
 - 5xx HTTP errors
 
@@ -98,11 +96,11 @@ The controller maintains 7 status conditions:
 
 | Condition | Type | Reason | Description |
 |-----------|------|--------|-------------|
-| SecretZeroGenerated | True/False | Generated/Failed | Bootstrap secrets created |
-| MigrationsComplete | True/False | Completed/DirtyDatabase/MigrationFailed | Database migrations executed |
-| DatabaseRolesConfigured | True/False | Configured/RoleCreationFailed | Database roles provisioned |
+| BootstrapSecretsGenerated | True/False | Generated/Failed | Secret Zero created |
+| ApplicationSecretsReady | True/False | Ready/Waiting | Every declared role's credential has been delivered |
+| DatabaseRolesProvisioned | True/False | Provisioned/RoleCreationFailed | Roles provisioned, each on its own cluster |
 | SecretsBackedUp | True/False | Uploaded/AuthenticationFailed | Secrets uploaded to Infisical |
-| OAuthClientsRegistered | True/False | Registered/Failed | OAuth clients registered in Hydra |
+| IdentityReady | True/False | Registered/Failed | OAuth clients registered with the box's issuer |
 | Ready | True/False | AllPhasesComplete/Failed | Hub environment fully operational |
 
 ## RBAC Permissions
@@ -131,8 +129,8 @@ The controller requires the following permissions:
 All reconciliation operations are idempotent:
 
 - Secret generation reuses existing passwords
-- Database migrations use golang-migrate (tracks applied migrations)
-- Role creation uses CREATE ROLE IF NOT EXISTS pattern
+- Role creation is idempotent, and a managed role is identified by its PostgreSQL
+  comment rather than by assuming the operator made it
 - OAuth client registration checks client_id before creating
 - Infisical uploads track uploaded secrets in Status.UploadedSecrets
 
@@ -159,8 +157,7 @@ The controller watches:
 - **External Dependencies**: CNPG Cluster (for readiness)
 
 Future tasks will add watches for:
-- Hydra/Infisical Deployments (readiness)
-- platform-db-ca secret (certificate rotation)
+- `infisical-db-ca` (certificate rotation)
 - Secrets with label `ops.nutgraf.in/db-credentials=true` (password rotation)
 
 ## Testing
@@ -171,9 +168,9 @@ Future tasks will add watches for:
 - Mock external API calls
 
 ### E2E Tests (KUTTL)
-- Deploy real CNPG, Hydra, Infisical
+- Deploy real CNPG and Infisical
 - Assert database roles exist via SQL queries
-- Assert OAuth clients exist via Hydra API
+- Assert OAuth clients exist via the issuer's API
 - Assert secrets exist in Infisical via API
 
 ## Development Workflow
@@ -203,14 +200,6 @@ Check status conditions:
 kubectl get hubenvironment hub-env -o jsonpath='{.status.conditions}' | jq
 ```
 
-### Dirty Database State
-
-Manual recovery required:
-1. Connect to database: `kubectl exec -it platform-db-1 -- psql`
-2. Check migration version: `SELECT * FROM schema_migrations;`
-3. Fix dirty state: `UPDATE schema_migrations SET dirty = false WHERE version = X;`
-4. Trigger reconciliation: Add `ops.nutgraf.in/reconcile-trigger` annotation
-
 ### Infisical Upload Suspended
 
 Check if infisical-auth secret exists:
@@ -224,8 +213,9 @@ If missing, Phase 3a will suspend until the secret is created.
 
 Check dependency status:
 ```bash
-kubectl get cluster platform-db -o jsonpath='{.status.conditions}'
-kubectl get deployment infisical -n platform-ops
+kubectl -n platform-data get clusters.postgresql.cnpg.io \
+  -o custom-columns=NAME:.metadata.name,READY:'.status.conditions[?(@.type=="Ready")].status'
+kubectl -n platform-security get deployment infisical-standalone-infisical
 ```
 
 Reconciliation will requeue every 10 seconds until dependencies are ready.
@@ -235,4 +225,3 @@ Reconciliation will requeue every 10 seconds until dependencies are ready.
 - [Kubebuilder Documentation](https://book.kubebuilder.io/)
 - [Controller-Runtime](https://github.com/kubernetes-sigs/controller-runtime)
 - [CloudNativePG API](https://cloudnative-pg.io/documentation/current/api_reference/)
-- [Ory Hydra Go SDK](https://github.com/ory/hydra-client-go)

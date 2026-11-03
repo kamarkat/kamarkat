@@ -407,11 +407,16 @@ check_infisical() {
     log_section "5. INFISICAL"
     check_namespace_pods "platform-security"
 
-    # Key ExternalSecrets
+    # The role credentials ESO delivers, which the hub-operator blocks on before it
+    # provisions any role (hubenvironment_controller.go, requiredSecrets). One per
+    # declared role, derived from the same names RoleSecretName builds.
     local key_secrets=(
-        "platform-data:hub-db-credentials"
-        "platform-data:platform-db-app-credentials"
-        "platform-data:control-plane-db-credentials"
+        "platform-data:hub-grafana-db-credentials"
+        "platform-data:hub-credits-db-credentials"
+        # Not a declared role: billing-db's initdb owner (ADR-113), which the
+        # cluster cannot initialise without.
+        "platform-data:hub-billing-db-credentials"
+        "platform-identity:zitadel-db-credentials"
     )
     for entry in "${key_secrets[@]}"; do
         local ns="${entry%%:*}"

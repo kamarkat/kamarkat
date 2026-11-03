@@ -99,12 +99,19 @@ spec:
       {{- end }}
     {{- end }}
 
-  {{- if ((.Values.capabilities).credits).enabled }}
-  # This application consumes the tenant's Credit Authority (ADR-109): the
-  # single source of its one caller. See credit-authority.yaml.
+  {{- if or ((.Values.capabilities).credits).enabled ((.Values.capabilities).billing).enabled }}
+  # The platform capabilities this application consumes: each declaration is
+  # the single source of that capability's one caller. See credit-authority.yaml
+  # (ADR-109) and billing-engine.yaml (ADR-113).
   capabilities:
+    {{- if ((.Values.capabilities).credits).enabled }}
     credits:
       enabled: true
+    {{- end }}
+    {{- if ((.Values.capabilities).billing).enabled }}
+    billing:
+      enabled: true
+    {{- end }}
   {{- end }}
 
   {{- with .Values.cache }}

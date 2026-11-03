@@ -20,7 +20,7 @@ CHART=$(mktemp -d)/platform-bundle
 scripts/package/bundle-chart.sh "$VERSION" "$(dirname "$CHART")" >/dev/null
 
 helm template platform-bundle "$CHART" \
-    --set environmentSlug=dev --set provider=hybrid \
+    --set environmentSlug=dev --set boxId=example-box --set provider=hybrid \
     --set instanceRepoURL=https://github.com/example-org/example-gitops \
     --set hubDomain=dev.example.test \
     --set previewDomain=example-preview.test \

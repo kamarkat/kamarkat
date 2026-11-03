@@ -125,3 +125,22 @@ stays limited to that one case. Every other role is declared against its applica
 cluster, by whichever reconciler owns application roles at the time. The `control_plane` and
 `hub` roles have no consuming workload and go with their databases (ADR-112 §1).
 
+`HubEnvironment.spec.database.roles[].clusterRef` is **required**: a role whose cluster was
+assumed would be provisioned on a plausible cluster, against the wrong application's
+database, and reported as a success. The box-level `spec.database.clusterRef` is no longer a
+default for it — it names the bootstrap cluster, which is the one the operator itself reads.
+
+### Amended 2026-11-03
+
+**"Still outstanding" above counts six application roles; there are three** —
+`hub_grafana`, `hub_zitadel` and `hub_credits`, one per application cluster. `hub_hydra`,
+`hub_kratos` and `hub_keto` went with the Ory stack; `hub_control_plane` and
+`hub_centralized` went with the databases nothing consumed. The mandate itself is
+unchanged: those three move to Crossplane `provider-sql` when it is deployed, and the
+Day-0 role stays with CNPG.
+
+**The third leg is no longer vacant.** ADR-074's 2026-11-03 addendum gives schema
+migration an owner — each application, at its own cluster — and removes the imperative
+migrator this ADR designated for deletion. What remains in `internal/database/` is role
+DCL only, which is this ADR's second leg and still outstanding as described.
+

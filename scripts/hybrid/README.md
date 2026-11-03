@@ -21,9 +21,21 @@ verification are handled by **one script**:
 # Verify Ready status of all registered nodes without changing anything
 ./scripts/hybrid/provision-flatcar-worker.sh --verify
 
-# Autonomous Tailscale re-auth (embed a reusable auth-key)
+# Autonomous Tailscale re-auth. Omit --ts-authkey and the key is read from
+# k8-secrets/tailscale/authkey; pass it only to use a different one.
 ./scripts/hybrid/provision-flatcar-worker.sh --node 1 --ts-authkey tskey-...
+
+# Re-running is RECOVERY-FIRST, not rebuild-first: an existing VM is started and
+# given --recover-wait seconds (default 300) to rejoin before it is replaced.
+./scripts/hybrid/provision-flatcar-worker.sh --node 1 --recover-wait 600
+
+# Skip that gate and rebuild from the base image. This DESTROYS the VM's disk.
+./scripts/hybrid/provision-flatcar-worker.sh --node 1 --force-rebuild
 ```
+
+`--help` lists the rest: `--spoke`, `--env`, `--vswitch`, `--upgrade-flatcar`,
+`--host-cpu-max`, and per-run capacity overrides (`--memory-gb`, `--min-memory-gb`,
+`--max-memory-gb`, `--cpus`, `--disk-gb`) that win over the registry for that run.
 
 > **The run is only a success when the node reports `Ready`** in the spoke
 > cluster. The provisioner exits non-zero if any targeted node fails to
@@ -33,7 +45,7 @@ verification are handled by **one script**:
 
 | Phase | What it does |
 |-------|--------------|
-| [0/6] | Verify offline worker binary cache on Mac (kubelet, kubeadm, tailscale) |
+| [0/6] | Verify offline worker binary cache on Mac (kubelet, kubeadm, tailscale), then the **recovery gate**: an existing VM is started and given time to rejoin before it is replaced |
 | [1/6] | SSH reachability gate to the Windows host |
 | [2/6] | Windows host & Hyper-V preparation (power/lid, Hyper-V feature, directories) |
 | [3/6] | Flatcar base VHDX & Ignition ISO bundle preparation |
@@ -48,8 +60,9 @@ verification are handled by **one script**:
    configuration needed. Join credentials (`<spoke>-home-worker-join` Secret,
    minted by hub-operator) are baked into the ISO.
 2. **Native Tailscale daemon** joins the VM to the tailnet
-   (`tailscale up --hostname=flatcar-node-<N>`); the spoke reachable via the
-   tailnet InternalIP.
+   (`tailscale up --hostname=$VM_NAME`, which is the node's hostname from the
+   registry); the node is then reachable on its tailnet address, which is what it
+   advertises as its `InternalIP`.
 3. **Native Linux cgroup v2 + eBPF** — standard Cilium CNI deployment, no
    cgroup mount hacks.
 
@@ -59,8 +72,12 @@ Nodes are declared in `scripts/hybrid/home-lab.env` (gitignored; see
 `home-lab.env.example`). Each line is
 
 ```
-<hostname>|<ssh-target>|<os-info>|<tailnet-host>|<box-tag>|<target-cluster>|<startupGB>|<minGB>|<maxGB>|<cpus>
+<hostname>|<ssh-target>|<os-info>|<tailnet-host>|<box-tag>|<target-cluster>|<startupGB>|<minGB>|<maxGB>|<cpus>|<diskGB>
 ```
+
+`<diskGB>` is optional and is the eleventh field; omitted, the per-cluster default
+applies (100 GB hub, 60 GB spoke). `<os-info>` is a legacy column, informational
+only — the shipped examples set it to `unused`.
 
 **The hostname column is authoritative**, not informational: the provisioner
 uses it directly (`VM_NAME="${_HOST}"`) and only falls back to the conventional
@@ -68,8 +85,21 @@ uses it directly (`VM_NAME="${_HOST}"`) and only falls back to the conventional
 order, counting every entry — including ones a `--cluster` filter skips — so
 renumbering the file changes what `--node N` means.
 
-Capacity fields are the default per-node Hyper-V sizing; sum the `cpus` column
-per box and keep it at or near that host's logical CPU count (ADR-046 §24.5).
+Capacity fields are the per-node Hyper-V sizing, and `home-lab.env.example`
+carries the full rationale for each. Two things are worth knowing before editing
+them:
+
+- **`cpus` overrides the provisioner's automatic division.** Left empty, the
+  provisioner splits the host's threads across the VMs that will share it (floor
+  of 2). Set, it wins — so a value copied between boxes can oversubscribe a host
+  that cannot take it. Sum the column per `box-tag` and keep it at or near that
+  host's logical CPU count: a 15 W part driven at 2:1 reaches the ACPI critical
+  thermal trip and powers the box off mid-provision (ADR-046 §24.5). The
+  provisioner warns when the total oversubscribes, and `--host-cpu-max` (default
+  70) caps `PROCTHROTTLEMAX` on the host.
+- **`minGB == startupGB == maxGB` means fixed memory.** The guest holds it for its
+  whole life and returns none of it, so the host keeps only the remainder. A 16 GB
+  box running a 13 GB hub node leaves about 3 GB for Windows and Hyper-V.
 
 The same node list lives in the SpokePool claim annotation
 (`home-workers`), which drives hub-operator's join-payload Secret via
@@ -86,8 +116,12 @@ The same node list lives in the SpokePool claim annotation
 | `render-home-workers.sh` | Render the SpokePool `home-workers` JSON annotation |
 | `rejoin-tailnet.sh` | Re-join a node to the tailnet after its device was deleted (see below) |
 | `free-spoke.sh` | Host disk sweep + 24-hour log bound for every box (see below) |
+| `setup-hyper-v.sh` | One-time: install Hyper-V on a remote Windows **Home** host over SSH, and reboot it. Run before the first provision of a box; the provisioner's `[2/6]` enables the feature but cannot bring a host from no-Hyper-V to Hyper-V across a reboot |
+| `sandbox-runtime-rollback.sh` | ADR-107: remove the sandboxed runtime layer from a node (Flatcar read-only config, or the managed block on Kind/Ubuntu) |
+| `kubelet-host-disk.conf` | The kubelet disk bound every node receives (see below) |
+| `hyper-v-install-guide.txt` | Reference only: where the Windows Home enablement technique came from, plus its BIOS virtualisation requirements. Nothing reads it — `setup-hyper-v.sh` generates its own batch file |
 | `home-lab.env` | Node registry — gitignored, real values only |
-| `home-lab.env.example` | Template for `home-lab.env` |
+| `home-lab.env.example` | Template for `home-lab.env`. Copy it, fill it in, and keep the eleven-field format above |
 
 ---
 
@@ -130,7 +164,9 @@ disk path `Get-VMHardDiskDrive` declares or any matching VM name, whatever
 state the VM is in (never `flatcar-base.vhdx`, the pristine image) — plus
 ignition artefacts of VMs that no longer exist on that box, and the Windows
 temp/update caches. Every deletion prints as a `DEL` line; every refusal as a
-`SKIP` line, so the run is auditable. Per guest that
+`SKIP` line, so the run is auditable. Guests are reached on the provisioner's own
+port numbering — SSH on `2220 + registry index` — so a guest that is absent from
+`home-lab.env`, or renumbered in it, is simply skipped. Per guest that
 answers it writes the 24-hour log bound
 (`/etc/systemd/journald.conf.d/24h.conf` — `MaxRetentionSec=1day`,
 `SystemMaxUse=500M`, the same file new provisions get from Ignition), vacuums
@@ -150,11 +186,13 @@ Spoken-node VHDXes grow ~2–3 GB/day per node (metrics PVC, CNPG data and
 container images — logs are the bounded share), so a two-day cadence spends
 about 6 GB against the ~47 GB the first run reclaims.
 
-Log retention is 24 hours wherever the platform stores logs: the VLogs
-`retentionPeriod` in `manifests/spoke/spoke-catalog/infra/victoriametrics/storage.yaml`
-and `manifests/hub-core-services/victoriametrics/storage.yaml` is `1d`, so
-platform pod logs older than a day are gone from Grafana by design. Metrics
-keep their 15 days.
+The 24-hour bound is on the GUEST's journal, not on the platform's logs. Alloy
+ships pod logs to Loki (`loki.platform-observability.svc:3100`), which stores them
+in object storage with `limits_config.retention_period: 168h` — seven days — in
+`manifests/hub-core-services/loki/loki.yaml` and its spoke counterpart. So
+vacuuming a guest journal to a day costs nothing that Grafana reads: the logs are
+already off the disk this section is trying to protect. Metrics keep their 15 days
+(`retentionPeriod: "15d"` on both `VMSingle`s in `victoriametrics/stores.yaml`).
 
 ---
 
@@ -303,7 +341,15 @@ Bind the switch to a real adapter so the inner NAT disappears:
 ```bash
 ./scripts/hybrid/convert-to-external-switch.sh --node 3 --dry-run
 ./scripts/hybrid/convert-to-external-switch.sh --node 3
+./scripts/hybrid/convert-to-external-switch.sh --node 3 --revert   # back to Internal
 ```
+
+**Re-provisioning does not undo the conversion.** The provisioner creates an
+Internal switch and its `New-NetNat` only when the switch is missing, and skips the
+gateway and NAT setup entirely when the switch it finds is not Internal — so a
+converted host stays converted across any number of provisioning runs. It also
+prints, on creating an Internal one, that the layout is host-local and breaks
+across two boxes, and points back at this file.
 
 **`-AllowManagementOS $true` is mandatory on Wi-Fi.** With `$false` the adapter
 is taken away from the host's WLAN service — which is what maintains the 802.11

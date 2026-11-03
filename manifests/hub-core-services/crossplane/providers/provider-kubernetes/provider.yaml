@@ -54,7 +54,7 @@ kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v1.3.1
+  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v1.4.1
   packagePullPolicy: IfNotPresent
   runtimeConfigRef:
     name: provider-kubernetes-runtime

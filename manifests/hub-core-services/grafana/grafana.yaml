@@ -1,8 +1,10 @@
 # ADR-078 addendum 5 §6: the box's Grafana, on the hub only.
 #
 # Grafana OSS, two replicas in staging and production, sharing one PostgreSQL
-# database (the `grafana` database on the hub's CNPG cluster), which holds state
-# and sessions for every replica: Grafana's documented HA model. Grafana's own
+# database (`grafana`, on Grafana's own cluster -- ADR-112 §1, declared in
+# database/grafana-db.yaml), which holds state and sessions for every replica:
+# Grafana's documented HA model. Grafana migrates that schema itself, at startup,
+# on every replica. Grafana's own
 # alerting is not used; alerting is VMAlert and VMAlertmanager.
 #
 # Sign-in: this box's own issuer, through the confidential `grafana` client
@@ -94,12 +96,25 @@ metadata:
   labels:
     dashboards: platform
 spec:
+  # Pinned, not inherited from the operator's default.
+  #
+  # The CR carried no version at all, so Grafana ran whatever the operator
+  # release defaulted to: an operator bump moved Grafana silently, and
+  # nothing recorded which version a box was on.
+  #
+  # `spec.version` and not a container image override, because that is the
+  # field the operator composes the image from and the field the release
+  # inventory reads (scripts/package/inventory.py, operated_images). A pod
+  # template override sets the running image without the inventory seeing
+  # it, so the release would still report the operator's default.
+  version: 13.3.0
   config:
     server:
       root_url: https://grafana.PLACEHOLDER_HUB_DOMAIN
     database:
       type: postgres
-      host: platform-db-rw.platform-data.svc.cluster.local:5432
+      # Grafana's own cluster (ADR-112 §1), declared in database/grafana-db.yaml.
+      host: grafana-db-rw.platform-data.svc.cluster.local:5432
       name: grafana
       ssl_mode: require
     users:

@@ -27,6 +27,11 @@ Authority (ADR-109); monetary billing is the coordinating product layer's,
 through external providers. Infrastructure usage therefore has no billing
 engine to be recorded in.
 
+*Amended by ADR-113 (2026-11-03):* Lago is now the platform's selectable
+billing capability, recording plans, subscriptions and invoices for the one
+application that declares it. Infrastructure usage is still recorded in the
+usage-analytics database below, never in the billing engine.
+
 **The usage record is the usage-analytics database.**
 - Infrastructure usage and internal execution costs are stored in a
   usage-analytics database operated by the platform, provisioned by the

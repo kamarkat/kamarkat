@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-engine-gateway
+  namespace: platform-billing
+data:
+  # The gateway in front of the engine (ADR-113 §4). The engine listens on the
+  # pod's loopback, so this listener is the only way in.
+  #
+  # Shell-expanded from the gateway's environment before it is parsed, as the
+  # Credit Authority's is: a value the platform allocates (project, caller, its
+  # organisation, the engine's key) reaches it at startup, an unset one stops it
+  # starting, and no rule below uses a bare dollar sign.
+  #
+  # Every rule is `require` or `allow`, never `deny`: a rule that fails to
+  # evaluate counts as false, so it refuses.
+  config.yaml: |
+    binds:
+    - port: 8080
+      listeners:
+      - protocol: HTTP
+        routes:
+        # Liveness: the gateway itself.
+        - name: health
+          matches:
+          - path: {exact: /health}
+          policies:
+            directResponse: {body: "ok", status: 200}
+        # Readiness: the engine's own health check, and nothing else of it.
+        - name: ready
+          matches:
+          - path: {exact: /health/ready}
+          policies:
+            urlRewrite:
+              path: {full: /health}
+          backends:
+          - host: 127.0.0.1:3000
+        # Invoice documents. The engine links each one at its public address as
+        # a signed, expiring URL, handed to the invoiced account's members by
+        # the caller; the signature is the authorisation, as the engine issues
+        # it. Reads only, of the two storage routes those links use.
+        - name: documents
+          matches:
+          - path: {pathPrefix: /rails/active_storage/}
+          policies:
+            authorization:
+              rules:
+              - allow: 'request.method == "GET" && request.path.matches(r"^/rails/active_storage/(blobs/redirect|disk)/[A-Za-z0-9_=+/.%-]+\z")'
+          backends:
+          - host: 127.0.0.1:3000
+        # The engine's API, for its one caller. The caller presents its own
+        # service token; the gateway removes it and presents the engine's key
+        # for the organisation, so no application holds that key.
+        - name: api
+          matches:
+          - path: {pathPrefix: /api/v1/}
+          policies:
+            jwtAuth:
+              mode: strict
+              issuer: "${OIDC_ISSUER_URL}"
+              audiences: ["${OIDC_PROJECT_ID}"]
+              jwks:
+                url: "${OIDC_JWKS_URL}"
+            authorization:
+              rules:
+              # An access token, never an ID token (ADR-095).
+              - require: '!has(jwt.at_hash)'
+              # The one caller: the service client of the application that
+              # declares this capability, published by the platform from that
+              # declaration, and the organisation it belongs to. A machine
+              # client, so no person's token can match it.
+              - require: 'jwt.client_id == "${BILLING_CALLER_CLIENT_ID}"'
+              - require: 'jwt["urn:zitadel:iam:user:resourceowner:id"] == "${BILLING_CALLER_ORG_ID}"'
+              # The caller owns the organisation: its whole API, and no other
+              # path of the engine.
+              - allow: 'request.method in ["GET", "POST", "PUT", "DELETE"] && request.path.matches(r"^/api/v1/[A-Za-z0-9_/.-]+\z")'
+            backendAuth:
+              key: "${LAGO_ORG_API_KEY}"
+          backends:
+          - host: 127.0.0.1:3000

@@ -40,6 +40,50 @@ ADR-020 is withdrawn entire. Its governance — immutability, checksum policy, l
 
 This is a regression against ADR-023's own reasoning — the platform asymmetry that ADR argued against is now the state — and it is accepted rather than concealed. The asymmetry was real throughout; what changes is that it is no longer described as temporary.
 
+## Addendum (2026-11-03): schema migration has an owner, and this ADR's stopgap is removed
+
+**Each platform application owns and runs its own schema migration, at its own
+cluster.** ADR-112 gave every application its own PostgreSQL cluster, and with it the
+only grain on which this question has an answer: the schema belongs to the thing that
+wrote it, and every application the platform ships already migrates its own.
+
+| Application | How its schema is applied |
+|---|---|
+| Zitadel | `zitadel-init` and `zitadel-setup`, Helm `pre-install,pre-upgrade` hook Jobs at weights 1 and 2; `zitadel setup cleanup` runs first, in `setupJob.initContainers`, so a step killed mid-migration is re-runnable |
+| Infisical | knex, in-process at pod startup; single-flight through `Recreate`, with the `migration-unlock` initContainer clearing a stale `infisical_migrations_lock` |
+| Grafana | its own sqlstore migrator, in-process at startup, on every replica |
+| Credit Authority | the ledger migrates before it answers `/_healthcheck`; `provision.sh` waits on that |
+
+This is not a mechanism chosen under the pressure this ADR warned about. It is what
+the applications do, which the platform was duplicating badly.
+
+### What the platform therefore does not do
+
+`operators/hub-operator/internal/database/migrator.go` and
+`operators/hub-operator/internal/embed/migrations/` are **removed**.
+
+This ADR recorded that stopgap as "the only migration path the platform has" and
+that "deleting it now would leave nothing". **Both halves were already false when
+they were written.** The HubEnvironment controller's call to `RunMigrations` was
+deleted on 2026-08-13, in `0d768ad0` ("remove SPIRE dependency and associated
+manifests from hub core services") — a month before this ADR. `NewMigrator` had no
+caller, so nothing was load-bearing and nothing was running. The file was retained,
+and documented as dangerous to remove, on the strength of a reading of the code that
+a search for its caller would have settled.
+
+What it would have applied, had anything called it, was `agent_infra_status` and its
+RLS policies — a table for a PostgREST-fronted agent registry this platform does not
+deploy, in the `hub` database, which went with `platform-db` (ADR-112 §1). The SQL
+under `manifests/hub-core-services/database-migrations/` is removed for the same
+reason: its own README said nothing applied it, and the databases it described no
+longer exist.
+
+**The alternative "delete the migration SQL along with the mechanism", rejected
+above, is therefore taken for the HUB only.** Its stated ground was that the SQL
+"describes schemas that exist in running databases". For the hub and control-plane
+schemas that ceased to be true when those databases were dropped. The tenant
+baseline is untouched and still has the owner ADR-089 gave it.
+
 ### What is not decided here
 
 *Amended 2026-09-25 by ADR-089, which closes this for the TENANT BASELINE only:
@@ -72,9 +116,10 @@ What owns schema migrations next. Atlas's replacement, if any, is a decision wit
 |---|---|---|---|---|---|
 | Physical database cluster | `zero-ops` | Platform | CloudNativePG | Tenants | Day-1+ |
 | Logical databases, roles, grants | `zero-ops` | Platform | Crossplane `provider-sql` | Tenants | Day-1+ |
-| Schema migrations | — | — | — | — | — |
+| Schema migrations | the application | the application | the application's own migrator, at its own cluster | itself | Day-1+ |
 
-The empty row is the decision. See ADR-039 for the complete ownership matrix.
+That row was empty, and the emptiness was the decision. It is filled by this ADR's
+2026-11-03 addendum. See ADR-039 for the complete ownership matrix.
 
 ## Consequences
 

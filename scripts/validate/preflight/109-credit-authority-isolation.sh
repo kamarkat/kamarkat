@@ -25,9 +25,10 @@
 #       the route and its listener exist only while the capability is enabled,
 #       admit only the capability's namespace, and reach only the gateway; the
 #       caller's Secret is revocable
-#   I9  the prerequisites are on every box: the credits database (owned by
-#       hub_credits, retained), the role, its generated credential delivered with
-#       the database prerequisites, the namespace, and platform-db admitting it
+#   I9  the prerequisites are on every box: the ledger's own cluster (ADR-112), the
+#       credits database on it (owned by hub_credits, retained), the role bound to
+#       that cluster, its generated credential delivered with them, the namespace,
+#       and credits-db admitting it
 #   I10 enablement: the service, the gateway's flag and the fleets' URL follow
 #       capabilities.credits.enabled, and a fleet declaring the capability on a
 #       box without it does not render
@@ -47,10 +48,10 @@ CA = "manifests/hub-core-services/credit-authority"
 GW = "manifests/hub-core-services/gateway"
 EM = "manifests/argocd/environment-manager"
 UT = "manifests/tenants/charts/universal-tenant"
-DB = "manifests/hub-core-services/database"
+DB = f"{CA}/database"
 FIXTURE = {"oidcIssuer": "https://id.example.test", "oidcJwksUrl": "https://id.example.test/keys",
            "global": {"hubDomain": "example.test"}}
-EM_ARGS = ["--set", "environmentSlug=dev", "--set", "provider=hybrid",
+EM_ARGS = ["--set", "environmentSlug=dev", "--set", "provider=hybrid", "--set", "boxId=example-box",
            "--set", "instanceRepoURL=https://github.com/example-org/example-gitops",
            "--set", "hubDomain=dev.example.test", "--set", "previewDomain=example-preview.test", "--set", "alerting.emailTo[0]=alerts@example.test",
            "--set", "topology=single", "--set", "publicTlsIssuer=letsencrypt-prod",
@@ -161,25 +162,32 @@ else:
               f"I8 exposure wrong: ingress={sources} ports={cnp_ports} listener admits={admitted} backends={backends}")
 
 # The prerequisites, on every box.
-dbs = docs(open(f"{DB}/platform-databases.yaml").read())
-credits_db = next((d for d in dbs if d["metadata"]["name"] == "credits"), {})
+#
+# All of them in the ledger's OWN component (ADR-112): the cluster, its Database, the
+# role credential and the policy that admits the ledger are one directory, so a box that
+# deploys the Credit Authority cannot deploy it without them.
+objs = docs(open(f"{DB}/credits-db.yaml").read())
+credits_db = next((d for d in objs if d["kind"] == "Database" and d["spec"].get("name") == "credits"), {})
+cluster = next((d for d in objs if d["kind"] == "Cluster"), {})
 es = yaml.safe_load(open(f"{DB}/hub-credits-db-credentials-es.yaml"))
 kust = yaml.safe_load(open(f"{DB}/kustomization.yaml"))
 pg_peers = [f["namespaceSelector"]["matchLabels"].get("kubernetes.io/metadata.name")
-            for d in docs(open(f"{DB}/network-policy.yaml").read()) if d["metadata"]["name"] == "platform-db-access"
+            for d in objs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "credits-db-access"
             for r in d["spec"]["ingress"] for f in r.get("from", []) if "namespaceSelector" in f]
 hubenv = yaml.safe_load(open("manifests/environments/base/hubenvironment.yaml"))
 roles = {r["name"]: r for r in hubenv["spec"]["database"]["roles"]}
 mappings = open("operators/hub-operator/internal/infisical/secret_mappings.go").read()
 namespaces = [d["metadata"]["name"] for d in docs(open("manifests/hub-core-services/platform-namespaces/namespaces.yaml").read())]
 check(credits_db.get("spec", {}).get("owner") == "hub_credits" and credits_db["spec"].get("databaseReclaimPolicy") == "retain"
+      and credits_db["spec"]["cluster"]["name"] == cluster["metadata"]["name"] == "credits-db"
       and es["metadata"]["namespace"] == "platform-data" and es["metadata"]["name"] == "hub-credits-db-credentials"
       and "hub-credits-db-credentials-es.yaml" in kust["resources"]
       and roles.get("hub_credits", {}).get("database") == "credits"
+      and roles.get("hub_credits", {}).get("clusterRef") == "credits-db"
       and '"hub-credits-db-password"' in mappings and "platform-credits" in namespaces and "platform-credits" in pg_peers,
-      "I9 the credits database (owned, retained), role, credential, namespace and database access are on every box",
-      f"I9 prerequisite missing: database={credits_db.get('spec')} role={roles.get('hub_credits')} "
-      f"namespace={'platform-credits' in namespaces} db access={pg_peers}")
+      "I9 the ledger's own cluster, its database (owned, retained), the role bound to that cluster, the credential, the namespace and database access are on every box",
+      f"I9 prerequisite missing: cluster={cluster.get('metadata', {}).get('name')} database={credits_db.get('spec')} "
+      f"role={roles.get('hub_credits')} namespace={'platform-credits' in namespaces} db access={pg_peers}")
 
 # Enablement.
 def em(template, enabled):

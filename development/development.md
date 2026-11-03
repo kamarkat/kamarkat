@@ -99,7 +99,7 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
   --bundle-version 0.1.14     
 
 - KUBECONFIG=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \                   
-  kubectl get app platform-database -n platform-ops \
+  kubectl get app platform-infisical-db -n platform-ops \
   -o jsonpath='{.spec.source.helm.values}{"\n"}'
 
 ### What the run should do:

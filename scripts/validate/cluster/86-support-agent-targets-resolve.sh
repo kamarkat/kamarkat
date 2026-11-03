@@ -48,6 +48,7 @@ for doc in yaml.safe_load_all(open(sys.argv[1])):
                 src.get("kind", "?"),
                 src.get("namespace", ""),
                 src.get("service", ""),
+                str(src.get("port", "")),
                 src.get("path", ""),
             ]))
         sys.exit(0)
@@ -59,8 +60,8 @@ PY
     rows=$(python3 -c "$extract" "$hub") \
         || { hard_fail "the hub allowlist could not be read from $hub"; return 0; }
 
-    local failed=0 total=0 name kind ns svc path
-    while IFS=$'\t' read -r name kind ns svc path; do
+    local failed=0 total=0 name kind ns svc port path
+    while IFS=$'\t' read -r name kind ns svc port path; do
         [[ -z "$name" ]] && continue
         (( total++ ))
         case "$kind" in
@@ -73,6 +74,18 @@ PY
                     note "ADR-077: a collector whose target is absent reports nothing and says so"
                     note "only in the payload's Skipped map. Either the Service moved, or the"
                     note "collector was written against the wrong component."
+                    failed=1
+                elif [[ -z "$port" || "$port" == "0" ]]; then
+                    hard_fail "collector '$name' is kind: metrics with no port"
+                    failed=1
+                elif ! kc get service "$svc" -n "$ns" \
+                        -o jsonpath='{.spec.ports[*].port}' 2>/dev/null \
+                        | tr ' ' '\n' | grep -qx "$port"; then
+                    hard_fail "collector '$name' scrapes $ns/$svc:$port, which that Service does not serve"
+                    note "A Service that exists on a different port fails exactly like an absent"
+                    note "one -- a refused scrape, recorded only in the payload's Skipped map."
+                    note "Exporters do not agree on a port: kube-state-metrics serves 8080 and a"
+                    note "CloudNativePG instance serves 9187."
                     failed=1
                 fi
                 ;;

@@ -32,7 +32,7 @@ import (
 //
 // So initialisation is treated as ATOMIC AT THE DATABASE, which is the same
 // contract CNPG already states with `bootstrap: initdb` versus `recovery`, and
-// the same one the database-recovery overlay applies to platform-db: a database
+// the same one each application's database-recovery overlay applies: a database
 // whose initialisation did not complete is recreated, not repaired. That is safe
 // precisely because incomplete initialisation means there is nothing to
 // preserve.

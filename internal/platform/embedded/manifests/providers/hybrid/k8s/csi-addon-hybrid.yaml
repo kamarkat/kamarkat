@@ -180,7 +180,7 @@ stringData:
             fsGroup: 1001
           containers:
             - name: csi-node-driver-registrar
-              image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.13.0
+              image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0
               imagePullPolicy: IfNotPresent
               args:
                 - --kubelet-registration-path=/var/lib/kubelet/plugins/csi.hetzner.cloud/socket
@@ -190,13 +190,13 @@ stringData:
                 - name: registration-dir
                   mountPath: /registration
             - name: liveness-probe
-              image: registry.k8s.io/sig-storage/livenessprobe:v2.15.0
+              image: registry.k8s.io/sig-storage/livenessprobe:v2.20.0
               imagePullPolicy: IfNotPresent
               volumeMounts:
               - mountPath: /run/csi
                 name: plugin-dir
             - name: hcloud-csi-driver
-              image: docker.io/hetznercloud/hcloud-csi-driver:v2.13.0
+              image: docker.io/hetznercloud/hcloud-csi-driver:v2.24.1
               imagePullPolicy: IfNotPresent
               command: [/bin/hcloud-csi-driver-node]
               volumeMounts:
@@ -284,7 +284,7 @@ stringData:
             fsGroup: 1001
           containers:
             - name: csi-attacher
-              image: registry.k8s.io/sig-storage/csi-attacher:v4.8.1
+              image: registry.k8s.io/sig-storage/csi-attacher:v4.13.0
               imagePullPolicy: IfNotPresent
               args:
                 - --default-fstype=ext4
@@ -292,7 +292,7 @@ stringData:
               - name: socket-dir
                 mountPath: /run/csi
             - name: csi-resizer
-              image: registry.k8s.io/sig-storage/csi-resizer:v1.13.2
+              image: registry.k8s.io/sig-storage/csi-resizer:v2.3.0
               imagePullPolicy: IfNotPresent
               args:
                 - --feature-gates=RecoverVolumeExpansionFailure=false
@@ -300,7 +300,7 @@ stringData:
               - name: socket-dir
                 mountPath: /run/csi
             - name: csi-provisioner
-              image: registry.k8s.io/sig-storage/csi-provisioner:v5.2.0
+              image: registry.k8s.io/sig-storage/csi-provisioner:v6.4.0
               imagePullPolicy: IfNotPresent
               args:
                 - --feature-gates=Topology=true
@@ -309,13 +309,13 @@ stringData:
               - name: socket-dir
                 mountPath: /run/csi
             - name: liveness-probe
-              image: registry.k8s.io/sig-storage/livenessprobe:v2.15.0
+              image: registry.k8s.io/sig-storage/livenessprobe:v2.20.0
               imagePullPolicy: IfNotPresent
               volumeMounts:
               - mountPath: /run/csi
                 name: socket-dir
             - name: hcloud-csi-driver
-              image: docker.io/hetznercloud/hcloud-csi-driver:v2.13.0
+              image: docker.io/hetznercloud/hcloud-csi-driver:v2.24.1
               imagePullPolicy: IfNotPresent
               command: [/bin/hcloud-csi-driver-controller]
               env:
@@ -449,7 +449,7 @@ stringData:
               effect: NoSchedule
           containers:
             - name: helper-pod
-              image: rancher/local-path-provisioner:v0.0.30
+              image: rancher/local-path-provisioner:v0.0.37
               imagePullPolicy: IfNotPresent
           restartPolicy: Never
     ---
@@ -489,7 +489,7 @@ stringData:
           hostNetwork: false
           containers:
             - name: local-path-provisioner
-              image: rancher/local-path-provisioner:v0.0.30
+              image: rancher/local-path-provisioner:v0.0.37
               imagePullPolicy: IfNotPresent
               command:
                 - local-path-provisioner

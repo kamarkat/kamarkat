@@ -241,6 +241,35 @@ spec:
         - name: credit-authority
           port: 3000
 {{- end }}
+{{- if .Values.billingEngine.enabled }}
+---
+# The billing engine (ADR-113): its gateway, and nothing else of its pod. The
+# engine's API listens on loopback; the gateway authenticates and authorises
+# every request before the engine sees it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  {{- if $target }}
+  annotations:
+    external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+  {{- end }}
+  name: billing-engine
+  namespace: platform-billing
+spec:
+  parentRefs:
+    - name: hub-gateway
+      namespace: platform-ops
+      sectionName: billing
+  hostnames: ["billing.{{ .Values.global.hubDomain }}"]
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: billing-engine
+          port: 8080
+{{- end }}
 ---
 # Headlamp Kubernetes dashboard.
 apiVersion: gateway.networking.k8s.io/v1

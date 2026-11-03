@@ -186,8 +186,6 @@ dns:
 capabilities:
   # CNPG Postgres. The platform maintains the operator, the version, the backups
   # and the failover; the schemas in it are the tenant's.
-  database:
-    enabled: true
   # Collection, and under ADR-078 the store, query and dashboards that go with it.
   observability:
     enabled: true
@@ -214,6 +212,14 @@ capabilities:
   # credits.<hubDomain> route. An application consumes it by declaring
   # capabilities.credits in its own fleet values.
   credits:
+    enabled: false
+
+  # ADR-113's billing engine: invoices and subscriptions for a box whose product
+  # sells plans. Off by default, for the reason credits is. Its database, role
+  # and credential exist on every box regardless; this runs the engine, its
+  # gateway and the billing.<hubDomain> route. An application consumes it by
+  # declaring capabilities.billing in its own fleet values.
+  billing:
     enabled: false
 
 # On-prem nodes (ADR-075): machines on the tenant's own premises, joining over

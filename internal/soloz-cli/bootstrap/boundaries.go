@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"github.com/soloz-io/zero-ops/internal/soloz-cli/constants"
 	"os/exec"
 	"strings"
 	"time"
@@ -92,10 +93,10 @@ type boundaryContract struct {
 type capability string
 
 const (
-	capOperatorsReady   capability = "platform operators and CRDs"
-	capPlatformDatabase capability = "the platform database accepts connections"
-	capDatabaseRoles    capability = "the platform's database roles exist"
-	capIdentityProvider capability = "the identity provider serves"
+	capOperatorsReady    capability = "platform operators and CRDs"
+	capBootstrapDatabase capability = "the bootstrap database accepts connections"
+	capDatabaseRoles     capability = "the platform's database roles exist"
+	capIdentityProvider  capability = "the identity provider serves"
 )
 
 // namedStep is a piece of work with a name to print when it runs.
@@ -184,7 +185,7 @@ var boundaryContracts = []boundaryContract{
 		// The database this boundary builds is what boundary 03 provisions roles
 		// in. Asserting it here is what makes that a sequence rather than a race.
 		asserts(
-			check(capPlatformDatabase, (*Orchestrator).awaitPlatformDatabaseReady),
+			check(capBootstrapDatabase, (*Orchestrator).awaitBootstrapDatabaseReady),
 		),
 	},
 	{
@@ -389,7 +390,7 @@ func init() {
 	}
 }
 
-// awaitPlatformDatabaseReady waits until CNPG reports the platform database has
+// awaitBootstrapDatabaseReady waits until CNPG reports the bootstrap database has
 // a ready instance.
 //
 // Boundary 02 builds this database and boundary 03 provisions roles inside it.
@@ -400,7 +401,7 @@ func init() {
 // readyInstances rather than the Cluster merely existing: a CNPG Cluster object
 // appears immediately and its first instance takes minutes, so existence is the
 // claim that is always true and never useful.
-func (o *Orchestrator) awaitPlatformDatabaseReady(ctx context.Context, kubeconfig string) error {
+func (o *Orchestrator) awaitBootstrapDatabaseReady(ctx context.Context, kubeconfig string) error {
 	const (
 		deadline = 45 * time.Minute
 		every    = 10 * time.Second
@@ -408,23 +409,25 @@ func (o *Orchestrator) awaitPlatformDatabaseReady(ctx context.Context, kubeconfi
 	started := time.Now()
 	for {
 		out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-			"get", "cluster.postgresql.cnpg.io", "platform-db", "-n", "platform-data",
+			"get", "cluster.postgresql.cnpg.io", constants.BootstrapDBCluster,
+			"-n", constants.NamespaceData,
 			"-o", "jsonpath={.status.readyInstances}").Output()
 		if err == nil {
 			if ready := strings.TrimSpace(string(out)); ready != "" && ready != "0" {
-				fmt.Printf("    ✓ platform database ready after %s\n",
+				fmt.Printf("    ✓ bootstrap database ready after %s\n",
 					formatDuration(time.Since(started)))
 				return nil
 			}
 		}
 		if time.Since(started) > deadline {
 			phase, _ := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-				"get", "cluster.postgresql.cnpg.io", "platform-db", "-n", "platform-data",
+				"get", "cluster.postgresql.cnpg.io", constants.BootstrapDBCluster,
+				"-n", constants.NamespaceData,
 				"-o", "jsonpath={.status.phase}").Output()
-			return fmt.Errorf("the platform database had no ready instance within %v (CNPG reports %q).\n"+
+			return fmt.Errorf("%s had no ready instance within %v (CNPG reports %q).\n"+
 				"  Boundary 03 provisions this platform's database roles and boundary 04 uses them,\n"+
 				"  so nothing past here can work until it serves",
-				deadline, strings.TrimSpace(string(phase)))
+				constants.BootstrapDBCluster, deadline, strings.TrimSpace(string(phase)))
 		}
 		select {
 		case <-ctx.Done():

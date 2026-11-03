@@ -44,7 +44,7 @@ auto_install() {
     mkdir -p "$dir"
     case "$tool" in
         kind) curl -fsSLo "$dir/kind.exe" "https://kind.sigs.k8s.io/dl/latest/kind-windows-amd64" && chmod +x "$dir/kind.exe" && export PATH="$PATH:$dir" ;;
-        clusterctl) curl -fsSLo "$dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.9.6/clusterctl-windows-amd64.exe" && chmod +x "$dir/clusterctl.exe" && export PATH="$PATH:$dir" ;;
+        clusterctl) curl -fsSLo "$dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe" && chmod +x "$dir/clusterctl.exe" && export PATH="$PATH:$dir" ;;
         helm) curl -fsSLo "$dir/helm.zip" "https://get.helm.sh/helm-v3.17.3-windows-amd64.zip" && unzip -jo "$dir/helm.zip" "windows-amd64/helm.exe" -d "$dir" 2>/dev/null && rm -f "$dir/helm.zip" && chmod +x "$dir/helm.exe" && export PATH="$PATH:$dir" ;;
         jq) curl -fsSLo "$dir/jq.exe" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" && chmod +x "$dir/jq.exe" && export PATH="$PATH:$dir" ;;
         aws)

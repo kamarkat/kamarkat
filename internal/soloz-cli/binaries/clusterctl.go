@@ -9,15 +9,15 @@ import (
 	"runtime"
 )
 
-const clusterctlVersion = "v1.10.0"
+const clusterctlVersion = "v1.13.7"
 
-// Known-good SHA256 checksums for clusterctl v1.10.0
+// Known-good SHA256 checksums for clusterctl v1.13.7
 // Computed manually at pin time from official GitHub releases
 var clusterctlChecksums = map[string]string{
-	"linux/amd64":   "a14c5ec57cf89ee2b479e8bc5738e319b335ab04170890c715ca2054293a8c89",
-	"linux/arm64":   "e542e6d77621e2bcfe30a8ba4a69654c48e0ed2602528ea68ff191d4cd6b1b90",
-	"darwin/amd64":  "8d69cf2c9556186947cc207804fa78b3f956a4018980331b7f3de21066f105f4",
-	"darwin/arm64":  "930fdbf18bee7f7519e09c298f2b5f9cefe0685065dd85f6baeaa33d9dc89f90",
+	"linux/amd64":   "0952cb107303ead3b76242f539fdd98c82f0edecc860ccdd7cd43ac41990897d",
+	"linux/arm64":   "a9c2c21bded3f7caa61d198a293b05447bf4ba02db86cd08e1d103e90121c548",
+	"darwin/amd64":  "c294eb19e8b53a5899f1d74a26c6d9ff771f9b8ec8012803f1c87b0e02ed90dc",
+	"darwin/arm64":  "1eff80d7dc0da472722d874b7273ff695f3baa0ba97d889d804db430bd9426e6",
 }
 
 // ClusterctlManager manages the clusterctl binary

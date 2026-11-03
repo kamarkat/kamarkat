@@ -43,6 +43,7 @@ import (
 // shoulder or a transcript afterwards.
 func newEscrowVerifyRecoveryCmd() *cobra.Command {
 	var (
+		box        string
 		cluster    string
 		fromFile   string
 		expectKind bool
@@ -71,16 +72,18 @@ it is one command away from plaintext and there is no reason for it to be a cred
 
 Neither the key nor the decrypted value is printed.`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runEscrowVerifyRecovery(c.Context(), cluster, fromFile, expectKind)
+			return runEscrowVerifyRecovery(c.Context(), box, cluster, fromFile, expectKind)
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&cluster, "cluster", "", "cluster whose escrowed key to test (required)")
+	f.StringVar(&box, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
 	f.StringVar(&fromFile, "from", "", "file holding one etcd value, as etcdctl wrote it (required)")
 	f.BoolVar(&expectKind, "expect-secret", true,
 		"also require the decrypted bytes to look like a serialised Secret, which proves the "+
 			"key produced the right plaintext rather than merely succeeding")
 	_ = cmd.MarkFlagRequired("cluster")
+	_ = cmd.MarkFlagRequired("box")
 	_ = cmd.MarkFlagRequired("from")
 	return cmd
 }
@@ -121,7 +124,7 @@ func keyFingerprint(v []byte) string {
 	return fingerprint(v)
 }
 
-func runEscrowVerifyRecovery(ctx context.Context, cluster, fromFile string, expectKind bool) error {
+func runEscrowVerifyRecovery(ctx context.Context, box, cluster, fromFile string, expectKind bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -130,7 +133,7 @@ func runEscrowVerifyRecovery(ctx context.Context, cluster, fromFile string, expe
 	if err != nil {
 		return fmt.Errorf("reaching the escrow: %w", err)
 	}
-	keyHex, err := store.RestoreArtifact(ctx, cluster, escrow.ArtifactSecretEncryptionKey)
+	keyHex, err := store.RestoreArtifact(ctx, escrow.ForCluster(box, cluster), escrow.ArtifactSecretEncryptionKey)
 	if err != nil {
 		return fmt.Errorf("reading %s for %q from the escrow: %w",
 			escrow.ArtifactSecretEncryptionKey, cluster, err)

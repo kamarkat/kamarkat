@@ -60,8 +60,33 @@ type HubEnvironmentSpec struct {
 	// +kubebuilder:validation:Enum=dev;stg;prod;ephemeral
 	Environment string `json:"environment"`
 
-	// ClusterName is this box's cluster, as CAPI and the escrow know it
-	// (e.g. nutgraf-hub).
+	// BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
+	//
+	// Separate from ClusterName because one field was carrying two lifetimes. The
+	// box's identity keys what must survive a cluster being replaced -- the escrow
+	// path holding the secret store's master keys and the identity provider's
+	// encryption key, and the external-dns owner id that decides which records are
+	// this box's to publish. The CLUSTER's identity keys what is replaced with it:
+	// the WAL archive prefix, the CAPI object names, the admin kubeconfig and the
+	// at-rest encryption key.
+	//
+	// While the two were one value, a hub could not be replaced without re-keying
+	// everything the box owns, which is why ClusterName's comment below had to say
+	// it is pinned forever. Declared rather than defaulted from ClusterName: a
+	// default would make the first successor inherit its predecessor's cluster name
+	// as the box id on one box and not another, and the value is unchangeable once
+	// anything has been written under it.
+	//
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	BoxID string `json:"boxId,omitempty"`
+
+	// ClusterName is this box's cluster, as CAPI knows it and as the escrow keys
+	// cluster-scoped artefacts by (e.g. nutgraf-hub).
+	//
+	// This is the CLUSTER, not the box: a successor hub carries a new one, while
+	// BoxID above stays. Artefacts that must outlive the cluster are keyed by the
+	// box; see escrow.Identity.
 	//
 	// Declared rather than derived from metadata.name. HubEnvironment is a
 	// cluster-scoped singleton always named "hub-environment", and that name was
@@ -143,7 +168,14 @@ type GrafanaAlloyConfig struct {
 
 // DatabaseConfig defines CNPG cluster and role configuration
 type DatabaseConfig struct {
-	// ClusterRef is the name of the CNPG Cluster (e.g., platform-db)
+	// ClusterRef is the box's BOOTSTRAP cluster: the one Infisical's own database
+	// lives on (e.g., infisical-db).
+	//
+	// It is not a default for roles. Each application owns its own cluster (ADR-112)
+	// and declares it on the role, so the only thing a box-level name can mean is the
+	// cluster the operator itself depends on: Day-0 waits for it, the generated
+	// bootstrap secrets address it, and its CA is the one Infisical is handed.
+	//
 	// +kubebuilder:validation:Required
 	ClusterRef string `json:"clusterRef"`
 
@@ -166,6 +198,21 @@ type DatabaseRole struct {
 	// Database name where the role has permissions
 	// +kubebuilder:validation:Required
 	Database string `json:"database"`
+
+	// ClusterRef is the CNPG Cluster this role lives on. REQUIRED.
+	//
+	// Named per role because that is the grain reality has: a box runs one cluster per
+	// platform application (ADR-112) and a role exists on exactly one of them.
+	// Reconciling or rotating it against another cluster either fails or, worse,
+	// succeeds against the wrong application's database.
+	//
+	// Required rather than defaulted for that second case. A role whose cluster is
+	// assumed is provisioned somewhere plausible and silently wrong, and the API is
+	// where that is cheapest to refuse.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	ClusterRef string `json:"clusterRef"`
 
 	// Permissions granted to the role (e.g., SELECT, INSERT, UPDATE, DELETE)
 	// +optional
@@ -287,4 +334,48 @@ type HubEnvironmentList struct {
 
 func init() {
 	SchemeBuilder.Register(&HubEnvironment{}, &HubEnvironmentList{})
+}
+
+// ClusterFor reports which CNPG cluster a role belongs to.
+//
+// A role that names none belongs to the box's shared cluster, which is what every role
+// did before ADR-112. Resolved here rather than at each call site so the two paths that
+// act on roles -- reconciliation and rotation -- cannot disagree about where a role is.
+func (s HubEnvironmentSpec) ClusterFor(role DatabaseRole) string {
+	return role.ClusterRef
+}
+
+// RolesFor returns the roles that live on one cluster.
+func (s HubEnvironmentSpec) RolesFor(cluster string) []DatabaseRole {
+	var out []DatabaseRole
+	for _, r := range s.Database.Roles {
+		if s.ClusterFor(r) == cluster {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// DatabaseClusters lists every cluster the box runs, in declaration order, without
+// duplicates: the bootstrap cluster first, then the cluster each declared role lives on.
+//
+// The bootstrap cluster is included although no declared role names it. The only role on
+// it is Infisical's, and CNPG owns that one through spec.managed.roles (ADR-023 addendum),
+// so a list built from roles alone would leave out the cluster the box cannot start
+// without.
+func (s HubEnvironmentSpec) DatabaseClusters() []string {
+	seen := map[string]bool{}
+	var out []string
+	if s.Database.ClusterRef != "" {
+		seen[s.Database.ClusterRef] = true
+		out = append(out, s.Database.ClusterRef)
+	}
+	for _, r := range s.Database.Roles {
+		c := s.ClusterFor(r)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }

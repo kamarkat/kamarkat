@@ -1,9 +1,16 @@
-// DEPRECATED: This file contains imperative DDL/DCL in violation of ADR-023.
-// Database roles and grants are owned by Crossplane provider-sql.
-// Schema migrations have no owner: Atlas Operator was removed from the platform
-// and nothing replaced it, so this file is the only migration path that exists.
-// It was written as a stopgap and is now load-bearing -- retire it by choosing a
-// declarative migration mechanism, not by deleting it.
+// RoleManager owns the platform's APPLICATION database roles: it creates them, applies
+// the credential ESO delivers, detects password drift and rotates it, and prunes roles
+// the CR no longer declares.
+//
+// ADR-023 assigns logical databases, roles and grants to Crossplane `provider-sql`, and
+// this file's imperative DCL is the state of that migration rather than a dispute with
+// it: until provider-sql is deployed, this is what provisions them. One role is not its
+// business -- Infisical's, which CNPG owns through spec.managed.roles (ADR-023 addendum)
+// so that the role which lets Infisical start does not depend on Infisical.
+//
+// SCHEMA is owned nowhere in this package. Each platform application migrates its own, at
+// its own cluster (ADR-074, amended 2026-11-03), so the only DDL here is the grants a
+// role needs on a database its application owns.
 
 package database
 
@@ -13,6 +20,11 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	// Registers the "postgres" driver that sql.Open below names. A blank import is the
+	// only thing that does, and nothing fails to compile without it: it fails at run
+	// time, with `sql: unknown driver "postgres"`, on the first role provisioned.
+	_ "github.com/lib/pq"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,13 +38,19 @@ const (
 	secretNamespaceIdentity = "platform-identity"
 )
 
-// mapRoleToSecretName converts CR role names to valid K8s secret names
-func mapRoleToSecretName(roleName string) string {
+// RoleSecretName is the Secret a declared role's credential arrives in.
+//
+// EXPORTED because two things must agree on it: this package applies the credential to
+// the role, and the controller waits for ESO to deliver it before provisioning any role
+// (ApplicationSecretsReady). A gate that lists its Secrets separately drifts from the
+// roles it guards and waits for credentials nothing will deliver, so both sides derive
+// the name from the declared roles through this one function.
+//
+// The mapping is conventional rather than declared, which is why a Secret named here
+// appears in no manifest that references it by name: `hub_grafana` becomes
+// `hub-grafana-db-credentials` by this rule alone.
+func RoleSecretName(roleName string) string {
 	switch roleName {
-	case "hub_control_plane":
-		return "control-plane-db-credentials"
-	case "hub_centralized":
-		return "hub-db-credentials"
 	case "hub_zitadel":
 		return "zitadel-db-credentials"
 	default:
@@ -41,10 +59,10 @@ func mapRoleToSecretName(roleName string) string {
 	}
 }
 
-// mapRoleToSecretNamespace returns the namespace where the secret is located.
+// RoleSecretNamespace returns the namespace where the secret is located.
 // The identity provider's credential lives in platform-identity; every other
 // service's lives in platform-data.
-func mapRoleToSecretNamespace(roleName, defaultNamespace string) string {
+func RoleSecretNamespace(roleName, defaultNamespace string) string {
 	switch roleName {
 	case "hub_zitadel":
 		return secretNamespaceIdentity
@@ -57,19 +75,33 @@ func mapRoleToSecretNamespace(roleName, defaultNamespace string) string {
 type RoleManager struct {
 	db     *sql.DB
 	client client.Client
+	// ep is the cluster this manager was opened against. Held rather than re-derived,
+	// because grantPermissions opens a SECOND connection -- to the target database
+	// rather than to `postgres` -- and that one used its own literal host and its own
+	// hardcoded namespace. Two connection strings for one cluster is how they come to
+	// disagree.
+	ep Endpoint
 }
 
-// NewRoleManager creates a new RoleManager instance
-func NewRoleManager(ctx context.Context, k8sClient client.Client, namespace string) (*RoleManager, error) {
+// NewRoleManager creates a new RoleManager instance for one CNPG cluster.
+//
+// The cluster is a parameter rather than a literal: ADR-112 gives each platform
+// application its own, and each role declares which one it lives on (ClusterRef). The
+// caller opens one manager per cluster and passes it only that cluster's roles.
+func NewRoleManager(ctx context.Context, k8sClient client.Client, ep Endpoint) (*RoleManager, error) {
 	logger := log.FromContext(ctx)
 
-	// Read platform-db-superuser secret for connection credentials
+	if err := ep.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Read the cluster's superuser secret for connection credentials
 	secret := &corev1.Secret{}
 	if err := k8sClient.Get(ctx, client.ObjectKey{
-		Name:      "platform-db-superuser",
-		Namespace: namespace,
+		Name:      ep.SuperuserSecret(),
+		Namespace: ep.Namespace,
 	}, secret); err != nil {
-		return nil, fmt.Errorf("failed to get platform-db-superuser secret: %w", err)
+		return nil, fmt.Errorf("failed to get %s secret: %w", ep.SuperuserSecret(), err)
 	}
 
 	username := string(secret.Data["username"])
@@ -82,10 +114,10 @@ func NewRoleManager(ctx context.Context, k8sClient client.Client, namespace stri
 		dbname = "postgres"
 	}
 
-	// Connect to primary service with TLS
+	// Connect to the cluster's primary service with TLS
 	connStr := fmt.Sprintf(
-		"host=platform-db-rw.%s.svc port=5432 user=%s password=%s dbname=%s sslmode=require",
-		namespace, username, password, dbname,
+		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=require",
+		ep.PrimaryHost(), username, password, dbname,
 	)
 
 	db, err := sql.Open("postgres", connStr)
@@ -98,11 +130,12 @@ func NewRoleManager(ctx context.Context, k8sClient client.Client, namespace stri
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	logger.Info("Connected to platform-db-rw for role management")
+	logger.Info("Connected for role management", "host", ep.PrimaryHost())
 
 	return &RoleManager{
 		db:     db,
 		client: k8sClient,
+		ep:     ep,
 	}, nil
 }
 
@@ -125,11 +158,11 @@ func (rm *RoleManager) MissingRoles(ctx context.Context, hubEnv *opsv1alpha1.Hub
 	namespace := hubEnv.Spec.Database.Namespace
 
 	var missing []string
-	for _, roleSpec := range hubEnv.Spec.Database.Roles {
+	for _, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
 		secret := &corev1.Secret{}
 		if err := rm.client.Get(ctx, client.ObjectKey{
-			Name:      mapRoleToSecretName(roleSpec.Name),
-			Namespace: mapRoleToSecretNamespace(roleSpec.Name, namespace),
+			Name:      RoleSecretName(roleSpec.Name),
+			Namespace: RoleSecretNamespace(roleSpec.Name, namespace),
 		}, secret); err != nil {
 			// The credential is not available yet, so provisioning cannot be
 			// verified either way. Treat it as missing so the caller reconciles
@@ -173,17 +206,17 @@ func (rm *RoleManager) CreateOrUpdateRoles(ctx context.Context, hubEnv *opsv1alp
 	// — which then could not authenticate to Postgres, with nothing in any log
 	// connecting the two. Naming the plan up front and the skipped remainder on
 	// failure is what makes that visible without reading this function.
-	planned := make([]string, 0, len(hubEnv.Spec.Database.Roles))
-	for _, roleSpec := range hubEnv.Spec.Database.Roles {
+	planned := make([]string, 0, len(hubEnv.Spec.RolesFor(rm.ep.Cluster)))
+	for _, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
 		planned = append(planned, roleSpec.Name)
 	}
 	logger.Info("Provisioning database roles", "count", len(planned), "roles", planned)
 
 	// Process each role from CR spec
-	for i, roleSpec := range hubEnv.Spec.Database.Roles {
+	for i, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
 		// Map role name to valid K8s secret name and namespace
-		secretName := mapRoleToSecretName(roleSpec.Name)
-		secretNamespace := mapRoleToSecretNamespace(roleSpec.Name, namespace)
+		secretName := RoleSecretName(roleSpec.Name)
+		secretNamespace := RoleSecretNamespace(roleSpec.Name, namespace)
 
 		logger.Info("Processing database role",
 			"role", roleSpec.Name, "position", fmt.Sprintf("%d/%d", i+1, len(planned)),
@@ -362,14 +395,15 @@ func (rm *RoleManager) passwordNeedsUpdate(ctx context.Context, username, passwo
 func (rm *RoleManager) grantPermissions(ctx context.Context, username string, roleSpec opsv1alpha1.DatabaseRole) error {
 	logger := log.FromContext(ctx)
 
-	// Get connection details from platform-db-superuser secret
+	// The same cluster this manager was opened against. This used to read the secret
+	// from a package constant with a "TODO: make configurable" beside it, which meant
+	// a role could be created on one cluster and its permissions granted on another.
 	secret := &corev1.Secret{}
-	namespace := secretNamespaceData // TODO: make configurable
 	if err := rm.client.Get(ctx, client.ObjectKey{
-		Name:      "platform-db-superuser",
-		Namespace: namespace,
+		Name:      rm.ep.SuperuserSecret(),
+		Namespace: rm.ep.Namespace,
 	}, secret); err != nil {
-		return fmt.Errorf("failed to get platform-db-superuser secret: %w", err)
+		return fmt.Errorf("failed to get %s secret: %w", rm.ep.SuperuserSecret(), err)
 	}
 
 	superUsername := string(secret.Data["username"])
@@ -391,10 +425,10 @@ func (rm *RoleManager) grantPermissions(ctx context.Context, username string, ro
 		logger.Info("Created database", "database", roleSpec.Database)
 	}
 
-	// Connect to target database (not postgres)
+	// Connect to target database (not postgres), on the same cluster
 	connStr := fmt.Sprintf(
-		"host=platform-db-rw.%s.svc port=5432 user=%s password=%s dbname=%s sslmode=require",
-		namespace, superUsername, superPassword, roleSpec.Database,
+		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=require",
+		rm.ep.PrimaryHost(), superUsername, superPassword, roleSpec.Database,
 	)
 
 	targetDB, err := sql.Open("postgres", connStr)
@@ -493,7 +527,7 @@ func (rm *RoleManager) pruneOrphanedRoles(ctx context.Context, hubEnv *opsv1alph
 
 	// Build map of desired roles from CR spec
 	desiredRoles := make(map[string]bool)
-	for _, roleSpec := range hubEnv.Spec.Database.Roles {
+	for _, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
 		desiredRoles[roleSpec.Name] = true
 	}
 

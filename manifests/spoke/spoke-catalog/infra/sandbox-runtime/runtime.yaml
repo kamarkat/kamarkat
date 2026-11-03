@@ -74,7 +74,7 @@ spec:
         - operator: Exists
       initContainers:
         - name: install
-          image: busybox:1.37.0
+          image: busybox:1.38.0
           securityContext:
             privileged: true
           command:
@@ -106,7 +106,7 @@ spec:
         # that loses it (a reprovision, an OS update) shows a NotReady installer
         # rather than sandboxed pods failing to start.
         - name: verify
-          image: busybox:1.37.0
+          image: busybox:1.38.0
           command: ["/bin/sh", "-c", "while true; do sleep 3600; done"]
           readinessProbe:
             exec:

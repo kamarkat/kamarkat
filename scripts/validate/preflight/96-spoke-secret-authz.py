@@ -91,6 +91,8 @@ rendered = run(["helm", "template", CHART,
                 "--set", "environmentSlug=dev",
                 "--set", "provider=hybrid",
                 "--set", "environmentRevision=main",
+                # ADR-111 keys the escrow on it and the chart refuses to assume one.
+                "--set", "boxId=example-box",
                 # ADR-055: every boundary renders now, so boundary 06's issuer
                 # guard applies here too. ADR-051 gives it no default on purpose.
                 "--set", "publicTlsIssuer=letsencrypt-prod",

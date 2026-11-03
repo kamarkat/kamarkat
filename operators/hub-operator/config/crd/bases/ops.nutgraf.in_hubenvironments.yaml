@@ -39,10 +39,34 @@ spec:
           spec:
             description: spec defines the desired state of HubEnvironment
             properties:
+              boxId:
+                description: |-
+                  BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
+
+                  Separate from ClusterName because one field was carrying two lifetimes. The
+                  box's identity keys what must survive a cluster being replaced -- the escrow
+                  path holding the secret store's master keys and the identity provider's
+                  encryption key, and the external-dns owner id that decides which records are
+                  this box's to publish. The CLUSTER's identity keys what is replaced with it:
+                  the WAL archive prefix, the CAPI object names, the admin kubeconfig and the
+                  at-rest encryption key.
+
+                  While the two were one value, a hub could not be replaced without re-keying
+                  everything the box owns, which is why ClusterName's comment below had to say
+                  it is pinned forever. Declared rather than defaulted from ClusterName: a
+                  default would make the first successor inherit its predecessor's cluster name
+                  as the box id on one box and not another, and the value is unchangeable once
+                  anything has been written under it.
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               clusterName:
                 description: |-
-                  ClusterName is this box's cluster, as CAPI and the escrow know it
-                  (e.g. nutgraf-hub).
+                  ClusterName is this box's cluster, as CAPI knows it and as the escrow keys
+                  cluster-scoped artefacts by (e.g. nutgraf-hub).
+
+                  This is the CLUSTER, not the box: a successor hub carries a new one, while
+                  BoxID above stays. Artefacts that must outlive the cluster are keyed by the
+                  box; see escrow.Identity.
 
                   Declared rather than derived from metadata.name. HubEnvironment is a
                   cluster-scoped singleton always named "hub-environment", and that name was
@@ -58,8 +82,14 @@ spec:
                 description: Database configuration for CNPG cluster and roles
                 properties:
                   clusterRef:
-                    description: ClusterRef is the name of the CNPG Cluster (e.g.,
-                      platform-db)
+                    description: |-
+                      ClusterRef is the box's BOOTSTRAP cluster: the one Infisical's own database
+                      lives on (e.g., infisical-db).
+
+                      It is not a default for roles. Each application owns its own cluster (ADR-112)
+                      and declares it on the role, so the only thing a box-level name can mean is the
+                      cluster the operator itself depends on: Day-0 waits for it, the generated
+                      bootstrap secrets address it, and its CA is the one Infisical is handed.
                     type: string
                   namespace:
                     description: Namespace of the CNPG Cluster
@@ -69,6 +99,20 @@ spec:
                     items:
                       description: DatabaseRole defines a database role specification
                       properties:
+                        clusterRef:
+                          description: |-
+                            ClusterRef is the CNPG Cluster this role lives on. REQUIRED.
+
+                            Named per role because that is the grain reality has: a box runs one cluster per
+                            platform application (ADR-112) and a role exists on exactly one of them.
+                            Reconciling or rotating it against another cluster either fails or, worse,
+                            succeeds against the wrong application's database.
+
+                            Required rather than defaulted for that second case. A role whose cluster is
+                            assumed is provisioned somewhere plausible and silently wrong, and the API is
+                            where that is cheapest to refuse.
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
                         database:
                           description: Database name where the role has permissions
                           type: string
@@ -83,6 +127,7 @@ spec:
                             type: string
                           type: array
                       required:
+                      - clusterRef
                       - database
                       - name
                       type: object

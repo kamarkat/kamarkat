@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
-# Backups for every CNPG cluster in the fleet — hub platform-db AND the spoke's
-# shared-cnpg.
+# Backups for every CNPG cluster in the fleet — every cluster on the hub AND the
+# spokes'.
 #
-# On 2026-09-02 BOTH had run their entire lives without a single successful
-# backup while reporting "Cluster in healthy state". platform-db holds Infisical:
-# the PKI root and every platform secret, on local-path, one node's disk.
+# On 2026-09-02 the hub's and the spoke's had both run their entire lives without a
+# single successful backup while reporting "Cluster in healthy state". The hub's
+# bootstrap cluster holds Infisical: the PKI root and every platform secret, on
+# local-path, one node's disk.
 #
-# The old check looked only at lastSuccessfulBackup, only on the hub. That is the
-# LAGGING indicator and it misses two things:
+# Enumerated on both sides rather than named. A box runs one cluster per platform
+# application (ADR-112), so a check that named the cluster it knew about would
+# assert one and silently ignore the others — and a new application's cluster would
+# be unwatched from the day it shipped, which is the day it matters.
 #
-#   1. The spoke entirely. shared-cnpg was broken the same way and nothing looked.
-#   2. Timing. Backups are scheduled daily at 01:00, so a cluster validated
-#      minutes after creation legitimately has no backup yet. The field is empty
-#      whether backups are healthy-but-pending or permanently broken, so it
-#      cannot fail a fresh cluster — which is exactly when this must be caught.
+# A lastSuccessfulBackup-only check misses two things:
+#
+#   1. Timing. Backups are scheduled daily, so a cluster validated minutes after
+#      creation legitimately has no backup yet. The field is empty whether backups
+#      are healthy-but-pending or permanently broken, so it cannot fail a fresh
+#      cluster — which is exactly when this must be caught.
+#   2. Reach. Every cluster, on every reachable spoke, not just the one the caller
+#      happened to name.
 #
 # ContinuousArchiving is the LEADING indicator. It goes False within seconds of
 # the first WAL and stays there. Both real failures were visible in it hours
@@ -96,7 +102,21 @@ _assert_cnpg_backup() {
 validate_root_of_trust_backup() {
     section "Backups for every CNPG cluster (hub + spokes)"
 
-    _assert_cnpg_backup "platform-db (hub, root of trust)" kc platform-data platform-db
+    # Every cluster the hub runs, enumerated. The bootstrap cluster is the root of
+    # trust, and the rest hold an application's data each; none of them may be
+    # backing up to nothing.
+    local hub_names
+    hub_names=$(kc get cluster.postgresql.cnpg.io -A -o json 2>/dev/null \
+        | jq -r '.items[]? | .metadata.namespace + "/" + .metadata.name')
+    if [[ -z "$hub_names" ]]; then
+        soft_fail "the hub reports NO CNPG clusters — Infisical's database is one of them, so this is either unreachable or broken"
+    else
+        local hub_entry
+        while IFS= read -r hub_entry; do
+            [[ -z "$hub_entry" ]] && continue
+            _assert_cnpg_backup "${hub_entry##*/} (hub)" kc "${hub_entry%%/*}" "${hub_entry##*/}"
+        done <<< "$hub_names"
+    fi
 
     # Every spoke, not just $SPOKEPOOL_NAME. That variable is supplied by the
     # bootstrap caller and is empty on a standalone run, which silently skipped
@@ -128,7 +148,7 @@ validate_root_of_trust_backup() {
         # The hub's own kubeconfig secret lives in this namespace too, and the
         # hub is asserted above. Identify it by the API endpoint the kubeconfig
         # points at rather than by name, so this holds whatever the hub is
-        # called and does not double-report platform-db.
+        # called and does not report the hub's clusters twice.
         if [[ "$(kubectl --kubeconfig="$kcfile" config view -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)" \
               == "$hub_server" ]]; then
             rm -f "$kcfile"

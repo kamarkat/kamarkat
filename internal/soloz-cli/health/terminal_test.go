@@ -16,7 +16,7 @@ func TestIsTerminalOnlyMatchesATerminalError(t *testing.T) {
 	// Checkers wrap errors on the way out, so matching must survive wrapping --
 	// otherwise the guard silently stops working the first time a caller adds
 	// context to the error.
-	if !IsTerminal(fmt.Errorf("CNPG cluster platform-db: %w",
+	if !IsTerminal(fmt.Errorf("CNPG cluster infisical-db: %w",
 		&TerminalError{Reason: "manages nothing"})) {
 		t.Error("a wrapped terminal error must still stop the wait")
 	}
@@ -30,7 +30,7 @@ func TestIsTerminalOnlyMatchesATerminalError(t *testing.T) {
 func TestApplicationOwnsNothingStaysSilentWhenUncertain(t *testing.T) {
 	// No cluster to read: kubectl fails, and the answer is not knowable.
 	if err := ApplicationOwnsNothing(t.Context(), "/nonexistent-kubeconfig",
-		"platform-ops", "platform-database"); err != nil {
+		"platform-ops", "platform-infisical-db"); err != nil {
 		t.Errorf("an unreadable cluster must not be reported as terminal: %v", err)
 	}
 }

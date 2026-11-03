@@ -43,6 +43,42 @@ Incrementing a suffix by hand remains necessary in one case the derivation canno
 distinguish: one named cluster rebuilt from an empty database, whose predecessor's
 segments are still under the same prefix.
 
+**Implementation state (2026-11-03).** This addendum is implemented for the hub, in each
+application's `hub-core-services/<application>/database/templated-fields.yaml`, which derive
+`destinationPath` as `s3://hub-db-backups/<box>/` and `serverName` from the cluster. There
+is no provider overlay in the path any more: ADR-112 made each cluster its own component, so
+the manifest a box runs is the one in that directory and reading it is reading the truth.
+Recorded because the previous arrangement -- a base literal overridden by a provider overlay
+at packaging -- caused a reading of the base alone to report a defect that was not there.
+
+**What is NOT yet addressed is the composite ADR-111 §2 and ADR-112 require.** The suffix
+derives from the BOX (`<clusterName>-v1`), not from the PostgreSQL cluster. One box runs one
+database today, so box and database coincide and nothing collides. ADR-112 gives the box four
+clusters, and all four would derive the same `serverName` under the same prefix -- which is
+the original collision, moved from between boxes to within one. The second dimension has to
+come from the database's own identity before the first application cluster exists.
+
+Two further facts the derivation does not carry, both per-box rather than per-bundle: the
+incarnation suffix is fixed at `v1` in platform code, so a cluster recreated from an empty
+database cannot be bumped without editing the bundle; and the recovery SOURCE is a historical
+coordinate that must not track the current destination (see
+`hub-core-services/database-recovery/kustomization.yaml`).
+
+**The rendering target changes under the Barman Cloud plugin, and the registry contract
+does not.** Reported at review on 2026-11-03 and recorded here so it is not rediscovered:
+with the in-tree `barmanObjectStore` integration, `serverName` is a field of that stanza,
+which is what `database/templated-fields.yaml` renders onto today. Under the Barman Cloud
+plugin it moves into the Cluster's plugin parameters rather than the `ObjectStore`
+resource. **Unverified in source** — the plugin is not vendored in `reference-projects/`,
+so this comes from its upstream documentation through the review and not from code read at
+a tag; confirm it before the plugin migration.
+
+What this does not change is that the identity has ONE authority. Whatever carries the
+per-database dimension above must be re-rendered into the plugin's parameters rather than
+duplicated beside them. A second archive-identity authority, per integration, is the thing
+to refuse: it is how the destination and the recovery source come to disagree without
+anything noticing.
+
 ## Addendum 3: backups move to the Barman Cloud plugin (2026-11-02, ADR-111, ADR-112)
 
 The backup contract below is written against CloudNativePG's in-tree Barman integration

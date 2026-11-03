@@ -154,7 +154,7 @@ PY
 # descriptors are missing, so this proves they were copied AND that the released
 # path renders at all -- neither of which the development path exercises.
 if ! helm template platform-bundle "$CHART" \
-        --set environmentSlug=dev --set provider=hybrid --set publicTlsIssuer=letsencrypt-prod \
+        --set environmentSlug=dev --set boxId=example-box --set provider=hybrid --set publicTlsIssuer=letsencrypt-prod \
         --set instanceRepoURL=https://github.com/example-org/example-gitops \
         --set hubDomain=dev.example.test \
         --set previewDomain=example-preview.test \

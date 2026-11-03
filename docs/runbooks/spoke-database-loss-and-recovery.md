@@ -331,6 +331,6 @@ reliable as remembering to run it.
 - ADR-014 — the backup contract, the recovery point definition, and the
   incarnation rule
 - ADR-046 §11 — hybrid placement and the `local-path` consequence
-- `docs/runbooks/platform-db-restore.md` — the hub's own database
+- `docs/runbooks/hub-database-restore.md` — the hub's own database
 - `docs/runbooks/backup-credential-chain-recovery.md` — when the S3 credential,
   not the data, is the problem

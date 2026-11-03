@@ -1,0 +1,125 @@
+# The three Class M streams (ADR-111 Rev6 §1), as Velero Schedules.
+#
+# NOT WIRED INTO AN APPLICATIONSET, like the modifiers beside them: Velero is not
+# installed yet, so these objects' CRDs do not exist on any box. They are the declared
+# contract, kept with the recovery material, and they are applied when the chart lands.
+#
+# Field names verified against Velero v1.18.2 (pkg/apis/velero/v1/backup_types.go):
+# includedResources, excludedResources, includedNamespaces, labelSelector,
+# orLabelSelectors, snapshotVolumes, includeClusterResources, storageLocation, ttl.
+#
+# THREE STREAMS, because only one of them makes a hub the fleet's manager. A standby
+# successor runs credentials and resources continuously and withholds activation, so it
+# holds everything it will need and none of the objects that would make it a second
+# manager of the same servers.
+#
+# WHAT IS NOT HERE, and is not an omission:
+#   * CNPG clusters, their volumes and any PersistentVolume -- Class B, owned by Barman
+#     (ADR-111/112). `snapshotVolumes: false` on every stream says so twice.
+#   * ClusterClass, machine templates, Compositions, Applications -- Class R, rendered
+#     from the bundle. Backing them up would give one object two writers.
+#   * The cluster PKI -- Class E, and excluded by POSITIVE selection: the credentials
+#     stream selects only Secrets carrying the bootstrap-data label, so an unlabelled
+#     authority is absent by construction rather than by a rule that has to keep up
+#     with it.
+#   * MachineHealthCheck -- absent until classification ends, so a restored graph with
+#     no Node correspondence is not remediated.
+---
+# Stream 1: credentials. The bootstrap data a recovered Machine cannot be adopted
+# without -- CAPH refuses to look for a server until `IsBootstrapDataReady`, so a
+# Machine whose data secret is missing can never reach adoption at all.
+#
+# POSITIVE SELECTION. The label is applied by hub-operator from Cluster API's own
+# contract: a Machine names its bootstrap data at `spec.bootstrap.dataSecretName`, and
+# a nil value means the Machine is still Pending. Nothing else is selected, which is
+# what keeps the PKI out -- it carries the same resource type and the same cluster-name
+# label as bootstrap data, so no selector over those separates them.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: class-m-credentials
+  namespace: velero
+spec:
+  schedule: "17 * * * *"
+  template:
+    includedNamespaces:
+      - platform-capi
+    includedResources:
+      - secrets
+    labelSelector:
+      matchLabels:
+        recovery.platform.io/class-m: bootstrap-data
+    # Named, not left to whichever location is default: a stream silently
+    # writing somewhere else is a backup nobody can find.
+    storageLocation: class-m
+    snapshotVolumes: false
+    includeClusterResources: false
+    ttl: 720h0m0s
+---
+# Stream 2: resources. Management state that does not itself command infrastructure.
+#
+# Thin, and that is a property of this topology rather than an oversight: almost every
+# live Cluster API object here either commands infrastructure (stream 3) or is rendered
+# from the bundle (Class R). What remains is the per-machine bootstrap configuration and
+# the infrastructure object, the latter because `soloz spoke match-inventory` derives
+# the provider's label from it and matching precedes activation.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: class-m-resources
+  namespace: velero
+spec:
+  schedule: "27 * * * *"
+  template:
+    includedNamespaces:
+      - platform-capi
+    includedResources:
+      - kubeadmconfigs.bootstrap.cluster.x-k8s.io
+      - hetznerclusters.infrastructure.cluster.x-k8s.io
+    excludedResources:
+      # Secrets belong to stream 1 and are selected there by label. Excluded here so
+      # this stream cannot pick one up incidentally.
+      - secrets
+    # Named, not left to whichever location is default: a stream silently
+    # writing somewhere else is a backup nobody can find.
+    storageLocation: class-m
+    snapshotVolumes: false
+    includeClusterResources: false
+    ttl: 720h0m0s
+---
+# Stream 3: activation. The objects whose presence makes this hub the manager of these
+# servers.
+#
+# A standby successor does NOT restore this stream. Withholding it is stronger than
+# pausing: an object that is not there cannot be unpaused by mistake, cannot be adopted
+# by a controller, and cannot contend with a live hub. Restoring it is the one-way
+# transition, and it is a commit (ADR-111 Rev6 §2) -- and restoring it is still not
+# authorisation to unpause Cluster API.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: class-m-activation
+  namespace: velero
+spec:
+  schedule: "37 * * * *"
+  template:
+    includedNamespaces:
+      - platform-capi
+    includedResources:
+      - clusters.cluster.x-k8s.io
+      - kubeadmcontrolplanes.controlplane.cluster.x-k8s.io
+      - machinedeployments.cluster.x-k8s.io
+      - machinesets.cluster.x-k8s.io
+      - machines.cluster.x-k8s.io
+      - hcloudmachines.infrastructure.cluster.x-k8s.io
+    excludedResources:
+      - secrets
+      # Health checking remediates on a Node that is not there, and a freshly
+      # restored graph has no Node correspondence until matching completes.
+      - machinehealthchecks.cluster.x-k8s.io
+    # Named, not left to whichever location is default: a stream silently
+    # writing somewhere else is a backup nobody can find.
+    storageLocation: class-m
+    snapshotVolumes: false
+    includeClusterResources: false
+    ttl: 720h0m0s

@@ -170,11 +170,15 @@ for a in json.load(sys.stdin)["items"]:
     # The control: a connection this pod is allowed to make. Without it, a
     # refusal could be this pod's own egress policy rather than the Credit
     # Authority's ingress, and the check would pass proving nothing.
-    control=$(kc -n platform-security exec deploy/infisical-standalone-infisical -- node -e "$probe" platform-db-rw.platform-data.svc.cluster.local 5432)
+    # Its OWN database, which infisical-db-access admits platform-security to on 5432.
+    # Not another application's cluster: after ADR-112 each one admits only its own
+    # consumer, so a probe at any other would be refused by THAT policy and the
+    # control would prove the opposite of what it is for.
+    control=$(kc -n platform-security exec deploy/infisical-standalone-infisical -- node -e "$probe" infisical-db-rw.platform-data.svc.cluster.local 5432)
     if [[ -z "$ip" || -z "$ledger_port" || -z "$gateway_port" ]]; then
         hard_fail "X6 cannot probe the pod from platform-security (address '${ip}')"
     elif [[ "$control" != "open" ]]; then
-        hard_fail "X6 inconclusive: platform-security's own connection to platform-db is '${control}', so a refusal proves nothing"
+        hard_fail "X6 inconclusive: platform-security's own connection to infisical-db is '${control}', so a refusal proves nothing"
     elif [[ "$ledger_port" != "open" && "$gateway_port" != "open" ]]; then
         pass "X6 from another hub namespace, the ledger's port is $ledger_port and the gateway's is $gateway_port: only the Gateway reaches it"
     else

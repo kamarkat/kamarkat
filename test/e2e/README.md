@@ -9,7 +9,6 @@ test/e2e/
 ├── go.mod                  # Separate test module
 ├── credit-authority/       # ADR-109: the Credit Authority's guarantees and isolation
 ├── infisical-eso/
-├── platform-database/
 ├── platform-victoriametrics/
 └── README.md
 ```

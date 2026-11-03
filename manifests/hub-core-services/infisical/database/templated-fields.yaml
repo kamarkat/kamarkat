@@ -1,0 +1,21 @@
+# Per-box values for the secret store's PostgreSQL cluster (ADR-112 §§2-3).
+#
+# Read only when this directory is packaged as a component, so it is inert until a
+# boundary-02 descriptor exists for it -- unlike a declaration left in the shared
+# database overlay, which packaging refuses when the object it names is not rendered.
+- kind: Cluster
+  name: infisical-db
+  fields:
+    - path: [spec, backup, barmanObjectStore, destinationPath]
+      value: 's3://hub-db-backups/{{ .Values.global.clusterName }}/'
+    - path: [spec, instances]
+      type: int
+      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "prod" }}3{{ else }}2{{ end }}'
+    # The placement-class fields (ADR-046 §11).
+    # global.provider is the RESOLVED placement class when the boundary passes
+    # placementGlobalValues (environment-manager.placementClass); a descriptor for this
+    # component must use that helper, or these render the raw provider instead.
+    - path: [spec, affinity, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
+    - path: [spec, storage, storageClass]
+      value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'

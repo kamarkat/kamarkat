@@ -138,7 +138,7 @@ _validate_s3_backup_credentials() {
         return 0
     fi
 
-    soft_fail "s3-credentials not resolved (status=${status}) — platform-db has no durable backup"
+    soft_fail "s3-credentials not resolved (status=${status}) — no CNPG cluster on this box has a durable backup"
 
     if [[ -n "$loc" ]]; then
         note "Seed these in Infisical: $loc"

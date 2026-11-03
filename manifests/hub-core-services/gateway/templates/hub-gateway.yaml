@@ -198,6 +198,27 @@ spec:
                 operator: In
                 values: [platform-credits]
     {{- end }}
+    {{- if .Values.billingEngine.enabled }}
+    # The billing engine (ADR-113), only while capabilities.billing.enabled.
+    # Its own namespace is the only one whose routes it admits.
+    - name: billing
+      hostname: billing.{{ .Values.global.hubDomain }}
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: hub-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [platform-billing]
+    {{- end }}
 
     # Grafana: the box's dashboards (ADR-078 add.5 §6), on the hub only. The
     # stores are never published here: Grafana reaches them in-cluster through

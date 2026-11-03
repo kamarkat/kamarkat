@@ -43,7 +43,7 @@ import (
 //	Phase 10: platform-pre-reqs       Provider.OnPlatformPreReqs(kubeconfig)
 //	Phase  5a: argocd-install        ArgoCD + seed Application (pre-worker, hybrid)
 //	Phase 11a: boundary-01            infra operators ready (orchestrator-owned)
-//	Phase 11b: generate-local-secrets Static Secrets (crypto, postgres connection, platform-db-app)
+//	Phase 11b: generate-local-secrets Static Secrets (crypto, postgres connection, infisical-db-credentials)
 //	Phase 11c: boundary-02            Data workloads (CNPG, Redis)
 //	Phase 11d: inject-ca-cert         Wait for CNPG Ready → inject DB_ROOT_CERT into infisical-secrets
 //	Phase 11e: boundary-03            Services (Infisical, hub Gateway, apps)
@@ -483,7 +483,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	// ── Phase 11b: Generate local secrets ─────────────────────────────
 	// Generates cryptographic keys (ENCRYPTION_KEY, AUTH_SECRET, REDIS_URL),
 	// creates infisical-secrets, infisical-redis-credentials, and
-	// platform-db-app. The latter MUST exist before CNPG's initdb runs
+	// infisical-db-credentials. The latter MUST exist before CNPG's initdb runs
 	// in B02, so this phase runs between B01 and B02.
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseGenerateLocalSecrets, "generate-local-secrets",
 		"Generating local bootstrap secrets...",
@@ -506,7 +506,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 
 	// ── Phase 11c: Boundary 02 — platform data workloads ─────────────
 	// Deploys the CNPG Cluster and Redis. The CNPG Cluster
-	// CR triggers the operator (installed in B01). platform-db-app was
+	// CR triggers the operator (installed in B01). infisical-db-credentials was
 	// created in the previous phase (generate-local-secrets), so CNPG's
 	// initdb has the credentials it needs immediately.
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseBoundary02, "boundary02",
@@ -518,7 +518,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	}
 
 	// ── Phase 11d: Inject CNPG CA certificate ────────────────────────
-	// Waits for CNPG Cluster to be Ready, reads platform-db-ca, and
+	// Waits for CNPG Cluster to be Ready, reads infisical-db-ca, and
 	// injects DB_ROOT_CERT into infisical-secrets. This MUST run after
 	// B02 (CNPG Cluster applied) and before B03 (Infisical deployed)
 	// so that Infisical Helm chart renders with DB_ROOT_CERT present,
@@ -1691,9 +1691,9 @@ func (o *Orchestrator) hubIngressAddressResolved(ctx context.Context, kubeconfig
 //
 // Both, because either alone has been wrong on this platform.
 //
-// The condition alone was wrong on 2026-09-15. platform-db's PVC is node-local
-// (local-path on the on-prem worker); the worker was rebuilt from a pristine
-// image, the database came back empty, and CNPG re-ran initdb -- but the
+// The condition alone was wrong on 2026-09-15. A platform database's PVC is
+// node-local on the on-prem placement class (local-path); the worker was rebuilt
+// from a pristine image, the database came back empty, and CNPG re-ran initdb -- but the
 // operator's DatabaseRolesProvisioned condition still said True, stamped ten and
 // a half hours earlier against a database that no longer existed. This gate read
 // it and printed "✓ database roles provisioned after 1s" over a cluster in which
@@ -1775,8 +1775,9 @@ func (o *Orchestrator) awaitDatabaseRolesProvisioned(ctx context.Context, kubeco
 			fmt.Printf("    ⚠️  the hub-operator reports DatabaseRolesProvisioned=True, but %s\n",
 				describeMissingRoles(missing))
 			fmt.Println("        Its record describes a database that no longer has them — most often")
-			fmt.Println("        because the volume behind platform-db was replaced. The operator will")
-			fmt.Println("        not redo work its own condition says is done; it has to be re-driven.")
+			fmt.Println("        because the volume behind an application's cluster was replaced. The")
+			fmt.Println("        operator will not redo work its own condition says is done; it has to")
+			fmt.Println("        be re-driven.")
 		}
 
 		// Nudge anything ESO has backed off on.
@@ -1808,12 +1809,13 @@ func (o *Orchestrator) awaitDatabaseRolesProvisioned(ctx context.Context, kubeco
 					deadline)
 			}
 			if !probed {
-				return fmt.Errorf("the platform database could not be read in %v to confirm "+
-					"its roles exist.\n"+
+				return fmt.Errorf("the platform databases could not be read in %v to confirm "+
+					"their roles exist.\n"+
 					"  The hub-operator's condition is not enough on its own -- it records what the\n"+
-					"  operator did, not what the database now contains -- so this gate does not\n"+
-					"  pass on it alone. Check the database is serving:\n"+
-					"    kubectl -n platform-data get cluster platform-db", deadline)
+					"  operator did, not what the databases now contain -- so this gate does not\n"+
+					"  pass on it alone. Each application owns its own cluster (ADR-112); check\n"+
+					"  they are serving:\n"+
+					"    kubectl -n %s get clusters.postgresql.cnpg.io", deadline, constants.NamespaceData)
 			}
 			if len(lastMissing) > 0 {
 				return fmt.Errorf("the platform database is missing %s after %v.\n  %s\n"+

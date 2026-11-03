@@ -119,7 +119,7 @@ VALS
 
 # Already Helm charts. Only the version is set, so every artefact in a bundle
 # carries the bundle's version and a cluster asks for one version, not a set.
-for src in manifests/hub-core-services/security manifests/hub-core-services/gateway manifests/hub-core-services/credit-authority; do
+for src in manifests/hub-core-services/security manifests/hub-core-services/gateway manifests/hub-core-services/credit-authority manifests/hub-core-services/billing-engine; do
     name=$(awk '/^name:/ {print $2; exit}' "$src/Chart.yaml")
     chart="$OUTDIR/$name"
     rm -rf "$chart"; cp -R "$src" "$chart"

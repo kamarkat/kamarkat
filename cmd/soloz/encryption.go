@@ -18,6 +18,7 @@ import (
 
 var (
 	encClusterName string
+	encBoxID       string
 	encNamespace   string
 	encKubeconfig  string
 	encContext     string
@@ -117,6 +118,7 @@ again -- are not performed here and are not optional.`,
 			"cluster: ArgoCD's infrastructure-provider ApplicationSet already carries that class. "+
 			"NOTE: this replaces the WHOLE class, not the encryption parts of it")
 	f.StringVar(&encClusterName, "cluster", "", "cluster name; the escrow is scoped to it (required)")
+	f.StringVar(&encBoxID, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
 	f.StringVar(&encNamespace, "namespace", "platform-capi", "namespace the control plane reads the Secret from")
 	f.StringVar(&encKubeconfig, "kubeconfig", "", "kubeconfig to apply through")
 	f.StringVar(&encContext, "context", "", "kubeconfig context")
@@ -125,6 +127,7 @@ again -- are not performed here and are not optional.`,
 		defaultHubClass, defaultSpokeClass))
 	f.BoolVar(&encDryRun, "dry-run", false, "say what would be applied, change nothing")
 	_ = cmd.MarkFlagRequired("cluster")
+	_ = cmd.MarkFlagRequired("box")
 	return cmd
 }
 
@@ -175,7 +178,7 @@ func runEncryptionEnable(cmd *cobra.Command, _ []string) error {
 			"not built without one (ADR-076): %w", err)
 	}
 
-	key, err := store.RestoreArtifact(ctx, encClusterName, escrow.ArtifactSecretEncryptionKey)
+	key, err := store.RestoreArtifact(ctx, escrow.ForCluster(encBoxID, encClusterName), escrow.ArtifactSecretEncryptionKey)
 	if err != nil {
 		// Unreadable is not absent. Treating it as absent would mint a second key for
 		// a cluster that already has one, and the first thing that key would do is
@@ -210,7 +213,7 @@ func runEncryptionEnable(cmd *cobra.Command, _ []string) error {
 	if generated {
 		if encDryRun {
 			fmt.Println("[encryption] dry-run: would escrow the generated key")
-		} else if err := store.BackupArtifact(ctx, encClusterName, escrow.ArtifactSecretEncryptionKey, key); err != nil {
+		} else if err := store.BackupArtifact(ctx, escrow.ForCluster(encBoxID, encClusterName), escrow.ArtifactSecretEncryptionKey, key); err != nil {
 			return fmt.Errorf("the key was generated but could not be escrowed, so nothing was "+
 				"applied: %w", err)
 		} else {

@@ -1,0 +1,40 @@
+global:
+  hubDomain: ""
+  # The box's provider: it selects the storage class of the engine's volume.
+  provider: ""
+
+# The box's issuer and its JWKS, set by environment-manager from the same values
+# every other consumer of the issuer reads. No default: a gateway that cannot
+# validate tokens must not start.
+oidcIssuer: ""
+oidcJwksUrl: ""
+
+# The organisation the engine seeds on its first migration: the one
+# organisation its one caller bills through. The admin user exists because the
+# engine requires one; nothing signs in as it.
+organisation:
+  name: Platform
+  adminEmail: billing-admin@platform.invalid
+
+# The engine's volume: invoice documents and the queue's append-only file.
+storage:
+  size: 2Gi
+
+# Pinned by digest by the platform, like every platform image (ADR-021).
+images:
+  # Lago OSS v1.55.0 (AGPLv3), unmodified: API, worker, clock and migration.
+  engine:
+    repository: docker.io/getlago/api
+    digest: "sha256:8dd75237d977b757134b062b88943b0c8c76ae135997a49c0cd2572245b9695e"
+  # The document renderer its v1.55.0 release pins. amd64 only, as is the fleet.
+  pdf:
+    repository: docker.io/getlago/lago-gotenberg
+    digest: "sha256:e8eef6fb4a92a3440c70d06598b385e7eb2ec7fb2d9b908ca4aa028741a0b270"
+  # The engine's queue: the Redis the platform's tenant cache pins.
+  queue:
+    repository: docker.io/library/redis
+    digest: "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2"
+  # The gateway: the AgentGateway release the Credit Authority runs (v1.6.0).
+  gateway:
+    repository: cr.agentgateway.dev/agentgateway
+    digest: "sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c"

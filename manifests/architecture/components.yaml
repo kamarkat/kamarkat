@@ -134,17 +134,21 @@ components:
 # rejects a waiver for something that IS applied, so the list cannot rot into a
 # blanket exemption.
 unreferenced:
-  - path: manifests/hub-core-services/database-migrations
-    reason: >-
-      Atlas SQL and checksums, not Kubernetes objects. Consumed by the migration
-      job, never applied by ArgoCD.
+  - path: manifests/hub-core-services/grafana/database-recovery
+    reason: &database-recovery >-
+      Break-glass. An overlay that rewrites its cluster's bootstrap to restore
+      from the object-store archive, applied by hand against a named archive.
+      Reconciling it continuously would re-create the cluster from an archive
+      every time it drifted. One per application cluster (ADR-112).
 
-  - path: manifests/hub-core-services/database-recovery
-    reason: >-
-      Break-glass. An overlay that rewrites platform-db's bootstrap to restore
-      from the object-store archive, applied by hand during the procedure in
-      docs/runbooks/platform-db-restore.md. Reconciling it continuously would
-      re-create the cluster from an archive every time it drifted.
+  - path: manifests/hub-core-services/identity/zitadel/database-recovery
+    reason: *database-recovery
+
+  - path: manifests/hub-core-services/credit-authority/database-recovery
+    reason: *database-recovery
+
+  - path: manifests/hub-core-services/infisical/database-recovery
+    reason: *database-recovery
 
 # ── The bundle's capability declaration (ADR-066) ────────────────────────────
 #
@@ -257,14 +261,16 @@ capabilities:
       cluster-machinery state.
 
   - name: database
-    kind: selectable
-    enable: capabilities.database.enabled
+    kind: required
     lifecycle: supported
     status: shipped
-    declared_by: [066-the-platform-boundary.md]
-    interacts_with: [metering, credits]
+    declared_by: [066-the-platform-boundary.md, 112-each-platform-application-owns-its-postgresql-cluster.md]
+    interacts_with: [metering, credits, billing]
     note: >-
-      Unconditionally on today. The platform maintains the capability -- operator
+      Required, not selectable (ADR-112). Each application owns its own PostgreSQL
+      cluster, so there is no single component a flag could remove: switching this
+      off would take the identity provider's users and the credit ledger with it.
+      The platform maintains the capability -- operator
       reconciling, version supported, backups restorable, failover working. The
       schemas in it are the tenant's, and a slow query against a healthy Postgres
       is not a platform incident.
@@ -352,13 +358,35 @@ capabilities:
     note: >-
       The Credit Authority: the box's credit ledger, run on the hub
       (hub-core-services/credit-authority) and reached only through the hub
-      Gateway at credits.<hubDomain>. Its database, role and credential on
-      platform-db are prerequisites present on every box; the ledger, its
+      Gateway at credits.<hubDomain>. Its own PostgreSQL cluster, role and
+      credential are prerequisites present on every box; the ledger, its
       AgentGateway sidecar and the route run only when enabled. The ledger
       listens on loopback and authenticates without authorising, so the
       sidecar binds the one caller (the application that declares
       capabilities.credits, and its organisation) and allows only the
       anchored transaction, account, balance and volume routes. It holds
       credits, never money, and determines no price. Planned until
-      ADR-109's isolation proof passes and platform-db's recovery is
+      ADR-109's isolation proof passes and credits-db's recovery is
       qualified for financial records -- see ADR-109.
+
+  - name: billing
+    kind: selectable
+    enable: capabilities.billing.enabled
+    lifecycle: declared
+    status: planned
+    declared_by:
+      - 113-the-billing-capability.md
+    interacts_with: [database]
+    note: >-
+      The billing engine: Lago OSS, unmodified, run on the hub
+      (hub-core-services/billing-engine) and reached only through the hub
+      Gateway at billing.<hubDomain>. Its own PostgreSQL cluster (with
+      pg_partman), role and credential are prerequisites present on every box;
+      the engine, its loopback queue, its document renderer, its AgentGateway
+      sidecar and the route run only when enabled. The sidecar binds the one
+      caller (the application that declares capabilities.billing, and its
+      organisation) and presents the engine's key for it, so no application
+      holds that key. It records plans, subscriptions and invoices for the
+      caller and collects nothing: payment is the caller's. Planned until
+      ADR-113's isolation proof passes, billing-db's recovery is qualified,
+      and the engine's encryption keys are escrowed -- see ADR-113.

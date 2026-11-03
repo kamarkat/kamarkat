@@ -46,6 +46,7 @@ import (
 // store's concern, and this is the procedure for the provider in force today.
 func newEncryptionRotateCmd() *cobra.Command {
 	var (
+		box         string
 		cluster     string
 		namespace   string
 		kubeconfig  string
@@ -80,13 +81,14 @@ incident, not a scheduling question: it is replaced now. Waiting for the next wi
 a key you know was disclosed keeps a compromised key in force for a quarter.`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runEncryptionRotate(c.Context(), rotateOpts{
-				cluster: cluster, namespace: namespace, kubeconfig: kubeconfig,
+				cluster: cluster, box: box, namespace: namespace, kubeconfig: kubeconfig,
 				kubeContext: kubeContext, finalize: finalize, dryRun: dryRun,
 			})
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&cluster, "cluster", "", "cluster whose key to rotate (required)")
+	f.StringVar(&box, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
 	f.StringVar(&namespace, "namespace", "platform-capi", "namespace holding the configuration Secret")
 	f.StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig for the MANAGEMENT cluster, where platform-capi lives")
 	f.StringVar(&kubeContext, "context", "", "kubeconfig context")
@@ -95,12 +97,13 @@ a key you know was disclosed keeps a compromised key in force for a quarter.`,
 			"carrying the new key's name — anything still under the old key becomes unreadable")
 	f.BoolVar(&dryRun, "dry-run", false, "print what would be applied")
 	_ = cmd.MarkFlagRequired("cluster")
+	_ = cmd.MarkFlagRequired("box")
 	return cmd
 }
 
 type rotateOpts struct {
-	cluster, namespace, kubeconfig, kubeContext string
-	finalize, dryRun                            bool
+	cluster, box, namespace, kubeconfig, kubeContext string
+	finalize, dryRun                                 bool
 }
 
 // keyEntry is one `- name: keyN` / `secret: ...` pair read back from the live Secret.
@@ -262,14 +265,14 @@ func stageRotation(ctx context.Context, o rotateOpts, store escrow.EscrowClient,
 		return fmt.Errorf("the live key %s is not a 32-byte base64 value, so it cannot be "+
 			"escrowed as the previous key: %w", current.name, err)
 	}
-	if err := store.BackupArtifact(ctx, o.cluster,
+	if err := store.BackupArtifact(ctx, escrow.ForCluster(o.box, o.cluster),
 		escrow.ArtifactSecretEncryptionKeyPrevious, oldHex); err != nil {
 		return fmt.Errorf("escrowing the outgoing key as %s: %w",
 			escrow.ArtifactSecretEncryptionKeyPrevious, err)
 	}
 	fmt.Printf("[rotate] escrowed the outgoing key as %s\n", escrow.ArtifactSecretEncryptionKeyPrevious)
 
-	if err := store.BackupArtifact(ctx, o.cluster, escrow.ArtifactSecretEncryptionKey, newHex); err != nil {
+	if err := store.BackupArtifact(ctx, escrow.ForCluster(o.box, o.cluster), escrow.ArtifactSecretEncryptionKey, newHex); err != nil {
 		return fmt.Errorf("the new key was generated but could not be escrowed, so nothing was "+
 			"applied: %w", err)
 	}

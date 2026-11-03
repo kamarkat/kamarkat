@@ -14521,7 +14521,7 @@ stringData:
             # must reach an external registry during cold boot would fail HARDER
             # than the race it removes: no operator at all, rather than Gateway API
             # disabled. IfNotPresent keeps it offline-safe.
-            image: registry.k8s.io/kubectl:v1.31.6@sha256:0340f50e46e77889398f41becf071e8d0f6be7672652a30e209112002147c06f
+            image: registry.k8s.io/kubectl:v1.35.10@sha256:4e1d541a3d62f74637974e4c71f3cea91b9a36ffd059ab45e355648898783837
             imagePullPolicy: IfNotPresent
             # This image is DISTROLESS: its entrypoint is /bin/kubectl and there is
             # no shell. An earlier revision used `command: [/bin/sh, -c, ...]`; every
@@ -14927,7 +14927,7 @@ stringData:
               type: Unconfined
           initContainers:
           - name: wait-for-envoy-release
-            image: busybox:1.36
+            image: busybox:1.38.0
             imagePullPolicy: IfNotPresent
             command:
             - /bin/sh

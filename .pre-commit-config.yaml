@@ -9,7 +9,7 @@ repos:
         files: 'manifests/argocd/environment-manager/.*'
       - id: schema-validate-environment-manager
         name: Kubernetes Schema Validation
-        entry: bash -c ". scripts/lib/tool-path.sh && set -o pipefail; helm template environment-manager manifests/argocd/environment-manager/ --set environmentRevision=dry-run --set environmentSlug=prod --set provider=hetzner --set topology=single --set publicTlsIssuer=letsencrypt-prod --set hubDomain=dev.example.test --set previewDomain=example-preview.test --set 'alerting.emailTo[0]=alerts@example.test' --set instanceRepoURL=https://github.com/example-org/example-gitops | kubeconform -summary -ignore-missing-schemas"
+        entry: bash -c ". scripts/lib/tool-path.sh && set -o pipefail; helm template environment-manager manifests/argocd/environment-manager/ --set environmentRevision=dry-run --set environmentSlug=prod --set boxId=example-box --set provider=hetzner --set topology=single --set publicTlsIssuer=letsencrypt-prod --set hubDomain=dev.example.test --set previewDomain=example-preview.test --set 'alerting.emailTo[0]=alerts@example.test' --set instanceRepoURL=https://github.com/example-org/example-gitops | kubeconform -summary -ignore-missing-schemas"
         language: system
         pass_filenames: false
         files: 'manifests/argocd/environment-manager/.*'

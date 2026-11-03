@@ -1,0 +1,293 @@
+# The secret store's PostgreSQL cluster (ADR-112 §1, §4), under Infisical's own folder
+# and reconciled by BOUNDARY 02.
+#
+# Those two are not in tension. This directory is its own component: a boundary's
+# inventory is the union of the descriptors under argocd/components/<boundary>/ and the
+# template's inline entries (ADR-061), and `identity/auth-proxy` and `identity/zitadel`
+# already show a service's subdirectory being a component in its own right. So the file
+# lives with the service it belongs to and is still provisioned ahead of it.
+#
+# WHY BOUNDARY 02 AND NOT 03 WITH INFISICAL ITSELF. Infisical is boundary 03
+# (argocd/components/03/platform-infisical.yaml), and boundary 02 is reconciled first --
+# which is the entire reason the data layer is its own boundary. Declared in the boundary
+# 03 component, this cluster would be created in the same sync as the application that
+# depends on it, and Infisical would crash-loop until CloudNativePG finished provisioning.
+#
+# THIS IS THE BOOTSTRAP CLUSTER. Day-0 waits for it and Infisical connects to it, both
+# through one declaration (constants.BootstrapDBCluster). It is the only database Day-0
+# needs before GitOps can proceed, because every other credential is fetched FROM
+# Infisical -- which is also why its own role is reconciled by CloudNativePG from a
+# Secret rather than arriving by the ordinary ESO path (ADR-023 add.).
+#
+# THIS ONE CANNOT DEPEND ON INFISICAL TO BE RECOVERED. Everything needed to restore it is
+# available before Infisical runs: the archive read credential from the escrow rather than
+# from Infisical, and the master keys as ADR-111 §1 scopes them. The other clusters may
+# keep taking their archive credentials from Infisical, because Infisical is restored
+# before them (ADR-111 Rev5 §3). Hence `s3-credentials-escrowed` below rather than the
+# shared `s3-credentials` -- pointing this cluster at the Infisical-delivered credential
+# would make its recovery depend on the service being recovered, which is the circularity
+# ADR-076 exists to break, at the one cluster where it is fatal. That Secret is delivered
+# from escrow by `soloz escrow deliver-backup-credentials`.
+#
+# THE BOOTSTRAP METHOD DEPENDS ON THE OPERATION, and only one may be declared for a
+# cluster's creation:
+#
+#   initdb          a new box. What is declared below.
+#   recovery        a replacement box rebuilding this cluster from its own archive,
+#                   which is ../database-recovery/.
+#
+# A recovery that silently initialised an empty database instead would report success
+# having discarded every credential the platform manages, so the method is chosen by the
+# operation rather than defaulted.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: infisical-db
+  namespace: platform-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # 1 in development, 2 in staging, 3 in production (templated-fields.yaml). A replica
+  # count is not availability: that needs instances on separate nodes, on storage that
+  # survives the loss of one, with failover exercised (ADR-112 §3).
+  instances: 1
+
+  # Pinned, not left to the operator's default. The default moves with the
+  # operator version, so an operator upgrade would otherwise change the
+  # PostgreSQL major underneath a cluster that never asked for it.
+  #
+  # 17, not 18. Infisical documents a floor (14) and no ceiling, and its own
+  # production compose still ships postgres:14. 17 is the newest major with real
+  # ecosystem soak behind it; 18 would be the first consumer to try it here, and
+  # this cluster holds the secret store the rest of the box bootstraps from.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-bookworm
+
+  # THE FLOOR, not a measurement. Four clusters replace one, so the shared cluster's
+  # 2 GiB cannot simply be repeated four times. These are the smallest settings a CNPG
+  # instance works at: shared_buffers at a quarter of the limit, the rest left to the
+  # instance manager and a handful of backends.
+  #
+  # The risk this accepts is that autovacuum and maintenance have little headroom, so a
+  # large table or a long transaction will press against the limit before a bigger
+  # cluster would. The answer is to raise it from this cluster's own metrics once it
+  # runs -- not to pre-emptively size it from a number nobody measured.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 256Mi
+  postgresql:
+    parameters:
+      shared_buffers: "64MB"
+      effective_cache_size: "192MB"
+      work_mem: "2MB"
+      maintenance_work_mem: "32MB"
+      max_connections: "50"
+  storage:
+    size: 4Gi
+    # Rendered per box by templated-fields.yaml (ADR-046 §11).
+    storageClass: PLACEHOLDER_PLACEMENT
+
+  # Worker nodes only, never tolerating the control-plane taint (ADR-014, ADR-112 §3).
+  affinity:
+    nodeSelector:
+      node-role.kubernetes.io/worker: ""
+      # ADR-046 §11 placement class, rendered per box by templated-fields.yaml.
+      workload-location: PLACEHOLDER_PLACEMENT
+
+  # The superuser secret the platform's own machinery connects as.
+  #
+  # CNPG creates `<cluster>-superuser` only when this is true, and defaults it to FALSE.
+  # Omitting it was a real break rather than a hardening choice: hub-operator's role
+  # reconciliation and password rotation both open the superuser secret by that name, so
+  # every rotation against this cluster would have failed looking for a Secret CNPG was
+  # never asked to make.
+  enableSuperuserAccess: true
+
+  # The `infisical` role, owned by CloudNativePG rather than by hub-operator.
+  #
+  # This is ADR-023's addendum, and it moves here with the database. Infisical's own role
+  # is the Day-0 BOOTSTRAP role: it has to exist before Infisical runs, and Infisical is
+  # what every other credential is fetched from -- so its password cannot arrive by the
+  # ordinary Infisical -> ESO path the way hub_zitadel's does. CNPG reconciling it from a
+  # Secret is the only ordering that closes.
+  #
+  # The addendum is explicit that this covers the bootstrap role "and only this case", and
+  # that anything listed here is removed from HubEnvironment.spec.database.roles so that
+  # exactly one controller owns each role. `infisical` is therefore deliberately absent
+  # from that list -- see the note on it in environments/base/hubenvironment.yaml.
+  #
+  # Rotation is declarative as a consequence: update the Secret and CNPG issues
+  # ALTER ROLE ... PASSWORD. That is why this cluster needs no rotation Job.
+  managed:
+    roles:
+      - name: infisical
+        ensure: present
+        login: true
+        passwordSecret:
+          name: infisical-db-credentials
+
+  # Its own database and owner, created at initialisation.
+  bootstrap:
+    initdb:
+      database: infisical
+      owner: infisical
+      # The owner is created WITH its real password, not a CloudNativePG-generated one.
+      #
+      # This is the one cluster where that is possible: hub-operator generates
+      # infisical-db-credentials during Day-0, before boundary 02 reconciles, so the
+      # Secret exists when initdb runs. The other three application clusters deliberately
+      # omit this -- their owners' credentials arrive by the ordinary ESO path at boundary
+      # 04, and blocking initdb on a Secret boundary 04 delivers would deadlock (the
+      # cluster waiting on the Secret, boundary 04 waiting on DatabaseRolesProvisioned).
+      #
+      # It is the same Secret managed.roles reconciles below, which is deliberate: initdb
+      # sets it once at creation and managed.roles keeps it true afterwards, so there is
+      # no window in which Infisical's own role has a password Infisical does not know.
+      #
+      # username in this Secret is `infisical`, matching owner above. CNPG takes the role
+      # name from the Secret when one is given, so the two must agree.
+      secret:
+        name: infisical-db-credentials
+
+  # This cluster's own archive identity (ADR-014 add.2, ADR-111 §2). destinationPath is
+  # rendered per box by templated-fields.yaml; serverName carries THIS database and its
+  # own incarnation, and is NOT templated -- it is bumped only when the cluster is
+  # recreated from an empty database, never on a running one, because check-wal-archive
+  # runs before a cluster's first archive and re-arming it against a non-empty prefix
+  # stops archiving on a database that was working (ADR-092).
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+      serverName: infisical-db-v1
+      endpointURL: https://hel1.your-objectstorage.com
+      s3Credentials:
+        accessKeyId:
+          name: s3-credentials-escrowed
+          key: access-key-id
+        secretAccessKey:
+          name: s3-credentials-escrowed
+          key: secret-access-key
+        region:
+          name: s3-credentials-escrowed
+          key: region
+      wal:
+        compression: gzip
+        maxParallel: 2
+      data:
+        compression: gzip
+        jobs: 2
+    retentionPolicy: "30d"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: infisical-db-infisical
+  namespace: platform-data
+spec:
+  cluster:
+    name: infisical-db
+  name: infisical
+  owner: infisical
+  ensure: present
+---
+# Daily, immediately on creation. `immediate: true` matters: until a base backup
+# completes this cluster has no recovery point at all.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: infisical-db-daily
+  namespace: platform-data
+spec:
+  schedule: "0 15 3 * * *"
+  immediate: true
+  backupOwnerReference: cluster
+  cluster:
+    name: infisical-db
+---
+# This cluster's application, the operator, and this cluster's own peers. Nothing else.
+#
+# The shared cluster's policy admits SEVEN namespaces because one cluster serves them
+# all; here the secret store reaches only its own database. The peer selector is a bare
+# `podSelector`, which means pods in THIS policy's namespace matching it, so
+# `cnpg.io/cluster` admits this cluster's instances and nothing else in platform-data --
+# a namespaceSelector would have admitted every workload there. The operator needs 5432
+# and 8000 both.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: infisical-db-access
+  namespace: platform-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: infisical-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-security
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: infisical-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8000
+    # The Support Agent, for the backup evidence ADR-014 makes the platform
+    # accountable for (ADR-077, collector backup-health-*). The METRICS port only:
+    # 5432 is not in this rule, so the agent can see whether this cluster is
+    # backing up and cannot reach its data.
+    #
+    # The namespace AND the agent's own label in ONE `from` element, which is AND.
+    # As two elements it would be a namespace selector admitting every pod in
+    # platform-ops to the exporter.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-ops
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: support-agent
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+# The instance exporter, as a Service the Support Agent can name.
+#
+# CloudNativePG publishes its backup and archive series on each instance pod's
+# :9187 and creates no Service for them, so a collector that reads a Service had
+# nothing to read. Per cluster, because a scrape resolves to one endpoint: a
+# Service spanning every CNPG pod here would report one arbitrary cluster's
+# backup as though it covered all of them.
+#
+# No cluster-wide scrape config and no PodMonitor: this exists for the evidence
+# path, which must keep working when a tenant declines the observability
+# capability (ADR-078 Section 8).
+apiVersion: v1
+kind: Service
+metadata:
+  name: infisical-db-metrics
+  namespace: platform-data
+  labels:
+    cnpg.io/cluster: infisical-db
+spec:
+  selector:
+    cnpg.io/cluster: infisical-db
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 9187
+      targetPort: 9187

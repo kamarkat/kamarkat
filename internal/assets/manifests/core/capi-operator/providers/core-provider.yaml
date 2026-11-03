@@ -4,7 +4,7 @@ metadata:
   name: cluster-api
   namespace: platform-capi
 spec:
-  version: v1.10.0
+  version: v1.13.7
   manager:
     featureGates:
       ClusterTopology: true

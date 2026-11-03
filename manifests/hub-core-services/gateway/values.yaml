@@ -29,3 +29,8 @@ externalDns:
 # from capabilities.credits.enabled. Off: no listener, no route, no hostname.
 creditAuthority:
   enabled: false
+
+# The billing engine's listener and route (ADR-113), set by environment-manager
+# from capabilities.billing.enabled. Off: no listener, no route, no hostname.
+billingEngine:
+  enabled: false

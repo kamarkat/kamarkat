@@ -347,7 +347,7 @@ func hostKubectl(ctx context.Context, args ...string) (string, error) {
 // unconditionally would recreate the org's projects on every run. What is not safe
 // is trusting them across instances.
 //
-// When platform-db is rebuilt, restored, or re-bootstrapped, Infisical comes up
+// When infisical-db is rebuilt, restored, or re-bootstrapped, Infisical comes up
 // with a new organization and no projects, while the ConfigMap (applied from the
 // git-tracked ADR-045 artifact) still advertises the old ones. The bootstrap then
 // believes hub-platform and hub-secrets exist, skips creating them, and fails
@@ -1179,7 +1179,7 @@ func WaitForCertificateProfile(ctx context.Context, podName, adminJWT, projectID
 			fmt.Printf("  3. Log in as %s with the password this box was bootstrapped with\n", adminEmail())
 			fmt.Println("  4. Navigate to: Certificates → Profiles → Create Profile")
 			fmt.Println("  5. Slug: argocd-bootstrap")
-			fmt.Println("  6. CA: Fleet Intermediate CA (NOT platform-db-ca — per ADR-035)")
+			fmt.Println("  6. CA: Fleet Intermediate CA (NOT infisical-db-ca — per ADR-035)")
 			fmt.Println("  7. Validity: 10 years")
 			fmt.Println("  8. Click 'Create'")
 			fmt.Println()

@@ -1,7 +1,7 @@
 # ADR-112: Each platform application owns its PostgreSQL cluster
 
 **Date:** 2026-11-02
-**Status:** Proposed
+**Status:** Accepted (implemented 2026-11-03)
 **Amends:** ADR-023 (addendum 2026-08-22, the Day-0 bootstrap role), ADR-078 (addendum 5 §6,
 Grafana's database), ADR-111 (§2 Class B), ADR-014 (the backup contract, through ADR-014
 addendum 3)
@@ -81,8 +81,12 @@ application's cluster:
   shared cluster's 2 GiB is not copied;
 * its credentials and role reconciliation, and its own read-write service endpoint;
 * a `Pooler` only where the application needs one;
-* a NetworkPolicy admitting its application and the operator, and nothing else;
+* a NetworkPolicy admitting its application, the operator, and the Support Agent on the
+  metrics port only -- and nothing else;
 * its own object store, archive identity, backup schedule and retention (ADR-014 addendum 3);
+* a `<cluster>-metrics` Service over its instance exporter, so the backup evidence ADR-014
+  makes the platform accountable for has a source per cluster (ADR-077, collector
+  `backup-health-<application>`). CloudNativePG creates no such Service itself;
 * its recovery configuration and runbook, under ADR-092.
 
 ### 3. Replicas and placement
@@ -107,41 +111,193 @@ them. No other cluster may become a dependency of Infisical's recovery. The othe
 archive credentials may continue to arrive from Infisical, because Infisical is restored
 before them (ADR-111, Revision 5).
 
-### 5. Transition
+### 5. Retiring the shared cluster
 
-The current state is preserved throughout. The transition is a logical separation of
-databases, not six physical copies of `platform-db`:
+No data moved, because none was wanted. The decision was taken on 2026-11-03 that the
+boxes carrying `platform-db` held nothing worth keeping — no users and no needed
+development data — so the shared cluster was deleted rather than drained, and the four
+application clusters start empty.
 
-* Each application moves on its own, using CloudNativePG's database import
-  (`bootstrap.initdb.import`, microservice type), where the source and destination PostgreSQL
-  versions are compatible.
-* Before data moves, the destination's backup and restore are proven (ADR-111, Revision 5).
-* Writes are quiesced for the cutover. The source and the destination never both accept
-  writes, during or after.
-* Data, extensions, ownership, privileges and schema version are verified on the destination
-  before the application's connection is moved, declaratively, to it.
-* The source database is kept for rollback until the destination is verified in use and
-  backed up. A healthy `Cluster` status is not that verification.
-* Grafana moves first, as the lowest-risk proof of the whole procedure. The secret store, the
-  identity provider and the ledger are critical-state moves, each with integrity checks before
-  and after.
-* No hidden dependency on `platform-db` survives: bootstrap SQL, `managed.roles`,
-  hub-operator's RoleManager, the password-rotation job, migration jobs, connection Secrets,
-  service names and network policies are each moved or removed.
+That makes the import path (`bootstrap.initdb.import`), the write quiesce, the per-
+application cutover order and the rollback window all unnecessary. None of them was
+exercised. A box that did hold wanted data would need them, and ADR-111 Revision 5's
+restore proof would gate the first move; that is not the situation this ADR was closed in,
+and nothing in these manifests implements it.
 
-None of this starts until ADR-111 Revision 5's recovery work has proven the current archive
-restorable. `platform-db` is retired only after the last application has moved and been
-verified.
+What was removed with the cluster, all in one change:
 
-## Ownership
+* `hub-core-services/database/` (the `Cluster`, its `Pooler`, its six `Database` CRs, its
+  credential ExternalSecrets, its `ScheduledBackup`, its NetworkPolicy and its
+  password-rotation `Job`), both `providers/<class>/database/` overlays, the
+  `database-recovery/` overlay and `database-migrations/`.
+* The `platform-database` element from boundary 02, leaving Redis and the four clusters.
+* `spec.database.clusterRef`, which named the shared cluster. `DatabaseClusters()`
+  includes the field only when set, so an empty value is how "there is no shared cluster"
+  is expressed; a value would open a role manager against a cluster nothing creates.
+* The `control_plane` and `hub` databases and their roles, which had no consumer (§1),
+  together with the `requiredSecrets` entries that waited for their credentials. That gate
+  is now derived from the declared roles through `database.RoleSecretName`, so it covers
+  exactly the roles RoleManager will provision and cannot outlive them.
+* `platform-db-app`, the shared cluster's owner credential. The bootstrap cluster's owner
+  credential is `infisical-db-credentials`, which already existed, is already mapped into
+  Infisical, and is read directly by `infisical-db`'s `initdb`. `platform-db-ca` became
+  `infisical-db-ca`, CloudNativePG deriving the name from the cluster.
+* The `database` capability's selector. It is `required` rather than `selectable` in the
+  bundle's declaration: with each application owning a cluster there is no single
+  component a flag could remove, and switching it off would take the identity provider's
+  users and the credit ledger with it.
 
-| Resource Class | System of Record | Lifecycle Owner | Reconciler | Consumer | Phase |
-|---|---|---|---|---|---|
-| An application's PostgreSQL cluster | PostgreSQL | Platform | CloudNativePG | that application | Day-1+ |
-| `infisical-db`, its role and database | PostgreSQL | Platform | CloudNativePG | Infisical | Day-0 (ADR-023) |
-| An application's database contents | PostgreSQL | the application | the application's migrations | the application | Day-1+ |
-| An application's archive and base backups | object storage | Platform | CloudNativePG (Barman Cloud plugin) | recovery (ADR-111) | Day-1+ |
-| `infisical-db`'s archive read credential | escrow (ADR-076) | Platform | — | recovery | Day-0 |
+**The bootstrap cluster is named once.** Day-0's readiness gate and the connection Secret
+it writes for Infisical both read `constants.BootstrapDBCluster`. They were separate
+literals — a string in the orchestrator and a constant in the secrets component — which is
+a bootstrap that can wait for one database and connect to another; they agreed only by
+luck, and either could have been edited alone. Day-0's wait is for `infisical-db`, the one
+database that must exist before GitOps can proceed.
+
+### 6. Implementation state (2026-11-03)
+
+Deployed and colocated. Each application's cluster, its `Database`, its `ScheduledBackup`
+and its NetworkPolicy live in one file under that application's own folder —
+`grafana/database/`, `identity/zitadel/database/`, `credit-authority/database/`,
+`infisical/database/` — each its own component with its own `templated-fields.yaml` and a
+boundary-02 descriptor in `argocd/components/02/`. Beside each is a
+`database-recovery/` overlay (§6, below). There is no second database folder: §1 says the
+unit is the application, and the files follow that. The objects still land in
+`platform-data`, which ADR-014 fixes.
+
+**No import.** The clusters initialise their own database through `bootstrap.initdb` and
+carry no `bootstrap.initdb.import`. An earlier draft imported each database from
+the shared cluster, which made applying a file a data migration and required the source
+quiesced first; that whole ordering — quiesce, snapshot, cutover, rollback window — does
+not arise (§5).
+
+**These clusters start EMPTY**, which is what §5 settled: the boxes held nothing worth
+keeping, so each application begins with no history. What that costs, per application:
+
+| Application | What starting empty costs |
+|---|---|
+| Grafana | sessions and preferences. Dashboards are GrafanaDashboard objects from Git, so nothing of record is lost. |
+| Identity provider | every user, organisation, project, client and grant. The box is re-bootstrapped and every OIDC client re-registered. |
+| Secret store | every credential the platform manages. All of them are re-seeded, and anything disclosed once at creation is re-created rather than recovered. |
+| Credit authority | the ledger. |
+
+That was accepted deliberately (§5). A box that did hold wanted data would need an import
+path, which these manifests do not implement.
+
+**Resources are at the floor.** 100m CPU and 256Mi memory per instance, `shared_buffers`
+at a quarter of the limit, with the rest left to the instance manager and a handful of
+backends. Four clusters replace one, so the shared cluster's 2 GiB could not simply be
+repeated four times. Totals: **400m / 1Gi / 14Gi** at one instance, 800m / 2Gi / 28Gi at
+two, 1200m / 3Gi / 42Gi at three. The accepted risk is that autovacuum and maintenance
+have little headroom, so each is to be raised from its own cluster's metrics once it runs
+rather than pre-sized from a number nobody measured.
+
+**Archive identity.** `destinationPath` is rendered per box from `global.clusterName` by
+each component's own `templated-fields.yaml`; `serverName` is a literal `<cluster>-v1`,
+deliberately not templated, because it is bumped only when a cluster is recreated from an
+empty database and never on a running one (ADR-092).
+
+**`infisical-db`'s archive credential comes from escrow, and its delivery now exists.**
+§4 requires it to come from somewhere other than the service being recovered.
+`soloz escrow deliver-backup-credentials` renders the enrolled object-store credential
+into the three discrete keys CloudNativePG reads and writes them as
+`s3-credentials-escrowed` in the clusters' namespace -- the same escrowed credential
+Velero consumes in its own INI shape, so there is one authority and two renderings rather
+than a second credential to rotate. It still has to be RUN: until it is, that cluster
+archives nothing.
+
+### 7. Infisical's database belongs to boundary 02
+
+Infisical is a **boundary 03 GitOps application**, declared by the component descriptor
+`argocd/components/03/platform-infisical.yaml` with `path:
+manifests/hub-core-services/infisical`. The Day-0 CLI waits for it to be ready
+(`hub-bootstrap.sh` step 6) and waits for the database separately (step 9); it is the
+declarative owner of neither.
+
+Its `Cluster` therefore sits in **boundary 02**, declared in
+`hub-core-services/infisical/database/` with a descriptor in `argocd/components/02/`.
+A database is provisioned before the application that
+needs it, and that ordering between boundaries is the entire reason the data layer is a
+boundary of its own. Declared in the boundary 03 component instead, the cluster would be
+created in the same sync as the application depending on it, and Infisical would
+crash-loop until CloudNativePG finished provisioning.
+
+**Grafana, Zitadel and the credit authority stay colocated with their services.** They are
+boundary 03 and 04 applications whose clusters are created alongside them, and none is a
+dependency of the bootstrap. Infisical is the one of the four whose database is ordered
+ahead of its service, and this is the only reason.
+
+**A correction worth recording, because it was asserted in this document.** An earlier
+revision claimed Infisical is installed before the GitOps seed and that its database had
+to be a Day-0 object. That was wrong — ArgoCD is running from `hub-bootstrap.sh` step 4,
+and the data layer's clusters are created by boundary 02's own Applications, not by
+Day-0. The conclusion is unchanged; the reason is boundary ordering, not Day-0. It was
+reached by reading the boundary diagram's Day-0 list and the appsets' inline entries while
+missing the component descriptors, which is where Infisical is declared.
+
+**Activated.** `infisical-db` has a boundary-02 descriptor
+(`argocd/components/02/platform-infisical-db.yaml`), so an Application renders it like any
+other component. Activation was one file: the manifest's directory is its own component,
+so nothing else had to move with it.
+
+**It is the bootstrap cluster.** Day-0 waits for it and Infisical connects to it, and both
+read one declaration, `constants.BootstrapDBCluster`. They were separate literals — a
+string in the orchestrator's readiness gate and a constant in the secrets component — which
+is a bootstrap that can wait for one database and then connect to another. They agreed only
+by luck, and either could have been edited alone.
+
+It is the one database Day-0 needs before GitOps can proceed, because every other
+credential is fetched from Infisical. That is also why its own role is reconciled by
+CloudNativePG from a Secret rather than arriving by the ordinary ESO path (ADR-023
+addendum), and why its `initdb` reads that same Secret: the role exists with the right
+password from creation, so there is no window in which Infisical cannot reach its own
+database.
+
+The bootstrap method follows the operation, and CloudNativePG permits one per cluster
+creation: `initdb` for a new box, `recovery` for a replacement box rebuilding from this
+cluster's archive (`infisical/database-recovery/`). A recovery that silently initialised an empty database would
+report success having discarded every credential the platform manages, so the method is
+chosen per operation and never defaulted. Its recovery inputs stay independent of
+Infisical (§4): the archive credential from escrow as `s3-credentials-escrowed`, and the
+master keys as ADR-111 §1 scopes them.
+
+**Evidence:** `argocd/components/03/platform-infisical.yaml`,
+`03-platform-services-appset.yaml`, `hub-core-services/infisical/kustomization.yaml`,
+`scripts/hub-bootstrap.sh`.
+
+### 8. Feature parity with the shared cluster (2026-11-03)
+
+Established by diffing the shared cluster's rendered object set and full Cluster spec path set
+against each of the four, rather than by comparing file names — which is how three of these
+rows were missed on the first pass.
+
+| What the shared cluster had | The four | Why |
+|---|---|---|
+| Cluster, Database, ScheduledBackup, NetworkPolicy | all four | — |
+| `enableSuperuserAccess` | all four | the platform's own machinery connects as superuser |
+| Archive destination derived per box | all four | via each component's `templated-fields.yaml` |
+| Placement class (`workload-location`, `storageClass`) | all four | the shared cluster received these from a `providers/<class>/` overlay; each of the four renders them instead, being its own component |
+| Recovery overlay | all four | `<service>/database-recovery/`, a sibling because kustomize refuses a resource file outside its own tree |
+| `managed.roles` | `infisical-db` only | ADR-023's addendum covers the Day-0 bootstrap role "and only this case"; the other three roles are hub-operator's, and listing them would give each two controllers |
+| `certificates.serverAltDNSNames` | none | it holds only Pooler DNS names, so it goes with the Pooler |
+| `Pooler` | none | §2: an application connects to its own cluster directly |
+| Password-rotation `Job` | none | the Job existed because `app`, the shared cluster's own initdb owner, was in neither the role list nor `managed.roles`. The four's owners are: three in `spec.database.roles` (RoleManager rotates them) and `infisical` under `managed.roles` (CNPG reconciles it from its Secret). Parity by mechanism, not by copying the Job |
+| `bootstrap.initdb.secret` | `infisical-db` only | the bootstrap cluster reads `infisical-db-credentials`, which hub-operator generates during Day-0 before boundary 02 reconciles, so its owner is created with the password Infisical already has. The other three omit it deliberately: their owners' credentials arrive by the ordinary ESO path at boundary 04, and blocking initdb on a Secret boundary 04 delivers would deadlock — the cluster waiting on the Secret, boundary 04 waiting on `DatabaseRolesProvisioned`. Their cost is a window before RoleManager sets the password, and an unused CloudNativePG-generated `<cluster>-app` Secret |
+| `bootstrap.initdb.postInitSQL` | none | it existed to create several databases on one cluster. Each of the four hosts one, declared as a `Database` CR — which, unlike `postInitSQL`, reconciles: `postInitSQL` runs once at initdb and can never repair an existing cluster |
+
+**The readiness gate is derived, not listed.** `control-plane-db-credentials` and
+`hub-db-credentials` were named literally in hub-operator's `requiredSecrets`, which
+blocks before provisioning any role — so deleting their ExternalSecrets with the shared
+cluster would have stopped `ApplicationSecretsReady`, then `DatabaseRolesProvisioned`,
+which is the gate boundary 04 waits on. A gate that lists its Secrets separately outlives
+the roles it guards. It is now built from `spec.database.roles` through
+`database.RoleSecretName`, the same function RoleManager uses to find the credential it
+applies, so the gate covers exactly the roles that will be provisioned and nothing else.
+
+A credential named this way appears in no manifest that references it: `hub_grafana`
+becomes `hub-grafana-db-credentials` by that rule alone, which is why two of these
+ExternalSecrets were briefly deleted as unreferenced during this work. A grep could not
+see the reference because the reference is a convention in code.
 
 ## Consequences
 

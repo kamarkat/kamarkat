@@ -306,6 +306,14 @@ spec:
               - name: creditAuthorityUrl
                 value: {{ printf "https://credits.%s" (include "environment-manager.hubDomain" $) | quote }}
 {{- end }}
+{{- if .Values.capabilities.billing.enabled }}
+              # ADR-113: where a fleet that declares capabilities.billing reaches
+              # the box's billing engine, built from the same hubDomain as its
+              # route. Absent while the capability is off, and a fleet declaring
+              # it then fails to render.
+              - name: billingEngineUrl
+                value: {{ printf "https://billing.%s" (include "environment-manager.hubDomain" $) | quote }}
+{{- end }}
 {{- if .Values.oidcScopes }}
             # A list, so it cannot go through `parameters` — those are flat
             # name/value strings.

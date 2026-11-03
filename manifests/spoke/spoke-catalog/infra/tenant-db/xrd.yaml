@@ -1,5 +1,5 @@
 ---
-apiVersion: apiextensions.crossplane.io/v1
+apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
   name: tenantdatabases.nutgraf.in
@@ -8,9 +8,12 @@ spec:
   names:
     kind: TenantDatabase
     plural: tenantdatabases
-  claimNames:
-    kind: TenantDatabaseClaim
-    plural: tenantdatabaseclaims
+  # Crossplane v2: cluster-scoped, so the XR composes the cluster-scoped
+  # resources this composition needs -- the SQL provider's Database, Role and
+  # Grant managed resources are cluster-scoped on the v1 provider line.
+  # Namespaced would forbid them.
+  # Claims are gone in v2; nothing ever created the *Claim kind.
+  scope: Cluster
   versions:
   - name: v1alpha1
     served: true

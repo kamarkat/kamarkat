@@ -1,0 +1,9 @@
+# The billing engine's PostgreSQL cluster as its own component (ADR-112 §1,
+# ADR-113 §3). A kustomization so ../database-recovery can reference this
+# directory (see credit-authority/database).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - billing-db.yaml
+  - hub-billing-db-credentials-es.yaml

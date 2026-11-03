@@ -1,7 +1,7 @@
-# Vendored from helm chart kyverno v3.9.1 (https://kyverno.github.io/kyverno)
+# Vendored from helm chart kyverno v3.9.2 (https://kyverno.github.io/kyverno)
 # CRDs applied at sync-wave -5 so ArgoCD establishes them before
 # operators/resources that depend on them (ADR-023).
-# sha256: c5b04f5b90a9e90e453435de7c748ab03b116812e429154edeb6881dba1c0abb
+# sha256: 30761566bbd4e406f2729a017958e7010ce028ce329437c6bb2cc29b565cc096
 #
 # The 3.2.6 -> 3.6.4 step REMOVED AdmissionReport, BackgroundScanReport,
 # ClusterAdmissionReport and ClusterBackgroundScanReport -- upstream's change,
@@ -26,8 +26,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: cleanuppolicies.kyverno.io
 spec:
   group: kyverno.io
@@ -2688,8 +2688,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: clustercleanuppolicies.kyverno.io
 spec:
   group: kyverno.io
@@ -5350,8 +5350,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: clusterephemeralreports.reports.kyverno.io
 spec:
   group: reports.kyverno.io
@@ -5704,8 +5704,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: clusterpolicies.kyverno.io
 spec:
   group: kyverno.io
@@ -7309,6 +7309,23 @@ spec:
                       additionalProperties:
                         items:
                           properties:
+                            filter:
+                              description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                When set, only array elements where the field named by ''key'' equals this value
+
+                                are extracted as image references. Requires ''key'' to be set.
+
+                                This is useful when a wildcard path expands an array containing both image and
+
+                                non-image elements, and only specific elements should be treated as images.
+
+                                Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                paths are expanded without filtering.
+
+                                Filter only applies to wildcard expansion over arrays, not maps.'
+                              type: string
                             jmesPath:
                               description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -12274,6 +12291,23 @@ spec:
                           additionalProperties:
                             items:
                               properties:
+                                filter:
+                                  description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                    When set, only array elements where the field named by ''key'' equals this value
+
+                                    are extracted as image references. Requires ''key'' to be set.
+
+                                    This is useful when a wildcard path expands an array containing both image and
+
+                                    non-image elements, and only specific elements should be treated as images.
+
+                                    Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                    paths are expanded without filtering.
+
+                                    Filter only applies to wildcard expansion over arrays, not maps.'
+                                  type: string
                                 jmesPath:
                                   description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -17098,6 +17132,23 @@ spec:
                       additionalProperties:
                         items:
                           properties:
+                            filter:
+                              description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                When set, only array elements where the field named by ''key'' equals this value
+
+                                are extracted as image references. Requires ''key'' to be set.
+
+                                This is useful when a wildcard path expands an array containing both image and
+
+                                non-image elements, and only specific elements should be treated as images.
+
+                                Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                paths are expanded without filtering.
+
+                                Filter only applies to wildcard expansion over arrays, not maps.'
+                              type: string
                             jmesPath:
                               description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -22000,6 +22051,23 @@ spec:
                           additionalProperties:
                             items:
                               properties:
+                                filter:
+                                  description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                    When set, only array elements where the field named by ''key'' equals this value
+
+                                    are extracted as image references. Requires ''key'' to be set.
+
+                                    This is useful when a wildcard path expands an array containing both image and
+
+                                    non-image elements, and only specific elements should be treated as images.
+
+                                    Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                    paths are expanded without filtering.
+
+                                    Filter only applies to wildcard expansion over arrays, not maps.'
+                                  type: string
                                 jmesPath:
                                   description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -25458,8 +25526,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: clusterpolicyreports.wgpolicyk8s.io
 spec:
   group: wgpolicyk8s.io
@@ -27519,8 +27587,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: ephemeralreports.reports.kyverno.io
 spec:
   group: reports.kyverno.io
@@ -30089,8 +30157,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: globalcontextentries.kyverno.io
 spec:
   group: kyverno.io
@@ -59596,8 +59664,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: policies.kyverno.io
 spec:
   group: kyverno.io
@@ -61203,6 +61271,23 @@ spec:
                       additionalProperties:
                         items:
                           properties:
+                            filter:
+                              description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                When set, only array elements where the field named by ''key'' equals this value
+
+                                are extracted as image references. Requires ''key'' to be set.
+
+                                This is useful when a wildcard path expands an array containing both image and
+
+                                non-image elements, and only specific elements should be treated as images.
+
+                                Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                paths are expanded without filtering.
+
+                                Filter only applies to wildcard expansion over arrays, not maps.'
+                              type: string
                             jmesPath:
                               description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -66168,6 +66253,23 @@ spec:
                           additionalProperties:
                             items:
                               properties:
+                                filter:
+                                  description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                    When set, only array elements where the field named by ''key'' equals this value
+
+                                    are extracted as image references. Requires ''key'' to be set.
+
+                                    This is useful when a wildcard path expands an array containing both image and
+
+                                    non-image elements, and only specific elements should be treated as images.
+
+                                    Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                    paths are expanded without filtering.
+
+                                    Filter only applies to wildcard expansion over arrays, not maps.'
+                                  type: string
                                 jmesPath:
                                   description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -70994,6 +71096,23 @@ spec:
                       additionalProperties:
                         items:
                           properties:
+                            filter:
+                              description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                When set, only array elements where the field named by ''key'' equals this value
+
+                                are extracted as image references. Requires ''key'' to be set.
+
+                                This is useful when a wildcard path expands an array containing both image and
+
+                                non-image elements, and only specific elements should be treated as images.
+
+                                Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                paths are expanded without filtering.
+
+                                Filter only applies to wildcard expansion over arrays, not maps.'
+                              type: string
                             jmesPath:
                               description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -75896,6 +76015,23 @@ spec:
                           additionalProperties:
                             items:
                               properties:
+                                filter:
+                                  description: 'Filter is an optional value to match against ''key'' during wildcard array expansion.
+
+                                    When set, only array elements where the field named by ''key'' equals this value
+
+                                    are extracted as image references. Requires ''key'' to be set.
+
+                                    This is useful when a wildcard path expands an array containing both image and
+
+                                    non-image elements, and only specific elements should be treated as images.
+
+                                    Filter applies at the terminal wildcard only; intermediate wildcards in nested
+
+                                    paths are expanded without filtering.
+
+                                    Filter only applies to wildcard expansion over arrays, not maps.'
+                                  type: string
                                 jmesPath:
                                   description: 'JMESPath is an optional JMESPath expression to apply to the image value.
 
@@ -79354,8 +79490,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: policyexceptions.kyverno.io
 spec:
   group: kyverno.io
@@ -81103,8 +81239,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: policyreports.wgpolicyk8s.io
 spec:
   group: wgpolicyk8s.io
@@ -81480,8 +81616,8 @@ metadata:
     app.kubernetes.io/instance: kyverno
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: kyverno-crds
-    app.kubernetes.io/version: 3.9.1
-    helm.sh/chart: crds-3.9.1
+    app.kubernetes.io/version: 3.9.2
+    helm.sh/chart: crds-3.9.2
   name: updaterequests.kyverno.io
 spec:
   group: kyverno.io

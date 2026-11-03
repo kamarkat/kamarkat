@@ -1,12 +1,14 @@
 ---
-apiVersion: apiextensions.crossplane.io/v1
+apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
   name: spokepools.nutgraf.in
 spec:
-  claimNames:
-    kind: SpokePoolClaim
-    plural: spokepoolclaims
+  # Crossplane v2: cluster-scoped, so the XR composes the cluster-scoped
+  # resources this composition needs (Namespace, ClusterIssuer,
+  # ClusterSecretStore, ProviderConfig). Namespaced would forbid them.
+  # Claims are gone in v2; nothing ever created the *Claim kind.
+  scope: Cluster
   group: nutgraf.in
   names:
     kind: SpokePool

@@ -68,6 +68,41 @@ MSG
 # components out of descriptors and in the boundary template.
 if [[ -f "$SRC/kustomization.yaml" ]]; then
     command -v kustomize >/dev/null || { echo "$APP: kustomize not found" >&2; exit 1; }
+    # Helm 3, checked here rather than discovered inside kustomize.
+    #
+    # kustomize's HelmChartInflationGenerator shells out to `helm version -c`, a flag
+    # Helm 4 removed, so on a Helm 4 toolchain every component that inflates a chart
+    # from its kustomization (headlamp, infisical) fails with
+    #
+    #   Error: unknown shorthand flag: 'c' in -c
+    #   : unable to run: 'helm version -c --short' ... (is 'helm' installed?)
+    #
+    # which names a flag nobody wrote and asks whether a binary that is present is
+    # installed. CI pins v3.16.4 for this reason (publish-platform-charts.yml); the
+    # local release path has no such pin, so the version is asserted here and the
+    # failure says what to do about it.
+    #
+    # ONLY for a component that actually inflates a chart. The check used to fire for
+    # every kustomization on a Helm 4 toolchain, which is broader than its own reason:
+    # a kustomization with no `helmCharts` never shells out to helm at all, so it was
+    # refused for a dependency it does not have. That took out the per-application
+    # database components (ADR-112), whose kustomizations exist only so a recovery
+    # overlay can reference the directory.
+    inflates_chart=""
+    if grep -rqls '^helmCharts:' "$SRC" 2>/dev/null; then
+        inflates_chart="yes"
+    fi
+    if [[ -n "$inflates_chart" ]] && command -v helm >/dev/null; then
+        helm_major="$(helm version --short 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')"
+        if [[ -n "$helm_major" && "$helm_major" -ge 4 ]]; then
+            echo "$APP: helm $(helm version --short) is installed, and kustomize inflates charts" >&2
+            echo "  by calling 'helm version -c', which Helm 4 removed. Packaging this component" >&2
+            echo "  needs Helm 3 (CI pins v3.16.4). Either install Helm 3, or point kustomize at" >&2
+            echo "  one for this run:" >&2
+            echo "    kustomize build --enable-helm --helm-command /path/to/helm3 $SRC" >&2
+            exit 1
+        fi
+    fi
     # --enable-helm because several components inflate a chart from their
     # kustomization (headlamp, infisical). Without it kustomize refuses the
     # build with "trouble configuring builtin HelmChartInflationGenerator",

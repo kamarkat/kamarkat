@@ -105,6 +105,20 @@ global:
   {{- /* ADR-078 addenda 4 and 5: who each cluster's Alertmanager emails. */}}
   alerting:
     emailTo: {{ $root.Values.alerting.emailTo | toJson }}
+  {{- /*
+    ADR-111 §1: the logical hub. Keys the escrow path holding this box's Infisical
+    master keys and its identity provider's encryption key, and the DNS records
+    this box owns -- everything that must survive the CLUSTER below being
+    replaced.
+
+    `required` rather than defaulted from clusterName. A default would make the
+    first successor inherit its predecessor's cluster name as the box id on one
+    box and not another, so the master keys would be looked for under a name
+    nothing wrote them under -- the secret store unrecoverable at exactly the
+    moment the escrow exists to serve. Failing to render is the loud end of that
+    choice; hub-operator refuses the same value for the same reason.
+  */}}
+  boxId: {{ required "boxId is required (ADR-111): it keys everything in the escrow that outlives a cluster, and there is no safe value to assume for it" $root.Values.boxId | quote }}
   clusterName: {{ include "environment-manager.clusterName" $root | quote }}
   {{- /*
     The box's own tenant id, for ADR-078 add.1 §7: Alloy stamps `cluster` AND

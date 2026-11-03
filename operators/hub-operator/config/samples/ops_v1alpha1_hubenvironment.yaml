@@ -13,11 +13,15 @@ spec:
     grafanaAlloy:
       scrapeInterval: 15s
   database:
-    clusterRef: platform-db
+    # The bootstrap cluster: Infisical's own, which the operator itself depends on.
+    clusterRef: infisical-db
     namespace: platform-data
     roles:
     - name: hub_zitadel
       database: zitadel
+      # The application's own cluster (ADR-112). Required: a role provisioned on
+      # another application's cluster is one this application cannot use.
+      clusterRef: zitadel-db
       permissions:
       - SELECT
       - INSERT

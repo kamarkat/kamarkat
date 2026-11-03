@@ -86,6 +86,12 @@ spec:
           port: 8000
         - protocol: TCP
           port: 9189
+        # CloudNativePG's instance exporter, which serves the backup and archive
+        # series the backup-health collectors read (ADR-014, ADR-077). Without it
+        # those collectors are refused at egress and recorded as finding nothing,
+        # which reads as a box whose backups are fine.
+        - protocol: TCP
+          port: 9187
     # The platform's telemetry ingress, over TLS.
     #
     # Not restricted to an IP block: the endpoint is a public name whose address

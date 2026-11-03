@@ -313,12 +313,20 @@ func (i *Installer) InstallPostgresConnectionSecret(ctx context.Context) (bool, 
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"DB_HOST":     "platform-db-pooler.platform-data.svc", // PgBouncer service
+			// The secret store's own cluster (ADR-112 §1, §4), declared in
+			// hub-core-services/infisical/infisical-db.yaml beside Infisical itself.
+			//
+			// The PRIMARY service, not a pooler: platform-db had one and infisical-db
+			// does not. A Pooler is provisioned per cluster only where the application
+			// needs one (ADR-112 §2), and nothing has shown that Infisical does --
+			// adding one to mirror the old topology would be copying a shape rather
+			// than meeting a need.
+			"DB_HOST":     infisicalDBCluster + "-rw." + constants.NamespaceData + ".svc",
 			"DB_PORT":     "5432",
 			"DB_USER":     "infisical",
 			"DB_PASSWORD": infPassword,
 			"DB_NAME":     "infisical",
-			"DB_SSL_MODE": "require", // Enable TLS for client->pooler connection
+			"DB_SSL_MODE": "require", // TLS from client to the primary
 		},
 	}
 
@@ -341,23 +349,17 @@ func (i *Installer) InstallPostgresConnectionSecret(ctx context.Context) (bool, 
 	return true, nil
 }
 
-// InstallPlatformDatabaseCredentials generates secure passwords for all platform database users
-// and stores them in Infisical (GitOps source of truth).
+// InstallPlatformDatabaseCredentials uploads the bootstrap database credential to
+// Infisical, making Infisical the source of truth for it.
 //
-// Layer 1 + Layer 2 Bootstrap Pattern:
-// 1. Uploads Layer 1 (Secret Zero) credentials to Infisical:
-//   - infisical-db-credentials (already in K8s, now uploaded to Infisical as SOT)
-//   - platform-db-app (already in K8s, now uploaded to Infisical as SOT)
+// Only Secret Zero is handled here. infisical-db-credentials is created in the cluster
+// before Infisical exists -- it has to be, since Infisical cannot supply the credential
+// to its own database -- so this is the one credential that travels INTO Infisical rather
+// than out of it. Every application role's credential is generated in Infisical and
+// reaches the cluster through ExternalSecrets, and hub-operator's RoleManager applies it
+// to the role (ADR-023 add.).
 //
-// 2. Generates Layer 2 (Application) credentials and stores in Infisical:
-//   - control-plane-db-* (mcp_server, agentregistry)
-//
-// 3. ExternalSecrets Operator syncs all credentials from Infisical to K8s
-//
-// This ensures Infisical is the definitive Source of Truth for ALL credentials,
-// while solving the bootstrap paradox by having CLI inject Secret Zero first.
-//
-// IDEMPOTENCY: Checks if secrets exist in Infisical before creating.
+// IDEMPOTENCY: CreateOrUpdateSecret is safe to repeat.
 func (i *Installer) InstallPlatformDatabaseCredentials(ctx context.Context) (bool, error) {
 	// Load kubeconfig and create clientset
 	config, err := clientcmd.BuildConfigFromFlags("", i.Kubeconfig)
@@ -403,72 +405,7 @@ func (i *Installer) InstallPlatformDatabaseCredentials(ctx context.Context) (boo
 	}
 	fmt.Println("[bootstrap-secrets] ✓ infisical-db credentials uploaded to Infisical")
 
-	// Upload platform-db-app credentials
-	appSecret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "platform-db-app", metav1.GetOptions{})
-	if err != nil {
-		return false, fmt.Errorf("failed to read platform-db-app: %w", err)
-	}
-
-	if err := infisicalClient.CreateOrUpdateSecret(ctx, infisicalConfig.ProjectSlug, infisicalConfig.EnvironmentSlug, secretPath, infisical.KeyPlatformDBAppUsername, string(appSecret.Data["username"])); err != nil {
-		return false, fmt.Errorf("failed to upload %s: %w", infisical.KeyPlatformDBAppUsername, err)
-	}
-
-	if err := infisicalClient.CreateOrUpdateSecret(ctx, infisicalConfig.ProjectSlug, infisicalConfig.EnvironmentSlug, secretPath, infisical.KeyPlatformDBAppPassword, string(appSecret.Data["password"])); err != nil {
-		return false, fmt.Errorf("failed to upload %s: %w", infisical.KeyPlatformDBAppPassword, err)
-	}
-	// Generate and store control-plane-db and hub-db credentials.
-	// Both are logical databases within the same CNPG cluster:
-	//   control_plane → used by MCP server + Ory stack (role: mcp_server)
-	//   hub          → used by hub platform (role: spoke_controller)
-	// The hub- prefix on Infisical keys follows the convention in
-	// operators/hub-operator/internal/infisical/constants.go.
-	controlPlanePassword, err := generateSecurePassword(32)
-	if err != nil {
-		return false, fmt.Errorf("failed to generate control-plane password: %w", err)
-	}
-	hubDBPassword, err := generateSecurePassword(32)
-	if err != nil {
-		return false, fmt.Errorf("failed to generate hub-db password: %w", err)
-	}
-
-	credentials := []struct {
-		prefix   string
-		username string
-		password string
-	}{
-		{"hub-control-plane-db", "mcp_server", controlPlanePassword},
-		{"hub-centralized-db", "spoke_controller", hubDBPassword},
-	}
-
-	// Store only username and password in Infisical (host/port/database are static in manifests)
-	for _, cred := range credentials {
-		fmt.Printf("[bootstrap-secrets] Storing %s credentials in Infisical...\n", cred.prefix)
-
-		var usernameKey, passwordKey string
-		switch cred.prefix {
-		case "hub-control-plane-db":
-			usernameKey = infisical.KeyControlPlaneDBUsername
-			passwordKey = infisical.KeyControlPlaneDBPassword
-		case "hub-centralized-db":
-			usernameKey = infisical.KeyHubCentralizedDBUsername
-			passwordKey = infisical.KeyHubCentralizedDBPassword
-		}
-
-		secrets := map[string]string{
-			usernameKey: cred.username,
-			passwordKey: cred.password,
-		}
-
-		for key, value := range secrets {
-			if err := infisicalClient.CreateOrUpdateSecret(ctx, infisicalConfig.ProjectSlug, infisicalConfig.EnvironmentSlug, secretPath, key, value); err != nil {
-				return false, fmt.Errorf("failed to store %s in Infisical: %w", key, err)
-			}
-		}
-
-		fmt.Printf("[bootstrap-secrets] ✓ %s credentials stored in Infisical\n", cred.prefix)
-	}
-
-	fmt.Println("[bootstrap-secrets] ✓ All credentials stored in Infisical. ExternalSecrets will sync to K8s.")
+	fmt.Println("[bootstrap-secrets] ✓ Bootstrap credential stored in Infisical. ExternalSecrets will sync the rest.")
 
 	return true, nil
 }
@@ -526,10 +463,30 @@ func (i *Installer) WaitForInfisicalAuth(ctx context.Context) error {
 // Note: the bash bootstrap's step5 has a separate, stricter verification
 // of the `infisical-auth` Secret artifact before marking init_secrets
 // complete — that is the real safety net.
+// infisicalDBCluster is the cluster Infisical uses: Infisical's own (ADR-112), and the
+// box's bootstrap cluster because Day-0 cannot proceed without it.
+//
+// It resolves to the declaration in package constants rather than to a literal here.
+// Day-0's readiness gate and this connection must name the SAME cluster, and when each
+// spelled its own literal, correcting one left the bootstrap waiting on one database and
+// connecting to another.
+const infisicalDBCluster = constants.BootstrapDBCluster
+
 func (i *Installer) WaitForInfisicalHealth(ctx context.Context) error {
 	waiter := &health.HealthWaiter{
 		Checkers: append(
-			(&health.DataLayerReadiness{}).Checkers(),
+			// The cluster Infisical actually uses. This wait exists to close the boot
+			// race described above -- Infisical crash-looping on a database service
+			// that does not exist yet -- so it must name the cluster Infisical
+			// connects to; a gate on any other one leaves the race open while
+			// appearing to guard against it.
+			//
+			// Named once, at infisicalDBCluster, so the gate and the connection cannot
+			// diverge. No Pooler is named because infisical-db has none (ADR-112 §2).
+			(&health.DataLayerReadiness{
+				CNPGClusterName:  infisicalDBCluster,
+				OwnerApplication: constants.BootstrapDBOwnerApplication,
+			}).Checkers(),
 			(&health.InfisicalReadiness{}).Checkers()...,
 		),
 		Interval: 5 * time.Second,

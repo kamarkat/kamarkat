@@ -11,7 +11,15 @@ spec:
   environment: prod
   # Domain is sourced from hub-bootstrap-config ConfigMap
   domain: nutgraf.in
-  # The cluster this box is, as CAPI names it and as the escrow is keyed by.
+  # The logical hub: this box, for as long as it exists (ADR-111 ss1). Templated
+  # per box like clusterName below, and never equal to it by rule -- the two are
+  # separate because they have separate lifetimes, and a successor hub carries a
+  # new clusterName under the same boxId.
+  boxId: prod-hetzner
+  # The cluster this box is, as CAPI names it and as the escrow keys
+  # CLUSTER-scoped artefacts by: the admin kubeconfig and the at-rest encryption
+  # key, which are replaced along with the cluster. What must outlive the cluster
+  # is keyed by boxId above.
   #
   # Declared because the operator will not infer it: metadata.name is the
   # singleton "hub-environment" on every box, and keying the escrow by that put
@@ -28,56 +36,38 @@ spec:
     grafanaAlloy:
       scrapeInterval: 15s
   database:
-    clusterRef: platform-db
+    # The BOOTSTRAP cluster, not a shared one: every application role names its own
+    # (ADR-112). This is the cluster Infisical's database is on, which is the one the
+    # operator itself depends on -- Day-0 waits for it, the generated bootstrap secrets
+    # address it, and its CA is what Infisical is handed.
+    clusterRef: infisical-db
     namespace: platform-data
     roles:
-    # NOTE: `infisical` is deliberately ABSENT from this list. It is a BOOTSTRAP
-    # role owned by CNPG (platform-db spec.managed.roles), not an application role.
-    # RoleManager reads each role's credential from an ESO-synced Secret sourced
-    # from Infisical, so it cannot be the thing that lets Infisical start — that is
-    # a circular dependency, and listing it here would also give the role two
-    # controllers. See manifests/hub-core-services/database/platform-db.yaml.
-    # hub_control_plane and hub_centralized were removed (2026-09-15). Nothing
-    # consumed them: no workload mounted control-plane-db-credentials or
-    # hub-db-credentials, and mcp-server -- named in the mapping as the consumer
-    # of the first -- runs with no env, no envFrom and no volumes at all.
+    # Declare a role here ONLY if its credential Secret is delivered. RoleManager
+    # iterates this list and returns on the first failure, so a role whose Secret never
+    # arrives skips every role after it -- and the symptom is the LAST application in
+    # the list failing to authenticate, which names neither this file nor the role that
+    # actually broke.
     #
-    # They were not inert while they stayed. The role manager iterates this list
-    # and returns on the first failure, so either one failing skipped every role
-    # after it, including hub_zitadel. That is the failure described below, and
-    # keeping two unused roles in front of the one role this platform needs made
-    # it twice as likely.
-    #
-    # What stays, deliberately:
-    #
-    #   - the databases control_plane and hub. Dropping a database is destructive
-    #     and is a separate decision from retiring a role that reached it.
-    #   - control-plane-db-credentials and hub-db-credentials. These are NOT
-    #     orphans: the CLI creates the mcp_server and spoke_controller database
-    #     users from the same Infisical keys (secrets_database_impl.go), and the
-    #     hub-operator BLOCKS on both Secrets existing before it will provision
-    #     any role at all (hubenvironment_controller.go, requiredSecrets).
-    #     Removing them stops ApplicationSecretsReady ever becoming true, which
-    #     stops DatabaseRolesProvisioned, which is the gate boundary 04 waits on.
-    #
-    # Only the two ROLE DECLARATIONS are gone: they duplicated users the CLI
-    # already creates under different names, and nothing ever created them.
+    # `infisical` is deliberately absent. It is a bootstrap role owned by CNPG
+    # (infisical-db spec.managed.roles, ADR-023 addendum), not an application role.
+    # RoleManager reads each role's credential from an ESO-synced Secret sourced from
+    # Infisical, so it cannot be the thing that lets Infisical start, and listing it
+    # here would also give one role two controllers. See
+    # manifests/hub-core-services/infisical/database/infisical-db.yaml.
 
     # The identity provider's role (ADR-060).
     #
-    # It OWNS its database rather than holding DML grants on one: Zitadel runs
-    # its own schema migrations at startup, so it needs DDL. Ownership is set on
-    # the Database CR; the permissions below are the DML floor the role manager
-    # applies to every declared role.
-    #
-    # hub_hydra, hub_kratos and hub_keto were removed with the Ory stack. Leaving
-    # a role here whose credential Secret no longer exists is not inert: the role
-    # manager iterates this list in order and returns on the first failure, so
-    # every role AFTER the missing one is skipped -- including this one. The
-    # symptom is Zitadel unable to authenticate to Postgres, which names neither
-    # the removed service nor this file.
+    # It OWNS its database rather than holding DML grants on one: Zitadel runs its own
+    # schema migrations at startup (its init and setup Jobs), so it needs DDL. Ownership
+    # is set on the Database CR; the permissions below are the DML floor the role
+    # manager applies to every declared role.
     - name: hub_zitadel
       database: zitadel
+      # ADR-112: the application's OWN cluster, which is where it connects. A role
+      # provisioned on any other cluster is a role the application cannot use, and
+      # RoleManager would report success for it.
+      clusterRef: zitadel-db
       permissions:
       - SELECT
       - INSERT
@@ -93,6 +83,10 @@ spec:
     # zitadel's; the ledger service itself runs only when the capability is on.
     - name: hub_credits
       database: credits
+      # ADR-112: the application's OWN cluster, which is where it connects. A role
+      # provisioned on any other cluster is a role the application cannot use, and
+      # RoleManager would report success for it.
+      clusterRef: credits-db
       permissions:
       - SELECT
       - INSERT
@@ -103,6 +97,10 @@ spec:
     # hub_credits owns credits, because Grafana runs its own schema migrations.
     - name: hub_grafana
       database: grafana
+      # ADR-112: the application's OWN cluster, which is where it connects. A role
+      # provisioned on any other cluster is a role the application cannot use, and
+      # RoleManager would report success for it.
+      clusterRef: grafana-db
       permissions:
       - SELECT
       - INSERT

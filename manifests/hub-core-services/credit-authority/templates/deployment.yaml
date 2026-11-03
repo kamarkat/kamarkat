@@ -54,7 +54,9 @@ spec:
             - name: PGPASSWORD
               valueFrom: {secretKeyRef: {name: credit-authority-db, key: password}}
             - name: POSTGRES_URI
-              value: "host=platform-db-rw.platform-data.svc.cluster.local port=5432 user=$(PGUSER) password='$(PGPASSWORD)' dbname=credits sslmode=require"
+              # The ledger's own cluster (ADR-112 §1), declared in
+              # ../database/credits-db.yaml.
+              value: "host=credits-db-rw.platform-data.svc.cluster.local port=5432 user=$(PGUSER) password='$(PGPASSWORD)' dbname=credits sslmode=require"
           securityContext: {{- toYaml $hardened | nindent 12 }}
           resources:
             requests: {cpu: 50m, memory: 128Mi}

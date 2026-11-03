@@ -80,7 +80,7 @@ echo "Validating component descriptors..."
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 helm template descriptor-check "$env_mgr" \
-  --set environmentSlug=dev \
+  --set environmentSlug=dev --set boxId=example-box \
   --set provider=hybrid \
   --set instanceRepoURL=https://github.com/example-org/example-gitops \
   --set hubDomain=dev.example.test \

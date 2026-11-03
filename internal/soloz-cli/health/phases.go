@@ -13,6 +13,9 @@ package health
 //     checks depend on which.
 
 import (
+	"context"
+	"errors"
+
 	"github.com/soloz-io/zero-ops/internal/soloz-cli/constants"
 )
 
@@ -28,12 +31,27 @@ import (
 // Add new data-layer dependencies here, in the order they must be
 // ready before downstream services start.
 type DataLayerReadiness struct {
-	// CNPGClusterName is the name of the CloudNativePG Cluster CR.
-	// Default: "platform-db".
+	// CNPGClusterName is the name of the CloudNativePG Cluster CR. REQUIRED.
+	//
+	// There is no shared cluster to fall back to: ADR-112 gives each application its
+	// own. Any default here would name a cluster nothing creates, making the wait
+	// indefinite with a message naming a CR nobody declared -- so the caller says
+	// which cluster it means.
 	CNPGClusterName string
-	// PoolerName is the name of the CNPG Pooler CR.
-	// Default: "platform-db-pooler".
+	// PoolerName is the name of the CNPG Pooler CR. Optional.
+	//
+	// Empty means the cluster has no Pooler and none is waited for. ADR-112 §2
+	// provisions one only where an application needs it, and none of the
+	// application-owned clusters does.
 	PoolerName string
+	// OwnerApplication is the ArgoCD Application that creates this cluster, in
+	// NamespaceOps. Optional.
+	//
+	// Naming it lets the check distinguish "not created yet" from "nothing is going to
+	// create it": an Application ArgoCD reports Synced and Healthy while managing no
+	// resources renders nothing, and waiting out a timeout ends where it began. Left
+	// empty the message degrades to "not created yet"; the wait itself is unaffected.
+	OwnerApplication string
 	// Namespace is the namespace both CRs live in.
 	// Default: platform-data.
 	Namespace string
@@ -44,30 +62,31 @@ func (d *DataLayerReadiness) PhaseName() string { return "Data Layer" }
 
 // Checkers returns the ordered list of HealthChecker instances.
 func (d *DataLayerReadiness) Checkers() []HealthChecker {
-	clusterName := d.CNPGClusterName
-	if clusterName == "" {
-		clusterName = "platform-db"
+	// Refused rather than defaulted. Checkers cannot return an error, so the
+	// misconfiguration becomes a check that fails with its reason -- which is louder
+	// than waiting out a timeout against a cluster the caller never named.
+	if d.CNPGClusterName == "" {
+		return []HealthChecker{newMisconfigured(
+			"DataLayerReadiness.CNPGClusterName is empty. Each application owns its own " +
+				"cluster (ADR-112) and there is none to assume; name the one to wait for.")}
 	}
-	poolerName := d.PoolerName
-	if poolerName == "" {
-		poolerName = "platform-db-pooler"
-	}
+
 	namespace := d.Namespace
 	if namespace == "" {
 		namespace = constants.NamespaceData
 	}
-	cnpg := NewCNPGClusterHealth(clusterName, namespace)
-	// The Application that creates this cluster. Naming it lets the check
-	// distinguish "not created yet" from "nothing is going to create it": an
-	// Application ArgoCD reports Synced and Healthy while managing no resources
-	// renders nothing, and waiting thirty minutes ends where it began.
-	cnpg.OwnerApplication = "platform-database"
-	cnpg.OwnerNamespace = constants.NamespaceOps
 
-	return []HealthChecker{
-		cnpg,
-		NewPgBouncerPoolerHealth(poolerName, namespace),
+	cnpg := NewCNPGClusterHealth(d.CNPGClusterName, namespace)
+	if d.OwnerApplication != "" {
+		cnpg.OwnerApplication = d.OwnerApplication
+		cnpg.OwnerNamespace = constants.NamespaceOps
 	}
+
+	checkers := []HealthChecker{cnpg}
+	if d.PoolerName != "" {
+		checkers = append(checkers, NewPgBouncerPoolerHealth(d.PoolerName, namespace))
+	}
+	return checkers
 }
 
 // InfisicalReadiness is the readiness profile for the Infisical
@@ -157,3 +176,17 @@ func (o *OperatorsReadiness) Checkers() []HealthChecker {
 		NewOperatorPodsHealth("platform-ops", "app.kubernetes.io/name=external-secrets"),
 	}
 }
+
+// misconfigured is a HealthChecker that always fails with the reason it was built.
+//
+// Checkers() cannot return an error, and the alternatives were both worse: defaulting a
+// required value puts the wait on a cluster the caller never named, and returning no
+// checkers at all makes an unconfigured phase report ready. This fails on the first
+// evaluation and says what to fix.
+type misconfigured struct{ reason string }
+
+func newMisconfigured(reason string) HealthChecker { return &misconfigured{reason: reason} }
+
+func (m *misconfigured) Name() string { return "configuration" }
+
+func (m *misconfigured) Check(context.Context, string) error { return errors.New(m.reason) }

@@ -33,25 +33,25 @@ type ApplicationSecretUploader struct {
 	k8sClient         client.Client
 	uncachedK8sClient client.Client
 
-	// escrowClient and clusterID keep the values that cannot be regenerated
+	// escrowClient and escrowID keep the values that cannot be regenerated
 	// outside the box (ADR-076). Nil escrow is not "skip the escrow": an entry
 	// declaring EscrowArtifact refuses to be generated without one, because a
 	// value that exists nowhere but inside the cluster it decrypts is the failure
 	// the escrow exists to prevent.
 	escrowClient escrow.EscrowClient
-	clusterID    string
+	escrowID     escrow.Identity
 }
 
 // NewApplicationSecretUploader creates a new application secret uploader
 func NewApplicationSecretUploader(
 	k8sClient, uncachedK8sClient client.Client,
-	escrowClient escrow.EscrowClient, clusterID string,
+	escrowClient escrow.EscrowClient, escrowID escrow.Identity,
 ) *ApplicationSecretUploader {
 	return &ApplicationSecretUploader{
 		k8sClient:         k8sClient,
 		uncachedK8sClient: uncachedK8sClient,
 		escrowClient:      escrowClient,
-		clusterID:         clusterID,
+		escrowID:          escrowID,
 	}
 }
 
@@ -320,7 +320,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		// with the loss happening during the recovery.
 		var restored string
 		if secretDef.EscrowArtifact != "" {
-			if u.escrowClient == nil || u.clusterID == "" {
+			if u.escrowClient == nil || u.escrowID.BoxID == "" {
 				// Refused, not skipped. Generating here produces a value that exists
 				// nowhere but inside the cluster it decrypts (ADR-076).
 				logger.Error(nil, "Refusing to generate an escrowed secret with no escrow to keep it in",
@@ -329,7 +329,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 				escrowFailures = append(escrowFailures, secretDef.PasswordKey+" (no escrow)")
 				continue
 			}
-			got, err := u.escrowClient.RestoreArtifact(ctx, u.clusterID, secretDef.EscrowArtifact)
+			got, err := u.escrowClient.RestoreArtifact(ctx, u.escrowID, secretDef.EscrowArtifact)
 			if err != nil {
 				// An unreadable escrow is not an absent one. Treating it as absent
 				// would generate a second key for a box that already has one.
@@ -396,7 +396,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		// Only when generated, because a restored value is already in the escrow and
 		// re-writing it is one more chance to write something different.
 		if secretDef.EscrowArtifact != "" && restored == "" {
-			if err := u.escrowClient.BackupArtifact(ctx, u.clusterID, secretDef.EscrowArtifact, password); err != nil {
+			if err := u.escrowClient.BackupArtifact(ctx, u.escrowID, secretDef.EscrowArtifact, password); err != nil {
 				// Loud and counted as a failure. The secret is live in Infisical and
 				// the box works, so nothing breaks today -- which is exactly why this
 				// must not pass quietly: the gap appears on the day the cluster is
@@ -475,7 +475,7 @@ func (u *ApplicationSecretUploader) escrowExistingValue(
 	ctx context.Context, logger logr.Logger, client *infisicalclient.InfisicalClient,
 	projectSlug, environmentSlug, secretPath string, def ApplicationSecretDefinition,
 ) error {
-	if u.escrowClient == nil || u.clusterID == "" {
+	if u.escrowClient == nil || u.escrowID.BoxID == "" {
 		return fmt.Errorf("no escrow configured, so an unrotatable value that already exists " +
 			"cannot be confirmed as recoverable (ADR-076)")
 	}
@@ -490,7 +490,7 @@ func (u *ApplicationSecretUploader) escrowExistingValue(
 		return fmt.Errorf("the store reports the secret exists but returned no value")
 	}
 
-	escrowed, err := u.escrowClient.RestoreArtifact(ctx, u.clusterID, def.EscrowArtifact)
+	escrowed, err := u.escrowClient.RestoreArtifact(ctx, u.escrowID, def.EscrowArtifact)
 	if err != nil {
 		// Unreadable is not absent, and an absent-by-assumption escrow would be
 		// overwritten with whatever this box happens to hold.
@@ -501,7 +501,7 @@ func (u *ApplicationSecretUploader) escrowExistingValue(
 	case escrowed == current:
 		return nil
 	case escrowed == "":
-		if err := u.escrowClient.BackupArtifact(ctx, u.clusterID, def.EscrowArtifact, current); err != nil {
+		if err := u.escrowClient.BackupArtifact(ctx, u.escrowID, def.EscrowArtifact, current); err != nil {
 			return fmt.Errorf("escrowing the existing value: %w", err)
 		}
 		logger.Info("Escrowed a value that already existed; it was not regenerated",

@@ -1,0 +1,228 @@
+# The credit authority's PostgreSQL cluster (ADR-112 §1), beside the ledger it serves.
+#
+# A LEDGER, which changes two things here. `databaseReclaimPolicy: retain` on the Database
+# below, because ADR-109 keeps the records when the capability is switched off and a
+# reclaim policy that dropped the database would discard financial history as a side
+# effect of a flag. And retention is 90d rather than 30d: the other three can be
+# reconstructed or re-entered from somewhere, a ledger entry cannot.
+#
+# CREATED EMPTY, NOT IMPORTED. An earlier version carried
+# migration and required the source quiesced first. There is no dev data to carry, so
+# the cluster initialises its own database and the whole import ordering -- quiesce,
+# snapshot, cutover, rollback window -- does not arise. A box that ever does need to
+# carry data forward is a separate, deliberate operation, not this file.
+#
+# NAMESPACE platform-data, with the file here. ADR-014 puts CNPG clusters in
+# platform-data; ADR-112 puts each application's database configuration with that
+# application. Both hold: the object lands in platform-data, and it is declared next to
+# the service that owns it rather than in a database folder of its own.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: credits-db
+  namespace: platform-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # 1 in development, 2 in staging, 3 in production (templated-fields.yaml).
+  instances: 1
+
+  # Pinned, not left to the operator's default. The default moves with the
+  # operator version, so an operator upgrade would otherwise change the
+  # PostgreSQL major underneath a cluster that never asked for it.
+  #
+  # 17, not 18. The ledger documents "14 or higher" with no tested ceiling. For a
+  # financial ledger the newest untested major is the wrong side to err on, so this
+  # takes the newest major with broad soak instead.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-bookworm
+
+  # THE FLOOR, not a measurement. Four clusters replace one, so the shared cluster's
+  # 2 GiB cannot simply be repeated four times. These are the smallest settings a CNPG
+  # instance works at: shared_buffers at a quarter of the limit, the rest left to the
+  # instance manager and a handful of backends.
+  #
+  # The risk this accepts is that autovacuum and maintenance have little headroom, so a
+  # large table or a long transaction will press against the limit before a bigger
+  # cluster would. The answer is to raise it from this cluster's own metrics once it
+  # runs -- not to pre-emptively size it from a number nobody measured.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 256Mi
+  postgresql:
+    parameters:
+      shared_buffers: "64MB"
+      effective_cache_size: "192MB"
+      work_mem: "2MB"
+      maintenance_work_mem: "32MB"
+      max_connections: "50"
+  storage:
+    size: 4Gi
+    # Rendered per box by templated-fields.yaml (ADR-046 §11).
+    storageClass: PLACEHOLDER_PLACEMENT
+
+  # Worker nodes only, never tolerating the control-plane taint (ADR-014, ADR-112 §3).
+  affinity:
+    nodeSelector:
+      node-role.kubernetes.io/worker: ""
+      # ADR-046 §11 placement class, rendered per box by templated-fields.yaml.
+      workload-location: PLACEHOLDER_PLACEMENT
+
+  # The superuser secret the platform's own machinery connects as.
+  #
+  # CNPG creates `<cluster>-superuser` only when this is true, and defaults it to FALSE.
+  # Omitting it was a real break rather than a hardening choice: hub-operator's role
+  # reconciliation and password rotation both open the superuser secret by that name, so
+  # every rotation against this cluster would have failed looking for a Secret CNPG was
+  # never asked to make.
+  enableSuperuserAccess: true
+
+  # Its own database and owner, created at initialisation.
+  bootstrap:
+    initdb:
+      database: credits
+      owner: hub_credits
+
+  # This cluster's own archive identity (ADR-014 add.2, ADR-111 §2). destinationPath is
+  # rendered per box by templated-fields.yaml; serverName carries THIS database and its
+  # own incarnation, and is NOT templated -- it is bumped only when the cluster is
+  # recreated from an empty database, never on a running one, because check-wal-archive
+  # runs before a cluster's first archive and re-arming it against a non-empty prefix
+  # stops archiving on a database that was working (ADR-092).
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+      serverName: credits-db-v1
+      endpointURL: https://hel1.your-objectstorage.com
+      s3Credentials:
+        accessKeyId:
+          name: s3-credentials
+          key: access-key-id
+        secretAccessKey:
+          name: s3-credentials
+          key: secret-access-key
+        region:
+          name: s3-credentials
+          key: region
+      wal:
+        compression: gzip
+        maxParallel: 2
+      data:
+        compression: gzip
+        jobs: 2
+    retentionPolicy: "90d"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: credits-db-credits
+  namespace: platform-data
+spec:
+  cluster:
+    name: credits-db
+  name: credits
+  owner: hub_credits
+  ensure: present
+  databaseReclaimPolicy: retain
+---
+# Daily, immediately on creation. `immediate: true` matters: until a base backup
+# completes this cluster has no recovery point at all.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: credits-db-daily
+  namespace: platform-data
+spec:
+  schedule: "0 30 3 * * *"
+  immediate: true
+  backupOwnerReference: cluster
+  cluster:
+    name: credits-db
+---
+# This cluster's application, the operator, and this cluster's own peers. Nothing else.
+#
+# The shared cluster's policy admits SEVEN namespaces because one cluster serves them
+# all; here the credit authority reaches only its own database. The peer selector is a bare
+# `podSelector`, which means pods in THIS policy's namespace matching it, so
+# `cnpg.io/cluster` admits this cluster's instances and nothing else in platform-data --
+# a namespaceSelector would have admitted every workload there. The operator needs 5432
+# and 8000 both.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: credits-db-access
+  namespace: platform-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: credits-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-credits
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: credits-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8000
+    # The Support Agent, for the backup evidence ADR-014 makes the platform
+    # accountable for (ADR-077, collector backup-health-*). The METRICS port only:
+    # 5432 is not in this rule, so the agent can see whether this cluster is
+    # backing up and cannot reach its data.
+    #
+    # The namespace AND the agent's own label in ONE `from` element, which is AND.
+    # As two elements it would be a namespace selector admitting every pod in
+    # platform-ops to the exporter.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-ops
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: support-agent
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+# The instance exporter, as a Service the Support Agent can name.
+#
+# CloudNativePG publishes its backup and archive series on each instance pod's
+# :9187 and creates no Service for them, so a collector that reads a Service had
+# nothing to read. Per cluster, because a scrape resolves to one endpoint: a
+# Service spanning every CNPG pod here would report one arbitrary cluster's
+# backup as though it covered all of them.
+#
+# No cluster-wide scrape config and no PodMonitor: this exists for the evidence
+# path, which must keep working when a tenant declines the observability
+# capability (ADR-078 Section 8).
+apiVersion: v1
+kind: Service
+metadata:
+  name: credits-db-metrics
+  namespace: platform-data
+  labels:
+    cnpg.io/cluster: credits-db
+spec:
+  selector:
+    cnpg.io/cluster: credits-db
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 9187
+      targetPort: 9187

@@ -122,6 +122,10 @@ identity:
 # while capabilities.credits.enabled, never by a fleet.
 creditAuthorityUrl: ""
 
+# Where the box's billing engine answers (ADR-113). Supplied by the environment
+# while capabilities.billing.enabled, never by a fleet.
+billingEngineUrl: ""
+
 # Platform capabilities this application CONSUMES (ADR-109).
 #
 #   credits   the box's Credit Authority, a platform capability on the hub,
@@ -132,8 +136,14 @@ creditAuthorityUrl: ""
 #             application declaring it. Withdrawing the declaration removes the
 #             caller; the ledger and its records stay. Declaring it on a box that
 #             does not run it fails to render.
+#   billing   the box's billing engine (ADR-113), on the same terms: the
+#             declaring application is its ONE caller, admitted at the engine's
+#             gateway with its service client; it gets the capability's audience
+#             and PROVIDER_BILLING_BASE_URL, and never the engine's key.
 capabilities:
   credits:
+    enabled: false
+  billing:
     enabled: false
 
 gateway:

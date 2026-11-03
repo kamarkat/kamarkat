@@ -22,7 +22,7 @@ spec:
       serviceAccountName: infisical-issuer
       containers:
       - name: infisical-issuer
-        image: docker.io/infisical/pki-issuer:v0.2.0
+        image: docker.io/infisical/pki-issuer:v1.0.1
         args:
         - --metrics-bind-address=:8443
         env:

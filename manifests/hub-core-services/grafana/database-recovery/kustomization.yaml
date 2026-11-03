@@ -1,0 +1,82 @@
+# Rebuild Grafana's database from its object-store archive instead of initialising empty.
+#
+# A SIBLING of database/, not inside it: a kustomization that listed the directory it
+# lives in would be a cycle, and kustomize refuses a resource file outside its own tree,
+# so the only workable shape is this one -- the same shape the shared cluster's
+# database-recovery/ has.
+#
+# WHEN THIS IS USED. `bootstrap` is read ONCE, when CloudNativePG creates a Cluster, and
+# ignored for the life of that Cluster (ADR-092). This is not a mode a running database
+# switches into -- it is what the manifest must say at the moment a replacement Cluster is
+# created, after the original is gone. Restoring is therefore a manifest transition
+# followed by a delete and a recreate, not a command run against a live cluster.
+#
+# WHY IT EXISTS. Under the base manifest's `bootstrap: initdb` a replacement comes up
+# EMPTY and Healthy, which is the worst available outcome because nothing reports an
+# error. For grafana-db specifically that means sessions and preferences, and nothing of record: every dashboard is a
+# GrafanaDashboard object rendered from Git. It is the one of the four where an empty
+# replacement is merely inconvenient.
+#
+# WHAT IT DOES NOT GIVE YOU. Recovery reaches the last archived WAL, not the moment of
+# failure; whatever had not been archived is gone. This BOUNDS data loss, it does not
+# eliminate it.
+#
+# TWO VALUES YOU MUST SET, and the overlay is deliberately not renderable without them:
+#
+#   PLACEHOLDER_BOX   the archive prefix, which is this box's `clusterName`. The steady
+#                     state derives it from global.clusterName, but a recovery names the
+#                     prefix of the box whose archive is being READ -- after a hub
+#                     succession those differ, and only the operator knows which.
+#
+#   serverName        the two below MUST differ. `externalClusters` names the incarnation
+#                     being read; `backup` names the one the replacement writes. One name
+#                     for both makes the new cluster archive into the WALs it just
+#                     restored from, which `barman-cloud-check-wal-archive` refuses -- and
+#                     that refusal blocks every base backup behind it while the Cluster
+#                     reports healthy.
+#
+# NOT REFERENCED BY ANY DESCRIPTOR, so nothing renders it. Applied by hand, against a
+# specific archive, after reading the runbook.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../database
+
+patches:
+  - target:
+      kind: Cluster
+      name: grafana-db
+    patch: |-
+      - op: remove
+        path: /spec/bootstrap/initdb
+      - op: add
+        path: /spec/bootstrap/recovery
+        value:
+          source: grafana-db-archive
+      - op: add
+        path: /spec/externalClusters
+        value:
+          - name: grafana-db-archive
+            barmanObjectStore:
+              destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+              # The incarnation being RESTORED FROM: what the lost cluster wrote.
+              serverName: grafana-db-v1
+              endpointURL: https://hel1.your-objectstorage.com
+              s3Credentials:
+                accessKeyId:
+                  name: s3-credentials
+                  key: access-key-id
+                secretAccessKey:
+                  name: s3-credentials
+                  key: secret-access-key
+                region:
+                  name: s3-credentials
+                  key: region
+              wal:
+                compression: gzip
+                maxParallel: 2
+      # The incarnation the REPLACEMENT writes. Must not equal the one above.
+      - op: replace
+        path: /spec/backup/barmanObjectStore/serverName
+        value: grafana-db-v2

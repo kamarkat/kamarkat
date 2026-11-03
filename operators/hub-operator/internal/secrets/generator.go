@@ -158,30 +158,6 @@ func ValidateEd25519KeyPair(privatePEM string, publicBase64 string) error {
 	return nil
 }
 
-// GeneratePlatformDBApp creates the platform-db-app BasicAuth secret
-// Required for CNPG bootstrap (superuser)
-func GeneratePlatformDBApp(namespace string, owner metav1.OwnerReference) (*corev1.Secret, error) {
-	password, err := GenerateSecurePassword()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate platform-db-app password: %w", err)
-	}
-
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "platform-db-app",
-			Namespace:       namespace,
-			OwnerReferences: []metav1.OwnerReference{owner},
-		},
-		Type: corev1.SecretTypeBasicAuth,
-		StringData: map[string]string{
-			"username": "app",
-			"password": password,
-		},
-	}
-
-	return secret, nil
-}
-
 // GenerateInfisicalDBCredentials creates the infisical-db-credentials secret
 // Required for Infisical bootstrap
 func GenerateInfisicalDBCredentials(namespace string, owner metav1.OwnerReference) (*corev1.Secret, error) {
@@ -237,9 +213,9 @@ type GenerateInfisicalSecretsResult struct {
 //
 // Implements REQ-7.1: Secret reconstruction logic
 // - Reads existing Redis password from infisical-redis-credentials (if available)
-// - Reads CA certificate from platform-db-ca (passed as parameter)
+// - Reads CA certificate from infisical-db-ca (passed as parameter)
 // - Reconstructs complete infisical-secrets with all 4 fields
-func GenerateInfisicalSecrets(ctx context.Context, securityNamespace, dataNamespace string, caCert []byte, owner metav1.OwnerReference, isFirstTime bool, clusterID string, escrowClient escrow.EscrowClient, existingRedisPassword string) (*GenerateInfisicalSecretsResult, error) {
+func GenerateInfisicalSecrets(ctx context.Context, securityNamespace, dataNamespace string, caCert []byte, owner metav1.OwnerReference, isFirstTime bool, escrowID escrow.Identity, escrowClient escrow.EscrowClient, existingRedisPassword string) (*GenerateInfisicalSecretsResult, error) {
 	var encryptionKey, authSecret string
 	var err error
 
@@ -256,14 +232,14 @@ func GenerateInfisicalSecrets(ctx context.Context, securityNamespace, dataNamesp
 		return nil, fmt.Errorf("no escrow: the Infisical master keys cannot be " +
 			"generated without somewhere outside this cluster to keep them (ADR-076)")
 	}
-	if clusterID == "" {
+	if escrowID.BoxID == "" {
 		return nil, fmt.Errorf("no cluster name: the master keys would be escrowed " +
 			"under a name nothing reads back")
 	}
 
 	// Try to restore from the escrow first
 	var backupData interface{}
-	backupData, err = escrowClient.RestoreMasterKeys(ctx, clusterID)
+	backupData, err = escrowClient.RestoreMasterKeys(ctx, escrowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the escrow: %w", err)
 	}
@@ -319,11 +295,11 @@ func GenerateInfisicalSecrets(ctx context.Context, securityNamespace, dataNamesp
 			"encryptionKey": encryptionKey,
 			"authSecret":    authSecret,
 			"createdAt":     time.Now().UTC(),
-			"clusterId":     clusterID,
+			"clusterId":     escrowID.BoxID,
 			"version":       "1",
 		}
-		if err := escrowClient.BackupMasterKeys(ctx, clusterID, backupKeys); err != nil {
-			return nil, fmt.Errorf("escrow the master keys for %s: %w", clusterID, err)
+		if err := escrowClient.BackupMasterKeys(ctx, escrowID, backupKeys); err != nil {
+			return nil, fmt.Errorf("escrow the master keys for %s: %w", escrowID.BoxID, err)
 		}
 	} else {
 		// NOT first-time AND backup missing - CRITICAL ERROR
@@ -431,10 +407,10 @@ func GenerateInfisicalPostgresConnection(securityNamespace, dbHost, dbName, user
 // ============================================================================
 
 // BootstrapSecretsResult contains bootstrap secrets required for infrastructure to start
-// These secrets break circular dependencies (CNPG needs platform-db-app before Infisical can start)
+// These secrets break circular dependencies: the bootstrap cluster's initdb needs
+// infisical-db-credentials before Infisical can start, and every other credential is
+// fetched FROM Infisical.
 type BootstrapSecretsResult struct {
-	PlatformDBCA                *corev1.Secret
-	PlatformDBApp               *corev1.Secret
 	InfisicalDBCredentials      *corev1.Secret
 	InfisicalSecrets            *corev1.Secret
 	InfisicalRedisCredentials   *corev1.Secret
@@ -452,30 +428,19 @@ type BootstrapSecretsResult struct {
 // - Restores keys from AWS if backup exists
 // - Generates and backs up new keys on first-time bootstrap
 // - Fails gracefully if backup missing and cluster already bootstrapped
-func GenerateBootstrapSecrets(ctx context.Context, dataNamespace, securityNamespace, dbHost string, owner metav1.OwnerReference, existingSecrets map[string]*corev1.Secret, isFirstTime bool, clusterID string, escrowClient escrow.EscrowClient) (*BootstrapSecretsResult, error) {
+func GenerateBootstrapSecrets(ctx context.Context, dataNamespace, securityNamespace, dbHost string, owner metav1.OwnerReference, existingSecrets map[string]*corev1.Secret, isFirstTime bool, escrowID escrow.Identity, escrowClient escrow.EscrowClient) (*BootstrapSecretsResult, error) {
 	result := &BootstrapSecretsResult{}
 
-	// Step 1: Read platform-db-ca CA certificate if available (in data namespace)
+	// Step 1: Read infisical-db-ca CA certificate if available (in data namespace)
 	// CA is now managed by cert-manager per ADR-035
 	var caCert []byte
-	if existing, ok := existingSecrets["platform-db-ca"]; ok {
+	if existing, ok := existingSecrets["infisical-db-ca"]; ok {
 		caCert = existing.Data["ca.crt"]
 	}
 	// If not available yet, caCert remains nil.
 	// GenerateInfisicalSecrets handles nil caCert gracefully by using empty string for DB_ROOT_CERT.
 
-	// Step 2: Generate or reuse platform-db-app (in data namespace)
-	if _, ok := existingSecrets["platform-db-app"]; ok {
-		result.PlatformDBApp = nil
-	} else {
-		platformDBApp, err := GeneratePlatformDBApp(dataNamespace, owner)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate platform-db-app: %w", err)
-		}
-		result.PlatformDBApp = platformDBApp
-	}
-
-	// Step 3: Generate or reuse infisical-db-credentials (in data namespace)
+	// Step 2: Generate or reuse infisical-db-credentials (in data namespace)
 	var infisicalUsername, infisicalPassword string
 	if existing, ok := existingSecrets["infisical-db-credentials"]; ok {
 		result.InfisicalDBCredentials = nil
@@ -511,7 +476,7 @@ func GenerateBootstrapSecrets(ctx context.Context, dataNamespace, securityNamesp
 			existingRedisPassword = string(existing.Data["password"])
 		}
 
-		infisicalResult, err := GenerateInfisicalSecrets(ctx, securityNamespace, dataNamespace, caCert, owner, isFirstTime, clusterID, escrowClient, existingRedisPassword)
+		infisicalResult, err := GenerateInfisicalSecrets(ctx, securityNamespace, dataNamespace, caCert, owner, isFirstTime, escrowID, escrowClient, existingRedisPassword)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate infisical-secrets: %w", err)
 		}

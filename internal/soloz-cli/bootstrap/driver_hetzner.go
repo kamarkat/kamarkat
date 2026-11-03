@@ -350,8 +350,13 @@ func (d *HetznerDriver) PopulateClusterConfig(cfg *cluster.Config) {
 
 	cfg.Region = d.Region
 	cfg.OSType = d.OS
-	cfg.ImageID = "ubuntu-24.04"
-	cfg.KubernetesVersion = "v1.31.6"
+	// No node image here. The management ClusterClass declares `imageId` with a
+	// default, and the spoke pool composition already relies on it rather than
+	// restating it ("We omit imageId ... relying on the ClusterClass defaults").
+	// Setting it here made the hub the only caller carrying a second copy of the
+	// same string, so the OS a box runs was written in two files that nothing
+	// compared.
+	cfg.KubernetesVersion = versions.KubernetesVersion
 	cfg.NetworkCIDR = d.NetworkCIDR
 	cfg.SubnetCIDR = subnetCIDR
 	cfg.ControlPlaneMachineType = "cx33"

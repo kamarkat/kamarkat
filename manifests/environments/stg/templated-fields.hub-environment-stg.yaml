@@ -17,6 +17,13 @@
   fields:
     - path: [spec, clusterName]
       value: '{{ .Values.global.clusterName }}'
+    # The logical hub (ADR-111 ss1). Rendered beside the cluster name rather than
+    # derived from it: the box outlives any one cluster, and the escrow keys the
+    # secret store's master keys and the identity provider's encryption key by it,
+    # so a successor that inherited the cluster name as the box id would look for
+    # them under its own name and find nothing.
+    - path: [spec, boxId]
+      value: '{{ .Values.global.boxId }}'
     - replaceAll: {from: stg.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
     - replaceAll: {from: nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
 

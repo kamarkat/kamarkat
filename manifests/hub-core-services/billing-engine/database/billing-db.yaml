@@ -1,0 +1,191 @@
+# The billing engine's PostgreSQL cluster (ADR-112 §1, ADR-113 §3), beside the engine it serves.
+#
+# Shaped like credits-db, with three differences the engine imposes:
+#
+#   IMAGE      the engine's schema creates pg_partman on an empty database, so the
+#              cluster runs PostgreSQL 18 with pg_partman added
+#              (images/postgres-partman), pinned by digest by its workflow.
+#   SUPERUSER  the schema drops and recreates its extensions, and pg_partman is not
+#              a trusted extension: only a superuser may create or drop it. The
+#              engine's role is made superuser once, at initialisation. The cluster
+#              holds the engine's database and nothing else (ADR-112), so that
+#              role's reach is this cluster.
+#   NO ROLE MANAGER  the role is the initdb owner, its password the credential the
+#              database prerequisites deliver (hub-billing-db-credentials). It is not
+#              in HubEnvironment's roles: RoleManager grants DML on a database it
+#              does not own, which is not what this role is.
+#
+# A LEDGER-LIKE RECORD: invoices and subscriptions cannot be re-derived, so the
+# Database is retained when the capability is turned off, and retention is 90d.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: billing-db
+  namespace: platform-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # 1 in development, 2 in staging, 3 in production (templated-fields.yaml).
+  instances: 1
+
+  # :unbuilt until the postgres-partman workflow pins its digest.
+  imageName: ghcr.io/soloz-io/zero-ops/postgres-partman:unbuilt
+
+  # The floor credits-db documents, raised once this cluster's metrics say so.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 256Mi
+  postgresql:
+    parameters:
+      shared_buffers: "64MB"
+      effective_cache_size: "192MB"
+      work_mem: "2MB"
+      maintenance_work_mem: "32MB"
+      max_connections: "50"
+  storage:
+    size: 4Gi
+    # Rendered per box by templated-fields.yaml (ADR-046 §11).
+    storageClass: PLACEHOLDER_PLACEMENT
+
+  # Worker nodes only, never tolerating the control-plane taint (ADR-014, ADR-112 §3).
+  affinity:
+    nodeSelector:
+      node-role.kubernetes.io/worker: ""
+      # ADR-046 §11 placement class, rendered per box by templated-fields.yaml.
+      workload-location: PLACEHOLDER_PLACEMENT
+
+  # The superuser secret hub-operator's machinery opens by name (see credits-db).
+  enableSuperuserAccess: true
+
+  # Its own database and owner, created at initialisation, with the owner's
+  # password from the database prerequisites. postInitSQL runs once, as the
+  # instance superuser, after initdb: the owner becomes superuser (header).
+  bootstrap:
+    initdb:
+      database: lago
+      owner: hub_billing
+      secret:
+        name: hub-billing-db-credentials
+      postInitSQL:
+        - ALTER ROLE hub_billing SUPERUSER
+
+  # This cluster's own archive identity (ADR-014 add.2, ADR-111 §2); see credits-db
+  # for why serverName is not templated.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+      serverName: billing-db-v1
+      endpointURL: https://hel1.your-objectstorage.com
+      s3Credentials:
+        accessKeyId:
+          name: s3-credentials
+          key: access-key-id
+        secretAccessKey:
+          name: s3-credentials
+          key: secret-access-key
+        region:
+          name: s3-credentials
+          key: region
+      wal:
+        compression: gzip
+        maxParallel: 2
+      data:
+        compression: gzip
+        jobs: 2
+    retentionPolicy: "90d"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: billing-db-lago
+  namespace: platform-data
+spec:
+  cluster:
+    name: billing-db
+  name: lago
+  owner: hub_billing
+  ensure: present
+  databaseReclaimPolicy: retain
+---
+# Daily, immediately on creation: until a base backup completes this cluster has
+# no recovery point at all.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: billing-db-daily
+  namespace: platform-data
+spec:
+  schedule: "0 45 3 * * *"
+  immediate: true
+  backupOwnerReference: cluster
+  cluster:
+    name: billing-db
+---
+# The billing engine, the operator, and this cluster's own peers. Nothing else
+# (see credits-db for why each `from` is shaped as it is).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: billing-db-access
+  namespace: platform-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: billing-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-billing
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: billing-engine
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: billing-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8000
+    # The Support Agent, the metrics port only (ADR-077, collector backup-health-*).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-ops
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: support-agent
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+# The instance exporter, as a Service the Support Agent can name (see credits-db).
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-db-metrics
+  namespace: platform-data
+  labels:
+    cnpg.io/cluster: billing-db
+spec:
+  selector:
+    cnpg.io/cluster: billing-db
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 9187
+      targetPort: 9187

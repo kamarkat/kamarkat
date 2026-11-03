@@ -99,7 +99,7 @@ spec:
               name: hub-bootstrap-config
               key: CLUSTER_REGION
         # ADR-078 add.5 §4: where each cluster's log bucket is created. The same
-        # object storage the database backups use (platform-db's endpointURL).
+        # object storage the database backups use (each cluster's endpointURL).
         - name: OBJECT_STORAGE_ENDPOINT
           value: hel1.your-objectstorage.com
         - name: OBJECT_STORAGE_REGION

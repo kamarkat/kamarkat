@@ -4,7 +4,7 @@ appName: stakater-reloader
 destinationNamespace: platform-ops
 isPlatformOwned: 'false'
 repoURL: https://stakater.github.io/stakater-charts
-targetRevision: 1.2.1
+targetRevision: 2.2.19
 path: ''
 chart: reloader
 directoryRecurse: ''

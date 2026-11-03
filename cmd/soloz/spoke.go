@@ -24,6 +24,8 @@ even when the hub cluster is no longer available.`,
 
 	// Add subcommands
 	cmd.AddCommand(newSpokeTeardownCmd())
+	cmd.AddCommand(newSpokeRestorePKICmd())
+	cmd.AddCommand(newSpokeMatchInventoryCmd())
 
 	return cmd
 }

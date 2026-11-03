@@ -44,7 +44,7 @@ while read -r env; do
         [ -n "$provider" ] || continue
         checked=$((checked + 1))
         rendered=$(helm template platform-bundle "$CHART" \
-            --set environmentSlug="$env" --set provider="$provider" \
+            --set environmentSlug="$env" --set boxId=example-box --set provider="$provider" \
             --set instanceRepoURL=https://github.com/example-org/example-gitops \
             --set hubDomain=dev.example.test \
             --set previewDomain=example-preview.test \

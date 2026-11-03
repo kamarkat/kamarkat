@@ -16,7 +16,7 @@ import (
 // reaches a payload.
 type fixtureReader struct{ metrics map[string]string }
 
-func (f fixtureReader) Metrics(_ context.Context, ns, svc string) (string, error) {
+func (f fixtureReader) Metrics(_ context.Context, ns, svc string, _ int) (string, error) {
 	if m, ok := f.metrics[ns+"/"+svc]; ok {
 		return m, nil
 	}

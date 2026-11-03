@@ -14,6 +14,7 @@ import (
 
 var (
 	verifyCluster string
+	verifyBox     string
 	isHub         bool
 	isSpoke       bool
 )
@@ -49,9 +50,11 @@ another and useless to anyone who obtains it.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&verifyCluster, "cluster", "", "cluster name the escrow is scoped to (required)")
+	f.StringVar(&verifyBox, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
 	f.BoolVar(&isHub, "hub", false, "this is the management cluster; all artefacts apply")
 	f.BoolVar(&isSpoke, "workload", false, "this is a workload cluster; hub-only artefacts do not apply")
 	_ = cmd.MarkFlagRequired("cluster")
+	_ = cmd.MarkFlagRequired("box")
 	return cmd
 }
 
@@ -87,6 +90,22 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 		{escrow.ArtifactSecretEncryptionKey, "the API server's at-rest encryption key", false},
 		{"infisical-master-keys", "the secret store's encryption key and auth secret", true},
 		{escrow.ArtifactZitadelMasterkey, "the identity provider's key-encryption key", true},
+		// ADR-111 §10: the tenant's half of the management-state backups'
+		// encryption. One per box, so the management cluster's row.
+		{escrow.ArtifactBackupSSECKey, "the management-state backups' encryption key", true},
+	}
+
+	// ADR-111 §2: the trust roots a replacement hub cannot do without and cannot
+	// re-create. Required of EVERY cluster, the management cluster included -- it is
+	// CAPI-managed like any other, and a box that can no longer issue a node
+	// certificate for its own control plane is in the same position as one that
+	// cannot for a spoke.
+	for _, purpose := range escrow.SpokePKIPurposes {
+		required = append(required, requirement{
+			escrow.SpokePKIArtifact(purpose),
+			"the cluster's " + purpose + " certificate authority",
+			false,
+		})
 	}
 
 	// Whether this cluster is the management cluster decides which rows apply. Taken
@@ -106,7 +125,7 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		checked++
-		v, err := store.RestoreArtifact(ctx, verifyCluster, r.artifact)
+		v, err := store.RestoreArtifact(ctx, escrow.ForCluster(verifyBox, verifyCluster), r.artifact)
 		switch {
 		case err != nil:
 			fmt.Printf("  ERROR    %-24s %v\n", r.artifact, err)
