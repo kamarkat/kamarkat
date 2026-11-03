@@ -84,6 +84,15 @@ after minutes of packaging, or something no gate catches at all.
     Runs every packaging step and gate, pushes nothing; the version stays free.
     Then `scripts/release.sh --dry-run` to see the version, files and sync it
     would touch.
+11. **Every component behind its latest release has a reason.** Each release page
+    explains why a red version is behind, from the catalog entry's `behind` items
+    (format in the catalog header), and the docs sync refuses a version it cannot
+    explain. Against the rehearsal's inventory, in `kamarkat/`:
+    ```bash
+    python3 scripts/sync-releases.py --check ../zero-ops/dist/charts/platform-bundle/components.json
+    ```
+    It lists every version behind today's latest with no reason: one newly behind,
+    or one whose pin changed. Add or update its `behind` item on `main`.
 
 ## 2. Publish and promote — the release owner
 

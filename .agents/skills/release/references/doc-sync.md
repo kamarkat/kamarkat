@@ -39,7 +39,8 @@ of the day the version was published:
 - the release date;
 - each component's link, from its catalog `repo`;
 - the newest release its repository had published, and whether the shipped
-  version is that release (green) or not (red).
+  version is that release (green) or not (red);
+- for each red version, the catalog's reason it is behind (its `behind` item).
 
 These are recorded once, in `data/releases/<version>.json`, so the page keeps
 showing what was latest on its release date. Every page is then regenerated from
@@ -64,15 +65,18 @@ they are regenerated on every run.
 | `<source> has no entry in component-catalog.yaml` | The version ships a component the current catalog no longer describes | Pull `zero-ops` `main`. If the entry was removed since, the version cannot be synced; ask before dropping or keeping it |
 | `catalog entry <name> has no repo for <source>` | Catalog incomplete | Add `repo` to the entry on `zero-ops` `main` |
 | `no <track> version found for <source>` | Its `track`, `tag` or `repo` does not match where the project publishes | Fix the entry on `zero-ops` `main` (see the catalog header) |
+| `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it | Add one to each listed entry on `zero-ops` `main` (format in the catalog header), then fetch again. Prepare 11 catches this before publishing |
 | `unknown track '<x>'` | Typo in the catalog | Use one of the tracks in the catalog header |
 | `no component catalog at …` | No `zero-ops` checkout beside `kamarkat` | Check one out, or pass `--catalog <path>` |
-| `<version> was fetched without its release date and upstream versions` | Data file in the old shape | `--fetch <version>` again |
+| `<version> was fetched without its release date, upstream versions or the reasons components are behind` | Data file in the old shape | `--fetch <version>` again |
 
 ## Reading the page
 
 - **Red** is a component behind its project's newest release on the release
   date, or one that cannot be shown to match it (a digest-only image, a floating
-  tag). This is the list of upgrades to plan.
+  tag). This is the list of upgrades to plan. The ⓘ beside each one shows its
+  status (held, scheduled, not assessed, declined), reason, what it waits on and
+  its target, as the catalog said when the version was fetched.
 - **Every component has a latest version.** Third-party versions come from where
   each project publishes (`track` in the catalog); the platform's own images are
   compared with the newest image built for them before the release. A component
