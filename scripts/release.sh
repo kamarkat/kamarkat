@@ -8,6 +8,8 @@
 #   scripts/release.sh --no-sync             publish and promote, do not sync
 #   scripts/release.sh --promote-only --version 0.1.17
 #                                            promote a version already published
+#   scripts/release.sh --check               rehearse the next version and check
+#                                            every component behind latest has a reason
 #
 # --promote-only is for a version this script did not publish: a stable release,
 # which the GitHub Release workflow publishes. Without it the publish step finds
@@ -44,6 +46,8 @@ DRY_RUN=0
 PUBLISH=1
 PROMOTE=1
 SYNC=1
+CHECK=0
+DOCS_DIR="${DOCS_DIR:-../kamarkat}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,10 +56,15 @@ while [ $# -gt 0 ]; do
     --promote-only) PUBLISH=0; shift ;;
     --no-promote)   PROMOTE=0; shift ;;
     --no-sync)      SYNC=0; shift ;;
-    -h|--help)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --check)        CHECK=1; shift ;;
+    -h|--help)      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)              echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# --check spends nothing: it reads the tenant as it stands, and every step that
+# would change something is the rehearsal's instead.
+[ "$CHECK" = 0 ] || DRY_RUN=1
 
 if [ "$PUBLISH" = 0 ]; then
   [ "$PROMOTE" = 1 ] || { echo "--promote-only and --no-promote together do nothing" >&2; exit 2; }
@@ -143,6 +152,29 @@ EVERY_REF="$(grep -rn -- "$VERSION" registry/ --include='*.yaml' 2>/dev/null || 
 $EVERY_REF"
 
 cd - >/dev/null
+
+# ---------------------------------------------------------------------------
+# --check: rehearse this version and ask the docs whether it can be explained.
+#
+# Every packaging step and gate runs and nothing is pushed, so the version stays
+# free. Then the docs' sync-releases.py -- where the latest-version lookups live,
+# once -- names every component behind its latest release with no `behind` reason
+# in the catalog. The docs sync refuses a published version it cannot explain, and
+# finding that after publishing is a release page nobody can write.
+# ---------------------------------------------------------------------------
+if [ "$CHECK" = 1 ]; then
+  [ -f "$DOCS_DIR/scripts/sync-releases.py" ] || die "no docs checkout at $DOCS_DIR (set DOCS_DIR)"
+  say "3. Rehearse $VERSION (nothing is pushed)"
+  PREVIOUS_VERSION="$CURRENT" SKIP_PUSH=1 make publish-local VERSION="$VERSION" OWNER="$OWNER" \
+    || die "the rehearsal failed a gate -- fix the cause on main before releasing"
+  say "4. Every component behind its latest release has a reason"
+  python3 "$DOCS_DIR/scripts/sync-releases.py" --check dist/charts/platform-bundle/components.json \
+    --catalog manifests/architecture/component-catalog.yaml \
+    || die "the versions above are behind their latest release with no reason. Add a \`behind\` item
+   for each in manifests/architecture/component-catalog.yaml (format in its header)."
+  say "Ready. $VERSION can be released."
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Publish. The existing script, unchanged -- one packaging path, one gate set.

@@ -1,6 +1,6 @@
 ---
 name: release
-description: Make a zero-ops platform release end to end — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (sync-releases.py), even if they only ask "can we release now?" or "why did the publish fail?".
+description: Make a zero-ops platform release end to end with `soloz release` — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions soloz release, release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (sync-releases.py), even if they only ask "can we release now?" or "why did the publish fail?".
 ---
 
 # Release
@@ -14,9 +14,15 @@ green. Follow the order; do not improvise around a gate.
 
 | Who | Does | Never |
 | :- | :- | :- |
-| Contributor | Lands changes on `main`, keeps CI green, readies the catalog and packaging | Runs `release.sh`, publishes, promotes |
-| Release owner | Runs `scripts/release.sh`, decides the version | Edits code to get past a gate |
+| Contributor | Lands changes on `main`, keeps CI green, readies the catalog and packaging | Runs `soloz release publish`, publishes, promotes |
+| Release owner | Runs `soloz release`, decides the version | Edits code to get past a gate |
 | Verifier | Checks the box once, syncs the docs | Re-publishes, re-promotes |
+
+`soloz release` runs from the root of a zero-ops checkout: each subcommand runs
+the checkout's own `scripts/release.sh` or `scripts/argocd-hard-sync.sh`. Without
+an installed `soloz`, use `go run ./cmd/soloz release …`. Flags common to all:
+`--gitops-dir` (default `.local-e2e/nutgraf-gitops`), `--owner` (default
+`soloz-io`), `--version`.
 
 One person can hold several roles, but only the release owner publishes. A
 version is consumed the moment publishing starts (ADR-063), so two people
@@ -24,17 +30,17 @@ publishing is two burned versions.
 
 ## Versions
 
-- **Prerelease** `X.Y.Z-rc.N`: `scripts/release.sh` publishes from a laptop and
+- **Prerelease** `X.Y.Z-rc.N`: `soloz release publish` publishes from a laptop and
   promotes the tenant. With no `--version` it takes the tenant's current rc + 1.
 - **Stable** `X.Y.Z`: a GitHub Release triggers
   `.github/workflows/publish-platform-charts.yml`, which publishes the bundle and
   attaches the CLI. Once that run is green, the release owner promotes it with
-  `scripts/release.sh --promote-only --version X.Y.Z`, which confirms the version
+  `soloz release promote --version X.Y.Z`, which confirms the version
   is in the registry and then promotes, syncs and verifies exactly as below.
 - **A version is published once.** Never re-publish, re-tag or delete one. If a
   publish fails part way, the next attempt takes the next version.
 
-## 1. Prepare — before anyone runs `release.sh`
+## 1. Prepare — before anyone publishes
 
 Work through all of it. Each item is something a gate will otherwise catch late,
 after minutes of packaging, or something no gate catches at all.
@@ -77,29 +83,27 @@ after minutes of packaging, or something no gate catches at all.
    `environments/`, and every cluster is on one `environmentRevision`.
 9. **Tools.** Helm 3 (Helm 4 breaks kustomize's chart inflation), `kustomize`,
    `yq`, `gh` authenticated, `helm registry login ghcr.io`, Python with PyYAML.
-10. **Rehearse without spending a version.**
+10. **Rehearse, and check every component behind latest has a reason.**
     ```bash
-    SKIP_PUSH=1 make publish-local VERSION=<next-version>
+    soloz release check            # kamarkat/ checked out beside zero-ops/, or --docs-dir
     ```
-    Runs every packaging step and gate, pushes nothing; the version stays free.
-    Then `scripts/release.sh --dry-run` to see the version, files and sync it
-    would touch.
-11. **Every component behind its latest release has a reason.** Each release page
-    explains why a red version is behind, from the catalog entry's `behind` items
-    (format in the catalog header), and the docs sync refuses a version it cannot
-    explain. Against the rehearsal's inventory, in `kamarkat/`:
-    ```bash
-    python3 scripts/sync-releases.py --check ../zero-ops/dist/charts/platform-bundle/components.json
-    ```
-    It lists every version behind today's latest with no reason: one newly behind,
-    or one whose pin changed. Add or update its `behind` item on `main`.
+    Runs every packaging step and gate for the next version and pushes nothing;
+    the version stays free. Then it lists every component behind today's latest
+    release with no reason in the catalog: one newly behind, or one whose pin
+    changed. Each release page explains why a red version is behind, from the
+    entry's `behind` items (format in the catalog header), and the docs sync
+    refuses a version it cannot explain. Add or update the item on `main`.
+    It ends `Ready. <version> can be released.`
+    Then `soloz release publish --dry-run` shows the version, files and sync a
+    release would touch.
 
 ## 2. Publish and promote — the release owner
 
 ```bash
-scripts/release.sh                 # next rc after the tenant's current version
-scripts/release.sh --version X.Y.Z-rc.N
-scripts/release.sh --promote-only --version X.Y.Z   # already published by CI
+soloz release publish                        # next rc after the tenant's current version
+soloz release publish --version X.Y.Z-rc.N
+soloz release promote --version X.Y.Z        # already published by CI
+soloz release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
 ```
 
 What it does, in this order, and why the order matters:
@@ -115,6 +119,8 @@ What it does, in this order, and why the order matters:
 5. **Hard-syncs and verifies** the box reached the version
    (`scripts/argocd-hard-sync.sh --promote`). Its exit code is the answer.
 
+`--no-promote` publishes only; `--no-sync` stops after the push.
+
 Success ends with: `Done. <version> is published, promoted and running.`
 
 When a gate fails, read [references/gates.md](references/gates.md): it names
@@ -128,9 +134,9 @@ through the normal path, then release again.
 | `publish failed — nothing has been promoted` | Version possibly partly pushed | Fix the cause; release the **next** version |
 | `version … is already published` | Consumed | Release the next version |
 | `<v> IS PUBLISHED but not promoted` | Registry has it, git does not | Resolve in `GITOPS_DIR`, push. Do not re-publish |
-| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, re-run `scripts/argocd-hard-sync.sh --promote <v>`. Do not re-publish |
+| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `soloz release sync --version <v>` again. Do not re-publish |
 | `clusters are on different versions` | A half-applied promotion | Bring them to one version, or pass `--version` |
-| `could not confirm <v> in oci://…` (`--promote-only`) | Not published, or no registry login | Check the publish run; `helm registry login ghcr.io` |
+| `could not confirm <v> in oci://…` (`promote`) | Not published, or no registry login | Check the publish run; `helm registry login ghcr.io` |
 
 Never force-push the tenant repository: a rejected push is someone else's
 commit, usually a CI bot's.

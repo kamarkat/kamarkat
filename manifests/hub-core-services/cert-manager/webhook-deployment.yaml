@@ -23,7 +23,7 @@ spec:
         app.kubernetes.io/component: webhook
         app.kubernetes.io/instance: cert-manager
         app.kubernetes.io/name: webhook
-        app.kubernetes.io/version: v1.20.2
+        app.kubernetes.io/version: v1.21.3
     spec:
       # Named here because this patch demonstrably does NOT behave as a
       # field-scoped overlay: on 2026-09-02, after args were added above, the
@@ -56,11 +56,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-          # IMPORTANT: image is pinned here to v1.20.2. If cert-manager is
+          # IMPORTANT: image is pinned here to v1.21.3. If cert-manager is
           # upgraded via internal/assets/manifests/core/cert-manager/install.yaml,
           # this file must be updated in lockstep or ArgoCD silently holds the
           # old image — the exact drift class that broke Gateway API CRDs.
-          image: "quay.io/jetstack/cert-manager-webhook:v1.20.2"
+          image: "quay.io/jetstack/cert-manager-webhook:v1.21.3"
           # OWNED HERE ON PURPOSE, copied verbatim from the vendored asset.
           #
           # This file is a PARTIAL server-side-apply patch: it owns only the
