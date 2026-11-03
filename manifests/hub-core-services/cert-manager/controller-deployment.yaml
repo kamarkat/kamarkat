@@ -23,16 +23,16 @@ spec:
         app.kubernetes.io/component: controller
         app.kubernetes.io/instance: cert-manager
         app.kubernetes.io/name: cert-manager
-        app.kubernetes.io/version: v1.20.2
+        app.kubernetes.io/version: v1.21.3
     spec:
       serviceAccountName: cert-manager
       containers:
         - name: cert-manager-controller
-          # IMPORTANT: image is pinned here to v1.20.2. If cert-manager is
+          # IMPORTANT: image is pinned here to v1.21.3. If cert-manager is
           # upgraded via internal/assets/manifests/core/cert-manager/install.yaml,
           # this file must be updated in lockstep or ArgoCD silently holds the
           # old image — the exact drift class that broke Gateway API CRDs.
-          image: "quay.io/jetstack/cert-manager-controller:v1.20.2"
+          image: "quay.io/jetstack/cert-manager-controller:v1.21.3"
           env:
           - name: POD_NAMESPACE
             valueFrom:
@@ -54,13 +54,19 @@ spec:
           - --v=2
           - --cluster-resource-namespace=$(POD_NAMESPACE)
           - --leader-election-namespace=kube-system
-          - --acme-http01-solver-image=quay.io/jetstack/cert-manager-acmesolver:v1.20.2
-          # cert-manager v1.20.2 checks BOTH --enable-gateway-api AND the
-          # ExperimentalGatewayAPISupport feature gate (cmd/controller/app/options:
-          # "gateway api is not enabled" otherwise). Removing either flag breaks
+          - --acme-http01-solver-image=quay.io/jetstack/cert-manager-acmesolver:v1.21.3
+          # cert-manager checks BOTH --enable-gateway-api AND the
+          # ExperimentalGatewayAPISupport feature gate. Removing either flag breaks
           # ACME HTTP-01 via Gateway API; the visible failure is a spoke-side
           # ESO/TLS error, not a cert-manager error — the distance between cause
           # and symptom is why this was hard to trace.
+          #
+          # Both are still declared at v1.21.3: the flag is registered in
+          # cmd/controller/app/options and the gate in
+          # internal/controller/feature/features.go, where it is now
+          # {Default: true, PreRelease: Beta} rather than off by default. Passing it
+          # explicitly is therefore redundant at this version and kept deliberately,
+          # so a future default flip cannot silently disable the shim.
           - --enable-gateway-api=true
           - --feature-gates=ExperimentalGatewayAPISupport=true
           - --max-concurrent-challenges=60

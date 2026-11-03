@@ -37,6 +37,7 @@ func main() {
 	rootCmd.AddCommand(newProposalCmd())
 	rootCmd.AddCommand(newSupportCmd())
 	rootCmd.AddCommand(newFleetCmd())
+	rootCmd.AddCommand(newReleaseCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -2,7 +2,7 @@
 
 cert-manager itself is installed **once**, at pivot, from the vendored upstream
 asset `internal/assets/manifests/core/cert-manager/install.yaml`
-(`internal/hub-cli/pivot/orchestrator.go`). That asset is upstream v1.20.2 and is
+(`internal/soloz-cli/pivot/orchestrator.go`). That asset is upstream v1.21.3 and is
 deliberately left unmodified so it can be re-vendored on a version bump without
 carrying merge conflicts.
 

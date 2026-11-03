@@ -640,12 +640,23 @@ def kubeadm_images(version: str, cache: Path) -> list[str]:
         except OSError as e:
             sys.exit(f"inventory: cannot fetch {url}: {e}")
     text = target.read_text()
-    minor = int(version.split(".")[1])
     coredns = re.search(r'CoreDNSVersion\s*=\s*"([^"]+)"', text)
     pause = re.search(r'PauseVersion\s*=\s*"([^"]+)"', text)
-    etcd = re.search(rf'\b{minor}:\s*"([^"]+)"', text)
+    # DefaultEtcdVersion, not the SupportedEtcdVersion map.
+    #
+    # Through 1.34 that map was keyed by literal minor (`31: "3.5.15-0"`), so the
+    # entry for the version being scanned could be read straight out of it. From
+    # 1.35 the keys are computed -- `uint8(getSkewedKubernetesVersion(0).Minor())`
+    # -- so nothing literal matches and the lookup silently found nothing.
+    #
+    # DefaultEtcdVersion is the version for the release the file belongs to, which
+    # is exactly the one wanted here: the constants are fetched at the tag the
+    # ClusterClass installs. The map's own comment states the coupling -- "
+    # DefaultEtcdVersion: with etcd version used for the current k8s release (0)".
+    etcd = re.search(r'DefaultEtcdVersion\s*=\s*"([^"]+)"', text)
     if not (coredns and pause and etcd):
-        sys.exit(f"inventory: kubeadm {version} constants name no CoreDNS, pause or etcd version for 1.{minor}")
+        sys.exit(f"inventory: kubeadm {version} constants name no CoreDNS, pause or "
+                 f"etcd version; its constants.go may have been restructured")
     images = [f"registry.k8s.io/{c}:v{version}" for c in
               ("kube-apiserver", "kube-controller-manager", "kube-scheduler", "kube-proxy")]
     return images + [f"registry.k8s.io/coredns/coredns:{coredns.group(1)}",
