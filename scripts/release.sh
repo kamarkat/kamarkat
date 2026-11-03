@@ -6,6 +6,15 @@
 #   scripts/release.sh --dry-run             say what it would do, change nothing
 #   scripts/release.sh --no-promote          publish only
 #   scripts/release.sh --no-sync             publish and promote, do not sync
+#   scripts/release.sh --promote-only --version 0.1.17
+#                                            promote a version already published
+#
+# --promote-only is for a version this script did not publish: a stable release,
+# which the GitHub Release workflow publishes. Without it the publish step finds
+# the version in the registry and refuses, correctly, so a CI-published version
+# could not be promoted at all. The version must be named, because "the next rc"
+# is a version to create, never one to assume exists; and it must already be in
+# the registry, because promoting first writes a reference to nothing.
 #
 # WHY ONE SCRIPT. Publishing and promoting are two halves of one intent, and
 # doing them by hand has failed in three distinct ways that this sequence
@@ -32,19 +41,26 @@ GITOPS_DIR="${GITOPS_DIR:-.local-e2e/nutgraf-gitops}"
 OWNER="${OWNER:-soloz-io}"
 VERSION=""
 DRY_RUN=0
+PUBLISH=1
 PROMOTE=1
 SYNC=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version)    VERSION="${2:?--version needs a value}"; shift 2 ;;
-    --dry-run)    DRY_RUN=1; shift ;;
-    --no-promote) PROMOTE=0; shift ;;
-    --no-sync)    SYNC=0; shift ;;
-    -h|--help)    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)            echo "unknown argument: $1" >&2; exit 2 ;;
+    --version)      VERSION="${2:?--version needs a value}"; shift 2 ;;
+    --dry-run)      DRY_RUN=1; shift ;;
+    --promote-only) PUBLISH=0; shift ;;
+    --no-promote)   PROMOTE=0; shift ;;
+    --no-sync)      SYNC=0; shift ;;
+    -h|--help)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)              echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+if [ "$PUBLISH" = 0 ]; then
+  [ "$PROMOTE" = 1 ] || { echo "--promote-only and --no-promote together do nothing" >&2; exit 2; }
+  [ -n "$VERSION" ] || { echo "--promote-only needs --version: name the published version to promote" >&2; exit 2; }
+fi
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -131,11 +147,20 @@ cd - >/dev/null
 # ---------------------------------------------------------------------------
 # 3. Publish. The existing script, unchanged -- one packaging path, one gate set.
 # ---------------------------------------------------------------------------
+if [ "$PUBLISH" = 0 ]; then
+  # Read, not assumed: the chart a box pulls must resolve before anything names it.
+  say "3. Confirm $VERSION is published"
+  helm show chart "oci://ghcr.io/${OWNER}/charts/environment-manager" --version "$VERSION" >/dev/null 2>&1 \
+    || die "could not confirm $VERSION in oci://ghcr.io/${OWNER}/charts -- not published, or the registry
+   could not be read (helm registry login ghcr.io). Nothing has been promoted."
+  note "oci://ghcr.io/${OWNER}/charts/environment-manager:$VERSION resolves"
+else
 say "3. Publish $VERSION"
 # The inventory compares this version against the one the box runs now.
 export PREVIOUS_VERSION="$CURRENT"
 run make publish-local VERSION="$VERSION" OWNER="$OWNER" \
   || die "publish failed -- nothing has been promoted, so the box is untouched"
+fi
 
 if [ "$PROMOTE" = 0 ]; then
   say "Published $VERSION. Not promoted (--no-promote)."
@@ -187,9 +212,7 @@ git commit -q -m "chore(promote): ${CURRENT} -> ${VERSION}
 
 Every reference under registry/, not only environmentRevision: a bundle carries
 the version twice, and moving one leaves the children pinned while the root
-reports Synced.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+reports Synced."
 
 # Rebase again before pushing. The publish above takes minutes, and a CI bot
 # writing a chart bump in that window is ordinary -- the first push of this

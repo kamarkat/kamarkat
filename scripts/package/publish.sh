@@ -188,18 +188,38 @@ done
 # the chart now refuses by design, and the publish failed on its own gate having
 # found exactly what it was supposed to find. A gate that has to be edited in
 # lockstep with the thing it checks is a second source of truth.
+#
+# Each combination is rendered twice: as a box gets it by default, and with every
+# optional component on. Only an Application that renders is checked, so a
+# component off by default was never checked at all: the cluster autoscaler's
+# element named a chart no release carried, and every release passed, because no
+# default box has a burst pool. The switches are READ from values.yaml, every
+# boolean `enabled`, for the reason above. burstSpokePool names a workload cluster
+# rather than switching, so it has no switch to find and is set here.
+every_optional="--set burstSpokePool=example-burst $(python3 -c "
+import yaml
+def walk(o, p):
+    for k, v in (o.items() if isinstance(o, dict) else ()):
+        if k == 'enabled' and isinstance(v, bool):
+            yield f'--set {p}enabled=true'
+        yield from walk(v, f'{p}{k}.')
+print(' '.join(walk(yaml.safe_load(open('manifests/argocd/environment-manager/values.yaml')), '')))
+")"
 while read -r env provider; do
     [ -n "$env" ] || continue
-    echo "  $env+$provider"
-    helm template platform-bundle dist/charts/platform-bundle \
-        --set environmentSlug="$env" --set provider="$provider" \
-        --set publicTlsIssuer=letsencrypt-prod --set hubIngressAddress=127.0.0.1 \
-        --set instanceRepoURL=https://github.com/example-org/example-gitops \
-        --set hubDomain=dev.example.test \
-        --set previewDomain=example-preview.test \
-        --set 'alerting.emailTo[0]=alerts@example.test' \
-        --set bundleVersion="$VERSION" \
-    | python3 scripts/validate/application-specs.py dist/charts
+    for optional in "" "$every_optional"; do
+        echo "  $env+$provider${optional:+, every optional component on}"
+        # shellcheck disable=SC2086 # $optional is a list of --set flags
+        helm template platform-bundle dist/charts/platform-bundle \
+            --set environmentSlug="$env" --set boxId=example-box --set provider="$provider" \
+            --set publicTlsIssuer=letsencrypt-prod --set hubIngressAddress=127.0.0.1 \
+            --set instanceRepoURL=https://github.com/example-org/example-gitops \
+            --set hubDomain=dev.example.test \
+            --set previewDomain=example-preview.test \
+            --set 'alerting.emailTo[0]=alerts@example.test' \
+            --set bundleVersion="$VERSION" $optional \
+        | python3 scripts/validate/application-specs.py dist/charts
+    done
 done <<EOF
 $(python3 -c "
 import yaml

@@ -162,6 +162,12 @@ package_path loki manifests/hub-core-services/loki
 # bundle naming a chart no release produced.
 package_path support-agent manifests/hub-core-services/support-agent
 
+# ADR-052's burst autoscaler, inline because its presence is a function of
+# burstSpokePool. It was left out when it moved from a descriptor to inline, and
+# every release named a chart none produced: a box with a burst pool got an
+# Application that rendered nothing and reported Healthy.
+package_path cluster-autoscaler manifests/hub-core-services/cluster-autoscaler
+
 # Parameterised paths: one chart per combination the boundary can ask for.
 # A directory a sibling overlay lists as a resource is a Kustomize base, not an
 # environment a boundary can ask for. Detected rather than named: excluding

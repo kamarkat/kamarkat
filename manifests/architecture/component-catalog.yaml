@@ -15,36 +15,60 @@
 #
 # license is the SPDX identifier of the upstream project. An empty value means
 # it has not been verified, and the docs say so rather than guessing.
+#
+# repo is where the component's title links: owner/name for a GitHub repository,
+# or a URL. track says where its versions are published, so the docs can show the
+# newest one as of each bundle's release date:
+#
+#   releases   GitHub releases of repo; the default for an owner/name repo
+#   tags       Git tags of repo, for a project that tags but publishes no releases
+#   dockerhub  the artefact's own Docker Hub tags
+#   ghcr       the artefact's own GHCR package, compared by digest; for images
+#              the platform builds itself
+#   ubuntu     Ubuntu's LTS releases
+#   file       a version written in `file` of repository `from`, at its newest release
+#
+# tag is the pattern a version is read from, its groups joined with dots; the
+# default is v1.2.3. repos gives an artefact from another project its own repo
+# (and, written as a mapping, its own track, tag, file and from), keyed like match.
+# Every component is tracked: an entry whose versions cannot be found fails the
+# docs sync rather than showing no version.
 
 components:
   # ── Nodes ───────────────────────────────────────────────────────────────
   - name: Ubuntu
     description: The node operating system, the provider's stock image.
     license: "Per package; see /usr/share/doc/<package>/copyright on the node"
+    repo: https://launchpad.net/ubuntu
+    track: ubuntu
     layer: machinery
     match: ["os:ubuntu"]
 
   - name: containerd
     description: The container runtime on every node.
     license: Apache-2.0
+    repo: containerd/containerd
     layer: machinery
     match: ["pkg:containerd"]
 
   - name: runc
     description: The low-level runtime containerd starts containers with.
     license: Apache-2.0
+    repo: opencontainers/runc
     layer: machinery
     match: ["pkg:runc"]
 
   - name: Kubernetes node tools
     description: kubelet runs the node's pods; kubeadm joins it to the cluster; kubectl is the command-line client.
     license: Apache-2.0
+    repo: kubernetes/kubernetes
     layer: machinery
     match: ["pkg:kubelet", "pkg:kubeadm", "pkg:kubectl"]
 
   - name: Tailscale
     description: Joins the node to the tailnet when a tailnet hostname is configured for it.
     license: BSD-3-Clause
+    repo: tailscale/tailscale
     layer: machinery
     match: ["pkg:tailscale"]
 
@@ -52,6 +76,14 @@ components:
   - name: Kubernetes
     description: The control plane kubeadm runs at the pinned Kubernetes version.
     license: Apache-2.0
+    repo: kubernetes/kubernetes
+    repos:
+      registry.k8s.io/pause:
+        repo: https://github.com/kubernetes/kubernetes/tree/master/build/pause
+        track: file
+        from: kubernetes/kubernetes
+        file: build/pause/Makefile
+        tag: '^TAG \?= (\d+)\.(\d+)(?:\.(\d+))?$'
     layer: machinery
     match: ["registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-controller-manager",
             "registry.k8s.io/kube-scheduler", "registry.k8s.io/kube-proxy", "registry.k8s.io/pause"]
@@ -59,12 +91,14 @@ components:
   - name: etcd
     description: The control plane's key-value store.
     license: Apache-2.0
+    repo: etcd-io/etcd
     layer: machinery
     match: ["registry.k8s.io/etcd"]
 
   - name: CoreDNS
     description: Cluster DNS.
     license: Apache-2.0
+    repo: coredns/coredns
     layer: machinery
     match: ["registry.k8s.io/coredns/*"]
 
@@ -72,24 +106,30 @@ components:
   - name: Cluster API
     description: Declarative cluster lifecycle. Creates, scales and replaces the management cluster and managed clusters.
     license: Apache-2.0
+    repo: kubernetes-sigs/cluster-api
+    repos:
+      registry.k8s.io/capi-operator/*: kubernetes-sigs/cluster-api-operator
     layer: machinery
     match: ["registry.k8s.io/cluster-api/*", "registry.k8s.io/capi-operator/*", "tool:clusterctl"]
 
   - name: Cluster API provider for Hetzner
     description: Creates cluster machines, networks and load balancers in the cloud account.
     license: Apache-2.0
+    repo: syself/cluster-api-provider-hetzner
     layer: machinery
     match: ["ghcr.io/syself/caph*"]
 
   - name: cert-manager
     description: Issues and renews the TLS certificates for every gateway and webhook.
     license: Apache-2.0
+    repo: cert-manager/cert-manager
     layer: machinery
     match: ["quay.io/jetstack/*"]
 
   - name: cert-manager DNS-01 webhook
     description: Proves domain ownership for certificates through the provider's DNS.
     license: Apache-2.0
+    repo: hetzner/cert-manager-webhook-hetzner
     layer: machinery
     match: [docker.io/hetzner/cert-manager-webhook-hetzner]
 
@@ -97,54 +137,70 @@ components:
   - name: Argo CD
     description: The GitOps engine. Reconciles every cluster to the GitOps repository and the pinned bundle.
     license: Apache-2.0
+    repo: argoproj/argo-cd
+    repos:
+      ghcr.io/dexidp/*: dexidp/dex
+      public.ecr.aws/docker/library/redis: redis/redis
+      ecr-public.aws.com/docker/library/redis: redis/redis
+      docker.io/library/haproxy:
+        repo: haproxy/haproxy
+        track: dockerhub
     layer: machinery
     match: ["quay.io/argoproj/argocd", "ghcr.io/dexidp/*", "public.ecr.aws/docker/library/redis", "ecr-public.aws.com/docker/library/redis", "docker.io/library/haproxy"]
 
   - name: Argo CD agent
     description: Connects each managed cluster's GitOps engine to the management cluster over an outbound channel.
     license: Apache-2.0
+    repo: argoproj-labs/argocd-agent
     layer: machinery
     match: ["quay.io/argoprojlabs/*"]
 
   - name: Argo Rollouts
     description: Progressive delivery for application workloads.
     license: Apache-2.0
+    repo: argoproj/argo-rollouts
     layer: workload-infrastructure
     match: ["quay.io/argoproj/argo-rollouts"]
 
   - name: capi2argo
     description: Registers each cluster Cluster API creates with the GitOps engine.
     license: Apache-2.0
+    repo: dntosas/capi2argo-cluster-operator
     layer: machinery
     match: ["ghcr.io/dntosas/*"]
 
   - name: Crossplane
     description: Composition. Turns one declaration into the set of resources behind it.
     license: Apache-2.0
+    repo: crossplane/crossplane
     layer: machinery
     match: ["xpkg.crossplane.io/crossplane/*"]
 
   - name: Crossplane Kubernetes provider
     description: Lets a composition create objects in any cluster the platform manages.
     license: Apache-2.0
+    repo: crossplane-contrib/provider-kubernetes
     layer: machinery
     match: [xpkg.upbound.io/crossplane-contrib/provider-kubernetes]
 
   - name: Crossplane SQL provider
     description: Creates application databases and roles inside the platform database.
     license: Apache-2.0
+    repo: crossplane-contrib/provider-sql
     layer: capability
     match: [xpkg.upbound.io/crossplane-contrib/provider-sql]
 
   - name: Patch and transform function
     description: The composition function the platform's compositions are written in.
     license: Apache-2.0
+    repo: crossplane-contrib/function-patch-and-transform
     layer: machinery
     match: [xpkg.upbound.io/crossplane-contrib/function-patch-and-transform]
 
   - name: Reloader
     description: Restarts a workload when a secret or config map it reads changes.
     license: Apache-2.0
+    repo: stakater/Reloader
     layer: machinery
     match: ["ghcr.io/stakater/*"]
 
@@ -152,42 +208,50 @@ components:
   - name: Cilium
     description: Container networking, network policy and the Gateway API implementation.
     license: Apache-2.0
+    repo: cilium/cilium
     layer: machinery
     match: ["quay.io/cilium/*"]
 
   - name: agentgateway
     description: The gateway that serves application and platform routes.
     license: Apache-2.0
+    repo: agentgateway/agentgateway
     layer: workload-infrastructure
     match: ["cr.agentgateway.dev/*"]
 
   - name: ExternalDNS
     description: Publishes DNS records for every public hostname.
     license: Apache-2.0
+    repo: kubernetes-sigs/external-dns
     layer: machinery
     match: ["registry.k8s.io/external-dns/*"]
 
   - name: ExternalDNS provider webhook
     description: Connects ExternalDNS to the provider's DNS service.
     license: Apache-2.0
+    repo: hetzner/external-dns-hetzner-webhook
     layer: machinery
     match: [docker.io/hetzner/external-dns-hetzner-webhook]
 
   - name: NodeLocal DNSCache
     description: A DNS cache on every node.
     license: Apache-2.0
+    repo: kubernetes/dns
     layer: machinery
     match: ["registry.k8s.io/dns/*"]
 
   - name: Cluster proportional autoscaler
     description: Scales cluster DNS with the size of the cluster.
     license: Apache-2.0
+    repo: kubernetes-sigs/cluster-proportional-autoscaler
     layer: machinery
     match: ["registry.k8s.io/cpa/*"]
 
   - name: NGINX
     description: Serves static pages and public assets.
     license: BSD-2-Clause
+    repo: nginx/nginx
+    tag: '^release-(\d+)\.(\d+)\.(\d+)$'
     layer: workload-infrastructure
     match: ["docker.io/nginxinc/*"]
 
@@ -195,24 +259,34 @@ components:
   - name: Hetzner cloud controller manager
     description: Node lifecycle and load balancers in the cloud account.
     license: Apache-2.0
+    repo: syself/hetzner-cloud-controller-manager
     layer: machinery
     match: ["ghcr.io/syself/hetzner-cloud-controller-manager"]
 
   - name: Hetzner CSI driver
     description: Block-storage volumes for persistent data.
     license: MIT
+    repo: hetznercloud/csi-driver
     layer: machinery
     match: ["docker.io/hetznercloud/*"]
 
   - name: CSI sidecars
     description: The standard Kubernetes storage sidecars the CSI driver runs with.
     license: Apache-2.0
+    repo: https://github.com/kubernetes-csi
+    repos:
+      registry.k8s.io/sig-storage/csi-attacher: kubernetes-csi/external-attacher
+      registry.k8s.io/sig-storage/csi-node-driver-registrar: kubernetes-csi/node-driver-registrar
+      registry.k8s.io/sig-storage/csi-provisioner: kubernetes-csi/external-provisioner
+      registry.k8s.io/sig-storage/csi-resizer: kubernetes-csi/external-resizer
+      registry.k8s.io/sig-storage/livenessprobe: kubernetes-csi/livenessprobe
     layer: machinery
     match: ["registry.k8s.io/sig-storage/*"]
 
   - name: Local path provisioner
     description: Node-local volumes on clusters without cloud block storage.
     license: Apache-2.0
+    repo: rancher/local-path-provisioner
     layer: machinery
     match: ["docker.io/rancher/*"]
 
@@ -220,24 +294,28 @@ components:
   - name: Kyverno
     description: Admission policy. Enforces the platform's rules on everything a cluster admits.
     license: Apache-2.0
+    repo: kyverno/kyverno
     layer: machinery
     match: ["reg.kyverno.io/*", "ghcr.io/kyverno/*"]
 
   - name: External Secrets
     description: Secret delivery. Copies each workload's secrets from the secret store into its namespace.
     license: Apache-2.0
+    repo: external-secrets/external-secrets
     layer: machinery
     match: ["ghcr.io/external-secrets/*", "oci.external-secrets.io/*"]
 
   - name: Infisical
     description: The secret store. Holds every platform and application secret.
     license: "MIT (enterprise directory unused)"
+    repo: Infisical/infisical
     layer: machinery
     match: ["docker.io/infisical/infisical"]
 
   - name: Infisical PKI issuer
     description: Issues internal certificates from the secret store's certificate authority.
     license: MIT
+    repo: Infisical/infisical-issuer
     layer: machinery
     match: ["docker.io/infisical/pki-issuer"]
 
@@ -245,6 +323,7 @@ components:
   - name: ZITADEL
     description: The identity provider. Sign-in for people and identities for applications.
     license: AGPL-3.0-only
+    repo: zitadel/zitadel
     layer: machinery
     match: ["ghcr.io/zitadel/*"]
 
@@ -252,18 +331,23 @@ components:
   - name: CloudNativePG
     description: The database operator. Runs PostgreSQL clusters with backups and failover.
     license: Apache-2.0
+    repo: cloudnative-pg/cloudnative-pg
     layer: capability
     match: ["ghcr.io/cloudnative-pg/cloudnative-pg"]
 
   - name: PostgreSQL
     description: The platform database and each application's database.
     license: PostgreSQL
+    repo: postgres/postgres
+    track: tags
+    tag: '^REL_(\d+)_(\d+)$'
     layer: capability
     match: ["ghcr.io/cloudnative-pg/postgresql", docker.io/library/postgres]
 
   - name: Redis
     description: The platform cache.
     license: "BSD-3-Clause (7.x); AGPL-3.0-only (8.x)"
+    repo: redis/redis
     layer: capability
     match: [docker.io/library/redis]
 
@@ -271,60 +355,70 @@ components:
   - name: Grafana Alloy
     description: Collects metrics and logs on every node and cluster.
     license: Apache-2.0
+    repo: grafana/alloy
     layer: capability
     match: ["docker.io/grafana/alloy"]
 
   - name: Loki
     description: Log storage and search.
     license: AGPL-3.0-only
+    repo: grafana/loki
     layer: capability
     match: ["docker.io/grafana/loki"]
 
   - name: Grafana
     description: Dashboards for metrics and logs.
     license: AGPL-3.0-only
+    repo: grafana/grafana
     layer: capability
     match: ["docker.io/grafana/grafana"]
 
   - name: Grafana operator
     description: Manages dashboards and data sources as declarations.
     license: Apache-2.0
+    repo: grafana/grafana-operator
     layer: capability
     match: ["ghcr.io/grafana/grafana-operator"]
 
   - name: VictoriaMetrics operator
     description: Runs the metrics stores.
     license: Apache-2.0
+    repo: VictoriaMetrics/operator
     layer: capability
     match: ["docker.io/victoriametrics/operator"]
 
   - name: VictoriaMetrics
     description: The metrics store, rule evaluation and the authenticating proxy in front of them, run by the VictoriaMetrics operator.
     license: Apache-2.0
+    repo: VictoriaMetrics/VictoriaMetrics
     layer: capability
     match: ["docker.io/victoriametrics/*"]
 
   - name: Alertmanager
     description: Routes the alerts rule evaluation raises, run by the VictoriaMetrics operator.
     license: Apache-2.0
+    repo: prometheus/alertmanager
     layer: capability
     match: ["docker.io/prom/alertmanager"]
 
   - name: kube-state-metrics
     description: Exposes the state of Kubernetes objects as metrics.
     license: Apache-2.0
+    repo: kubernetes/kube-state-metrics
     layer: capability
     match: ["registry.k8s.io/kube-state-metrics/*"]
 
   - name: metrics-server
     description: Resource metrics for autoscaling and `kubectl top`.
     license: Apache-2.0
+    repo: kubernetes-sigs/metrics-server
     layer: machinery
     match: ["registry.k8s.io/metrics-server/*"]
 
   - name: Headlamp
     description: The cluster console.
     license: Apache-2.0
+    repo: headlamp-k8s/headlamp
     layer: machinery
     match: ["ghcr.io/headlamp-k8s/*"]
 
@@ -332,42 +426,53 @@ components:
   - name: kubectl
     description: Runs one-off jobs against the cluster API.
     license: Apache-2.0
+    repo: kubernetes/kubernetes
     layer: machinery
     match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl", "docker.io/bitnamilegacy/kubectl"]
 
   - name: BusyBox
     description: Init steps that prepare a volume before its workload starts.
     license: GPL-2.0-only
+    repo: https://git.busybox.net/busybox
+    track: dockerhub
     layer: machinery
     match: [docker.io/library/busybox]
 
   - name: Agent sandbox controller
     description: Runs isolated, short-lived sandboxes for application jobs.
     license: Apache-2.0
+    repo: kubernetes-sigs/agent-sandbox
     layer: workload-infrastructure
     match: ["registry.k8s.io/agent-sandbox/*"]
 
   - name: Kubernetes toolbox image
     description: A container image with kubectl and other Kubernetes tools; runs the node labeler.
     license: MIT
+    repo: alpine-docker/k8s
+    track: dockerhub
     layer: machinery
     match: ["docker.io/alpine/k8s"]
 
   - name: wait4x
     description: Waits until a dependency, such as a database, accepts connections before its workload starts.
     license: Apache-2.0
+    repo: wait4x/wait4x
     layer: machinery
     match: ["docker.io/wait4x/*"]
 
   - name: Cluster Autoscaler
     description: Adds and removes worker nodes as workloads need them.
     license: Apache-2.0
+    repo: kubernetes/autoscaler
+    tag: '^cluster-autoscaler-(\d+)\.(\d+)\.(\d+)$'
     layer: machinery
     match: ["registry.k8s.io/autoscaling/*"]
 
   - name: curl
     description: An HTTP client image for one-time setup jobs and network probes.
     license: curl
+    repo: curl/curl
+    tag: '^curl-(\d+)_(\d+)_(\d+)$'
     layer: machinery
     match: ["docker.io/curlimages/*"]
 
@@ -375,47 +480,85 @@ components:
   - name: Platform operator
     description: Reconciles the management cluster's own platform state.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/hub-operator]
 
   - name: Organization provisioning
     description: Provisions each organization and application declared in the GitOps repository.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/kube-sbt]
 
   - name: Control-plane API
     description: The control plane's API.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/mcp-server]
 
   - name: Login gateway
     description: Signs people in before a request reaches a protected route.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/auth-proxy]
 
   - name: Cluster identity operator
     description: Gives each managed cluster its identity with the management cluster.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/spoke-identity-operator]
 
   - name: Ephemeral job operator
     description: Runs short-lived jobs on managed clusters.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: workload-infrastructure
     match: [ghcr.io/soloz-io/ephemeral-job-operator]
 
   - name: Support agent
     description: Reports allowlisted control-plane facts when an organization enrols. Does nothing until then.
     license: Apache-2.0
+    repo: https://github.com/soloz-io/zero-ops
+    track: ghcr
     layer: machinery
     match: [ghcr.io/soloz-io/zero-ops/support-agent]
 
   - name: Formance Ledger
     description: The ledger Credit Authority records every credit grant and spend in.
     license: MIT
+    repo: formancehq/ledger
     layer: capability
     match: ["ghcr.io/formancehq/ledger"]
+
+  # ── Billing (ADR-113) ───────────────────────────────────────────────────
+  - name: Lago
+    description: The billing engine. Rates usage into invoices, run unmodified.
+    license: AGPL-3.0-only
+    repo: getlago/lago
+    layer: capability
+    match: ["docker.io/getlago/api"]
+
+  - name: Lago document renderer
+    description: Renders the billing engine's invoices as PDF.
+    license: MIT
+    repo: getlago/lago-gotenberg
+    layer: capability
+    match: ["docker.io/getlago/lago-gotenberg"]
+
+  - name: PostgreSQL with pg_partman
+    description: The billing engine's database image. PostgreSQL with the partitioning extension the engine requires, built by the platform.
+    license: PostgreSQL
+    repo: https://github.com/pgpartman/pg_partman
+    track: ghcr
+    layer: capability
+    match: ["ghcr.io/soloz-io/zero-ops/postgres-partman"]
