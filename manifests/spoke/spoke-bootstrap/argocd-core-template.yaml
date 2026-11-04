@@ -1,4 +1,17 @@
----
+# Argo CD core v3.5.7 on the managed clusters -- repo-server and
+# application-controller only, no API server, UI or dex. Delivered as a
+# ClusterResourceSet payload at bootstrap.
+#
+# Re-derived from upstream manifests/core-install.yaml at v3.5.7 and filtered to
+# the objects this cluster runs. It replaced a hand-assembled v2.11.2 copy that
+# had drifted three minors behind the management cluster's: upstream configures
+# the controller through ~50 environment values read from argocd-cmd-params-cm,
+# and the hand-built pod specs carried six, so settings written in that ConfigMap
+# were never read.
+#
+# Our settings are therefore the ConfigMap keys upstream's env wiring reads, not
+# CLI flags -- the pod specs below are upstream's, unedited. Re-derive rather
+# than hand-edit when this moves again.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,220 +21,10 @@ metadata:
     app.kubernetes.io/name: argocd-core
     app.kubernetes.io/component: bootstrap
     app.kubernetes.io/part-of: cluster-bios
-    addons.cluster.x-k8s.io/resource-set: ""
+    addons.cluster.x-k8s.io/resource-set: ''
 data:
-  argocd-secret.yaml: |
-    apiVersion: v1
-    kind: Secret
-    metadata:
-      name: argocd-secret
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-secret
-        app.kubernetes.io/part-of: argocd
-    type: Opaque
-    stringData:
-      # NOTE: In agent-only mode (no API server), this secret is only used by
-      # application-controller for cluster sharding. Since we only have one cluster
-      # (the local spoke), a static value is acceptable. This is NOT used for
-      # authentication or encryption of sensitive data.
-      server.secretkey: "changeme"
-
-  argocd-cm.yaml: |
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: argocd-cm
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-cm
-        app.kubernetes.io/part-of: argocd
-    data:
-      application.instanceLabelKey: argocd.argoproj.io/instance
-
-  argocd-cmd-params-cm.yaml: |
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: argocd-cmd-params-cm
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-cmd-params-cm
-        app.kubernetes.io/part-of: argocd
-    data:
-      # Allow application-controller to watch platform-ops namespace
-      # Required for destination-based mapping where Applications are created in platform-ops
-      application.namespaces: "platform-ops,argocd"
-
-  repo-server.yaml: |
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: argocd-repo-server
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-repo-server
-        app.kubernetes.io/part-of: argocd
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app.kubernetes.io/name: argocd-repo-server
-      template:
-        metadata:
-          labels:
-            app.kubernetes.io/name: argocd-repo-server
-        spec:
-          tolerations:
-            - key: node-role.kubernetes.io/control-plane
-              operator: Exists
-              effect: NoSchedule
-          containers:
-          - name: argocd-repo-server
-            image: quay.io/argoproj/argocd:v2.11.2
-            command: ["argocd-repo-server"]
-            ports:
-            - containerPort: 8081
-            env:
-            - name: ARGOCD_RECONCILIATION_TIMEOUT
-              value: "180s"
-            - name: ARGOCD_REPO_SERVER_LOGFORMAT
-              value: "text"
-            - name: ARGOCD_REPO_SERVER_LOGLEVEL
-              value: "info"
-            - name: ARGOCD_REPO_SERVER_PARALLELISM_LIMIT
-              value: "0"
-            - name: ARGOCD_REPO_SERVER_DISABLE_TLS
-              value: "true"
-            - name: ARGOCD_EXEC_TIMEOUT
-              value: "180s"
-            livenessProbe:
-              tcpSocket:
-                port: 8081
-              initialDelaySeconds: 10
-              periodSeconds: 10
-            readinessProbe:
-              tcpSocket:
-                port: 8081
-              initialDelaySeconds: 5
-              periodSeconds: 10
-    ---
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: argocd-repo-server
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-repo-server
-        app.kubernetes.io/part-of: argocd
-    spec:
-      selector:
-        app.kubernetes.io/name: argocd-repo-server
-      ports:
-      - port: 8081
-        targetPort: 8081
-        protocol: TCP
-        name: server
-
-  application-controller.yaml: |
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: argocd-application-controller
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-application-controller
-        app.kubernetes.io/part-of: argocd
-    ---
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: ClusterRole
-    metadata:
-      name: argocd-application-controller
-      labels:
-        app.kubernetes.io/name: argocd-application-controller
-        app.kubernetes.io/part-of: argocd
-    rules:
-    - apiGroups: ["*"]
-      resources: ["*"]
-      verbs: ["*"]
-    - nonResourceURLs: ["*"]
-      verbs: ["*"]
-    ---
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: ClusterRoleBinding
-    metadata:
-      name: argocd-application-controller
-      labels:
-        app.kubernetes.io/name: argocd-application-controller
-        app.kubernetes.io/part-of: argocd
-    roleRef:
-      apiGroup: rbac.authorization.k8s.io
-      kind: ClusterRole
-      name: argocd-application-controller
-    subjects:
-    - kind: ServiceAccount
-      name: argocd-application-controller
-      namespace: argocd
-    ---
-    apiVersion: apps/v1
-    kind: StatefulSet
-    metadata:
-      name: argocd-application-controller
-      namespace: argocd
-      labels:
-        app.kubernetes.io/name: argocd-application-controller
-        app.kubernetes.io/part-of: argocd
-    spec:
-      replicas: 1
-      serviceName: argocd-application-controller
-      selector:
-        matchLabels:
-          app.kubernetes.io/name: argocd-application-controller
-      template:
-        metadata:
-          labels:
-            app.kubernetes.io/name: argocd-application-controller
-        spec:
-          serviceAccountName: argocd-application-controller
-          tolerations:
-            - key: node-role.kubernetes.io/control-plane
-              operator: Exists
-              effect: NoSchedule
-          containers:
-          - name: argocd-application-controller
-            image: quay.io/argoproj/argocd:v2.11.2
-            command:
-            - argocd-application-controller
-            args:
-            - --redis
-            - argocd-redis:6379
-            - --repo-server
-            - argocd-repo-server:8081
-            - --repo-server-plaintext
-            - --loglevel
-            - info
-            - --logformat
-            - text
-            env:
-            - name: ARGOCD_CONTROLLER_REPLICAS
-              value: "1"
-            - name: ARGOCD_RECONCILIATION_TIMEOUT
-              value: "180s"
-            - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER
-              value: "argocd-repo-server:8081"
-            - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS
-              value: "60"
-            ports:
-            - containerPort: 8082
-            livenessProbe:
-              httpGet:
-                path: /healthz
-                port: 8082
-              initialDelaySeconds: 30
-              periodSeconds: 10
-            readinessProbe:
-              httpGet:
-                path: /healthz
-                port: 8082
-              initialDelaySeconds: 10
-              periodSeconds: 10
+  argocd-secret.yaml: "apiVersion: v1\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/name: argocd-secret\n    app.kubernetes.io/part-of: argocd\n  name: argocd-secret\ntype: Opaque\n"
+  argocd-cm.yaml: "apiVersion: v1\ndata:\n  application.instanceLabelKey: argocd.argoproj.io/instance\nkind: ConfigMap\nmetadata:\n  labels:\n    app.kubernetes.io/name: argocd-cm\n    app.kubernetes.io/part-of: argocd\n  name: argocd-cm\n"
+  argocd-cmd-params-cm.yaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  labels:\n    app.kubernetes.io/name: argocd-cmd-params-cm\n    app.kubernetes.io/part-of: argocd\n  name: argocd-cmd-params-cm\ndata:\n  application.namespaces: platform-ops,argocd\n  redis.server: argocd-redis:6379\n  repo.server: argocd-repo-server:8081\n  controller.repo.server.plaintext: 'true'\n  controller.log.level: info\n  controller.log.format: text\n"
+  repo-server.yaml: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/component: repo-server\n    app.kubernetes.io/name: argocd-repo-server\n    app.kubernetes.io/part-of: argocd\n  name: argocd-repo-server\nspec:\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: argocd-repo-server\n  template:\n    metadata:\n      labels:\n        app.kubernetes.io/name: argocd-repo-server\n    spec:\n      affinity:\n        podAntiAffinity:\n          preferredDuringSchedulingIgnoredDuringExecution:\n          - podAffinityTerm:\n              labelSelector:\n                matchLabels:\n                  app.kubernetes.io/name: argocd-repo-server\n              topologyKey: kubernetes.io/hostname\n            weight: 100\n          - podAffinityTerm:\n              labelSelector:\n                matchLabels:\n                  app.kubernetes.io/part-of: argocd\n              topologyKey: kubernetes.io/hostname\n            weight: 5\n      automountServiceAccountToken: false\n      containers:\n      - args:\n        - /usr/local/bin/argocd-repo-server\n        env:\n        - name: REDIS_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              key: auth\n              name: argocd-redis\n        - name: GRPC_ENABLE_TXT_SERVICE_CONFIG\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.grpc.enable.txt.service.config\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_RECONCILIATION_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: timeout.reconciliation\n              name: argocd-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_LOGFORMAT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.log.format\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_LOGLEVEL\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.log.level\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_LOG_FORMAT_TIMESTAMP\n          valueFrom:\n            configMapKeyRef:\n              key: log.format.timestamp\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_PARALLELISM_LIMIT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.parallelism.limit\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_LISTEN_ADDRESS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.listen.address\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_LISTEN_METRICS_ADDRESS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.metrics.listen.address\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_DISABLE_TLS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.disable.tls\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_TLS_MIN_VERSION\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.tls.minversion\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_TLS_MAX_VERSION\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.tls.maxversion\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_TLS_CIPHERS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.tls.ciphers\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_CLIENT_CA_PATH\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.client.ca.path\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_CACHE_EXPIRATION\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.repo.cache.expiration\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDIS_SERVER\n          valueFrom:\n            configMapKeyRef:\n              key: redis.server\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDIS_COMPRESSION\n          valueFrom:\n            configMapKeyRef:\n              key: redis.compression\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDISDB\n          valueFrom:\n            configMapKeyRef:\n              key: redis.db\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_DEFAULT_CACHE_EXPIRATION\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.default.cache.expiration\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OTLP_ADDRESS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.address\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OTLP_INSECURE\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.insecure\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OTLP_HEADERS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.headers\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OTLP_ATTRS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.attrs\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_MAX_COMBINED_DIRECTORY_MANIFESTS_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.max.combined.directory.manifests.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_PLUGIN_TAR_EXCLUSIONS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.plugin.tar.exclusions\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_PLUGIN_USE_MANIFEST_GENERATE_PATHS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.plugin.use.manifest.generate.paths\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_ALLOW_OUT_OF_BOUNDS_SYMLINKS\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.allow.oob.symlinks\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_STREAMED_MANIFEST_MAX_TAR_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.streamed.manifest.max.tar.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_STREAMED_MANIFEST_MAX_EXTRACTED_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.streamed.manifest.max.extracted.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_HELM_MANIFEST_MAX_EXTRACTED_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.helm.manifest.max.extracted.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_DISABLE_HELM_MANIFEST_MAX_EXTRACTED_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.disable.helm.manifest.max.extracted.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OCI_MANIFEST_MAX_EXTRACTED_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.oci.manifest.max.extracted.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_DISABLE_OCI_MANIFEST_MAX_EXTRACTED_SIZE\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.disable.oci.manifest.max.extracted.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_OCI_LAYER_MEDIA_TYPES\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.oci.layer.media.types\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REVISION_CACHE_LOCK_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.revision.cache.lock.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_GIT_MODULES_ENABLED\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.enable.git.submodule\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_GIT_LS_REMOTE_PARALLELISM_LIMIT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.git.lsremote.parallelism.limit\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_GIT_REQUEST_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.git.request.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_ENABLE_BUILTIN_GIT_CONFIG\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.enable.builtin.git.config\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_GRPC_MAX_SIZE_MB\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.grpc.max.size\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_REPO_SERVER_INCLUDE_HIDDEN_DIRECTORIES\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.include.hidden.directories\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_HELM_USER_AGENT\n          valueFrom:\n            configMapKeyRef:\n              key: reposerver.helm.user.agent\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: HELM_CACHE_HOME\n          value: /helm-working-dir\n        - name: HELM_CONFIG_HOME\n          value: /helm-working-dir\n        - name: HELM_DATA_HOME\n          value: /helm-working-dir\n        image: quay.io/argoproj/argocd:v3.5.7\n        imagePullPolicy: Always\n        livenessProbe:\n          failureThreshold: 3\n          httpGet:\n            path: /healthz?full=true\n            port: 8084\n          initialDelaySeconds: 30\n          periodSeconds: 30\n          timeoutSeconds: 5\n        name: argocd-repo-server\n        ports:\n        - containerPort: 8081\n        - containerPort: 8084\n        readinessProbe:\n          httpGet:\n            path: /healthz\n            port: 8084\n          initialDelaySeconds: 5\n          periodSeconds: 10\n        securityContext:\n          allowPrivilegeEscalation: false\n          capabilities:\n            drop:\n            - ALL\n          readOnlyRootFilesystem: true\n          runAsNonRoot: true\n          seccompProfile:\n            type: RuntimeDefault\n        volumeMounts:\n        - mountPath: /app/config/ssh\n          name: ssh-known-hosts\n        - mountPath: /app/config/tls\n          name: tls-certs\n        - mountPath: /app/config/gpg/source\n          name: gpg-keys\n        - mountPath: /app/config/gpg/keys\n          name: gpg-keyring\n        - mountPath: /app/config/reposerver/tls\n          name: argocd-repo-server-tls\n        - mountPath: /app/config/reposerver/mtls\n          name: argocd-repo-server-mtls\n        - mountPath: /tmp\n          name: tmp\n        - mountPath: /helm-working-dir\n          name: helm-working-dir\n        - mountPath: /home/argocd/cmp-server/plugins\n          name: plugins\n        - mountPath: /home/argocd/params\n          name: argocd-cmd-params-cm\n      initContainers:\n      - args:\n        - /bin/cp /usr/local/bin/argocd /var/run/argocd/argocd && /bin/ln -sf /var/run/argocd/argocd /var/run/argocd/argocd-cmp-server\n        command:\n        - sh\n        - -c\n        image: quay.io/argoproj/argocd:v3.5.7\n        name: copyutil\n        securityContext:\n          allowPrivilegeEscalation: false\n          capabilities:\n            drop:\n            - ALL\n          readOnlyRootFilesystem: true\n          runAsNonRoot: true\n          seccompProfile:\n            type: RuntimeDefault\n        volumeMounts:\n        - mountPath: /var/run/argocd\n          name: var-files\n      nodeSelector:\n        kubernetes.io/os: linux\n      serviceAccountName: argocd-repo-server\n      volumes:\n      - configMap:\n          name: argocd-ssh-known-hosts-cm\n        name: ssh-known-hosts\n      - configMap:\n          name: argocd-tls-certs-cm\n        name: tls-certs\n      - configMap:\n          name: argocd-gpg-keys-cm\n        name: gpg-keys\n      - emptyDir: {}\n        name: gpg-keyring\n      - emptyDir: {}\n        name: tmp\n      - emptyDir: {}\n        name: helm-working-dir\n      - name: argocd-repo-server-tls\n        secret:\n          items:\n          - key: tls.crt\n            path: tls.crt\n          - key: tls.key\n            path: tls.key\n          - key: ca.crt\n            path: ca.crt\n          optional: true\n          secretName: argocd-repo-server-tls\n      - name: argocd-repo-server-mtls\n        secret:\n          items:\n          - key: client-ca.crt\n            path: client-ca.crt\n          optional: true\n          secretName: argocd-repo-server-mtls\n      - emptyDir: {}\n        name: var-files\n      - emptyDir: {}\n        name: plugins\n      - configMap:\n          items:\n          - key: reposerver.profile.enabled\n            path: profiler.enabled\n          name: argocd-cmd-params-cm\n          optional: true\n        name: argocd-cmd-params-cm\n---\napiVersion: v1\nkind: Service\nmetadata:\n  labels:\n    app.kubernetes.io/component: repo-server\n    app.kubernetes.io/name: argocd-repo-server\n    app.kubernetes.io/part-of: argocd\n  name: argocd-repo-server\nspec:\n  ports:\n  - name: server\n    port: 8081\n    protocol: TCP\n    targetPort: 8081\n  - name: metrics\n    port: 8084\n    protocol: TCP\n    targetPort: 8084\n  selector:\n    app.kubernetes.io/name: argocd-repo-server\n"
+  application-controller.yaml: "apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  labels:\n    app.kubernetes.io/component: application-controller\n    app.kubernetes.io/name: argocd-application-controller\n    app.kubernetes.io/part-of: argocd\n  name: argocd-application-controller\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  labels:\n    app.kubernetes.io/component: application-controller\n    app.kubernetes.io/name: argocd-application-controller\n    app.kubernetes.io/part-of: argocd\n  name: argocd-application-controller\nrules:\n- apiGroups:\n  - '*'\n  resources:\n  - '*'\n  verbs:\n  - '*'\n- nonResourceURLs:\n  - '*'\n  verbs:\n  - '*'\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  labels:\n    app.kubernetes.io/component: application-controller\n    app.kubernetes.io/name: argocd-application-controller\n    app.kubernetes.io/part-of: argocd\n  name: argocd-application-controller\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: argocd-application-controller\nsubjects:\n- kind: ServiceAccount\n  name: argocd-application-controller\n  namespace: argocd\n---\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  labels:\n    app.kubernetes.io/component: application-controller\n    app.kubernetes.io/name: argocd-application-controller\n    app.kubernetes.io/part-of: argocd\n  name: argocd-application-controller\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: argocd-application-controller\n  serviceName: argocd-application-controller\n  template:\n    metadata:\n      labels:\n        app.kubernetes.io/name: argocd-application-controller\n    spec:\n      affinity:\n        podAntiAffinity:\n          preferredDuringSchedulingIgnoredDuringExecution:\n          - podAffinityTerm:\n              labelSelector:\n                matchLabels:\n                  app.kubernetes.io/name: argocd-application-controller\n              topologyKey: kubernetes.io/hostname\n            weight: 100\n          - podAffinityTerm:\n              labelSelector:\n                matchLabels:\n                  app.kubernetes.io/part-of: argocd\n              topologyKey: kubernetes.io/hostname\n            weight: 5\n      containers:\n      - args:\n        - /usr/local/bin/argocd-application-controller\n        env:\n        - name: REDIS_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              key: auth\n              name: argocd-redis\n        - name: GRPC_ENABLE_TXT_SERVICE_CONFIG\n          valueFrom:\n            configMapKeyRef:\n              key: controller.grpc.enable.txt.service.config\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_CONTROLLER_REPLICAS\n          value: '1'\n        - name: ARGOCD_RECONCILIATION_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: timeout.reconciliation\n              name: argocd-cm\n              optional: true\n        - name: ARGOCD_HARD_RECONCILIATION_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: timeout.hard.reconciliation\n              name: argocd-cm\n              optional: true\n        - name: ARGOCD_RECONCILIATION_JITTER\n          valueFrom:\n            configMapKeyRef:\n              key: timeout.reconciliation.jitter\n              name: argocd-cm\n              optional: true\n        - name: ARGOCD_REPO_ERROR_GRACE_PERIOD_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.error.grace.period.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER\n          valueFrom:\n            configMapKeyRef:\n              key: repo.server\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.timeout.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_STATUS_PROCESSORS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.status.processors\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_OPERATION_PROCESSORS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.operation.processors\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_HYDRATION_PROCESSORS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.hydration.processors\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_LOGFORMAT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.log.format\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_LOGLEVEL\n          valueFrom:\n            configMapKeyRef:\n              key: controller.log.level\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_LOG_FORMAT_TIMESTAMP\n          valueFrom:\n            configMapKeyRef:\n              key: log.format.timestamp\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_CLIENT_QPS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.client.qps\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_CLIENT_BURST\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.client.burst\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_CLIENT_MAX_IDLE_CONNECTIONS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.client.max.idle.connections\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_TCP_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.tcp.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_TCP_KEEPALIVE\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.tcp.keepalive\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_TLS_HANDSHAKE_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.tls.handshake.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8S_TCP_IDLE_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8s.tcp.idle.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_METRICS_CACHE_EXPIRATION\n          valueFrom:\n            configMapKeyRef:\n              key: controller.metrics.cache.expiration\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SELF_HEAL_TIMEOUT_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.self.heal.timeout.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_TIMEOUT_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.self.heal.backoff.timeout.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_FACTOR\n          valueFrom:\n            configMapKeyRef:\n              key: controller.self.heal.backoff.factor\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_CAP_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.self.heal.backoff.cap.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_COOLDOWN_SECONDS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.self.heal.backoff.cooldown.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_SYNC_WAVE_DELAY\n          valueFrom:\n            configMapKeyRef:\n              key: controller.sync.wave.delay.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SYNC_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.sync.timeout.seconds\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_PLAINTEXT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.plaintext\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_STRICT_TLS\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.strict.tls\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_CA_CERT_PATH\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.ca.cert.path\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_PATH\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.client.cert.path\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_KEY_PATH\n          valueFrom:\n            configMapKeyRef:\n              key: controller.repo.server.client.cert.key.path\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_PERSIST_RESOURCE_HEALTH\n          valueFrom:\n            configMapKeyRef:\n              key: controller.resource.health.persist\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APP_STATE_CACHE_EXPIRATION\n          valueFrom:\n            configMapKeyRef:\n              key: controller.app.state.cache.expiration\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDIS_SERVER\n          valueFrom:\n            configMapKeyRef:\n              key: redis.server\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDIS_COMPRESSION\n          valueFrom:\n            configMapKeyRef:\n              key: redis.compression\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: REDISDB\n          valueFrom:\n            configMapKeyRef:\n              key: redis.db\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_DEFAULT_CACHE_EXPIRATION\n          valueFrom:\n            configMapKeyRef:\n              key: controller.default.cache.expiration\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_OTLP_ADDRESS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.address\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_OTLP_INSECURE\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.insecure\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_OTLP_HEADERS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.headers\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_OTLP_ATTRS\n          valueFrom:\n            configMapKeyRef:\n              key: otlp.attrs\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_NAMESPACES\n          valueFrom:\n            configMapKeyRef:\n              key: application.namespaces\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_CONTROLLER_SHARDING_ALGORITHM\n          valueFrom:\n            configMapKeyRef:\n              key: controller.sharding.algorithm\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_KUBECTL_PARALLELISM_LIMIT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.kubectl.parallelism.limit\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8SCLIENT_RETRY_MAX\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8sclient.retry.max\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_K8SCLIENT_RETRY_BASE_BACKOFF\n          valueFrom:\n            configMapKeyRef:\n              key: controller.k8sclient.retry.base.backoff\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_SERVER_SIDE_DIFF\n          valueFrom:\n            configMapKeyRef:\n              key: controller.diff.server.side\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_IGNORE_NORMALIZER_JQ_TIMEOUT\n          valueFrom:\n            configMapKeyRef:\n              key: controller.ignore.normalizer.jq.timeout\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_HYDRATOR_ENABLED\n          valueFrom:\n            configMapKeyRef:\n              key: hydrator.enabled\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_CLUSTER_CACHE_BATCH_EVENTS_PROCESSING\n          valueFrom:\n            configMapKeyRef:\n              key: controller.cluster.cache.batch.events.processing\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_CLUSTER_CACHE_EVENTS_PROCESSING_INTERVAL\n          valueFrom:\n            configMapKeyRef:\n              key: controller.cluster.cache.events.processing.interval\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: ARGOCD_APPLICATION_CONTROLLER_COMMIT_SERVER\n          valueFrom:\n            configMapKeyRef:\n              key: commit.server\n              name: argocd-cmd-params-cm\n              optional: true\n        - name: KUBECACHEDIR\n          value: /tmp/kubecache\n        image: quay.io/argoproj/argocd:v3.5.7\n        imagePullPolicy: Always\n        name: argocd-application-controller\n        ports:\n        - containerPort: 8082\n        readinessProbe:\n          httpGet:\n            path: /healthz\n            port: 8082\n          initialDelaySeconds: 5\n          periodSeconds: 10\n        securityContext:\n          allowPrivilegeEscalation: false\n          capabilities:\n            drop:\n            - ALL\n          readOnlyRootFilesystem: true\n          runAsNonRoot: true\n          seccompProfile:\n            type: RuntimeDefault\n        volumeMounts:\n        - mountPath: /app/config/controller/tls\n          name: argocd-repo-server-tls\n        - mountPath: /app/config/reposerver/mtls\n          name: argocd-repo-server-mtls\n        - mountPath: /home/argocd\n          name: argocd-home\n        - mountPath: /home/argocd/params\n          name: argocd-cmd-params-cm\n        - mountPath: /tmp\n          name: argocd-application-controller-tmp\n        workingDir: /home/argocd\n      nodeSelector:\n        kubernetes.io/os: linux\n      serviceAccountName: argocd-application-controller\n      volumes:\n      - emptyDir: {}\n        name: argocd-home\n      - emptyDir: {}\n        name: argocd-application-controller-tmp\n      - name: argocd-repo-server-tls\n        secret:\n          items:\n          - key: tls.crt\n            path: tls.crt\n          - key: tls.key\n            path: tls.key\n          - key: ca.crt\n            path: ca.crt\n          optional: true\n          secretName: argocd-repo-server-tls\n      - name: argocd-repo-server-mtls\n        secret:\n          items:\n          - key: client.crt\n            path: client.crt\n          - key: client.key\n            path: client.key\n          - key: server-ca.crt\n            path: server-ca.crt\n          optional: true\n          secretName: argocd-repo-server-mtls\n      - configMap:\n          items:\n          - key: controller.profile.enabled\n            path: profiler.enabled\n          name: argocd-cmd-params-cm\n          optional: true\n        name: argocd-cmd-params-cm\n"
