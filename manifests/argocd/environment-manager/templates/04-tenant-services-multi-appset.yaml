@@ -22,7 +22,7 @@ spec:
           - appName: 'zitadel'
             destinationNamespace: 'platform-identity'
             repoURL: 'https://charts.zitadel.com'
-            targetRevision: '10.0.4'
+            targetRevision: '10.4.0'
             chart: 'zitadel'
             valueFilesPath: 'manifests/hub-core-services/identity/zitadel/values.yaml'
 {{- if $released }}

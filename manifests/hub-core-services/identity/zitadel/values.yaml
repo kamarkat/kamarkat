@@ -422,8 +422,9 @@ setupJob:
     #
     # FIRST, because cleanup below queries the eventstore this creates.
     - name: ensure-schema
-      # chart 10.0.4 -> appVersion v4.15.3
-      image: ghcr.io/zitadel/zitadel:v4.20.0
+      # Must be the chart's own appVersion: these init containers run the same
+      # zitadel binary the chart deploys. chart 10.4.0 -> appVersion v4.19.2.
+      image: ghcr.io/zitadel/zitadel:v4.19.2
       args:
         - init
         - --config
@@ -455,8 +456,9 @@ setupJob:
           mountPath: /config
 
     - name: cleanup-stuck-migration
-      # chart 10.0.4 -> appVersion v4.15.3
-      image: ghcr.io/zitadel/zitadel:v4.20.0
+      # Must be the chart's own appVersion: these init containers run the same
+      # zitadel binary the chart deploys. chart 10.4.0 -> appVersion v4.19.2.
+      image: ghcr.io/zitadel/zitadel:v4.19.2
       args:
         - setup
         - cleanup
