@@ -3,7 +3,7 @@ resources:
 - provider-registry.yaml
 
 images:
-- digest: sha256:fb9673e712b736a40e22504422d86c1eb0653fe09f46145031eb09ebeff8a383
+- digest: sha256:f0354c46b482cf8736b7bb946e1cae1e4cf338787c5987eaff81ee364f8c81ac
   name: controller
   newName: ghcr.io/kamarkat/kamarkat/hub-operator
 apiVersion: kustomize.config.k8s.io/v1beta1
