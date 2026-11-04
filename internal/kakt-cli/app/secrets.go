@@ -1,14 +1,15 @@
-// Package fleet reads what a fleet declares and reports what has been supplied.
+// Package app reads what an application declares and reports what has been
+// supplied.
 //
-// ADR-087 splits a fleet's runtime input by who owns the value. The secrets
-// half is declared in the fleet's own repository and supplied out of band, and
+// ADR-087 splits an application's runtime input by who owns the value. The secrets
+// half is declared in the application's own repository and supplied out of band, and
 // this package is the join between those two halves: the declaration, from git,
 // and the key names present in the provider.
 //
 // Nothing here handles a secret VALUE. Supplying one is a write the caller
 // performs; reporting on one is done by name. That is a property of the types,
 // not a convention -- see infisical.ListSecretNames.
-package fleet
+package app
 
 import (
 	"fmt"
@@ -19,24 +20,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Declaration is one entry in a fleet's `secrets:` list.
+// Declaration is one entry in an application's `secrets:` list.
 type Declaration struct {
 	// Name is the key, identical in the provider and in the delivered Secret.
 	Name string `yaml:"name"`
-	// Capability is what the fleet loses without it, and is what a report names
+	// Capability is what the application loses without it, and is what a report names
 	// -- a key alone is not something an operator can act on.
 	Capability string `yaml:"capability"`
 	// Workloads read it, and therefore decide which ExternalSecret it lands in.
 	Workloads []string `yaml:"workloads"`
 }
 
-// Fleet is the part of environments/<env>/<app>/values.yaml this package reads.
+// App is the part of environments/<env>/<app>/values.yaml this package reads.
 //
 // TenantID is the organisation whose box this is; AppID is the product
 // (ADR-088). They were one field until 2026-09-24, which is why the path below
 // read /tenants/<product>/ while the cluster segment above it already carried the
 // customer.
-type Fleet struct {
+type App struct {
 	TenantID string `yaml:"tenantId"`
 	AppID    string `yaml:"appId"`
 
@@ -49,13 +50,13 @@ type Fleet struct {
 	Secrets     []Declaration `yaml:"secrets"`
 }
 
-// SecretPath is where this fleet's values live in the provider.
+// SecretPath is where this application's values live in the provider.
 //
-// DERIVED from the fleet's own declaration, never passed in. The legacy fleet
-// wrote this path out per key, twenty-three times, each one an opportunity to
-// name a cluster the fleet does not run on -- which fails as "could not get secret
+// DERIVED from the application's own declaration, never passed in. The retired
+// fleet-registry arrangement wrote this path out per key, twenty-three times,
+// each one an opportunity to name a cluster the application does not run on -- which fails as "could not get secret
 // data from provider", indistinguishable from a store or auth fault.
-func (f Fleet) SecretPath() string {
+func (f App) SecretPath() string {
 	// The `/spoke-pool/<name>/` segment keeps its spelling. The value in it has
 	// always been the cluster's name, so renaming the field that supplies it
 	// moves no secret; renaming the segment would orphan every one already
@@ -63,8 +64,8 @@ func (f Fleet) SecretPath() string {
 	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", f.ClusterName, f.AppID)
 }
 
-// Load reads one environment's fleet declaration.
-func Load(repoRoot, environment, app string) (*Fleet, error) {
+// Load reads one environment's application declaration.
+func Load(repoRoot, environment, app string) (*App, error) {
 	path := filepath.Join(repoRoot, "environments", environment, app, "values.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -73,7 +74,7 @@ func Load(repoRoot, environment, app string) (*Fleet, error) {
 			path, err)
 	}
 
-	var f Fleet
+	var f App
 	if err := yaml.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -82,10 +83,10 @@ func Load(repoRoot, environment, app string) (*Fleet, error) {
 	// empty segment. "/spoke-pool//tenants/waypoint" is a valid string and a
 	// folder that will never hold anything.
 	if f.TenantID == "" {
-		return nil, fmt.Errorf("%s declares no tenantId, which is half of this fleet's secret path", path)
+		return nil, fmt.Errorf("%s declares no tenantId, which is half of this application's secret path", path)
 	}
 	if f.ClusterName == "" {
-		return nil, fmt.Errorf("%s declares no clusterName, which is half of this fleet's secret path", path)
+		return nil, fmt.Errorf("%s declares no clusterName, which is half of this application's secret path", path)
 	}
 	if err := VerifyTargetCluster(repoRoot, environment, f.ClusterName); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -128,8 +129,8 @@ func VerifyTargetCluster(repoRoot, environment, clusterName string) error {
 
 	raw, err := os.ReadFile(declaration)
 	if err != nil {
-		return fmt.Errorf("declares clusterName %q, and this box has no such cluster at %s/%s: "+
-			"an application placed on a cluster that does not exist generates no Application "+
+		return fmt.Errorf("no cluster named %q: this box declares none at %s/%s, and an "+
+			"application placed on a cluster that does not exist generates no Application "+
 			"and reports nothing", clusterName, registryClustersDir, clusterName)
 	}
 
@@ -146,9 +147,9 @@ func VerifyTargetCluster(repoRoot, environment, clusterName string) error {
 		return fmt.Errorf("read %s: %w", dir, err)
 	}
 	if len(claims) == 0 {
-		return fmt.Errorf("declares clusterName %q, which is not a workload cluster: it has no "+
-			"spoke-pool claim, so it is this box's management cluster and applications do not "+
-			"run on it", clusterName)
+		return fmt.Errorf("cluster %q is not a workload cluster: it has no spoke-pool claim, "+
+			"so it is this box's management cluster and applications do not run on it",
+			clusterName)
 	}
 
 	var cluster struct {
@@ -158,16 +159,16 @@ func VerifyTargetCluster(repoRoot, environment, clusterName string) error {
 		return fmt.Errorf("parse %s: %w", declaration, err)
 	}
 	if cluster.EnvironmentSlug != environment {
-		return fmt.Errorf("declares clusterName %q, which serves environmentSlug %q and not %q: "+
-			"the cluster and the directory disagree about which stage this application is, "+
-			"and each is correct on its own",
+		return fmt.Errorf("cluster %q serves environmentSlug %q, not %q: the cluster and the "+
+			"environment disagree about which stage this application is, and each is correct "+
+			"on its own",
 			clusterName, cluster.EnvironmentSlug, environment)
 	}
 	return nil
 }
 
-// Declared reports whether the fleet declares this key, and returns it.
-func (f Fleet) Declared(name string) (Declaration, bool) {
+// Declared reports whether the application declares this key, and returns it.
+func (f App) Declared(name string) (Declaration, bool) {
 	for _, d := range f.Secrets {
 		if d.Name == name {
 			return d, true
@@ -186,9 +187,9 @@ type Entry struct {
 	Orphan bool
 }
 
-// Status is the join of what a fleet declares against what has been supplied.
+// Status is the join of what an application declares against what has been supplied.
 type Status struct {
-	Fleet   Fleet
+	App     App
 	Path    string
 	Entries []Entry
 }
@@ -196,23 +197,23 @@ type Status struct {
 // Join builds a Status from a declaration and the key names present.
 //
 // Takes NAMES, not secrets. A caller that has no values cannot print one.
-func Join(f Fleet, present []string) Status {
+func Join(f App, present []string) Status {
 	have := make(map[string]bool, len(present))
 	for _, n := range present {
 		have[n] = true
 	}
 
-	s := Status{Fleet: f, Path: f.SecretPath()}
+	s := Status{App: f, Path: f.SecretPath()}
 	declared := make(map[string]bool, len(f.Secrets))
 	for _, d := range f.Secrets {
 		declared[d.Name] = true
 		s.Entries = append(s.Entries, Entry{Declaration: d, Present: have[d.Name]})
 	}
 
-	// Orphans are reported, never removed. A key this fleet does not declare may
+	// Orphans are reported, never removed. A key this application does not declare may
 	// still be read by something else -- the platform writes OAUTH_*,
 	// CACHE_PASSWORD and db-credentials to this same folder, and none of those
-	// appear in a fleet's `secrets:` by design. Deleting what looks unclaimed
+	// appear in an application's `secrets:` by design. Deleting what looks unclaimed
 	// would take those with it.
 	for _, n := range present {
 		if !declared[n] {

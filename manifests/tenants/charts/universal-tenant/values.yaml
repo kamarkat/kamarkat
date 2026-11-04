@@ -8,17 +8,17 @@ tenantId: ""
 # and support resources are installed directly into the tenant namespace.
 deployXR: false
 
-# OAuth2 clients for this fleet, reconciled into Zitadel.
+# OAuth2 clients for this application, reconciled into Zitadel.
 # The platform does not declare tenant clients (ADR-047 addendum); they are rendered
-# here, per fleet, at onboarding.
+# here, per application, at onboarding.
 # Ephemeral in-memory cache (ADR-014, ADR-047). A declaration, not an
 # implementation: the platform renders the Deployment, Service, Certificate and
 # NetworkPolicy from this. Image, TLS, ACL, security context and network rules are
-# deliberately not expressible here — each is a policy a fleet should not be able
+# deliberately not expressible here — each is a policy an application should not be able
 # to get wrong on its own, and the credential is generated into Infisical and
 # delivered by ESO like every other tenant secret.
 #
-# State is transient by construction (emptyDir, never a PVC), so a fleet needing
+# State is transient by construction (emptyDir, never a PVC), so an application needing
 # durable state needs something other than this.
 cache:
   enabled: false
@@ -26,26 +26,26 @@ cache:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: 250m, memory: 256Mi}
 
-# This fleet's browser-facing gateway (ADR-050, ADR-047).
+# This application's browser-facing gateway (ADR-050, ADR-047).
 #
-# A fleet CONFIGURES a gateway; it does not define one. Everything below that a
-# fleet can set is a choice the platform offers — whether to have a gateway, and
+# An application CONFIGURES a gateway; it does not define one. Everything below that a
+# application can set is a choice the platform offers — whether to have a gateway, and
 # which hostnames it answers for. Everything else is derived from the tenant
 # identity or fixed by the platform, and is deliberately absent from this
 # surface: image, replicas, resource requests, backend addresses, OAuth client
-# identity and redirect path are platform decisions, and a fleet that could set
-# them could run an arbitrary container, claim another fleet's client, or route
-# to another fleet's services.
+# identity and redirect path are platform decisions, and an application that could set
+# them could run an arbitrary container, claim another application's client, or route
+# to another application's services.
 #
 # Derived rather than declared:
-#   backends    bff-workload / frontend-workload in this fleet's own namespace
+#   backends    bff-workload / frontend-workload in this application's own namespace
 #   clientId    <tenantId>-public-client, matching ADR-053's identifier rule
 #   redirect    <publicHost>/oauth/callback
 #
-# Supplied by the environment, not the fleet:
+# Supplied by the environment, not the application:
 #   issuer      the environment's identity provider
-# Supplied by the environment bootstrap, never by a fleet. Which identity
-# provider a spoke trusts is a platform property; a fleet able to set it could
+# Supplied by the environment bootstrap, never by an application. Which identity
+# provider a spoke trusts is a platform property; an application able to set it could
 # point its own login flow at an issuer the platform does not trust.
 oidcIssuer: ""
 
@@ -82,16 +82,16 @@ oidcJwksUrl: ""
 # arrives without the claim.
 oidcScopes: []
 
-# How people get accounts in this fleet's tenant.
+# How people get accounts in this application's tenant.
 #
-# Fleet-owned: it is a property of this fleet's product, not of the platform.
+# Application-owned: it is a property of this application's product, not of the platform.
 # The platform keeps what surrounds it — which issuer is trusted, that a login on
-# this hostname is bound to this fleet's organisation, and the role a new member
+# this hostname is bound to this application's organisation, and the role a new member
 # receives.
 identity:
-  # Off by default. Turning it on lets anyone reaching this fleet's hostname
+  # Off by default. Turning it on lets anyone reaching this application's hostname
   # create an account IN THIS TENANT — the gateway scopes every authorization
-  # request to this fleet's organisation, so it cannot land anywhere else.
+  # request to this application's organisation, so it cannot land anywhere else.
   selfRegistration: false
   # Other applications OF THIS TENANT this one may call with a user's credential
   # (ADR-094 Part 2). appIds, never hostnames, never another tenant's app.
@@ -101,7 +101,7 @@ identity:
   # never asked for. Declaring `waypoint` here means the platform renders
   # waypoint's project into the audience scope THIS app's client requests, AND
   # renders this app's client into the allowed-caller list waypoint checks azp
-  # against. The fleet declares a relationship; the platform decides what it
+  # against. The application declares a relationship; the platform decides what it
   # renders into.
   backendDependencies: []
 
@@ -119,11 +119,11 @@ identity:
   allowedConsumers: []
 
 # Where the box's Credit Authority answers (ADR-109). Supplied by the environment
-# while capabilities.credits.enabled, never by a fleet.
+# while capabilities.credits.enabled, never by an application.
 creditAuthorityUrl: ""
 
 # Where the box's billing engine answers (ADR-113). Supplied by the environment
-# while capabilities.billing.enabled, never by a fleet.
+# while capabilities.billing.enabled, never by an application.
 billingEngineUrl: ""
 
 # Platform capabilities this application CONSUMES (ADR-109).
@@ -194,7 +194,7 @@ gateway:
   # routed directly to frontend-workload without redirecting to the identity provider.
   oidc:
     enabled: true
-  # Hostnames this fleet answers on. The first is the browser-facing host and is
+  # Hostnames this application answers on. The first is the browser-facing host and is
   # where the OAuth redirect returns; the rest are additional names for the same
   # gateway. These must already be declared under `public.hosts` so a certificate
   # exists for them (ADR-051) — a hostname here without one serves no traffic.
@@ -202,15 +202,15 @@ gateway:
 
 
 oauth:
-  # Public hostname this fleet serves, e.g. waypoint.dev.nutgraf.in
+  # Public hostname this application serves, e.g. waypoint.dev.nutgraf.in
   publicHost: ""
-  # OAuth clients this fleet declares (ADR-053). One per service that INITIATES an
+  # OAuth clients this application declares (ADR-053). One per service that INITIATES an
   # OAuth flow; a service that only validates tokens is not a client. An empty list
-  # renders nothing, which is how a fleet with no OAuth declares it — there is no
+  # renders nothing, which is how an application with no OAuth declares it — there is no
   # enabled flag, because the list already says whether anything is wanted.
   #
   # The FLEET declares; the PLATFORM provisions. A client's name, type and callback
-  # are the fleet's to choose (ADR-047: a platform binary must not contain a tenant
+  # are the application's to choose (ADR-047: a platform binary must not contain a tenant
   # identifier, and "every tenant has a bff" is one). The platform creates each
   # declared client against the issuer and publishes the identifiers it allocates.
   #
@@ -237,7 +237,7 @@ oauth:
   #   scope             space-separated; default "openid offline_access"
   #   extraRedirectUris absolute URIs, for local/dev callbacks
   #
-  # Everything else is DERIVED from `name` — nothing below is chosen per fleet:
+  # Everything else is DERIVED from `name` — nothing below is chosen per application:
   #
   #   client identifier   <tenantId>-<name>              e.g. acme-bff
   #   Infisical keys      OAUTH_<NAME>_CLIENT_ID         name uppercased, - becomes _
@@ -246,7 +246,7 @@ oauth:
   # A confidential client's credential is delivered to its workload under those SAME
   # Infisical key names. Do not rename them on the way through: the correspondence
   # between what is stored and what is read stops being visible, and no validator
-  # sees fleet-registry ExternalSecrets, so a rename that drifts is caught by nothing
+  # sees application-registry ExternalSecrets, so a rename that drifts is caught by nothing
   # — the secret simply never resolves and the sync wave never reports healthy.
   # The tenant is not part of the key; the folder path and the namespace scope it.
   #
@@ -268,10 +268,10 @@ database:
   schemaName: ""
 
 
-# ADR-047 Tier 2: Platform-rendered namespaced RBAC for fleet workloads.
+# ADR-047 Tier 2: Platform-rendered namespaced RBAC for application workloads.
 # Rendered only when deployXR=false (spoke provisioning). Each entry binds a
-# platform-authored Role to a fleet ServiceAccount. The serviceAccount name must
-# match the fleet overlay's workload ServiceAccount (base `workload-sa` + namePrefix).
+# platform-authored Role to an application ServiceAccount. The serviceAccount name must
+# match the application overlay's workload ServiceAccount (base `workload-sa` + namePrefix).
 # Example:
 # workloadRbac:
 #   - serviceAccount: sdk-workload-sa
@@ -286,18 +286,18 @@ workloadRbac: []
 # It delivered one ExternalSecret per FLEET, from remote paths each entry wrote
 # out in full, and drew no line between configuration and secret material. All
 # three were load-bearing defects rather than untidiness: the object is atomic so
-# a fleet-wide grouping couples unrelated workloads' failures, a per-entry
+# an application-wide grouping couples unrelated workloads' failures, a per-entry
 # absolute path is a per-entry opportunity to name the wrong cell, and eleven of
 # waypoint's twenty-three keys were not secrets at all.
 #
 # Removed rather than deprecated. Leaving it in place would be two mechanisms for
 # one job, and the one being replaced is the one that already shipped -- so a
-# fleet could keep using it and never learn why the new one exists.
+# application could keep using it and never learn why the new one exists.
 #
 # `config` and `secrets` below are its replacement.
 
 
-# ADR-087: the fleet's non-secret configuration, delivered as ConfigMap
+# ADR-087: the application's non-secret configuration, delivered as ConfigMap
 # <tenantId>-config. A map of KEY: value. Values the tenant owns and nothing
 # protects by concealing -- model names, bucket names, base URLs, provider
 # endpoint identifiers. In git, so the change that alters behaviour is the change
@@ -308,7 +308,7 @@ workloadRbac: []
 #   S3_BUCKET_NAME: waypoint-dev
 config: {}
 
-# ADR-087: the fleet's secrets, declared here and supplied out of band.
+# ADR-087: the application's secrets, declared here and supplied out of band.
 #
 # Delivered as ONE ExternalSecret PER WORKLOAD, named
 # <tenantId>-<workload>-secrets, because the object is atomic and its key set is
@@ -319,7 +319,7 @@ config: {}
 # of the last two. The Infisical path is derived from clusterName and tenantId and is
 # never written per key.
 #
-# Platform-generated credentials are NOT declared here. A fleet that declares a
+# Platform-generated credentials are NOT declared here. An application that declares a
 # confidential OAuth client, a cache or a database has thereby declared their
 # credentials, and hub-operator writes them (ADR-053).
 # Example:
@@ -342,7 +342,7 @@ secrets: []
 previewAccess:
   enabled: false
 
-# ADR-047 Tier 2: Sandbox capabilities for the fleet.
+# ADR-047 Tier 2: Sandbox capabilities for the application.
 sandbox:
   # When true, the platform provisions the `agent-vault-entrypoint` ConfigMap
   # in the tenant namespace (required by the waypoint SDK sandbox pods). The
@@ -364,28 +364,28 @@ sandbox:
 
 # Burst compute (ADR-052).
 #
-# A fleet DECLARES the request here; the platform grants it by labelling the
-# namespace, which is what the burst placement policy matches on. The fleet
+# An application DECLARES the request here; the platform grants it by labelling the
+# namespace, which is what the burst placement policy matches on. The application
 # never sets placement on its own pods — nodeSelector, the burst toleration and
 # priorityClassName are written by a platform-owned mutating policy, and a
-# companion validating policy rejects them if a fleet writes them itself
+# companion validating policy rejects them if an application writes them itself
 # (ADR-052 §4).
 #
-# So this is a request, not a grant. Enabling it says "this fleet's sandboxes
+# So this is a request, not a grant. Enabling it says "this application's sandboxes
 # may run on burst capacity"; how much of that capacity it may consume is the
-# platform's decision below, not the fleet's.
+# platform's decision below, not the application's.
 burstCompute:
-  # Off by default. Burst capacity costs money per node-hour and a fleet
+  # Off by default. Burst capacity costs money per node-hour and an application
   # acquires it deliberately.
   enabled: false
 
 # The ceiling on burst consumption, scoped to the burst PriorityClass (ADR-052
-# §5). Platform-set and NOT fleet-overridable: a fleet that could raise its own
-# ceiling could exhaust the cell's burst budget for every other fleet on it.
+# §5). Platform-set and NOT application-overridable: an application that could raise its own
+# ceiling could exhaust the cell's burst budget for every other application on it.
 #
 # Scoped by PriorityClassName, so it bounds burst work only and leaves the
-# fleet's ordinary quota untouched. Without it, `maxNodes` is the only bound and
-# it is per-cell, not per-fleet — one fleet could consume all of it.
+# application's ordinary quota untouched. Without it, `maxNodes` is the only bound and
+# it is per-cell, not per-application — one application could consume all of it.
 burstQuota:
   starter:
     cpu: "2"

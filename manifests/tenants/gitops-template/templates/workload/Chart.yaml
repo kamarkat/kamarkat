@@ -1,14 +1,14 @@
 # What ONE application runs, in one environment.
 #
-# Copy this to environments/<ENVIRONMENT>/<APPLICATION>/Chart.yaml
-# -- one directory per application, each with one dependency. Not one file listing
+# Copy this to environments/<ENVIRONMENT>/<APP_ID>/<WORKLOAD>/Chart.yaml
+# -- one directory per workload, each with one dependency. Not one file listing
 # every application: that way every build of every application edits the same
 # file, which is the contention this arrangement exists to remove, and it
 # collapses a tenant's workloads into a single Application that shares one sync,
 # one health state and one blast radius (ADR-073).
 #
-# The ApplicationSet that reconciles this derives the path from the fleet's
-# identity, so nothing here declares a repository, a revision or a location.
+# The ApplicationSet that reconciles this derives the path from the application's
+# own declaration, so nothing here declares a repository, a revision or a location.
 #
 # The version is the only field a build writes. An application's CI publishes its
 # own chart, then commits the new version here -- one line, in this file, for the
@@ -18,8 +18,8 @@
 # which an image could be written. What runs is legible from this file without
 # fetching anything.
 apiVersion: v2
-name: <APPLICATION>
-description: <APPLICATION>, as <FLEET_ID> runs it in <ENVIRONMENT>
+name: <WORKLOAD>
+description: <WORKLOAD>, as <APP_ID> runs it in <ENVIRONMENT>
 type: application
 version: 1.0.0
 
@@ -33,7 +33,7 @@ version: 1.0.0
 # either -- that is a stateful component someone has to back up, bought for a
 # failure domain the hub already shares.
 dependencies:
-  - name: <APPLICATION>
+  - name: <WORKLOAD>
     repository: oci://ghcr.io/<GIT_ORG>/charts
     # Replaced by the first build that publishes this chart. Left as a version
     # that cannot resolve, on purpose: a dependency list that is empty or

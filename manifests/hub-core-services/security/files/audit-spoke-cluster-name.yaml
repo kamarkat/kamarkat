@@ -75,7 +75,7 @@ spec:
         message: >-
           Spoke cluster Secret {{ request.object.metadata.name }} has no non-empty
           cluster-name label. The fleet ApplicationSets
-          (tenant-fleet-xr/spoke/workload-provisioning, tenant-public-tls) select
+          (tenant-app-xr/spoke/workload-provisioning, tenant-public-tls) select
           spokes with a clusters generator on this label, so every tenant
           targeting this spoke will generate zero Applications while the
           ApplicationSet reports Healthy. Check that the CAPI Cluster carries both

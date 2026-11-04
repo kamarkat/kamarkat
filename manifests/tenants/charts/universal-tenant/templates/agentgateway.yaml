@@ -10,8 +10,8 @@
        return to exactly one origin, and choosing it here rather than accepting a
        separate value removes a way for the two to disagree. */ -}}
 {{- $host := first $hosts }}
-{{- /* Supplied by the environment, not the fleet: which identity provider a
-       spoke authenticates against is a platform property, and a fleet able to
+{{- /* Supplied by the environment, not the application: which identity provider a
+       spoke authenticates against is a platform property, and an application able to
        set it could point its login flow at an issuer the platform does not
        trust. */ -}}
 {{- $issuer := required "oidcIssuer must be supplied by the environment" .Values.oidcIssuer }}
@@ -19,7 +19,7 @@
   The applications this one may call (ADR-094 Part 2), and the issuer's host.
 
   $deps decides whether this gateway MINTS a backend credential or forwards the
-  session's own token. It is read from the fleet's declaration, so the count and
+  session's own token. It is read from the application's declaration, so the count and
   the names come from git -- while each target's project id is allocated by the
   issuer and arrives through the environment, one variable per declared target.
   That split is deliberate: a gateway's scopes and audiences are YAML LISTS, and a
@@ -58,14 +58,14 @@
 {{- end }}
 {{- end }}
 {{- $issuerHost := $issuer | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" }}
-{{- /* Derived, not declared. A fleet that could name its own backends could
-       route to another fleet's services; one that could name its own client id
-       could claim another fleet's OAuth client. Both follow from the tenant
+{{- /* Derived, not declared. An application that could name its own backends could
+       route to another application's services; one that could name its own client id
+       could claim another application's OAuth client. Both follow from the tenant
        identity by platform convention (ADR-053 for the client id). */ -}}
 {{- $ns := include "universal-tenant.namespace" . }}
 {{- $bff := printf "bff-workload.%s.svc.cluster.local:3001" $ns }}
 {{- /* The SDK owns workflow hooks, so it owns the endpoint that resumes them
-       (ADR-024). Derived like the others: a fleet able to name this backend
+       (ADR-024). Derived like the others: an application able to name this backend
        could point an unauthenticated public path at a service of its choosing. */ -}}
 {{- $sdk := printf "sdk-workload.%s.svc.cluster.local:3000" $ns }}
 {{- $frontend := printf "frontend-workload.%s.svc.cluster.local:3000" $ns }}
@@ -94,11 +94,11 @@
 {{- if and (hasKey (.Values.gateway | default dict) "oidc") (hasKey .Values.gateway.oidc "enabled") }}
 {{-   $oidcEnabled = eq (.Values.gateway.oidc.enabled | toString) "true" }}
 {{- end }}
-# This fleet's own AgentGateway instance (ADR-050 amendment 2026-08-31).
+# This application's own AgentGateway instance (ADR-050 amendment 2026-08-31).
 #
 # One instance per tenant, not one per spoke. The shared instance required every
 # tenant's hostnames, backends and OAuth client to live in a platform manifest —
-# tenant-owned data that ADR-047 forbids there and ADR-051 assigns to the fleet
+# tenant-owned data that ADR-047 forbids there and ADR-051 assigns to the application
 # registry. AgentGateway reads a single configuration file with no merge, so a
 # shared instance and tenant-owned configuration cannot both hold without a
 # runtime aggregator, and that aggregator is an accidental control plane whose
@@ -630,7 +630,7 @@ data:
           # a bare 500 at /oauth/callback that no client-side listener can see.
           tokenEndpointAuth: null
           redirectURI: {{ $redirect }}
-          # Fixed by the platform. Scopes bound what a token may do, so a fleet
+          # Fixed by the platform. Scopes bound what a token may do, so an application
           # able to widen its own would be granting itself authority the platform
           # did not issue.
           #
@@ -675,10 +675,10 @@ data:
 #
 # The SDK has to tell an external job runner where to call back, and that URL is
 # this hostname. The hostname is platform-owned (ADR-051) while the SDK's
-# Deployment is fleet-authored, so without this the fleet would have to type the
+# Deployment is application-authored, so without this the application would have to type the
 # hostname into its own manifest — two places free to disagree, which is exactly
 # how PROVIDER_RUNPOD_TTS_ENDPOINT_ID and WAYPOINT_SDK_SERVICE_NAME each went
-# wrong. Publishing it here means the fleet references a value it cannot get
+# wrong. Publishing it here means the application references a value it cannot get
 # wrong, and a hostname change moves both sides at once.
 #
 # Derived from the SAME $host as the OIDC redirectURI above, so the address a
@@ -696,7 +696,7 @@ data:
   # callback guard rejects anything that is not http(s) and public.
   PUBLIC_BASE_URL: https://{{ $host }}
   # The callback the platform REGISTERED for each confidential OAuth client this
-  # fleet declares, keyed by client name.
+  # application declares, keyed by client name.
   #
   # Published for exactly the reason PUBLIC_BASE_URL and OIDC_ISSUER_URL are:
   # the value is the platform's, the workload needs it, and a workload that
@@ -716,13 +716,13 @@ data:
   OAUTH_{{ .name | upper | replace "-" "_" }}_REDIRECT_URI: https://{{ $host }}{{ index .redirectPaths 0 }}
 {{- end }}
 {{- end }}
-  # The issuer this fleet's workloads must validate tokens against — the SAME
+  # The issuer this application's workloads must validate tokens against — the SAME
   # value the gateway policy above authenticates with.
   #
   # Published for the reason this ConfigMap exists. The issuer is platform-owned
-  # (ADR-050: a fleet able to set it could trust an issuer the platform does
-  # not), but a fleet's own workloads need it to fetch the JWKS, so it was typed
-  # into the fleet's manifest as a literal. That is two places free to disagree,
+  # (ADR-050: an application able to set it could trust an issuer the platform does
+  # not), but an application's own workloads need it to fetch the JWKS, so it was typed
+  # into the application's manifest as a literal. That is two places free to disagree,
   # and they did: moving the gateway to a new issuer left the BFF still
   # validating against the old one, which fails as
   #
@@ -734,7 +734,7 @@ data:
   OIDC_ISSUER_URL: {{ $issuer }}
   # OIDC_CLIENT_ID is deliberately NOT published here.
   #
-  # It is the audience a fleet must require on the id_token, and it is the
+  # It is the audience an application must require on the id_token, and it is the
   # issuer's ALLOCATED client id — a value that does not exist when this
   # ConfigMap is rendered. Publishing the derived name instead would put a
   # plausible, wrong value where a correct one is expected, and the failure
@@ -742,7 +742,7 @@ data:
   #
   # It is delivered through the Secret the identity service writes instead:
   #   agentgateway-<tenant>-oidc-client, key oidc-client-id
-  # which both the gateway and a fleet's workloads read.
+  # which both the gateway and an application's workloads read.
   # Where to fetch the signing keys.
   #
   # NOT derivable from the issuer, which is why it is published rather than
@@ -827,8 +827,8 @@ spec:
     # must not start and quietly authenticate with something else.
     #
     # The platform writes all three for every application: the exchange client is
-    # appended to whatever the fleet declared (gatewayExchangeClient), so it
-    # exists whether or not the fleet asked for one.
+    # appended to whatever the application declared (gatewayExchangeClient), so it
+    # exists whether or not the application asked for one.
     - secretKey: oidc-project-id
       remoteRef:
         key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OIDC_PROJECT_ID
@@ -837,7 +837,7 @@ spec:
     #
     # The OAUTH_ key grammar, which is where every declared confidential client's
     # credentials live. The exchange client is one -- the platform appends it to
-    # whatever the fleet declared -- so it is published by the same loop, under
+    # whatever the application declared -- so it is published by the same loop, under
     # the same rule, and read here under the same name. There is no second key
     # for it and no second publisher.
     - secretKey: oidc-exchange-client-id
@@ -849,7 +849,7 @@ spec:
 {{- range $deps }}
     # One pair per declared target: the scope requested at login, and the project
     # id sent as the exchange's audience parameter. The COUNT comes from the
-    # fleet's declaration in git; each VALUE is allocated by the issuer.
+    # application's declaration in git; each VALUE is allocated by the issuer.
     - secretKey: oidc-backend-audience-scope-{{ . }}
       remoteRef:
         key: /spoke-pool/{{ $.Values.clusterName }}/tenants/{{ $t }}/OIDC_BACKEND_AUDIENCE_SCOPE_{{ . | upper | replace "-" "_" }}
@@ -887,7 +887,7 @@ metadata:
     # Deployment in a tenant-* namespace. The shared gateway lived in
     # platform-ops, outside that match, so moving it here brought it under rules
     # it had never had to meet. cost-center is the platform's because the
-    # platform, not the fleet, decides this workload runs and how large it is.
+    # platform, not the application, decides this workload runs and how large it is.
     tenant-id: {{ include "universal-tenant.tenantId" $ }}
     app-id: {{ include "universal-tenant.appId" $ }}
     cost-center: platform
@@ -895,7 +895,7 @@ metadata:
 spec:
   # Fixed. Replica count and resource requests are the platform's capacity
   # decision — a spoke's tenant ceiling is derived from them (ADR-050) — and a
-  # fleet able to raise its own would invalidate that calculation for everyone.
+  # application able to raise its own would invalidate that calculation for everyone.
   replicas: 1
   selector:
     matchLabels:
@@ -943,7 +943,7 @@ spec:
       - name: agentgateway
         # Pinned to tag + digest. `:latest` is not reproducible — a rebuild of the
         # same manifest can silently change the gateway binary.
-        # Fixed here, not a value. A fleet able to set this would run an
+        # Fixed here, not a value. An application able to set this would run an
         # arbitrary container inside its own namespace with the platform's
         # gateway identity.
         # v1.5.0. A current stable release, kept rather than reverted.

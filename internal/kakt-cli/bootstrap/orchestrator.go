@@ -635,7 +635,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	}
 
 	// ── Phase 11h: Boundary 05 — fleet provisioning (ADR-047) ────────────
-	// Deploys the tenant-fleet provisioning ApplicationSets (xr / spoke /
+	// Deploys the tenant-app provisioning ApplicationSets (xr / spoke /
 	// workloads). Requires boundary04 (tenant services + ArgoCD fleet-registry
 	// auth) to be in place first.
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseBoundary05, "boundary05",

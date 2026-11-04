@@ -31,7 +31,7 @@ import (
 func TestFleetAppsetDerivesTheOidcIssuerRatherThanReadingIt(t *testing.T) {
 	dir := filepath.Join("..", "..", "..", "manifests", "argocd", "environment-manager", "templates")
 
-	appset, err := os.ReadFile(filepath.Join(dir, "05-tenant-fleet-appset.yaml"))
+	appset, err := os.ReadFile(filepath.Join(dir, "05-tenant-app-appset.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestFleetAppsetDerivesTheOidcIssuerRatherThanReadingIt(t *testing.T) {
 
 	for _, raw := range []string{".Values.oidcIssuer", ".Values.oidcJwksUrl"} {
 		if strings.Contains(s, raw) {
-			t.Errorf("05-tenant-fleet-appset.yaml reads %s directly: it is empty on every box "+
+			t.Errorf("05-tenant-app-appset.yaml reads %s directly: it is empty on every box "+
 				"whose seed is declared in its own repository. Use the derivation helper.", raw)
 		}
 	}
@@ -48,7 +48,7 @@ func TestFleetAppsetDerivesTheOidcIssuerRatherThanReadingIt(t *testing.T) {
 		`include "environment-manager.oidcJwksUrl"`,
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("05-tenant-fleet-appset.yaml does not call %s", want)
+			t.Errorf("05-tenant-app-appset.yaml does not call %s", want)
 		}
 	}
 

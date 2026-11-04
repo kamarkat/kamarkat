@@ -46,6 +46,7 @@ func newTenantCmd() *cobra.Command {
 	cmd.AddCommand(newTenantScaffoldCmd())
 	cmd.AddCommand(newTenantSetGitopsTokenCmd())
 	cmd.AddCommand(newAddWorkloadClusterCmd())
+	cmd.AddCommand(newAddAppCmd())
 	return cmd
 }
 
@@ -237,20 +238,21 @@ func newAddWorkloadClusterCmd() *cobra.Command {
 		Short: "Declare an additional workload cluster in a tenant's repository",
 		Long: `Declare a workload cluster and the Application that creates it.
 
-Writes clusters/<name>/ -- the platform this cluster runs, addressed to this
-cluster -- and clusters/<mgmt>/<name>-infrastructure.yaml, the Application that
-brings it into being, addressed to the management cluster. Commit and push, and
+Writes registry/clusters/<name>/ -- the platform this cluster runs, addressed to
+this cluster -- and registry/clusters/<mgmt>/<name>-infrastructure.yaml, the
+Application that brings it into being, addressed to the management cluster. Commit and push, and
 the management cluster provisions it.
 
-The name is this cell's id (ADR-047): the SpokePool composition derives
-metadata.labels.cluster-name from it and the fleet ApplicationSets select on it, so
-choose something meaningful -- it names the cluster for its whole life.`,
+The name is what applications name to run here: the SpokePool composition
+derives metadata.labels.cluster-name from it and the application ApplicationSets
+select on it, so choose something meaningful -- it names the cluster, its secret
+path and its backup prefix for their whole lives.`,
 		RunE: runAddWorkloadCluster,
 	}
 	f := cmd.Flags()
 	f.StringVar(&workloadCluster.GitopsDir, "gitops-dir", ".", "the tenant repository")
 	f.StringVar(&workloadCluster.MgmtCluster, "mgmt-cluster", "", "the management cluster that creates this one (required)")
-	f.StringVar(&workloadCluster.Name, "name", "", "the workload cluster, and this cell's id (required)")
+	f.StringVar(&workloadCluster.Name, "name", "", "the workload cluster's name, and what applications target (required)")
 	f.StringVar(&workloadCluster.Provider, "provider", "hetzner", "cloud provider")
 	f.StringVar(&workloadCluster.Region, "region", "hel1", "cloud region")
 	f.StringVar(&workloadCluster.Environment, "environment", "dev", "environment slug")
@@ -665,4 +667,90 @@ func defaultBundleVersion() string {
 		return versions.BundleVersion
 	}
 	return ""
+}
+
+// addApp is the application `kakt tenant add-app` declares.
+var addApp tenant.AppSpec
+
+// addAppWorkloads is repeatable: an application is one or more deployables, and
+// each is its own directory and its own chart (ADR-073, ADR-088).
+var addAppWorkloads []string
+
+// newAddAppCmd declares an application in an environment.
+//
+// The counterpart of add-cluster, and it was missing: a cluster is a command and
+// an application was `mkdir -p`, two `cp`s and a hand-edit of tokens that the two
+// templates spelled five ways between them and that TOKENS.md did not list.
+//
+// What the command adds beyond the copying is the check. The cluster an
+// application names is verified before a file is written -- it must exist, be a
+// workload cluster rather than the management one, and serve the environment the
+// directory names. Nothing used to read that name until the first
+// `kakt app secrets` call, and a clusters generator that matches nothing
+// generates zero Applications while reporting Healthy.
+func newAddAppCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add-app",
+		Short: "Declare an application in an environment",
+		Long: `Declare an application and the workloads it runs.
+
+Writes environments/<env>/<app>/values.yaml -- what the application is, and the
+cluster it runs on -- plus one directory and Chart.yaml per workload. Commit and
+push, and the management cluster generates it.
+
+The cluster is checked before anything is written: it must be a workload cluster
+this repository declares, serving the environment named here. Several clusters
+may serve one environment, so the application names which.`,
+		SilenceUsage: true,
+		RunE:         runAddApp,
+	}
+	f := cmd.Flags()
+	f.StringVar(&addApp.GitopsDir, "gitops-dir", ".", "the tenant repository")
+	f.StringVar(&addApp.Environment, "env", "", "the environment this application is declared in (required)")
+	f.StringVar(&addApp.AppID, "app", "", "the application: the product, and its isolation unit (required)")
+	f.StringVar(&addApp.ClusterName, "cluster", "", "the managed cluster it runs on (required)")
+	f.StringVar(&addApp.OwnerEmail, "owner-email", "", "who is paged for it (required)")
+	f.StringSliceVar(&addAppWorkloads, "workload", nil,
+		"a deployable inside this application; repeat for each")
+
+	for _, required := range []string{"env", "app", "cluster", "owner-email"} {
+		_ = cmd.MarkFlagRequired(required)
+	}
+	return cmd
+}
+
+func runAddApp(cmd *cobra.Command, _ []string) error {
+	addApp.Workloads = addAppWorkloads
+
+	written, err := tenant.AddApp(addApp)
+	if err != nil {
+		return err
+	}
+	for _, p := range written {
+		rel, relErr := filepath.Rel(addApp.GitopsDir, p)
+		if relErr != nil {
+			rel = p
+		}
+		fmt.Printf("[add-app] ✓ %s\n", rel)
+	}
+
+	// The aggregate is the shared Gateway's listener list and has one producer
+	// (ADR-096). A new application declares no hostnames yet, so this changes
+	// nothing today -- it is run because a preflight check asserts the file
+	// matches the declarations exactly, and leaving it to be remembered later is
+	// how it stops matching.
+	spokes, err := tenant.AggregatePublicHosts(addApp.GitopsDir)
+	if err != nil {
+		return fmt.Errorf("regenerate the public hostname aggregate: %w", err)
+	}
+	fmt.Printf("[add-app] %d cluster aggregate(s) checked\n", len(spokes))
+
+	fmt.Printf(`
+Next:
+  1. Fill in environments/%s/%s/values.yaml -- its quota, public hostnames and
+     the secrets it declares.
+  2. git add environments && git commit && git push
+  3. kakt app secrets status %s %s   -- what it declares, and what is present
+`, addApp.Environment, addApp.AppID, addApp.Environment, addApp.AppID)
+	return nil
 }

@@ -20,9 +20,9 @@
 ---
 # ADR-051 / ADR-047: tenant-public-tls ApplicationSet.
 #
-# Renders platform-owned public TLS for every fleet that declares public
+# Renders platform-owned public TLS for every application that declares public
 # hostnames: one Certificate plus a dedicated :443 TLS-termination Gateway in
-# platform-ops on the fleet's owning spoke, via the tenant-public-tls chart.
+# platform-ops on the application's owning spoke, via the tenant-public-tls chart.
 #
 # Ownership chain (each link exactly once):
 #   instance repo environments/<env>/values.yaml public.hosts = intent
@@ -53,24 +53,24 @@ spec:
 
   generators:
     # Matrix Generator: only create applications when BOTH conditions are met:
-    # 1. Fleet values exist in Git (this box's instance repository) — public.hosts
+    # 1. The application's values exist in Git (this box's instance repository) — public.hosts
     #    (empty list renders zero resources; absent key breaks rendering loudly,
     #    which is the schema-enforcement mechanism).
     # 2. Target spoke cluster is registered in ArgoCD (by capi2argo) with the
-    #    cell-id label — no certificate is materialised for a fleet whose cell
+    #    cell-id label — no certificate is materialised for an application whose cell
     #    does not exist yet.
     - matrix:
         generators:
           - matrix:
               generators:
-                # Fleet DIRECTORIES, not a filename glob -- because `exclude`
+                # Application DIRECTORIES, not a filename glob -- because `exclude`
                 # exists on a directories generator and does NOT exist on a
                 # files one (GitFileGeneratorItem declares only `path`).
                 #
                 # That asymmetry is the whole reason this is shaped like this.
                 # `*` in either generator crosses `/`, so
                 # `environments/*/*/values.yaml` matched a WORKLOAD's chart
-                # values three levels down as readily as a fleet's declaration
+                # values three levels down as readily as an application's declaration
                 # two levels down. The workload file carries no `cellId`, the
                 # cluster selector below interpolates one, and the generator
                 # failed outright:
@@ -98,25 +98,25 @@ spec:
                     # Prefixed so it cannot collide with the `.path` the files
                     # generator below exports; downstream templates read that
                     # one, unchanged.
-                    pathParamPrefix: fleetdir
+                    pathParamPrefix: appdir
                     directories:
                       - path: 'environments/*/*'
                       - path: 'environments/*/*/*'
                         exclude: true
 
-                # That fleet's declaration, addressed exactly rather than
+                # That application's declaration, addressed exactly rather than
                 # matched. Supplies tenantId, appId and cellId, and `.path`.
                 - git:
                     repoURL: {{ include "environment-manager.instanceRepoURL" . | quote }}
                     revision: main
                     files:
-                      - path: '{{"{{"}} .fleetdir.path.path {{"}}"}}/values.yaml'
+                      - path: '{{"{{"}} .appdir.path.path {{"}}"}}/values.yaml'
 
           - clusters:
               selector:
                 matchLabels:
                   # The named cluster, on a workload cluster only: see the
-                  # note in 05-tenant-fleet-appset.
+                  # note in 05-tenant-app-appset.
                   spoke-type: pool
                   cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
 
@@ -135,7 +135,7 @@ spec:
 
       sources:
         # Source 1: Platform TLS chart. The issuer comes from THIS environment's
-        # bootstrap policy (publicTlsIssuer) — never from the fleet values, never
+        # bootstrap policy (publicTlsIssuer) — never from the application values, never
         # defaulted. An empty value fails chart rendering by design.
 {{- if $released }}
         # Released: the chart that renders every tenant's platform-owned

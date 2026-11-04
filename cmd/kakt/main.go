@@ -36,7 +36,7 @@ func main() {
 	rootCmd.AddCommand(newEncryptionCmd())
 	rootCmd.AddCommand(newProposalCmd())
 	rootCmd.AddCommand(newSupportCmd())
-	rootCmd.AddCommand(newFleetCmd())
+	rootCmd.AddCommand(newAppCmd())
 	rootCmd.AddCommand(newReleaseCmd())
 
 	if err := rootCmd.Execute(); err != nil {

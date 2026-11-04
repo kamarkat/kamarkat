@@ -198,8 +198,8 @@ def elements(text):
     return {el["appName"]: el for d in docs(text) for g in d["spec"]["generators"] for el in g.get("list", {}).get("elements", [])}
 s_off, e3 = em("templates/03-platform-services-appset.yaml", False)
 s_on, e4 = em("templates/03-platform-services-appset.yaml", True)
-f_off, e5 = em("templates/05-tenant-fleet-appset.yaml", False)
-f_on, e6 = em("templates/05-tenant-fleet-appset.yaml", True)
+f_off, e5 = em("templates/05-tenant-app-appset.yaml", False)
+f_on, e6 = em("templates/05-tenant-app-appset.yaml", True)
 if e3 or e4 or e5 or e6:
     fails.append(f"I10 environment-manager did not render: {e3 or e4 or e5 or e6}")
 else:

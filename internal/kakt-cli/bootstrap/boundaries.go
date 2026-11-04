@@ -224,9 +224,9 @@ var boundaryContracts = []boundaryContract{
 		),
 	},
 	{
-		5, "05-tenant-fleet", true, true, nil,
+		5, "05-tenant-app", true, true, nil,
 		requiresNothingBecause(
-			"the fleet's provisioning reads the credentials and CRDs earlier " +
+			"the application's provisioning reads the credentials and CRDs earlier " +
 				"boundaries guarantee; nothing further is needed to begin."),
 		assertsNothingBecause(
 			"spoke provisioning is asynchronous by design (ADR-047): a spoke takes " +

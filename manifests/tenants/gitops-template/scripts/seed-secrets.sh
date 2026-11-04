@@ -22,7 +22,7 @@
 #
 # An entry left empty is never written: it would replace a supplied secret
 # with nothing. Re-running with a new value for a key rotates it. For one key,
-# `kakt fleet secrets set <env> <app> <KEY>` prompts with echo disabled and
+# `kakt app secrets set <env> <app> <KEY>` prompts with echo disabled and
 # touches no file at all.
 #
 # WHAT IT DOES NOT DO
@@ -32,7 +32,7 @@
 # `config:` there, in git, where it can be reviewed.
 #
 # The filtering and the example's content are not implemented here. Both come
-# from `kakt fleet secrets`, the same command `status` and `set` use, so there
+# from `kakt app secrets`, the same command `status` and `set` use, so there
 # is ONE answer to "which keys does this app declare" -- a second
 # implementation in a script is a second answer, and the two disagree the
 # moment either changes.
@@ -93,7 +93,7 @@ fi
 # by hand is where a typo becomes a key the import silently skips. A stale
 # example is refused rather than used, because a key missing from it is a key
 # nobody is asked for.
-REGENERATE="kakt fleet secrets template ${ENVIRONMENT} ${APP} --repo . > ${APP_DIR_REL}/.env.example"
+REGENERATE="kakt app secrets template ${ENVIRONMENT} ${APP} --repo . > ${APP_DIR_REL}/.env.example"
 if [[ ! -f "$EXAMPLE_FILE" ]]; then
   echo "${APP_DIR_REL}/.env.example does not exist. Generate and commit it:" >&2
   echo "  ${REGENERATE}" >&2
@@ -102,7 +102,7 @@ fi
 # The keys are compared, not the comments: the guidance text may differ by
 # kakt version, the set of keys may not.
 keys() { grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1; }
-if ! diff -q <(kakt fleet secrets template "$ENVIRONMENT" "$APP" --repo "$REPO_ROOT" | keys) <(keys < "$EXAMPLE_FILE") >/dev/null; then
+if ! diff -q <(kakt app secrets template "$ENVIRONMENT" "$APP" --repo "$REPO_ROOT" | keys) <(keys < "$EXAMPLE_FILE") >/dev/null; then
   echo "${APP_DIR_REL}/.env.example no longer matches the secrets ${APP} declares." >&2
   echo "Regenerate and commit it, then copy any new keys into your .env:" >&2
   echo "  ${REGENERATE}" >&2
@@ -119,7 +119,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 0
 fi
 
-kakt fleet secrets import "$ENVIRONMENT" "$APP" \
+kakt app secrets import "$ENVIRONMENT" "$APP" \
   --from-env "$ENV_FILE" \
   --repo "$REPO_ROOT" \
   --kubeconfig "$KUBECONFIG" \
@@ -128,7 +128,7 @@ kakt fleet secrets import "$ENVIRONMENT" "$APP" \
 if [[ -n "$CONFIRM" ]]; then
   echo ""
   echo "Verify, and see anything still outstanding:"
-  echo "  kakt fleet secrets status ${ENVIRONMENT} ${APP} --repo . --kubeconfig \$KUBECONFIG"
+  echo "  kakt app secrets status ${ENVIRONMENT} ${APP} --repo . --kubeconfig \$KUBECONFIG"
   echo ""
   echo "Then delete ${APP_DIR_REL}/.env -- its values are now held where the"
   echo "app's declaration says they are, and a copy here is one nothing rotates."

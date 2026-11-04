@@ -10,10 +10,10 @@ import (
 // and the import path must treat that as "not supplied yet" rather than as a
 // value.
 //
-// The skeleton `kakt fleet secrets template` emits is entirely empty entries.
+// The skeleton `kakt app secrets template` emits is entirely empty entries.
 // Importing one with --confirm, before this distinction existed, would have
 // written empty strings over every secret already supplied -- turning a
-// convenience into the one operation that can destroy a working fleet's
+// convenience into the one operation that can destroy a working application's
 // credentials in a single command.
 func TestReadEnvFileDistinguishesEmptyFromAbsent(t *testing.T) {
 	dir := t.TempDir()

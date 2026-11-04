@@ -14,21 +14,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/fleet"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/infisical"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
 
 var (
-	fleetKubeconfig string
-	fleetRepoRoot   string
+	appKubeconfig string
+	appRepoRoot   string
 )
 
-// newFleetCmd groups the operations a fleet owner performs on their own box.
+// newAppCmd groups the operations an application's owner performs on their own box.
 //
-// ADR-087 splits a fleet's runtime input by who owns the value: the platform
+// ADR-087 splits an application's runtime input by who owns the value: the platform
 // generates what it owns, git carries what is not secret, and what remains is
-// supplied here. A fleet DECLARES its secrets in its repository -- key,
+// supplied here. An application DECLARES its secrets in its repository -- key,
 // capability, consuming workloads -- and this is the only sanctioned way to put
 // the values where that declaration says they will be.
 //
@@ -37,25 +37,25 @@ var (
 // wrong name, and in the wrong environment -- and because an ExternalSecret is
 // atomic, one mistyped key withholds every other key from every workload
 // reading it.
-func newFleetCmd() *cobra.Command {
+func newAppCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "fleet",
-		Short: "Manage a fleet's workload configuration and secrets",
+		Use:   "app",
+		Short: "Manage an application's workload configuration and secrets",
 		// A non-zero exit here reports the state of the box, not a
 		// misinvocation. Printing usage after "9 secrets have not been
 		// supplied" buries the finding under flag documentation.
 		SilenceUsage: true,
 	}
-	cmd.PersistentFlags().StringVar(&fleetKubeconfig, "kubeconfig", "",
+	cmd.PersistentFlags().StringVar(&appKubeconfig, "kubeconfig", "",
 		"Path to this box's hub kubeconfig")
-	cmd.PersistentFlags().StringVar(&fleetRepoRoot, "repo", ".",
+	cmd.PersistentFlags().StringVar(&appRepoRoot, "repo", ".",
 		"Root of the tenant's GitOps repository (holds environments/<env>/values.yaml)")
-	cmd.AddCommand(newFleetSecretsCmd())
-	cmd.AddCommand(newFleetHostsCmd())
+	cmd.AddCommand(newAppSecretsCmd())
+	cmd.AddCommand(newAppHostsCmd())
 	return cmd
 }
 
-// newFleetHostsCmd regenerates each spoke's public-hostname aggregate (ADR-096).
+// newAppHostsCmd regenerates each spoke's public-hostname aggregate (ADR-096).
 //
 // The shared :443 Gateway has exactly one owner, and its listener list comes
 // from this aggregate rather than from each app's own Application -- the
@@ -64,7 +64,7 @@ func newFleetCmd() *cobra.Command {
 // public.hosts; a preflight check asserts the file matches the declarations
 // exactly, in both directions, so forgetting fails review rather than becoming
 // a hostname that does not resolve.
-func newFleetHostsCmd() *cobra.Command {
+func newAppHostsCmd() *cobra.Command {
 	hosts := &cobra.Command{
 		Use:          "hosts",
 		Short:        "Public hostname aggregate for the shared TLS Gateway",
@@ -75,33 +75,33 @@ func newFleetHostsCmd() *cobra.Command {
 		Short:        "Regenerate registry/clusters/<spoke>/generated/values/public-hosts.yaml",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			written, err := tenant.AggregatePublicHosts(fleetRepoRoot)
+			written, err := tenant.AggregatePublicHosts(appRepoRoot)
 			if err != nil {
 				return err
 			}
 			for _, spoke := range written {
-				fmt.Printf("[fleet-hosts] ✓ %s/%s\n", spoke, tenant.PublicHostsFile)
+				fmt.Printf("[app-hosts] ✓ %s/%s\n", spoke, tenant.PublicHostsFile)
 			}
-			fmt.Printf("[fleet-hosts] %d spoke(s) updated; commit the result\n", len(written))
+			fmt.Printf("[app-hosts] %d spoke(s) updated; commit the result\n", len(written))
 			return nil
 		},
 	})
 	return hosts
 }
 
-func newFleetSecretsCmd() *cobra.Command {
+func newAppSecretsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secrets",
-		Short: "Supply and audit the secrets a fleet declares",
-		Long: `A fleet declares its secrets in environments/<env>/values.yaml -- the key,
+		Short: "Supply and audit the secrets an application declares",
+		Long: `An application declares its secrets in environments/<env>/values.yaml -- the key,
 what capability it serves, and which workloads read it. The VALUES are never in
 that repository in any form.
 
 This is where they are supplied, and where an operator can see which declared
 secrets are still absent without any value being disclosed.`,
 	}
-	cmd.AddCommand(newFleetSecretsTemplateCmd(), newFleetSecretsStatusCmd(),
-		newFleetSecretsSetCmd(), newFleetSecretsImportCmd())
+	cmd.AddCommand(newAppSecretsTemplateCmd(), newAppSecretsStatusCmd(),
+		newAppSecretsSetCmd(), newAppSecretsImportCmd())
 	return cmd
 }
 
@@ -112,11 +112,11 @@ secrets are still absent without any value being disclosed.`,
 // default pointed every box at the platform's own instance, which is a
 // different tenant's secret store (ADR-065).
 func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Config) error) error {
-	if fleetKubeconfig == "" {
+	if appKubeconfig == "" {
 		return fmt.Errorf("--kubeconfig is required: the credential for this box's Infisical " +
 			"is held in the box, and is the same one ESO uses")
 	}
-	cfg, err := clientcmd.BuildConfigFromFlags("", fleetKubeconfig)
+	cfg, err := clientcmd.BuildConfigFromFlags("", appKubeconfig)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -127,7 +127,7 @@ func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Co
 
 	return infisical.RunWithPortForward(ctx,
 		"platform-security", "infisical-standalone-infisical", "8081", "8080",
-		fleetKubeconfig, 1,
+		appKubeconfig, 1,
 		func() error {
 			client, err := infisical.NewClient(ctx, clientset)
 			if err != nil {
@@ -141,13 +141,13 @@ func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Co
 		})
 }
 
-func newFleetSecretsStatusCmd() *cobra.Command {
+func newAppSecretsStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "status <environment> <app>",
 		// Read on the command that returns the error, not on its parent.
 		SilenceUsage: true,
 		Short:        "Report which declared secrets are present, by name",
-		Long: `Join what the fleet declares against what has been supplied.
+		Long: `Join what the application declares against what has been supplied.
 
 Prints key NAMES and never values. A declared secret that is absent is reported
 with the capability it serves, because a key name alone is not something an
@@ -157,7 +157,7 @@ ExternalSecret is atomic and one absent key withholds every other key in it.
 Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := fleet.Load(fleetRepoRoot, args[0], args[1])
+			f, err := app.Load(appRepoRoot, args[0], args[1])
 			if err != nil {
 				return err
 			}
@@ -166,7 +166,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 				return nil
 			}
 
-			var status fleet.Status
+			var status app.Status
 			err = withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				// args[0], not icfg.EnvironmentSlug: an application's secrets live in
 				// the environment the application runs in, and icfg carries the
@@ -179,7 +179,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 				if err != nil {
 					return err
 				}
-				status = fleet.Join(*f, present)
+				status = app.Join(*f, present)
 				return nil
 			})
 			if err != nil {
@@ -193,7 +193,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 					names = append(names, m.Name)
 				}
 				return fmt.Errorf("%d declared secret(s) have not been supplied.\n\n"+
-					"Supply each with:\n  kakt fleet secrets set %s <KEY>\n\nAbsent: %s",
+					"Supply each with:\n  kakt app secrets set %s <KEY>\n\nAbsent: %s",
 					len(missing), args[0], strings.Join(names, ", "))
 			}
 			return nil
@@ -201,16 +201,16 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 	}
 }
 
-func printStatus(s fleet.Status, environment string) {
-	fmt.Printf("\n%s / %s\n%s\n\n", s.Fleet.TenantID, environment, s.Path)
+func printStatus(s app.Status, environment string) {
+	fmt.Printf("\n%s / %s\n%s\n\n", s.App.TenantID, environment, s.Path)
 
 	for _, e := range s.Entries {
 		switch {
 		case e.Orphan:
 			// NOT a fault, and not labelled as one. The platform writes
 			// OAUTH_*, CACHE_PASSWORD, db-credentials and the owner's initial
-			// password to this same folder, and none belongs in a fleet's
-			// `secrets:` -- a fleet cannot supply what the issuer mints. The
+			// password to this same folder, and none belongs in an application's
+			// `secrets:` -- an application cannot supply what the issuer mints. The
 			// line exists so a key left behind by a rename is visible, which
 			// means it cannot distinguish that from the normal case; saying
 			// "orphan" would call six expected keys a problem.
@@ -233,19 +233,19 @@ func printStatus(s fleet.Status, environment string) {
 		fmt.Printf("  every other key in the same object:\n\n")
 		for _, w := range names {
 			fmt.Printf("    %s-%s-secrets delivers nothing: %d key(s), so %s cannot start\n",
-				s.Fleet.TenantID, w, withheld[w], w)
+				s.App.TenantID, w, withheld[w], w)
 		}
 	}
 	fmt.Println()
 }
 
-func newFleetSecretsSetCmd() *cobra.Command {
+func newAppSecretsSetCmd() *cobra.Command {
 	var fromStdin bool
 	cmd := &cobra.Command{
 		Use:          "set <environment> <app> <KEY>",
 		SilenceUsage: true,
 		Short:        "Supply one declared secret",
-		Long: `Write one value to this fleet's secret path.
+		Long: `Write one value to this application's secret path.
 
 The value is read from the terminal with echo disabled, or from stdin with
 --stdin so a password manager can pipe into it. There is deliberately no
@@ -259,8 +259,8 @@ Re-running is how a secret is rotated. The value is replaced, ESO delivers it
 within its refresh interval, and the workload's reloader restarts on the change.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			environment, app, key := args[0], args[1], args[2]
-			f, err := fleet.Load(fleetRepoRoot, environment, app)
+			environment, appID, key := args[0], args[1], args[2]
+			f, err := app.Load(appRepoRoot, environment, appID)
 			if err != nil {
 				return err
 			}
@@ -289,7 +289,7 @@ within its refresh interval, and the workload's reloader restarts on the change.
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				return c.CreateOrUpdateSecret(cmd.Context(),
 					// The environment named on the command line, not the hub's: see
-					// the note in `fleet secrets status`.
+					// the note in `app secrets status`.
 					icfg.ProjectSlug, environment, f.SecretPath(), key, value)
 			}); err != nil {
 				return err
@@ -331,16 +331,16 @@ func readSecretValue(cmd *cobra.Command, fromStdin bool, key, capability string)
 	return strings.TrimSpace(string(raw)), nil
 }
 
-func newFleetSecretsImportCmd() *cobra.Command {
+func newAppSecretsImportCmd() *cobra.Command {
 	var fromEnv string
 	var confirm bool
 	cmd := &cobra.Command{
 		Use:          "import <environment> <app> --from-env <file>",
 		SilenceUsage: true,
-		Short:        "Migrate a fleet whose secrets predate ADR-087",
+		Short:        "Migrate an application whose secrets predate ADR-087",
 		Long: `Read a KEY=VALUE file once and write every DECLARED key it carries.
 
-This exists to migrate a fleet that predates ADR-087, whose values were held in
+This exists to migrate an application that predates ADR-087, whose values were held in
 a seed file. It is not how secrets are supplied afterwards: the file it reads is
 an input to the migration, not a location where secrets live, and should be
 deleted once this has run.
@@ -348,11 +348,11 @@ deleted once this has run.
 Without --confirm it lists the key names it would write and writes nothing.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			environment, app := args[0], args[1]
+			environment, appID := args[0], args[1]
 			if fromEnv == "" {
 				return fmt.Errorf("--from-env is required: import reads a file, and there is no default one")
 			}
-			f, err := fleet.Load(fleetRepoRoot, environment, app)
+			f, err := app.Load(appRepoRoot, environment, appID)
 			if err != nil {
 				return err
 			}
@@ -361,7 +361,7 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 				return err
 			}
 
-			// Only DECLARED keys. A seed file for a legacy fleet carries
+			// Only DECLARED keys. A seed file from the retired fleet-registry arrangement carries
 			// configuration and platform-owned material alongside the secrets --
 			// waypoint's carried twenty-seven keys of which ten were secrets --
 			// and writing all of it would put configuration back in the secret
@@ -397,7 +397,7 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 				fmt.Printf("  empty  %-34s declared, but no value in the file\n", k)
 			}
 			for _, k := range skipped {
-				fmt.Printf("  skip   %-34s not declared by this fleet\n", k)
+				fmt.Printf("  skip   %-34s not declared by this app\n", k)
 			}
 			if len(willWrite) == 0 {
 				if len(empty) > 0 {
@@ -407,7 +407,7 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 						"supplied with nothing, and the workload reading it would start and fail.",
 						fromEnv)
 				}
-				return fmt.Errorf("\nnothing to import: %s carries no key this fleet declares", fromEnv)
+				return fmt.Errorf("\nnothing to import: %s carries no key this application declares", fromEnv)
 			}
 
 			if !confirm {
@@ -418,7 +418,7 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				for _, k := range willWrite {
 					if err := c.CreateOrUpdateSecret(cmd.Context(),
-						// The named environment, not the hub's: see `fleet secrets status`.
+						// The named environment, not the hub's: see `app secrets status`.
 						icfg.ProjectSlug, environment, f.SecretPath(), k, values[k]); err != nil {
 						return fmt.Errorf("write %s: %w", k, err)
 					}
@@ -430,7 +430,7 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 			}
 
 			fmt.Printf("\n  %d key(s) written. Delete %s: its values are now held where the\n"+
-				"  fleet's declaration says they are, and a second copy on this machine is\n"+
+				"  application's declaration says they are, and a second copy on this machine is\n"+
 				"  a copy nothing rotates.\n\n", len(willWrite), fromEnv)
 			return nil
 		},
@@ -473,12 +473,12 @@ func readEnvFile(path string) (map[string]string, error) {
 	return out, nil
 }
 
-// newFleetSecretsTemplateCmd emits a .env skeleton containing exactly the keys
-// the fleet declares.
+// newAppSecretsTemplateCmd emits a .env skeleton containing exactly the keys
+// the application declares.
 //
 // The alternative is a tenant hand-writing that file from the declaration,
 // which is transcription: a typo produces a key the import skips silently,
-// because a key the fleet does not declare is indistinguishable from a key the
+// because a key the application does not declare is indistinguishable from a key the
 // tenant chose not to supply. Generating it removes the transcription step
 // entirely -- the skeleton cannot disagree with the declaration because it is
 // derived from it.
@@ -486,10 +486,10 @@ func readEnvFile(path string) (map[string]string, error) {
 // Emits NAMES and capabilities, never values. Writing a skeleton that already
 // carried values would be writing secrets to a file on behalf of someone who
 // did not ask for it.
-func newFleetSecretsTemplateCmd() *cobra.Command {
+func newAppSecretsTemplateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:          "template <environment> <app>",
-		Short:        "Print a .env skeleton holding exactly the keys this fleet declares",
+		Short:        "Print a .env skeleton holding exactly the keys this application declares",
 		SilenceUsage: true,
 		Long: `Generate the file that ` + "`import`" + ` reads, with one empty entry per declared
 secret and the capability each serves as its comment.
@@ -499,7 +499,7 @@ scripts/seed-secrets.sh copies it to .env for the values, and refuses an example
 that no longer matches this output.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := fleet.Load(fleetRepoRoot, args[0], args[1])
+			f, err := app.Load(appRepoRoot, args[0], args[1])
 			if err != nil {
 				return err
 			}
@@ -512,7 +512,7 @@ that no longer matches this output.`,
 			env, app := args[0], args[1]
 			fmt.Fprintf(out, "# Secrets for %s / %s / %s -- generated from environments/%s/%s/values.yaml\n",
 				f.TenantID, env, app, env, app)
-			fmt.Fprintf(out, "# by `kakt fleet secrets template %s %s`. No values here, ever.\n", env, app)
+			fmt.Fprintf(out, "# by `kakt app secrets template %s %s`. No values here, ever.\n", env, app)
 			fmt.Fprintf(out, "#\n")
 			fmt.Fprintf(out, "# To supply them, from the repository root:\n")
 			fmt.Fprintf(out, "#\n")

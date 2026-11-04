@@ -927,7 +927,7 @@ check_observability() {
 }
 
 # ─── 15b. FLEET PROVISIONING APPS (ADR-047 boundary05) ─────────────────────
-# The tenant-fleet ApplicationSets (xr/spoke/workloads) + platform-spoke-catalog.
+# The tenant-app ApplicationSets (xr/spoke/workloads) + platform-spoke-catalog.
 check_fleet_argocd_apps() {
     log_section "15b. FLEET PROVISIONING APPS (ADR-047)"
 
@@ -939,7 +939,7 @@ check_fleet_argocd_apps() {
     # validate the ones that exist rather than failing on envs not yet deployed.
     local fleet_apps
     fleet_apps=$(kc get applications -n platform-ops --no-headers 2>/dev/null \
-        | awk '{print $1}' | grep -E '^tenant-.*-workloads$|-xr$|-spoke$' | grep -v '^tenant-fleet-' || true)
+        | awk '{print $1}' | grep -E '^tenant-.*-workloads$|-xr$|-spoke$' | grep -v '^tenant-app-' || true)
     if [[ -z "$fleet_apps" ]]; then
         log_warn "No fleet tenant apps found yet (boundary05 appsets may not have generated any)"
         return 0

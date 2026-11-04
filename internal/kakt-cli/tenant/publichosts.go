@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/fleet"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
 )
 
 // PublicHostsFile is where the aggregate for one spoke is written, relative to
@@ -98,7 +98,7 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 		// hostname on development capacity -- neither of which the Gateway can
 		// report.
 		environment := filepath.Base(filepath.Dir(filepath.Dir(path)))
-		if err := fleet.VerifyTargetCluster(gitopsDir, environment, decl.ClusterName); err != nil {
+		if err := app.VerifyTargetCluster(gitopsDir, environment, decl.ClusterName); err != nil {
 			return nil, fmt.Errorf("%s %w", rel, err)
 		}
 		for _, host := range decl.Public.Hosts {

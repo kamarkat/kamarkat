@@ -31,12 +31,12 @@ k8-secrets/
 
 # A guard, not a sanctioned location.
 #
-# ADR-087: a fleet's secret VALUES are never in this repository in any form --
+# ADR-087: an application's secret VALUES are never in this repository in any form --
 # not encrypted, not templated, not in an ignored file. The declaration is in
 # git (environments/<env>/values.yaml names the key, its capability and its
 # consuming workloads); the value is supplied out of band.
 #
-# The one case that legitimately produces a local .env is migrating a fleet that
+# The one case that legitimately produces a local .env is migrating an application that
 # predates ADR-087, whose values are being read once and then discarded. If that
 # file is written inside this repository, this line is what stops it becoming
 # permanent: ignored and untracked are not the same thing, because `git add -A`

@@ -22,3 +22,21 @@ in this template's history. A renderer that is handed one should refuse it.
 | `<DOMAIN>` | the DNS zone this box publishes under, e.g. `acme.example` |
 | `<SUBDOMAIN>` | the label it sits at within that zone, or empty for the apex (ADR-051 amendment 2026-09-18) |
 | `<HUB_DOMAIN>` | the two joined: `<subdomain>.<domain>`, or `<domain>` when no subdomain is declared |
+
+## Tokens you fill in yourself
+
+The tokens above are substituted when the repository is rendered. These are not:
+they are in the templates the repository keeps, and they are replaced when you
+copy a template to declare an application. They were undocumented, and the two
+templates spelled the same thing three ways -- an application was `<APP_ID>`,
+`<APP>` and `<APPLICATION>`, and its owner was both `<TENANT_ID>` and
+`<FLEET_ID>`, a leftover from before ADR-088 separated the tenant from the
+product it runs.
+
+| Token | Meaning |
+|---|---|
+| `<APP_ID>` | the application: the product, and its isolation unit |
+| `<WORKLOAD>` | one deployable inside that application, and its chart's name |
+| `<TARGET_CLUSTER>` | the managed cluster the application runs on, by name |
+| `<OWNER_EMAIL>` | who is paged for this application |
+| `<KEY>` | a secret's name, in the example commands only |

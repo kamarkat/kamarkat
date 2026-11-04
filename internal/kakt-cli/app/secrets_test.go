@@ -1,4 +1,4 @@
-package fleet
+package app
 
 import (
 	"fmt"
@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-func fleetFixture() Fleet {
-	return Fleet{
+func fleetFixture() App {
+	return App{
 		TenantID:    "acme",
 		AppID:       "storefront",
 		ClusterName: "nutgraf-01",
@@ -22,7 +22,7 @@ func fleetFixture() Fleet {
 	}
 }
 
-// The path is derived from the fleet's own declaration. Written out per key, it
+// The path is derived from the application's own declaration. Written out per key, it
 // was twenty-three chances to name the wrong cluster.
 func TestSecretPathIsDerived(t *testing.T) {
 	// The segment is the APP. That is what it always held -- before ADR-088 the
@@ -35,7 +35,7 @@ func TestSecretPathIsDerived(t *testing.T) {
 }
 
 func TestJoinSeparatesPresentAbsentAndOrphan(t *testing.T) {
-	// db-credentials is platform-written and appears in no fleet's `secrets:`.
+	// db-credentials is platform-written and appears in no application's `secrets:`.
 	s := Join(fleetFixture(), []string{"ACME_INTERNAL_TOKEN", "db-credentials"})
 
 	var present, absent, orphan []string
@@ -56,7 +56,7 @@ func TestJoinSeparatesPresentAbsentAndOrphan(t *testing.T) {
 	if want := []string{"AI_GATEWAY_API_KEY", "S3_ACCESS_KEY_ID"}; !reflect.DeepEqual(absent, want) {
 		t.Errorf("absent = %v, want %v", absent, want)
 	}
-	// Reported, not removed: the platform owns this key and the fleet cannot
+	// Reported, not removed: the platform owns this key and the application cannot
 	// know that from its own file.
 	if want := []string{"db-credentials"}; !reflect.DeepEqual(orphan, want) {
 		t.Errorf("orphan = %v, want %v", orphan, want)
@@ -101,7 +101,7 @@ func TestNoTypeCanHoldASecretValue(t *testing.T) {
 		{"Declaration", Declaration{}},
 		{"Entry", Entry{}},
 		{"Status", Status{}},
-		{"Fleet", Fleet{}},
+		{"App", App{}},
 	} {
 		v := reflect.TypeOf(tc.typ)
 		for i := 0; i < v.NumField(); i++ {
@@ -137,7 +137,7 @@ func TestLoadRejectsAFleetWithNoPath(t *testing.T) {
 			// a folder that will never hold anything.
 			_, err := Load(dir, "dev", "acme")
 			if err == nil {
-				t.Fatalf("Load() accepted a fleet with no %s", tc.wantErr)
+				t.Fatalf("Load() accepted an application with no %s", tc.wantErr)
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("error %q does not name the missing field %q", err, tc.wantErr)
@@ -243,6 +243,6 @@ secrets:
 		t.Error("capability was not read: it is what a report names, so losing it makes the report unactionable")
 	}
 	if _, ok := f.Declared("NOT_DECLARED"); ok {
-		t.Error("Declared() returned true for a key the fleet does not declare")
+		t.Error("Declared() returned true for a key the application does not declare")
 	}
 }

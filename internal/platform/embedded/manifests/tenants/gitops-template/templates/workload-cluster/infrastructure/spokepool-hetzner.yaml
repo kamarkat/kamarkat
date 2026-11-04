@@ -26,7 +26,8 @@
 # <CLUSTER_NAME> is what applications name to run here:
 # validate-cluster-name-contract.sh records that the SpokePool composition
 # derives metadata.labels.cluster-name from the claim name,
-# so naming the claim names the cell, and the fleet ApplicationSets select on it.
+# so naming the claim names the cluster, and the application ApplicationSets
+# select on it.
 apiVersion: nutgraf.in/v1alpha1
 kind: SpokePool
 metadata:

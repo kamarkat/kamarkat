@@ -124,7 +124,7 @@ type appSetSummary struct {
 // AppProject they template rather than by their name.
 //
 // Name is NOT a reliable key. Boundaries 01-04 name their ApplicationSet after
-// the boundary number, but 05 renders three (tenant-fleet-xr-provisioning,
+// the boundary number, but 05 renders three (tenant-app-xr-provisioning,
 // -spoke-provisioning, -workload-provisioning) and 06 renders tenant-public-tls,
 // none of which carry the number. A prefix match found nothing for those and
 // failed for the full timeout reporting "no ApplicationSet named 05-* exists" —

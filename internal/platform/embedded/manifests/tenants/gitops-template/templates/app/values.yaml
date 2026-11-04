@@ -1,6 +1,6 @@
 # What one APP is, in one environment.
 #
-# Copy to environments/<ENVIRONMENT>/<APP>/values.yaml. Three levels since
+# Copy to environments/<ENVIRONMENT>/<APP_ID>/values.yaml. Three levels since
 # ADR-088: the environment, then the app, then a directory per workload. Every
 # DIRECTORY beside this file is a workload and is generated as an Application;
 # see templates/workload/. A per-app concern therefore belongs in this file or
@@ -96,7 +96,7 @@ config: {}
 # Secrets your workloads read. Declared here, supplied out of band.
 #
 #   name        the key, identical here and where you supply it
-#   capability  what this fleet loses without it. REQUIRED, and not decoration:
+#   capability  what this application loses without it. REQUIRED, and not decoration:
 #               it is what the tooling reports when a value is absent, because
 #               "AI_GATEWAY_API_KEY is missing" asks the reader to already know
 #               what that is and "the AI gateway the SDK calls has no
@@ -107,8 +107,8 @@ config: {}
 #
 # Supply each one with (from the root of this repository):
 #
-#     kakt fleet secrets status <env>            what is declared vs present
-#     kakt fleet secrets set <env> <KEY>         supply one, prompted, no echo
+#     kakt application secrets status <env>            what is declared vs present
+#     kakt app secrets set <env> <app> <key>     supply one, prompted, no echo
 #
 # Rotation is `set` again. There is no flag that takes a value as an argument,
 # and no batch form -- both would put the value somewhere it persists.
