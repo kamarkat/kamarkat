@@ -470,6 +470,11 @@ components:
     repo: redis/redis
     layer: capability
     match: [docker.io/library/redis]
+    behind:
+      - versions: ["8.6.4-alpine"]
+        status: held
+        reason: The GitOps chart's own cache; it moves when that chart does
+        blocked_by: Argo CD
   # ── Observability ───────────────────────────────────────────────────────
   - name: Grafana Alloy
     description: Collects metrics and logs on every node and cluster.
