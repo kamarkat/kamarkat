@@ -14,5 +14,5 @@ resources:
 # image is always an immutable reference to a specific build rather than whatever
 # `latest` happened to point at when a pod last restarted.
 images:
-- digest: sha256:fb7488ab37713383228e2f09fc56b36e1ea1d786a1eac57dafd0b063c21fee8f
+- digest: sha256:a65ccec4e96b74b5176bb0e4ef26e5dafb6a1f1ef64f70f5025ca3aef0857e70
   name: ghcr.io/kamarkat/kamarkat/auth-proxy
