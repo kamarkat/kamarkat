@@ -19,7 +19,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/soloz-io/zero-ops/postgres-partman
+  IMAGE: ghcr.io/${{ github.repository }}/postgres-partman
   INPUTS: images/postgres-partman
   MANIFEST: manifests/hub-core-services/billing-engine/database/billing-db.yaml
 

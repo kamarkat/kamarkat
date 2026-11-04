@@ -46,8 +46,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/zero-ops/support-agent:${{ github.sha }}
-            ghcr.io/soloz-io/zero-ops/support-agent:latest
+            ghcr.io/${{ github.repository }}/support-agent:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/support-agent:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           digest="${{ steps.build.outputs.digest }}"
           cd manifests/hub-core-services/support-agent
-          kustomize edit set image "support-agent=ghcr.io/soloz-io/zero-ops/support-agent@${digest}"
+          kustomize edit set image "support-agent=ghcr.io/${{ github.repository }}/support-agent@${digest}"
           cd -
           # The spoke agent is a plain multi-document manifest, not a
           # kustomization, so its reference is rewritten in place.
@@ -72,7 +72,7 @@ jobs:
           # -- silently changed nothing, and the spoke shipped an unpullable tag
           # while the hub was correctly pinned.
           sed -i.bak -E \
-            "s|image: ghcr\.io/soloz-io/zero-ops/support-agent(@sha256:[a-f0-9]+\|:[A-Za-z0-9._-]+)|image: ghcr.io/soloz-io/zero-ops/support-agent@${digest}|" \
+            "s|image: ghcr\.io/kamarkat/kamarkat/support-agent(@sha256:[a-f0-9]+\|:[A-Za-z0-9._-]+)|image: ghcr.io/${{ github.repository }}/support-agent@${digest}|" \
             manifests/spoke/spoke-catalog/infra/support-agent.yaml
           grep -q "support-agent@${digest}" manifests/spoke/spoke-catalog/infra/support-agent.yaml || {
               echo "::error::the spoke image reference did not update; the pattern no longer matches"

@@ -174,7 +174,7 @@ netpol = next((d for d in objs if d["kind"] == "NetworkPolicy"), {})
 app_from = netpol.get("spec", {}).get("ingress", [{}])[0].get("from", [])
 mappings = open("operators/hub-operator/internal/infisical/secret_mappings.go").read()
 namespaces = [d["metadata"]["name"] for d in docs(open("manifests/hub-core-services/platform-namespaces/namespaces.yaml").read())]
-check(cluster.get("spec", {}).get("imageName", "").startswith("ghcr.io/soloz-io/zero-ops/postgres-partman")
+check(cluster.get("spec", {}).get("imageName", "").startswith("ghcr.io/kamarkat/kamarkat/postgres-partman")
       and initdb.get("owner") == "hub_billing" and initdb.get("secret", {}).get("name") == es["metadata"]["name"] == "hub-billing-db-credentials"
       and initdb.get("postInitSQL") == ["ALTER ROLE hub_billing SUPERUSER"]
       and database.get("spec", {}).get("owner") == "hub_billing" and database["spec"].get("databaseReclaimPolicy") == "retain"

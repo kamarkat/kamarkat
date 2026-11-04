@@ -69,14 +69,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/zero-ops/kube-sbt:${{ github.sha }}
-            ghcr.io/soloz-io/zero-ops/kube-sbt:latest
+            ghcr.io/${{ github.repository }}/kube-sbt:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/kube-sbt:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Pin the manifest to the digest just built
         env:
-          KUSTOMIZE_IMAGE_ARG: controller=ghcr.io/soloz-io/zero-ops/kube-sbt@${{ steps.build.outputs.digest }}
+          KUSTOMIZE_IMAGE_ARG: controller=ghcr.io/${{ github.repository }}/kube-sbt@${{ steps.build.outputs.digest }}
           MANIFEST_DIR: manifests/hub-core-services/kube-sbt
         run: |
           git config user.name "github-actions[bot]"

@@ -1,4 +1,4 @@
-module github.com/soloz-io/ephemeral-vm-provisioner
+module github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner
 
 go 1.25.3
 

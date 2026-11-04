@@ -392,7 +392,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     inv = sub.add_parser("inventory", help="a published version's inventory, annotated as of its release date")
     inv.add_argument("version")
-    inv.add_argument("--owner", default="soloz-io")
+    inv.add_argument("--owner", default="kamarkat")
     inv.add_argument("--out", required=True)
     chk = sub.add_parser("check", help="which versions of an unpublished inventory are behind with no reason")
     chk.add_argument("components_json")

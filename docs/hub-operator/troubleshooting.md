@@ -635,7 +635,7 @@ platform-external-secrets has ServerSideApply=true.
 **Next Steps:**
 ```bash
 # 1. Rebuild operator
-make docker-build docker-push IMG=ghcr.io/soloz-io/zero-ops/hub-operator:latest
+make docker-build docker-push IMG=ghcr.io/kamarkat/kamarkat/hub-operator:latest
 
 # 2. Restart operator
 kubectl rollout restart deployment hub-operator -n platform-ops

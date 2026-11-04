@@ -209,7 +209,7 @@ func readSeedBundleVersion(ctx context.Context, kubeconfig string) string {
 // already running the defective one cannot be repaired by a reseed, which is
 // the operation that exists to repair exactly this. The CLI knows which
 // registry it fetched from; the chart should not have to guess.
-const bundleRegistry = "ghcr.io/soloz-io/charts"
+const bundleRegistry = "ghcr.io/kamarkat/charts"
 
 func renderSeedApplication(envRevision, envSlug, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, infisicalProjectID, infisicalClientID, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
 	scopes := ""

@@ -40,7 +40,7 @@ SOURCE_TYPES = ("chart", "kustomize", "helm", "directory", "plugin")
 # name and version are pinned by its descriptor and it is not ours to publish,
 # so checking it against what this release produced would report every upstream
 # chart as missing.
-PLATFORM_REGISTRY = "ghcr.io/soloz-io/charts"
+PLATFORM_REGISTRY = "ghcr.io/kamarkat/charts"
 
 # The one published artefact (ADR-063). Every platform-owned Application names
 # it and enables its own component through values.
@@ -63,7 +63,7 @@ PLATFORM_GIT = "github.com/kamarkat/kamarkat"
 # A tenant's own repository is not a violation: it is the box reading its own
 # state, which is what ADR-062 requires. What is forbidden is a repository on the
 # platform's side of the boundary.
-PLATFORM_ORG = "github.com/soloz-io/"
+PLATFORM_ORG = "github.com/kamarkat/"
 
 
 def is_registry(url):

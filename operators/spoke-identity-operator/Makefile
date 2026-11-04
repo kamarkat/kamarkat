@@ -2,7 +2,7 @@ SHELL := /usr/bin/env bash -euo pipefail
 
 .PHONY: build run test manifests generate docker-build docker-push deploy
 
-IMG ?= ghcr.io/soloz-io/spoke-identity-operator:latest
+IMG ?= ghcr.io/kamarkat/kamarkat/spoke-identity-operator:latest
 
 # Tools
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen

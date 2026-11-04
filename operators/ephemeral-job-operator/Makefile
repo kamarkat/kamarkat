@@ -1,7 +1,7 @@
 LOCALBIN ?= $(shell pwd)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.16.5
-IMG ?= ghcr.io/soloz-io/ephemeral-job-operator:latest
+IMG ?= ghcr.io/kamarkat/kamarkat/ephemeral-job-operator:latest
 
 .PHONY: all
 all: generate manifests fmt vet build

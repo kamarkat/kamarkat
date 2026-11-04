@@ -19,4 +19,4 @@ resources:
 images:
 - digest: sha256:b0522975b8305072ef0a765329467c4f1719da4feba5b7151915c0147fb23541
   name: support-agent
-  newName: ghcr.io/soloz-io/zero-ops/support-agent
+  newName: ghcr.io/kamarkat/kamarkat/support-agent

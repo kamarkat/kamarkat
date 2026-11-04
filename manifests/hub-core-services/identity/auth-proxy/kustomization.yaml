@@ -15,4 +15,4 @@ resources:
 # `latest` happened to point at when a pod last restarted.
 images:
 - digest: sha256:fb7488ab37713383228e2f09fc56b36e1ea1d786a1eac57dafd0b063c21fee8f
-  name: ghcr.io/soloz-io/zero-ops/auth-proxy
+  name: ghcr.io/kamarkat/kamarkat/auth-proxy

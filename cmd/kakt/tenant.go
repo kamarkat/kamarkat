@@ -258,7 +258,7 @@ choose something meaningful -- it names the cluster for its whole life.`,
 	f.StringVar(&workloadCluster.TenantID, "tenant", "", "the tenant that owns it (required)")
 	f.StringVar(&workloadCluster.GitopsRepoURL, "gitops-repo-url", "", "this repository's URL (required)")
 	f.StringVar(&workloadCluster.PlatformRepoURL, "platform-repo-url", "", "the platform repository URL")
-	f.StringVar(&workloadCluster.BundleRegistry, "bundle-registry", "ghcr.io/soloz-io/charts", "the chart registry")
+	f.StringVar(&workloadCluster.BundleRegistry, "bundle-registry", "ghcr.io/kamarkat/charts", "the chart registry")
 	f.StringVar(&workloadCluster.ChartSource, "chart-source", "", "chart source, as the management cluster was scaffolded with")
 	f.StringVar(&workloadCluster.PublicTLSIssuer, "public-tls-issuer", "letsencrypt-prod", "ACME issuer for public certificates")
 	// -1 is "no opinion", so an explicit --workers is distinguishable from the
@@ -376,7 +376,7 @@ what a tenant would receive before any repository exists.`,
 		"the platform branch a development box reads its chart from (default: the branch you are on). Ignored by a released box")
 	f.BoolVar(&scaffoldLocal, "local", false,
 		"clone the repository and print the bootstrap command instead of dispatching a workflow. For testing the platform end to end without a release")
-	f.StringVar(&scaffoldSpec.BundleRegistry, "bundle-registry", "ghcr.io/soloz-io/charts",
+	f.StringVar(&scaffoldSpec.BundleRegistry, "bundle-registry", "ghcr.io/kamarkat/charts",
 		"registry published bundles are pulled from (no scheme)")
 	f.BoolVar(&scaffoldSpec.Private, "private", true, "create the repository private")
 	f.BoolVar(&scaffoldSpec.PrivateRegistry, "private-registry", false,

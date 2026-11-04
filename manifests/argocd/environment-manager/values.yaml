@@ -19,7 +19,7 @@ bundleVersion: "development"
 # platform-owned Application failed with "not a valid chart repository or
 # cannot be reached: object required" -- a message about the registry, for a
 # registry that was reachable and correct.
-bundleRegistry: "ghcr.io/soloz-io/charts"
+bundleRegistry: "ghcr.io/kamarkat/charts"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Repository identities (ADR-004 dual-repository contract)

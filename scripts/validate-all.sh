@@ -230,7 +230,7 @@ if wants adr; then
         run_phase adr "$LOG_DIR/validation-adr.log" \
             env PATH="$PLATFORM_DIR/bin:$PATH" \
                 bash "$adr_script" "$BUNDLE_VERSION" "$ZERO_OPS_DIR" "$kubeconfig" \
-                    "${BUNDLE_REGISTRY:-ghcr.io/soloz-io/charts}"
+                    "${BUNDLE_REGISTRY:-ghcr.io/kamarkat/charts}"
     fi
 fi
 

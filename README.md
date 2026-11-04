@@ -111,7 +111,7 @@ Download the CLI from a release and run it once:
 
 ```
 # the latest release, for this machine
-gh release download --repo soloz-io/zero-ops \
+gh release download --repo kamarkat/kamarkat \
   --pattern "kakt-$(uname -s | tr 'A-Z' 'a-z')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
   --output kakt && chmod +x kakt
 

@@ -28,7 +28,7 @@ ROOT="$PWD"
 
 # ── What is being built ─────────────────────────────────────────────────────
 # Overridable from the environment; the defaults describe a throwaway dev box.
-GIT_ORG="${GIT_ORG:-soloz-io}"
+GIT_ORG="${GIT_ORG:-kamarkat}"
 # MANDATORY. No default, and `acme.example` is not one.
 #
 # It used to default to acme.example, which is an RFC 2606 reserved TLD: it
@@ -97,12 +97,12 @@ ENVIRONMENT="${ENVIRONMENT:-dev}"
 SUBDOMAIN="${SUBDOMAIN-$ENVIRONMENT}"
 PROVIDER="${PROVIDER:-hetzner}"
 REGION="${REGION:-hel1}"
-# The GHCR namespace. soloz-io rather than a personal one because visibility is a
+# The GHCR namespace. kamarkat rather than a personal one because visibility is a
 # property of the package, not the version: those charts are already public, so a
 # prerelease pushed there is pullable immediately, while a new namespace creates
 # private packages that ArgoCD cannot read until each is flipped by hand
 # (scripts/package/flip-public.sh).
-OWNER="${OWNER:-soloz-io}"
+OWNER="${OWNER:-kamarkat}"
 # Where the tenant clone is made. Outside the checkout: it is a separate
 # repository with its own remote, and `git add -A` here has swept one in before.
 WORKSPACE="${WORKSPACE:-$ROOT/.local-e2e}"

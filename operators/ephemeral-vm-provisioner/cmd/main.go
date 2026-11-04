@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/hetzner"
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/provision"
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/store"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/hetzner"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/provision"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/store"
 )
 
 func main() {

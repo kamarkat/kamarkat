@@ -162,7 +162,7 @@ Build and promote a release, then bump the spoke's `environmentRevision` and
 `targetRevision` in the gitops repo. **Verify the published chart, not the repo:**
 
 ```bash
-helm pull oci://ghcr.io/soloz-io/charts/platform --version <ver> --untar
+helm pull oci://ghcr.io/kamarkat/charts/platform --version <ver> --untar
 grep -n destinationPath platform/charts/platform-spoke-catalog/templates/hybrid-templated.yaml
 ```
 

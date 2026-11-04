@@ -117,9 +117,9 @@ e2e-clean:
 #
 # SKIP_PUSH=1 packages and gates without publishing, which spends no version.
 # Use it to find a packaging mistake before committing to an -rc number.
-OWNER ?= soloz-io
+OWNER ?= kamarkat
 publish-local:
-	@test -n "$(VERSION)" || { echo "usage: make publish-local VERSION=0.1.16-rc.1 [OWNER=soloz-io] [SKIP_PUSH=1]"; exit 1; }
+	@test -n "$(VERSION)" || { echo "usage: make publish-local VERSION=0.1.16-rc.1 [OWNER=kamarkat] [SKIP_PUSH=1]"; exit 1; }
 	SKIP_PUSH=$(SKIP_PUSH) ./scripts/package/publish.sh "$(VERSION)" "$(OWNER)"
 
 # Build the CLI in its RELEASED shape, at VERSION.

@@ -15,7 +15,7 @@ resources:
 images:
 - digest: sha256:1f7f9d7977a166a3ab5864dcbf2a72fd6df12d2d047dae2e4ec30e4fa194c52c
   name: controller
-  newName: ghcr.io/soloz-io/zero-ops/kube-sbt
+  newName: ghcr.io/kamarkat/kamarkat/kube-sbt
 
 labels:
 - pairs:

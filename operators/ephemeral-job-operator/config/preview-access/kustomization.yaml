@@ -44,6 +44,6 @@ patches:
 images:
 - digest: sha256:216113415bf2a13b02ad9744d81fa9e5d5d3d100b26c923e8f1919d9211712c7
   name: ephemeral-job-operator
-  newName: ghcr.io/soloz-io/ephemeral-job-operator
+  newName: ghcr.io/kamarkat/kamarkat/ephemeral-job-operator
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

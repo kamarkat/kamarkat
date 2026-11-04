@@ -317,7 +317,7 @@ func TestPlatformOwnBoxResolvesItsInstanceRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("boxOrgURL: %v", err)
 	}
-	if org != "https://github.com/soloz-io" {
+	if org != "https://github.com/kamarkat" {
 		t.Errorf("boxOrgURL() = %q, want the organisation that owns it", org)
 	}
 }

@@ -49,8 +49,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/workspace-sync:${{ github.sha }}
-            ghcr.io/soloz-io/workspace-sync:latest
+            ghcr.io/${{ github.repository }}/workspace-sync:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/workspace-sync:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -77,7 +77,7 @@ jobs:
           # reference makes "which code did that" unanswerable after the fact.
           if not digest.startswith("sha256:"):
               sys.exit(f"expected a sha256 digest from buildx, got {digest!r}")
-          ref = f"ghcr.io/soloz-io/workspace-sync@{digest}"
+          ref = f"ghcr.io/${{ github.repository }}/workspace-sync@{digest}"
 
           p = pathlib.Path("manager.yaml")
           s = p.read_text()

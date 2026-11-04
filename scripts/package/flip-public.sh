@@ -3,20 +3,20 @@ set -euo pipefail
 
 # Packages that must be public for anonymous GHCR pull.
 # Format: "label|check_type|check_arg|settings_url"
-PKG="https://github.com/orgs/soloz-io/packages/container"
+PKG="https://github.com/orgs/kamarkat/packages/container"
 PACKAGES=(
-  "environment-manager|helm|soloz-io/charts/environment-manager|$PKG/charts%2Fenvironment-manager/settings"
-  "platform|helm|soloz-io/charts/platform|$PKG/charts%2Fplatform/settings"
-  "universal-tenant|helm|soloz-io/charts/universal-tenant|$PKG/charts%2Funiversal-tenant/settings"
-  "tenant-public-tls|helm|soloz-io/charts/tenant-public-tls|$PKG/charts%2Ftenant-public-tls/settings"
-  "hub-operator|image|soloz-io/zero-ops/hub-operator|$PKG/zero-ops%2Fhub-operator/settings"
-  "auth-proxy|image|soloz-io/zero-ops/auth-proxy|$PKG/zero-ops%2Fauth-proxy/settings"
-  "kube-sbt|image|soloz-io/zero-ops/kube-sbt|$PKG/zero-ops%2Fkube-sbt/settings"
-  "mcp-server|image|soloz-io/zero-ops/mcp-server|$PKG/zero-ops%2Fmcp-server/settings"
-  "ephemeral-job-operator|image|soloz-io/ephemeral-job-operator|$PKG/ephemeral-job-operator/settings"
-  "ephemeral-vm-provisioner|image|soloz-io/ephemeral-vm-provisioner|$PKG/ephemeral-vm-provisioner/settings"
-  "spoke-identity-operator|image|soloz-io/spoke-identity-operator|$PKG/spoke-identity-operator/settings"
-  "workspace-sync|image|soloz-io/workspace-sync|$PKG/workspace-sync/settings"
+  "environment-manager|helm|kamarkat/charts/environment-manager|$PKG/charts%2Fenvironment-manager/settings"
+  "platform|helm|kamarkat/charts/platform|$PKG/charts%2Fplatform/settings"
+  "universal-tenant|helm|kamarkat/charts/universal-tenant|$PKG/charts%2Funiversal-tenant/settings"
+  "tenant-public-tls|helm|kamarkat/charts/tenant-public-tls|$PKG/charts%2Ftenant-public-tls/settings"
+  "hub-operator|image|kamarkat/kamarkat/hub-operator|$PKG/kamarkat%2Fhub-operator/settings"
+  "auth-proxy|image|kamarkat/kamarkat/auth-proxy|$PKG/kamarkat%2Fauth-proxy/settings"
+  "kube-sbt|image|kamarkat/kamarkat/kube-sbt|$PKG/kamarkat%2Fkube-sbt/settings"
+  "mcp-server|image|kamarkat/kamarkat/mcp-server|$PKG/kamarkat%2Fmcp-server/settings"
+  "ephemeral-job-operator|image|kamarkat/kamarkat/ephemeral-job-operator|$PKG/ephemeral-job-operator/settings"
+  "ephemeral-vm-provisioner|image|kamarkat/kamarkat/ephemeral-vm-provisioner|$PKG/ephemeral-vm-provisioner/settings"
+  "spoke-identity-operator|image|kamarkat/kamarkat/spoke-identity-operator|$PKG/spoke-identity-operator/settings"
+  "workspace-sync|image|kamarkat/kamarkat/workspace-sync|$PKG/workspace-sync/settings"
 )
 
 check_helm() {

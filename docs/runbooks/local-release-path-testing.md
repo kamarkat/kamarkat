@@ -77,7 +77,7 @@ publishing it, so a version used for testing can never be released; `0.1.16-rc.1
 is a distinct version, so `0.1.16` stays free for the set you actually release.
 Iterate with `-rc.2`, `-rc.3`.
 
-Charts land in `oci://ghcr.io/soloz-io/charts` — the same registry a release uses,
+Charts land in `oci://ghcr.io/kamarkat/charts` — the same registry a release uses,
 so the `repoURL` your test renders is identical to a tenant's. `OWNER=` overrides
 the namespace, but it must match what the scaffolded bundle names.
 
@@ -149,7 +149,7 @@ loop exists to make:
 grep -A3 repoURL acme-gitops/registry/clusters/acme/bundle.yaml
 ```
 
-Expect `ghcr.io/soloz-io/charts`, a `chart:` key, and a `bundleVersion` parameter
+Expect `ghcr.io/kamarkat/charts`, a `chart:` key, and a `bundleVersion` parameter
 matching `targetRevision`. If you see a `github.com` URL with a `path:` key, the
 binary is a development build — go back to step 2.
 

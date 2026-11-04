@@ -213,7 +213,7 @@ jobs:
       - name: Check out the platform's scripts
         uses: actions/checkout@v4
         with:
-          repository: soloz-io/zero-ops
+          repository: kamarkat/kamarkat
           ref: v${{ inputs.bundle-version }}
           path: .platform-validators
 

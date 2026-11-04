@@ -10,4 +10,4 @@ resources:
 # with `kustomize edit set image` after each build.
 images:
 - digest: sha256:990bfec09d9e6e89ac6e375f8137d014ce870ad19cec61b40bbfb464838928e0
-  name: ghcr.io/soloz-io/zero-ops/mcp-server
+  name: ghcr.io/kamarkat/kamarkat/mcp-server

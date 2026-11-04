@@ -108,7 +108,7 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
 2. Refuse if any portability reference reappears (passes on main right now)
 3. Assert each chart renders exactly what ArgoCD applies today — 28 verified identical locally
 4. Build four CLI binaries with the version injected, and fail if the built CLI doesn't report 0.1.0
-5. Push to oci://ghcr.io/soloz-io/charts and attach the binaries to the release
+5. Push to oci://ghcr.io/kamarkat/charts and attach the binaries to the release
 
 - Make the GHCR packages public — ADR-063 requires a tenant to mirror without asking permission, and ArgoCD has no OCI credential.
 
@@ -119,12 +119,12 @@ chmod +x kakt
 
 ## Scaffold a real tenant repo 
 
-cd /Users/arun_subramanian/Projects/soloz-io/zero-ops
+cd /Users/arun_subramanian/Projects/kamarkat/kamarkat
 ./kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
 
 Or from your current directory:
 
-/Users/arun_subramanian/Projects/soloz-io/zero-ops/kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
 
 ### Interactive
 

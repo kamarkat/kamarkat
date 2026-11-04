@@ -23,7 +23,7 @@ func TestTenantSeedRefusesAnUnhydratedDeclaration(t *testing.T) {
 kind: Application
 spec:
   sources:
-    - repoURL: ghcr.io/soloz-io/charts
+    - repoURL: ghcr.io/kamarkat/charts
       chart: environment-manager
       targetRevision: <BUNDLE_VERSION>
 `

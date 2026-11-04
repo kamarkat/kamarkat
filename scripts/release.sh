@@ -40,7 +40,7 @@
 set -euo pipefail
 
 GITOPS_DIR="${GITOPS_DIR:-.local-e2e/nutgraf-gitops}"
-OWNER="${OWNER:-soloz-io}"
+OWNER="${OWNER:-kamarkat}"
 VERSION=""
 DRY_RUN=0
 PUBLISH=1

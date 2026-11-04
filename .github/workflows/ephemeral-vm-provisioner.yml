@@ -74,8 +74,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/ephemeral-vm-provisioner:${{ github.sha }}
-            ghcr.io/soloz-io/ephemeral-vm-provisioner:latest
+            ghcr.io/${{ github.repository }}/ephemeral-vm-provisioner:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/ephemeral-vm-provisioner:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -89,7 +89,7 @@ jobs:
       - name: Update Kustomization with new image
         run: |
           cd operators/ephemeral-vm-provisioner/config
-          kustomize edit set image ephemeral-vm-provisioner=ghcr.io/soloz-io/ephemeral-vm-provisioner@${{ steps.build.outputs.digest }}
+          kustomize edit set image ephemeral-vm-provisioner=ghcr.io/${{ github.repository }}/ephemeral-vm-provisioner@${{ steps.build.outputs.digest }}
 
       - name: Commit and push image update
         run: |

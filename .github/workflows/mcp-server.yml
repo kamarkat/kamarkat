@@ -45,14 +45,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/zero-ops/mcp-server:${{ github.sha }}
-            ghcr.io/soloz-io/zero-ops/mcp-server:latest
+            ghcr.io/${{ github.repository }}/mcp-server:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/mcp-server:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Pin the manifest to the digest just built
         env:
-          KUSTOMIZE_IMAGE_ARG: ghcr.io/soloz-io/zero-ops/mcp-server@${{ steps.build.outputs.digest }}
+          KUSTOMIZE_IMAGE_ARG: ghcr.io/${{ github.repository }}/mcp-server@${{ steps.build.outputs.digest }}
           MANIFEST_DIR: manifests/hub-core-services/api-gateway/mcp-server
         run: |
           git config user.name "github-actions[bot]"

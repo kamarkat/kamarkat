@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/hetzner"
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/store"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/hetzner"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/store"
 )
 
 // Reconciler owns the Hetzner VM lifecycle for all ephemeral jobs. Postgres is

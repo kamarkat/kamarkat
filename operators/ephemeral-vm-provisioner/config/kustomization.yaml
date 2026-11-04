@@ -26,4 +26,4 @@ resources:
 images:
 - digest: sha256:101861db7e8f40f1644db90e904a81849d301a9d1b133754bb81103ab8a6da30
   name: ephemeral-vm-provisioner
-  newName: ghcr.io/soloz-io/ephemeral-vm-provisioner
+  newName: ghcr.io/kamarkat/kamarkat/ephemeral-vm-provisioner

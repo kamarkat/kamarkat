@@ -30,10 +30,10 @@ kube-sbt is the REST API server for the kube-sbt metering and billing system. It
 ### Build Docker Image
 ```bash
 # Build the image
-docker build -t ghcr.io/soloz-io/kube-sbt:latest -f cmd/kube-sbt/Dockerfile .
+docker build -t ghcr.io/kamarkat/kamarkat/kube-sbt:latest -f cmd/kube-sbt/Dockerfile .
 
 # Push to registry
-docker push ghcr.io/soloz-io/kube-sbt:latest
+docker push ghcr.io/kamarkat/kamarkat/kube-sbt:latest
 ```
 
 ### Deploy via ArgoCD

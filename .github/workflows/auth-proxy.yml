@@ -46,14 +46,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/zero-ops/auth-proxy:${{ github.sha }}
-            ghcr.io/soloz-io/zero-ops/auth-proxy:latest
+            ghcr.io/${{ github.repository }}/auth-proxy:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/auth-proxy:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Pin the manifest to the digest just built
         env:
-          KUSTOMIZE_IMAGE_ARG: ghcr.io/soloz-io/zero-ops/auth-proxy@${{ steps.build.outputs.digest }}
+          KUSTOMIZE_IMAGE_ARG: ghcr.io/${{ github.repository }}/auth-proxy@${{ steps.build.outputs.digest }}
           MANIFEST_DIR: manifests/hub-core-services/identity/auth-proxy
         run: |
           git config user.name "github-actions[bot]"

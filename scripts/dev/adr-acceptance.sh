@@ -19,7 +19,7 @@ set -uo pipefail
 VERSION="${1:?usage: adr-acceptance.sh <version> <gitops-dir> <kubeconfig> [registry]}"
 GITOPS="${2:?}"
 KUBECONFIG_PATH="${3:?}"
-REGISTRY="${4:-ghcr.io/soloz-io/charts}"
+REGISTRY="${4:-ghcr.io/kamarkat/charts}"
 export KUBECONFIG="$KUBECONFIG_PATH"
 
 pass=0 fail=0 skip=0

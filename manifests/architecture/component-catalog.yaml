@@ -670,7 +670,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/zero-ops/hub-operator]
+    match: [ghcr.io/kamarkat/kamarkat/hub-operator]
 
   - name: Organization provisioning
     description: Provisions each organization and application declared in the GitOps repository.
@@ -678,7 +678,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/zero-ops/kube-sbt]
+    match: [ghcr.io/kamarkat/kamarkat/kube-sbt]
 
   - name: Control-plane API
     description: The control plane's API.
@@ -686,7 +686,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/zero-ops/mcp-server]
+    match: [ghcr.io/kamarkat/kamarkat/mcp-server]
 
   - name: Login gateway
     description: Signs people in before a request reaches a protected route.
@@ -694,7 +694,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/zero-ops/auth-proxy]
+    match: [ghcr.io/kamarkat/kamarkat/auth-proxy]
 
   - name: Cluster identity operator
     description: Gives each managed cluster its identity with the management cluster.
@@ -702,7 +702,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/spoke-identity-operator]
+    match: [ghcr.io/kamarkat/kamarkat/spoke-identity-operator]
 
   - name: Ephemeral job operator
     description: Runs short-lived jobs on managed clusters.
@@ -710,7 +710,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: workload-infrastructure
-    match: [ghcr.io/soloz-io/ephemeral-job-operator]
+    match: [ghcr.io/kamarkat/kamarkat/ephemeral-job-operator]
 
   - name: Support agent
     description: Reports allowlisted control-plane facts when an organization enrols. Does nothing until then.
@@ -718,7 +718,7 @@ components:
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
     layer: machinery
-    match: [ghcr.io/soloz-io/zero-ops/support-agent]
+    match: [ghcr.io/kamarkat/kamarkat/support-agent]
     behind:
       - versions: ["digest-pinned"]
         status: scheduled
@@ -770,4 +770,4 @@ components:
     repo: https://github.com/pgpartman/pg_partman
     track: ghcr
     layer: capability
-    match: ["ghcr.io/soloz-io/zero-ops/postgres-partman"]
+    match: ["ghcr.io/kamarkat/kamarkat/postgres-partman"]

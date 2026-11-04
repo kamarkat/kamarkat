@@ -2363,14 +2363,14 @@ func (o *Orchestrator) ensureArgoCDGitHubAuth(ctx context.Context, kubeconfig, o
 // purpose: a chart default travels to every cluster that installs the published
 // bundle, which is how one box's identity once became the fallback for all of them.
 // Nothing reaches this but a run with no tenant repository to read.
-const platformBoxInstanceRepo = "https://github.com/soloz-io/fleet-registry"
+const platformBoxInstanceRepo = "https://github.com/kamarkat/fleet-registry"
 
 // instanceRepoURL returns this box's instance repository (ADR-062).
 //
 // The source is the gitops repository Day-0 is running inside, which is what
 // ADR-072 makes Day-0 run from. There is deliberately no default: any default
 // would name some other box's repository, and shipping one as a chart default is
-// how soloz-io/fleet-registry became the fallback for every box that installed
+// how kamarkat/fleet-registry became the fallback for every box that installed
 // the published bundle.
 func (o *Orchestrator) instanceRepoURL() (string, error) {
 	if o.InstanceRepoURL != "" {

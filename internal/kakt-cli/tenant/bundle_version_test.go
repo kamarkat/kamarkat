@@ -179,13 +179,13 @@ func TestScaffoldRefusesABoxWithNoEscrow(t *testing.T) {
 func TestDevelopmentModeLeavesTheReleasedDeclarationIntact(t *testing.T) {
 	released := Spec{
 		TenantID: "acme", GitOrg: "acme-inc", ClusterName: "acme-hub",
-		BundleVersion: "0.1.16", BundleRegistry: "ghcr.io/soloz-io/charts",
+		BundleVersion: "0.1.16", BundleRegistry: "ghcr.io/kamarkat/charts",
 		PlatformRepoURL: "https://github.com/kamarkat/kamarkat",
 	}
 
 	src := released.chartSource()
 	for _, want := range []string{
-		"repoURL: ghcr.io/soloz-io/charts", // the registry, scheme-less
+		"repoURL: ghcr.io/kamarkat/charts", // the registry, scheme-less
 		"chart: environment-manager",       // a chart source, not a path
 		"targetRevision: 0.1.16",
 		"- name: bundleVersion", // the chart is told what it is

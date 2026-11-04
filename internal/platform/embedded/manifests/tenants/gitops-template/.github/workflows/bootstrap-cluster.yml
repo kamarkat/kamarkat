@@ -90,7 +90,7 @@ permissions:
 
 jobs:
   bootstrap:
-    uses: soloz-io/zero-ops/.github/workflows/tenant-bootstrap.yml@v<BUNDLE_VERSION>
+    uses: kamarkat/kamarkat/.github/workflows/tenant-bootstrap.yml@v<BUNDLE_VERSION>
     with:
       cluster: ${{ inputs.cluster }}
       provider: ${{ inputs.provider }}

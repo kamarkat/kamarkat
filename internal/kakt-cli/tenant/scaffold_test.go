@@ -17,7 +17,7 @@ func testSpec() Spec {
 		Provider: "hetzner", Region: "hel1", Environment: "dev",
 		ClusterName: "acme-hub", BundleVersion: "v1.2.3",
 		PlatformRepoURL: "https://github.com/kamarkat/kamarkat",
-		BundleRegistry:  "ghcr.io/soloz-io/charts",
+		BundleRegistry:  "ghcr.io/kamarkat/charts",
 	}
 }
 
@@ -331,7 +331,7 @@ func TestBundleToleratesTheGeneratedValuesFileNotExistingYet(t *testing.T) {
 			spec := Spec{
 				TenantID: "acme", GitOrg: "acme-io", Domain: "nutgraf.in",
 				ClusterName: "acme-hub", Environment: "dev", Provider: "hetzner",
-				BundleVersion: version, BundleRegistry: "ghcr.io/soloz-io/charts",
+				BundleVersion: version, BundleRegistry: "ghcr.io/kamarkat/charts",
 				PlatformRepoURL: "https://github.com/kamarkat/kamarkat",
 			}
 			src := spec.chartSource()

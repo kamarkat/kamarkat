@@ -58,8 +58,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/zero-ops/hub-operator:${{ github.sha }}
-            ghcr.io/soloz-io/zero-ops/hub-operator:latest
+            ghcr.io/${{ github.repository }}/hub-operator:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/hub-operator:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -70,7 +70,7 @@ jobs:
       - name: Update Kustomization with new image
         run: |
           cd operators/hub-operator/config/manager
-          kustomize edit set image controller=ghcr.io/soloz-io/zero-ops/hub-operator@${{ steps.build.outputs.digest }}
+          kustomize edit set image controller=ghcr.io/${{ github.repository }}/hub-operator@${{ steps.build.outputs.digest }}
 
       - name: Commit and push image update
         run: |

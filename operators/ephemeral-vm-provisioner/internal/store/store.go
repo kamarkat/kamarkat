@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/soloz-io/ephemeral-vm-provisioner/internal/hetzner"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-vm-provisioner/internal/hetzner"
 )
 
 // JobStatus mirrors the SDK's ephemeral_job_status enum.

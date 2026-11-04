@@ -44,8 +44,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/soloz-io/ephemeral-job-operator:${{ github.sha }}
-            ghcr.io/soloz-io/ephemeral-job-operator:latest
+            ghcr.io/${{ github.repository }}/ephemeral-job-operator:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/ephemeral-job-operator:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -59,7 +59,7 @@ jobs:
           # the preview-access service. Pinned together so they cannot drift.
           for d in manager preview-access; do
             (cd operators/ephemeral-job-operator/config/$d && \
-              kustomize edit set image ephemeral-job-operator=ghcr.io/soloz-io/ephemeral-job-operator@${{ steps.build.outputs.digest }})
+              kustomize edit set image ephemeral-job-operator=ghcr.io/${{ github.repository }}/ephemeral-job-operator@${{ steps.build.outputs.digest }})
           done
 
       - name: Commit and push image update

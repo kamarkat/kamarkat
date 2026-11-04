@@ -5,10 +5,10 @@
 #
 # Patterns are recursive (trailing /) rather than /*, which in CODEOWNERS matches
 # only files directly in the directory and silently skips any subdirectory added later.
-/manifests/environments/prod/ @soloz-io/platform-admins
-/manifests/spoke/spoke-pools/prod/ @soloz-io/platform-admins
+/manifests/environments/prod/ @kamarkat/platform-admins
+/manifests/spoke/spoke-pools/prod/ @kamarkat/platform-admins
 # The catalogue no longer has an environment axis (ADR-051 amendment 2026-09-18):
 # platform content splits by provider and nothing else, so there is no prod/
 # directory to guard. The whole catalogue is guarded instead -- it reaches every
 # spoke on every box, which is a wider blast radius than prod's overlay had.
-/manifests/spoke/spoke-catalog/ @soloz-io/platform-admins
+/manifests/spoke/spoke-catalog/ @kamarkat/platform-admins

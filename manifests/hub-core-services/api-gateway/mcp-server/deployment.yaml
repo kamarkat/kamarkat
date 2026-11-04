@@ -17,6 +17,6 @@ spec:
         - name: ghcr-pull-secret
       containers:
         - name: mcp-server
-          image: ghcr.io/soloz-io/zero-ops/mcp-server
+          image: ghcr.io/kamarkat/kamarkat/mcp-server
           ports:
             - containerPort: 8080

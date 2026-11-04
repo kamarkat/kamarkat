@@ -92,7 +92,7 @@ func TestDeclaredVersionReadsTheRepositoryDeclaration(t *testing.T) {
 	// names a branch: a matcher that took the first version-looking value would
 	// return the branch.
 	bundle := `
-    - repoURL: ghcr.io/soloz-io/charts
+    - repoURL: ghcr.io/kamarkat/charts
       chart: environment-manager
       targetRevision: 0.1.16
       helm:

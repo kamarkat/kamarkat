@@ -25,7 +25,7 @@ func newReleaseCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().StringVar(&gitopsDir, "gitops-dir", ".local-e2e/nutgraf-gitops",
 		"The tenant's GitOps checkout, whose registry/ the version is read from and promoted in")
-	cmd.PersistentFlags().StringVar(&owner, "owner", "soloz-io", "GitHub organisation whose registry the bundle is published to")
+	cmd.PersistentFlags().StringVar(&owner, "owner", "kamarkat", "GitHub organisation whose registry the bundle is published to")
 	cmd.PersistentFlags().StringVar(&version, "version", "", "The version; default the tenant's current rc + 1")
 
 	env := func(extra ...string) []string {

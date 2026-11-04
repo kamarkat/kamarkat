@@ -7,4 +7,4 @@ resources:
 images:
 - digest: sha256:5b6a95cb28615b28f60f61fcbec30d093997da028f98de953539937694f533a2
   name: controller
-  newName: ghcr.io/soloz-io/spoke-identity-operator
+  newName: ghcr.io/kamarkat/kamarkat/spoke-identity-operator

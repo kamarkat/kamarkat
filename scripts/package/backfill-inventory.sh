@@ -20,7 +20,7 @@ set -euo pipefail
 
 OUT="${1:?usage: backfill-inventory.sh <out-dir> <version>...}"; shift
 [ $# -gt 0 ] || { echo "usage: backfill-inventory.sh <out-dir> <version>..." >&2; exit 2; }
-OWNER="${OWNER:-soloz-io}"
+OWNER="${OWNER:-kamarkat}"
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'git -C "$HERE" worktree prune; rm -rf "$WORK"' EXIT
