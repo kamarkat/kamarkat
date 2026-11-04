@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths:
       - cmd/mcp-server/**
+      # This file. A workflow that does not watch itself cannot react to
+      # its own change: when the image path moved to the kamarkat
+      # organisation, every workflow was edited and not one of them ran,
+      # so the new registry path stayed empty while the old one held the
+      # last build.
+      - .github/workflows/mcp-server.yml
   workflow_dispatch:
 
 permissions:

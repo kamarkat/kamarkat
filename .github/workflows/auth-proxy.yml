@@ -6,6 +6,12 @@ on:
     paths:
       - cmd/auth-proxy/**
       - internal/auth-proxy/**
+      # This file. A workflow that does not watch itself cannot react to
+      # its own change: when the image path moved to the kamarkat
+      # organisation, every workflow was edited and not one of them ran,
+      # so the new registry path stayed empty while the old one held the
+      # last build.
+      - .github/workflows/auth-proxy.yml
   workflow_dispatch:
 
 permissions:

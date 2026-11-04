@@ -13,6 +13,7 @@ on:
       # against a workflow nobody has exercised. A broken gofmt check survived
       # two commits this way on 2026-09-02.
       - .github/workflows/ephemeral-vm-provisioner.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
