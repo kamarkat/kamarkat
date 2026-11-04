@@ -1,5 +1,5 @@
-# cert-manager CRDs v1.21.1
-# Source: https://github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.crds.yaml
+# cert-manager CRDs v1.21.3
+# Source: https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.crds.yaml
 # CRDs applied at sync-wave -5 so ArgoCD establishes them before
 # operators/resources that depend on them (ADR-023).
 # Copyright 2022 The cert-manager Authors.
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: acme.cert-manager.io
   names:
@@ -3359,7 +3359,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: acme.cert-manager.io
   names:
@@ -3648,7 +3648,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: cert-manager.io
   names:
@@ -3973,7 +3973,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: cert-manager.io
   names:
@@ -4718,6 +4718,12 @@ spec:
                         ARI stores the ACME Renewal Information that is fetched from the ACME server
                         in accordance with RFC 9773. This is only populated if the ARI feature gate is enabled.
                       properties:
+                        certID:
+                          description: |-
+                            CertID is the ARI CertID (RFC 9773) of the certificate this renewal information was
+                            fetched for. This is used to determine if we need to re-fetch the renewal information
+                            as changed cert id means that ARI fetched before is stale.
+                          type: string
                         explanationURL:
                           description: |-
                             ExplanationURL is a human-readable URL that may explain why the suggested window
@@ -4886,7 +4892,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: cert-manager.io
   names:
@@ -8838,7 +8844,7 @@ metadata:
     app.kubernetes.io/name: "cert-manager"
     app.kubernetes.io/instance: "cert-manager"
     app.kubernetes.io/component: "crds"
-    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/version: "v1.21.3"
 spec:
   group: cert-manager.io
   names:
