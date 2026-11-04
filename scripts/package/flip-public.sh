@@ -33,10 +33,21 @@ PACKAGES=(
 # read as not public whatever its real visibility was. Images were checked
 # against the `latest` tag, which the chart releases do not carry.
 #
-# A package that does not exist reads the same as a private one: GHCR returns no
-# token and 403 for both, and will not say which, so existence cannot be probed
-# anonymously. Before the first publish a package therefore reads NOT PUBLIC,
-# and the settings page it points at does not exist yet.
+# A package that does not exist reads the same as a private one HERE: GHCR
+# returns no token and 403 for both and will not say which. That is a property
+# of the anonymous endpoint, not of the registry -- `exists` below asks the
+# authenticated API, which does distinguish them, so a package nobody has
+# published is reported as absent instead of sending someone to a settings page
+# that 404s.
+# Whether the package exists at all. Only consulted for one that is not publicly
+# pullable, to say WHY. Authenticated, because that is the only way to tell an
+# absent package from a private one; `gh` is required rather than optional, since
+# guessing here is what produced the 404.
+exists() {
+  local org="${1%%/*}" rest="${1#*/}"
+  gh api "/orgs/${org}/packages/container/${rest//\//%2F}" >/dev/null 2>&1
+}
+
 check_public() {
   local token http_code
   token=$(curl -s "https://ghcr.io/token?scope=repository:$1:pull" 2>/dev/null \
@@ -48,11 +59,23 @@ check_public() {
   [ "$http_code" = "200" ]
 }
 
+command -v gh >/dev/null || {
+  echo "flip-public: gh is required -- it is what tells an absent package from a" >&2
+  echo "             private one. Install it, or read the visibility column in" >&2
+  echo "             https://github.com/orgs/kamarkat/packages" >&2
+  exit 1
+}
+gh auth status >/dev/null 2>&1 || {
+  echo "flip-public: gh is not authenticated; run 'gh auth login'" >&2
+  exit 1
+}
+
 echo ""
 echo "Checking package visibility..."
 echo ""
 
 PRIVATE=()
+ABSENT=()
 
 for entry in "${PACKAGES[@]}"; do
   IFS='|' read -r label repository url <<< "$entry"
@@ -60,11 +83,20 @@ for entry in "${PACKAGES[@]}"; do
 
   if check_public "$repository"; then
     echo "PUBLIC"
-  else
-    echo "NOT PUBLIC"
+  elif exists "$repository"; then
+    echo "PRIVATE"
     PRIVATE+=("$label|$url")
+  else
+    echo "NOT PUBLISHED"
+    ABSENT+=("$label")
   fi
 done
+
+if [ ${#ABSENT[@]} -gt 0 ]; then
+  echo ""
+  echo "${#ABSENT[@]} not published yet: ${ABSENT[*]}"
+  echo "Visibility is set after the first publish; there is no settings page before it."
+fi
 
 echo ""
 
@@ -75,11 +107,8 @@ if [ ${#PRIVATE[@]} -eq 0 ]; then
 fi
 
 echo "========================================="
-echo "  ${#PRIVATE[@]} package(s) not publicly pullable"
+echo "  ${#PRIVATE[@]} package(s) PRIVATE"
 echo "========================================="
-echo ""
-echo "A package nobody has published yet appears here too, with no settings"
-echo "page to open. Publish it first."
 echo ""
 echo "For each package:"
 echo "  1. Click Package settings (right sidebar)"
