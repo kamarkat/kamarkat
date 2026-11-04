@@ -17,6 +17,11 @@ PACKAGES=(
   "ephemeral-vm-provisioner|kamarkat/kamarkat/ephemeral-vm-provisioner|$PKG/kamarkat%2Fephemeral-vm-provisioner/settings"
   "spoke-identity-operator|kamarkat/kamarkat/spoke-identity-operator|$PKG/kamarkat%2Fspoke-identity-operator/settings"
   "workspace-sync|kamarkat/kamarkat/workspace-sync|$PKG/kamarkat%2Fworkspace-sync/settings"
+  # Pulled with no imagePullSecret -- support-agent by the hub and every spoke,
+  # postgres-partman by the billing cluster (CNPG pulls it on each node), so
+  # both must be anonymously pullable and neither was listed.
+  "support-agent|kamarkat/kamarkat/support-agent|$PKG/kamarkat%2Fsupport-agent/settings"
+  "postgres-partman|kamarkat/kamarkat/postgres-partman|$PKG/kamarkat%2Fpostgres-partman/settings"
 )
 
 # One check for charts and images alike: ask GHCR for an anonymous pull token and
