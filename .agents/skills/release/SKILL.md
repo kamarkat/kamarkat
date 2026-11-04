@@ -94,6 +94,8 @@ after minutes of packaging, or something no gate catches at all.
     while this release still ships the version: a promise the release breaks. Each release page explains why a red version is behind, from the
     entry's `behind` items (format in the catalog header), and the docs sync
     refuses a version it cannot explain. Add or update the item on `main`.
+    When it fails, read the release check section of
+    [references/gates.md](references/gates.md): check the pin before writing a reason.
     It ends `Ready. <version> can be released.`
     Then `kakt release publish --dry-run` shows the version, files and sync a
     release would touch.

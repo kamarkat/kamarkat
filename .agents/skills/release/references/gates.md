@@ -40,3 +40,24 @@ default values, and once with every optional component on (every boolean
 A failure only in the "every optional component on" render means the defect is
 behind a switch no default box turns on. It is still a defect: the first box
 that turns it on gets an Application that renders nothing and reports Healthy.
+
+## Release check: every component behind latest has a reason
+
+`kakt release check` runs this after the gates above. It looks up each
+component's newest upstream release and compares it with what the bundle ships.
+
+| Fails with | Means | Fix |
+| :- | :- | :- |
+| `could not reach an upstream API` | A network or GitHub API failure, not a catalog problem | Run the check again |
+| `looked up something that does not exist` (`… does not exist`) | A catalog `repo` or `match` names something upstream does not have | Correct the name in the catalog entry |
+| `looked up something that does not exist` (`<package> … does not exist`, `has no image in the registry`) for a platform image | Its build has not published under the current name, e.g. after a repository rename, or its last run failed | `gh workflow run <image>.yml --ref main`, then `git pull --rebase` and run again |
+| `<component> [<v>]: no reason` | The release ships a version behind its latest release, and no `behind` item names it | Check the pin first (below), then add the item |
+| `its reason says it changes in <target>, but <v> still ships it` | A promise this release breaks | Land the change, or give the real status and a later target |
+
+### Check the pin before writing a reason
+
+A reason explains a version someone chose. Before adding one, find where the
+version is pinned and confirm it was chosen. Two versions of one component on
+one cluster (`v2.14.0, v2.2.0`), or an image `tag` in values that differs from
+the chart's own version, is a stale override left behind when the chart moved.
+Remove the override so the image follows the chart; do not explain it.

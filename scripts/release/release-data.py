@@ -57,9 +57,10 @@ def gh(path: str, paginate: bool = True) -> list[dict]:
     if r.returncode:
         err = " ".join((r.stderr or "").split()) or "no output on stderr"
         if "HTTP 404" in err:
-            # Exit 1, not 4: a missing resource is a wrong name or an unpublished
+            # Exit 5, not 4: a missing resource is a wrong name or an unpublished
             # image, and running the command again finds it missing again.
-            sys.exit(f"release-data: {path} does not exist\n  {err}")
+            print(f"release-data: {path} does not exist\n  {err}", file=sys.stderr)
+            sys.exit(5)
         # Exit 4, not 1: the caller tells a transport failure from an unexplained
         # version. A timeout reaching the API is not a catalog problem, and
         # advising someone to edit the catalog for one costs them the time it
@@ -166,8 +167,8 @@ class Upstream:
         if ("ghcr", package) not in self.cache:
             rows = gh(path)
             if not rows:
-                sys.exit(f"release-data: {package} has no image in the registry. The release ships "
-                         f"it, so its build must publish it before the release can be checked.")
+                print(f"release-data: {package} has no image in the registry", file=sys.stderr)
+                sys.exit(5)
             self.cache[("ghcr", package)] = rows
         built = [v for v in self.cache[("ghcr", package)] if v["created_at"] <= before]
         if not built:
