@@ -166,11 +166,21 @@ if [ "$CHECK" = 1 ]; then
   PREVIOUS_VERSION="$CURRENT" SKIP_PUSH=1 make publish-local VERSION="$VERSION" OWNER="$OWNER" \
     || die "the rehearsal failed a gate -- fix the cause on main before releasing"
   say "4. Every component behind its latest release has a reason"
-  scripts/release/release-data.py check dist/charts/platform-bundle/components.json \
-    || die "the versions above are behind their latest release and not explained: no reason, or a
+  # Exit 4 is a failed upstream lookup, not an unexplained version: the catalog
+  # advice below would send someone to edit a file that is not the problem.
+  set +e
+  scripts/release/release-data.py check dist/charts/platform-bundle/components.json
+  reasons_rc=$?
+  set -e
+  if [ "$reasons_rc" = 4 ]; then
+    die "the reasons check could not reach an upstream API (above). Nothing is wrong with the
+   catalog -- run the same command again."
+  elif [ "$reasons_rc" != 0 ]; then
+    die "the versions above are behind their latest release and not explained: no reason, or a
    reason whose target is this release. Fix the \`behind\` item for each in
    manifests/architecture/component-catalog.yaml (format in its header): land the change, or
    give the real status and a later target."
+  fi
   say "Ready. $VERSION can be released."
   exit 0
 fi

@@ -60,8 +60,14 @@ def gh(path: str, paginate: bool = True, missing_ok: bool = False) -> list[dict]
         if "HTTP 404" in err:
             if missing_ok:
                 return None
-            sys.exit(f"release-data: {path} does not exist\n  {err}")
-        sys.exit(f"release-data: gh api {path} failed\n  {err}")
+            print(f"release-data: {path} does not exist\n  {err}", file=sys.stderr)
+            sys.exit(4)
+        # Exit 4, not 1: the caller tells a transport failure from an unexplained
+        # version. A timeout reaching the API is not a catalog problem, and
+        # advising someone to edit the catalog for one costs them the time it
+        # takes to discover it was a network blip.
+        print(f"release-data: gh api {path} failed\n  {err}", file=sys.stderr)
+        sys.exit(4)
     return [json.loads(line) for line in r.stdout.splitlines()]
 
 
