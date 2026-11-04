@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """What a bundle version ships, against each component's newest upstream release.
 
-    soloz release inventory --version <v> --out <file>     (release-data.py inventory)
-    soloz release check                                    (release-data.py check)
+    soloz release docs <v>       runs release-data.py inventory for each version
+    soloz release check          runs release-data.py check on the rehearsal's inventory
 
 `inventory` pulls a published version's `components.json` from its bundle chart
 and records, as of the day the version was published to the registry:

@@ -11,8 +11,8 @@ import (
 // newReleaseCmd groups the platform team's release operations. Each runs the
 // script that implements it -- scripts/release.sh, scripts/argocd-hard-sync.sh,
 // scripts/release/release-data.py -- so there is one release path, and these
-// commands only name its modes. The docs' release pages are generated from
-// `inventory`, so the docs and the release check read one implementation.
+// commands only name its modes. The docs' release pages are written by
+// `docs`, so the docs and the release check read one implementation.
 //
 // They run from the root of a zero-ops checkout, where those scripts and the
 // packaging live. A box owner never runs them; their upgrade is a proposal to
@@ -47,24 +47,32 @@ func newReleaseCmd() *cobra.Command {
 		},
 	}
 
-	var out string
-	inventory := &cobra.Command{
-		Use:   "inventory",
-		Short: "Write a published version's components, each against its latest release as of the release date",
-		Long: `Write a published version's component inventory, each component annotated with
-the newest release its project had published on the version's release date,
-whether the version shipped is that release, and the catalog's reason when it is
-not. A version behind with no reason fails. The docs' release pages are generated
-from this file.`,
-		Args: cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if version == "" || out == "" {
-				return fmt.Errorf("name the published version and the file to write: --version, --out")
+	var docsDir string
+	docs := &cobra.Command{
+		Use:   "docs [version...]",
+		Short: "Add published versions to the docs' release pages, and render every release page",
+		Long: `Add published versions to the docs' release pages, and render every release page.
+
+For each version named, writes its component inventory into the docs checkout:
+each component against the newest release its project had published on the
+version's release date, whether the version shipped it, and the catalog's reason
+when it did not. A version behind with no reason fails, and nothing is written for
+it. Then renders the release and line pages from every version the docs hold.
+With no version, only renders.`,
+		RunE: func(_ *cobra.Command, versions []string) error {
+			if _, err := os.Stat(docsDir + "/docs.json"); err != nil {
+				return fmt.Errorf("no docs checkout at %s: pass --docs-dir", docsDir)
 			}
-			return runScript(nil, "scripts/release/release-data.py", "inventory", version, "--owner", owner, "--out", out)
+			for _, v := range versions {
+				out := docsDir + "/data/releases/" + v + ".json"
+				if err := runScript(nil, "scripts/release/release-data.py", "inventory", v, "--owner", owner, "--out", out); err != nil {
+					return err
+				}
+			}
+			return runScript(nil, "scripts/release/release-pages.py", docsDir)
 		},
 	}
-	inventory.Flags().StringVar(&out, "out", "", "The JSON file to write")
+	docs.Flags().StringVar(&docsDir, "docs-dir", "../kamarkat", "The docs checkout to write the release pages into")
 
 	var dryRun, noPromote, noSync bool
 	publish := &cobra.Command{
@@ -126,7 +134,7 @@ this again. Never re-publish. KUBECONFIG names the hub to drive.`,
 	}
 
 	// A failed release prints the state it left; usage text would bury it.
-	for _, c := range []*cobra.Command{check, publish, promote, sync, inventory} {
+	for _, c := range []*cobra.Command{check, publish, promote, sync, docs} {
 		c.SilenceUsage = true
 		cmd.AddCommand(c)
 	}
