@@ -69,7 +69,6 @@ components:
           baseline than the machine types in use, which is a separate question from
           availability.
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: containerd
     description: The container runtime on every node.
     license: Apache-2.0
@@ -91,20 +90,21 @@ components:
     layer: machinery
     match: ["pkg:kubelet", "pkg:kubeadm", "pkg:kubectl"]
     behind:
-      - versions: ["1.31.6"]
+      - versions: ["1.35.10"]
         status: held
-        reason: >-
-          Waits on Kubernetes: kubelet, kubeadm and kubectl are installed from the repository
-          the node's Kubernetes version names.
+        reason: Follows the node's Kubernetes version
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: Tailscale
     description: Joins the node to the tailnet when a tailnet hostname is configured for it.
     license: BSD-3-Clause
     repo: tailscale/tailscale
     layer: machinery
     match: ["pkg:tailscale"]
+    behind:
+      - versions: ["1.104.4"]
+        status: not assessed
+        reason: One patch behind; installed by the node bootstrap
 
   # ── Kubernetes control plane ────────────────────────────────────────────
   - name: Kubernetes
@@ -122,16 +122,16 @@ components:
     match: ["registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-controller-manager",
             "registry.k8s.io/kube-scheduler", "registry.k8s.io/kube-proxy", "registry.k8s.io/pause"]
     behind:
-      - versions: ["v1.31.6"]
+      - versions: ["v1.35.10"]
         status: held
-        reason: >-
-          The newest policy engine release supports Kubernetes 1.33 to 1.35, and its webhooks
-          gate every deployment, so the newest Kubernetes is not reachable while it is in the
-          stack. 1.35.10 is the destination; 1.37.2 is not available at any policy-engine
-          version.
+        reason: Policy engine supports 1.33-1.35 only
         blocked_by: Kyverno
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
+      - versions: ["3.10.1"]
+        status: held
+        reason: Pause image chosen by kubeadm, not pinned here
+        blocked_by: Kubernetes
+        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: etcd
     description: The control plane's key-value store.
     license: Apache-2.0
@@ -139,14 +139,11 @@ components:
     layer: machinery
     match: ["registry.k8s.io/etcd"]
     behind:
-      - versions: ["3.5.15-0"]
+      - versions: ["3.6.6-0"]
         status: held
-        reason: >-
-          Not independently pinned. kubeadm chooses etcd for the Kubernetes version in use, so
-          this moves only when Kubernetes does and will not reach etcd's own newest release.
+        reason: Chosen by kubeadm, not pinned here
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: CoreDNS
     description: Cluster DNS.
     license: Apache-2.0
@@ -154,14 +151,11 @@ components:
     layer: machinery
     match: ["registry.k8s.io/coredns/*"]
     behind:
-      - versions: ["v1.11.3"]
+      - versions: ["v1.13.1"]
         status: held
-        reason: >-
-          Not independently pinned. kubeadm chooses CoreDNS for the Kubernetes version in use,
-          so this moves only when Kubernetes does.
+        reason: Chosen by kubeadm, not pinned here
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   # ── Cluster lifecycle ───────────────────────────────────────────────────
   - name: Cluster API
     description: Declarative cluster lifecycle. Creates, scales and replaces the management cluster and managed clusters.
@@ -172,69 +166,28 @@ components:
     layer: machinery
     match: ["registry.k8s.io/cluster-api/*", "registry.k8s.io/capi-operator/*", "tool:clusterctl"]
     behind:
-      - versions: ["v1.10.0"]
+      - versions: ["v1.13.7"]
         status: held
-        reason: >-
-          Capped by the infrastructure provider, whose current line is tested against Cluster
-          API 1.13 and below. The newest Cluster API is unreachable until that provider ships
-          its next line.
+        reason: Infrastructure provider is tested to 1.13 only
         blocked_by: Cluster API provider for Hetzner
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["v1.8.5"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: the kubeadm bootstrap and control-plane providers were left
-          behind the core provider, so one release ships a mismatched Cluster API set. They
-          move to the core provider's version in the next release.
-        blocked_by: Cluster API
-        target: 0.1.16-rc.189
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["v0.13.0"]
+      - versions: ["v0.29.0"]
         status: held
-        reason: >-
-          The operator installs the provider versions it is given, so it moves with the
-          provider set rather than on its own. Its manifest is vendored, so the version and
-          the vendored copy move together.
+        reason: The newer operator moves to CAPI 1.14
         blocked_by: Cluster API
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: Cluster API provider for Hetzner
     description: Creates cluster machines, networks and load balancers in the cloud account.
     license: Apache-2.0
     repo: syself/cluster-api-provider-hetzner
     layer: machinery
     match: ["ghcr.io/syself/caph*"]
-    behind:
-      - versions: ["v1.0.7"]
-        status: held
-        reason: >-
-          The newer line drops Kubernetes 1.31, which the nodes still run, so it moves with
-          Kubernetes. It also still implements the deprecated Cluster API contract, which is
-          what caps Cluster API itself.
-        blocked_by: Kubernetes
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: cert-manager
     description: Issues and renews the TLS certificates for every gateway and webhook.
     license: Apache-2.0
     repo: cert-manager/cert-manager
     layer: machinery
     match: ["quay.io/jetstack/*"]
-    behind:
-      - versions: ["v1.20.2"]
-        status: held
-        reason: >-
-          Installed before the GitOps engine exists, from a release URL held in a build
-          constant, as a prerequisite of the cluster lifecycle controllers. It moves with that
-          controller set.
-        blocked_by: Cluster API
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["v1.21.1"]
-        status: not assessed
-        reason: >-
-          The managed-cluster copy is vendored separately from the prerequisite above and
-          nobody has assessed its move; the two are at different versions as a result.
-
   - name: cert-manager DNS-01 webhook
     description: Proves domain ownership for certificates through the provider's DNS.
     license: Apache-2.0
@@ -246,7 +199,6 @@ components:
         status: not assessed
         reason: >-
           A patch release behind, in a vendored render. Nobody has assessed the move.
-
   # ── GitOps and composition ──────────────────────────────────────────────
   - name: Argo CD
     description: The GitOps engine. Reconciles every cluster to the GitOps repository and the pinned bundle.
@@ -262,45 +214,15 @@ components:
     layer: machinery
     match: ["quay.io/argoproj/argocd", "ghcr.io/dexidp/*", "public.ecr.aws/docker/library/redis", "ecr-public.aws.com/docker/library/redis", "docker.io/library/haproxy"]
     behind:
-      - versions: ["v2.14.11"]
-        status: declined
-        reason: >-
-          The newest release is a breaking major: it always enforces log access control,
-          changes how resource ownership is tracked, and broadens the resources it ignores.
-          The Day-0 seed installs this chart and an Application then adopts that same release,
-          so both halves must move in one change or the engine upgrades itself while it is
-          still reconciling the first boundary.
-      - versions: ["v2.11.2"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: the managed clusters run a hand-assembled minimal install that
-          was never moved with the management cluster's, so one release ships two Argo CD
-          versions three minors apart. The newest upstream equivalent configures through far
-          more environment values than the local copy carries, so it is re-derived from
-          upstream rather than bumped.
-        target: 0.1.16-rc.189
-      - versions: ["v2.42.1"]
+      - versions: ["v3.5.7"]
         status: held
-        reason: >-
-          The identity broker the GitOps chart bundles. It is tracked against its own
-          upstream project, and the chart pins which release ships, so it moves when the
-          chart does rather than on its own. The newest broker release becomes reachable
-          when the chart carrying it is adopted.
-        blocked_by: Argo CD
-
+        reason: Newest chart ships 3.5.7
   - name: Argo CD agent
     description: Connects each managed cluster's GitOps engine to the management cluster over an outbound channel.
     license: Apache-2.0
     repo: argoproj-labs/argocd-agent
     layer: machinery
     match: ["quay.io/argoprojlabs/*"]
-    behind:
-      - versions: ["v0.9.0"]
-        status: held
-        reason: >-
-          The agent and the hub-side principal are one pair and are pinned to the same build,
-          so this moves as a pair rather than per side.
-
   - name: Argo Rollouts
     description: Progressive delivery for application workloads.
     license: Apache-2.0
@@ -310,9 +232,7 @@ components:
     behind:
       - versions: ["v1.9.1"]
         status: not assessed
-        reason: >-
-          A minor behind. Nobody has assessed the move.
-
+        reason: A minor behind. Nobody has assessed the move.
   - name: capi2argo
     description: Registers each cluster Cluster API creates with the GitOps engine.
     license: Apache-2.0
@@ -326,70 +246,30 @@ components:
     repo: crossplane/crossplane
     layer: machinery
     match: ["xpkg.crossplane.io/crossplane/*"]
-    behind:
-      - versions: ["v1.20.5"]
-        status: declined
-        reason: >-
-          The newest release is a breaking major: it removes claims, so every composite
-          definition has to be re-declared before the engine can move. Taking it is a
-          migration of the definitions that provision clusters and tenant databases, not a
-          version bump.
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: Crossplane Kubernetes provider
     description: Lets a composition create objects in any cluster the platform manages.
     license: Apache-2.0
     repo: crossplane-contrib/provider-kubernetes
     layer: machinery
     match: [xpkg.upbound.io/crossplane-contrib/provider-kubernetes]
-    behind:
-      - versions: ["v1.3.1"]
-        status: held
-        reason: >-
-          Waits on Crossplane: the provider line has to match the engine major, because the
-          scope of its managed resources differs between them.
-        blocked_by: Crossplane
-
   - name: Crossplane SQL provider
     description: Creates application databases and roles inside the platform database.
     license: Apache-2.0
     repo: crossplane-contrib/provider-sql
     layer: capability
     match: [xpkg.upbound.io/crossplane-contrib/provider-sql]
-    behind:
-      - versions: ["v0.14.0"]
-        status: held
-        reason: >-
-          Waits on Crossplane, for the same managed-resource scope reason as the other
-          provider.
-        blocked_by: Crossplane
-
   - name: Patch and transform function
     description: The composition function the platform's compositions are written in.
     license: Apache-2.0
     repo: crossplane-contrib/function-patch-and-transform
     layer: machinery
     match: [xpkg.upbound.io/crossplane-contrib/function-patch-and-transform]
-    behind:
-      - versions: ["v0.8.0"]
-        status: held
-        reason: >-
-          Waits on Crossplane: composition functions are resolved by the engine, so the
-          function moves with it.
-        blocked_by: Crossplane
-
   - name: Reloader
     description: Restarts a workload when a secret or config map it reads changes.
     license: Apache-2.0
     repo: stakater/Reloader
     layer: machinery
     match: ["ghcr.io/stakater/*"]
-    behind:
-      - versions: ["v1.2.1"]
-        status: not assessed
-        reason: >-
-          Behind by several minors. Nobody has assessed the move.
-
   # ── Networking ──────────────────────────────────────────────────────────
   - name: Cilium
     description: Container networking, network policy and the Gateway API implementation.
@@ -402,17 +282,6 @@ components:
     # Cilium's releases, so a current certgen read as far behind.
     repos:
       quay.io/cilium/certgen: cilium/certgen
-    behind:
-      - versions: ["v1.17.18"]
-        status: held
-        reason: >-
-          The shipped release supports Kubernetes below 1.33, so it moves with Kubernetes
-          rather than ahead of it. Upstream supports consecutive-minor upgrades only, and the
-          delivered payload carries hand-applied patches that must be re-applied to any new
-          render.
-        blocked_by: Kubernetes
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: agentgateway
     description: The gateway that serves application and platform routes.
     license: Apache-2.0
@@ -420,72 +289,36 @@ components:
     layer: workload-infrastructure
     match: ["cr.agentgateway.dev/*"]
     behind:
-      - versions: ["v1.4.1", "v1.6.0"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: the gateway ships at two versions in one release, one on the
-          management cluster and one in the managed-cluster catalogue. They converge in the
-          next release.
-        target: 0.1.16-rc.189
       - versions: ["digest-pinned"]
         status: scheduled
         reason: >-
           DEFECT, not a hold: a third copy carries a digest with no tag, so its version is
           unreportable. A tag is restored alongside the digest in the next release.
         target: 0.1.16-rc.189
-
   - name: ExternalDNS
     description: Publishes DNS records for every public hostname.
     license: Apache-2.0
     repo: kubernetes-sigs/external-dns
     layer: machinery
     match: ["registry.k8s.io/external-dns/*"]
-    behind:
-      - versions: ["v0.15.0"]
-        status: not assessed
-        reason: >-
-          Behind by several minors, pinned as an image rather than installed from a chart.
-          Nobody has assessed the move.
-
   - name: ExternalDNS provider webhook
     description: Connects ExternalDNS to the provider's DNS service.
     license: Apache-2.0
     repo: hetzner/external-dns-hetzner-webhook
     layer: machinery
     match: [docker.io/hetzner/external-dns-hetzner-webhook]
-    behind:
-      - versions: ["v0.3.4"]
-        status: not assessed
-        reason: >-
-          Behind by two minors and paired with the DNS controller above. Nobody has assessed
-          the move.
-        blocked_by: ExternalDNS
-
   - name: NodeLocal DNSCache
     description: A DNS cache on every node.
     license: Apache-2.0
     repo: kubernetes/dns
     layer: machinery
     match: ["registry.k8s.io/dns/*"]
-    behind:
-      - versions: ["1.23.1"]
-        status: not assessed
-        reason: >-
-          Behind by several minors, pinned in a hand-assembled manifest on both the management
-          and managed clusters. Nobody has assessed the move.
-
   - name: Cluster proportional autoscaler
     description: Scales cluster DNS with the size of the cluster.
     license: Apache-2.0
     repo: kubernetes-sigs/cluster-proportional-autoscaler
     layer: machinery
     match: ["registry.k8s.io/cpa/*"]
-    behind:
-      - versions: ["v1.9.0"]
-        status: not assessed
-        reason: >-
-          A minor behind, pinned beside the DNS cache it scales. Nobody has assessed the move.
-
   - name: NGINX
     description: Serves static pages and public assets.
     license: BSD-2-Clause
@@ -499,7 +332,6 @@ components:
         reason: >-
           Behind by several minors, in a vendored chart's values. Nobody has assessed the
           move.
-
   # ── Cloud integration and storage ───────────────────────────────────────
   - name: Hetzner cloud controller manager
     description: Node lifecycle and load balancers in the cloud account.
@@ -520,7 +352,6 @@ components:
         reason: >-
           Behind by several minors. Nobody has assessed the move; the driver is delivered as a
           hand-assembled manifest, so its sidecars are pinned here rather than by a chart.
-
   - name: CSI sidecars
     description: The standard Kubernetes storage sidecars the CSI driver runs with.
     license: Apache-2.0
@@ -540,20 +371,12 @@ components:
           Five sidecars on five independent release series, pinned beside the storage driver's
           manifest. Each has its own newest release; none has been assessed.
         blocked_by: Hetzner CSI driver
-
   - name: Local path provisioner
     description: Node-local volumes on clusters without cloud block storage.
     license: Apache-2.0
     repo: rancher/local-path-provisioner
     layer: machinery
     match: ["docker.io/rancher/*"]
-    behind:
-      - versions: ["v0.0.30"]
-        status: not assessed
-        reason: >-
-          Behind by several patch releases, pinned in a hand-assembled manifest. Nobody has
-          assessed the move.
-
   # ── Policy and secrets ──────────────────────────────────────────────────
   - name: Kyverno
     description: Admission policy. Enforces the platform's rules on everything a cluster admits.
@@ -562,14 +385,6 @@ components:
     layer: machinery
     match: ["reg.kyverno.io/*", "ghcr.io/kyverno/*"]
     behind:
-      - versions: ["v1.19.1"]
-        status: scheduled
-        reason: >-
-          A patch release behind. The version is load-bearing for the Kubernetes destination,
-          so it moves deliberately rather than with routine bumps; 1.19.2 is the newest of the
-          line that supports the target Kubernetes.
-        target: 0.1.16-rc.189
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
       - versions: ["latest"]
         status: scheduled
         reason: >-
@@ -577,20 +392,12 @@ components:
           it runs is whatever the registry served last. It is pinned by digest in the next
           release.
         target: 0.1.16-rc.189
-
   - name: External Secrets
     description: Secret delivery. Copies each workload's secrets from the secret store into its namespace.
     license: Apache-2.0
     repo: external-secrets/external-secrets
     layer: machinery
     match: ["ghcr.io/external-secrets/*", "oci.external-secrets.io/*"]
-    behind:
-      - versions: ["v2.2.0"]
-        status: not assessed
-        reason: >-
-          Behind by several minors. Nobody has assessed the move; the operator serves the API
-          versions the platform's objects already use, so no object migration is expected.
-
   - name: Infisical
     description: The secret store. Holds every platform and application secret.
     license: "MIT (enterprise directory unused)"
@@ -603,20 +410,12 @@ components:
         reason: >-
           Behind by several patch releases, in a vendored chart. Nobody has assessed the move,
           and it runs database migrations on start, so it needs its own validation.
-
   - name: Infisical PKI issuer
     description: Issues internal certificates from the secret store's certificate authority.
     license: MIT
     repo: Infisical/infisical-issuer
     layer: machinery
     match: ["docker.io/infisical/pki-issuer"]
-    behind:
-      - versions: ["v0.2.0"]
-        status: not assessed
-        reason: >-
-          The newest release is a major. Nobody has assessed what it changes for the issuer
-          the platform declares.
-
   # ── Identity ────────────────────────────────────────────────────────────
   - name: ZITADEL
     description: The identity provider. Sign-in for people and identities for applications.
@@ -630,7 +429,9 @@ components:
         reason: >-
           Behind by several minors within the same major, in a vendored chart. It runs
           database migrations on start, so the move needs its own validation.
-
+      - versions: ["v4.19.2"]
+        status: held
+        reason: Newest chart ships 4.19.2
   # ── Data ────────────────────────────────────────────────────────────────
   - name: CloudNativePG
     description: The database operator. Runs PostgreSQL clusters with backups and failover.
@@ -647,7 +448,6 @@ components:
           support.
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: PostgreSQL
     description: The platform database and each application's database.
     license: PostgreSQL
@@ -657,13 +457,6 @@ components:
     layer: capability
     match: ["ghcr.io/cloudnative-pg/postgresql", docker.io/library/postgres]
     behind:
-      - versions: ["16.2"]
-        status: held
-        reason: >-
-          The shared managed-cluster store serves tenant applications, which do not select
-          their own major, so it moves only when a major is known good for every consumer on
-          the box.
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
       - versions: ["15-alpine", "16-alpine"]
         status: declined
         reason: >-
@@ -672,7 +465,10 @@ components:
           store documents support but has an unresolved fresh-install failure on it, and the
           secret store documents only a floor.
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
+      - versions: ["17.11-standard-bookworm"]
+        status: declined
+        reason: Chosen per application; its consumers do not support 18
+        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: Redis
     description: The platform cache.
     license: "BSD-3-Clause (7.x); AGPL-3.0-only (8.x)"
@@ -680,13 +476,6 @@ components:
     layer: capability
     match: [docker.io/library/redis]
     behind:
-      - versions: ["7.2-alpine", "7.2.8-alpine", "8.6-alpine"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: three different versions of the same cache ship in one release,
-          from separate manifests that were never reconciled. They converge on one version in
-          the next release.
-        target: 0.1.16-rc.189
       - versions: ["digest-pinned"]
         status: scheduled
         reason: >-
@@ -694,7 +483,6 @@ components:
           report what it runs and nobody can tell whether it is current. A tag is restored
           alongside the digest in the next release.
         target: 0.1.16-rc.189
-
   # ── Observability ───────────────────────────────────────────────────────
   - name: Grafana Alloy
     description: Collects metrics and logs on every node and cluster.
@@ -702,12 +490,6 @@ components:
     repo: grafana/alloy
     layer: capability
     match: ["docker.io/grafana/alloy"]
-    behind:
-      - versions: ["v1.20.1"]
-        status: not assessed
-        reason: >-
-          A patch behind, in a vendored render. Nobody has assessed the move.
-
   - name: Loki
     description: Log storage and search.
     license: AGPL-3.0-only
@@ -721,16 +503,6 @@ components:
     repo: grafana/grafana
     layer: capability
     match: ["docker.io/grafana/grafana"]
-    behind:
-      - versions: ["13.0.1"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: the instance carries no image at all, so its version is whatever
-          the operator release defaults to and an operator bump moves it silently. An explicit
-          image is pinned in the next release.
-        blocked_by: Grafana operator
-        target: 0.1.16-rc.189
-
   - name: Grafana operator
     description: Manages dashboards and data sources as declarations.
     license: Apache-2.0
@@ -743,7 +515,6 @@ components:
         reason: >-
           A minor behind. Nobody has assessed the move; it also sets the instance version
           today, which is the defect recorded against the instance.
-
   - name: VictoriaMetrics operator
     description: Runs the metrics stores.
     license: Apache-2.0
@@ -756,7 +527,6 @@ components:
         reason: >-
           Two patch releases behind, in the same vendored render as the stores. The operator
           and its config reloader move together because one render produces both.
-
   - name: VictoriaMetrics
     description: The metrics store, rule evaluation and the authenticating proxy in front of them, run by the VictoriaMetrics operator.
     license: Apache-2.0
@@ -770,7 +540,6 @@ components:
           Behind by three patch releases, in a vendored render whose values are recorded in
           prose rather than a values file, so re-rendering has to be reconstructed before it
           can be trusted.
-
   - name: Alertmanager
     description: Routes the alerts rule evaluation raises, run by the VictoriaMetrics operator.
     license: Apache-2.0
@@ -783,7 +552,6 @@ components:
         reason: >-
           A patch behind, delivered by the observability operator rather than pinned directly.
           Nobody has assessed the move.
-
   - name: kube-state-metrics
     description: Exposes the state of Kubernetes objects as metrics.
     license: Apache-2.0
@@ -791,16 +559,11 @@ components:
     layer: capability
     match: ["registry.k8s.io/kube-state-metrics/*"]
     behind:
-      - versions: ["v2.14.0"]
+      - versions: ["v2.19.1"]
         status: held
-        reason: >-
-          Each release of this exporter is built against one Kubernetes client version, and
-          the project supports only the pairing. The release matching the target Kubernetes is
-          not the newest one, so this is capped by the Kubernetes destination rather than free
-          to move.
+        reason: Newer builds target Kubernetes 1.36
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: metrics-server
     description: Resource metrics for autoscaling and `kubectl top`.
     license: Apache-2.0
@@ -808,12 +571,9 @@ components:
     layer: machinery
     match: ["registry.k8s.io/metrics-server/*"]
     behind:
-      - versions: ["v0.7.2"]
+      - versions: ["v0.9.0"]
         status: held
-        reason: >-
-          The newest application release has no chart yet, and this is installed from a chart,
-          so the reachable version is the newest the chart ships.
-
+        reason: Newest release has no chart yet
   - name: Headlamp
     description: The cluster console.
     license: Apache-2.0
@@ -823,9 +583,7 @@ components:
     behind:
       - versions: ["v0.45.0"]
         status: not assessed
-        reason: >-
-          A minor behind. Nobody has assessed the move.
-
+        reason: A minor behind. Nobody has assessed the move.
   # ── Utilities ───────────────────────────────────────────────────────────
   - name: kubectl
     description: Runs one-off jobs against the cluster API.
@@ -834,14 +592,11 @@ components:
     layer: machinery
     match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl", "docker.io/bitnamilegacy/kubectl"]
     behind:
-      - versions: ["v1.31.6"]
+      - versions: ["v1.35.10"]
         status: held
-        reason: >-
-          Waits on Kubernetes: this is the client the node bootstrap and init containers run,
-          held within one minor of the API server.
+        reason: Held within one minor of the API server
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: BusyBox
     description: Init steps that prepare a volume before its workload starts.
     license: GPL-2.0-only
@@ -849,13 +604,6 @@ components:
     track: dockerhub
     layer: machinery
     match: [docker.io/library/busybox]
-    behind:
-      - versions: ["1.37.0"]
-        status: not assessed
-        reason: >-
-          A minor behind. A helper image in hand-written manifests, with no chart governing
-          it.
-
   - name: Agent sandbox controller
     description: Runs isolated, short-lived sandboxes for application jobs.
     license: Apache-2.0
@@ -868,7 +616,6 @@ components:
         reason: >-
           The newest release is a major, crossing 1.0. Nobody has assessed what it changes for
           the sandbox resources the platform declares.
-
   - name: Kubernetes toolbox image
     description: A container image with kubectl and other Kubernetes tools; runs the node labeler.
     license: MIT
@@ -877,13 +624,11 @@ components:
     layer: machinery
     match: ["docker.io/alpine/k8s"]
     behind:
-      - versions: ["1.31.6"]
+      - versions: ["1.35.10"]
         status: held
-        reason: >-
-          Waits on Kubernetes: the image tracks the cluster's Kubernetes minor.
+        reason: Tracks the cluster's Kubernetes minor
         blocked_by: Kubernetes
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-
   - name: wait4x
     description: Waits until a dependency, such as a database, accepts connections before its workload starts.
     license: Apache-2.0
@@ -896,7 +641,6 @@ components:
         reason: >-
           Behind by patch releases. A helper image used by init containers to wait on
           dependencies.
-
   - name: Cluster Autoscaler
     description: Adds and removes worker nodes as workloads need them.
     license: Apache-2.0
@@ -904,6 +648,12 @@ components:
     tag: '^cluster-autoscaler-(\d+)\.(\d+)\.(\d+)$'
     layer: machinery
     match: ["registry.k8s.io/autoscaling/*"]
+    behind:
+      - versions: ["v1.35.2"]
+        status: held
+        reason: Its minor follows Kubernetes
+        blocked_by: Kubernetes
+        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
 
   - name: curl
     description: An HTTP client image for one-time setup jobs and network probes.
@@ -919,7 +669,6 @@ components:
           DEFECT, not a hold: pinned by digest with no tag, so its version is unreportable. A
           tag is restored alongside the digest in the next release.
         target: 0.1.16-rc.189
-
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
     description: Reconciles the management cluster's own platform state.
@@ -984,7 +733,6 @@ components:
           but the commit that pins it back into the deployment never landed, so the newer
           image was published and never shipped. The pin-back lands in the next release.
         target: 0.1.16-rc.189
-
   - name: Formance Ledger
     description: The ledger Credit Authority records every credit grant and spend in.
     license: MIT
@@ -998,7 +746,6 @@ components:
           DEFECT, not a hold: pinned by digest with no tag, so the release cannot report which
           ledger version it runs. A tag is restored alongside the digest in the next release.
         target: 0.1.16-rc.189
-
   # ── Billing (ADR-113) ───────────────────────────────────────────────────
   - name: Lago
     description: The billing engine. Rates usage into invoices, run unmodified.
@@ -1006,6 +753,10 @@ components:
     repo: getlago/lago
     layer: capability
     match: ["docker.io/getlago/api"]
+    behind:
+      - versions: ["v1.55.0"]
+        status: not assessed
+        reason: One minor behind; not assessed
 
   - name: Lago document renderer
     description: Renders the billing engine's invoices as PDF.
@@ -1013,6 +764,11 @@ components:
     repo: getlago/lago-gotenberg
     layer: capability
     match: ["docker.io/getlago/lago-gotenberg"]
+    behind:
+      - versions: ["7.8.2"]
+        status: held
+        reason: The renderer the engine's release pins
+        blocked_by: Lago
 
   - name: PostgreSQL with pg_partman
     description: The billing engine's database image. PostgreSQL with the partitioning extension the engine requires, built by the platform.
