@@ -37,7 +37,8 @@ images:
   # The engine's queue: the Redis the platform's tenant cache pins.
   queue:
     repository: docker.io/library/redis
-    digest: "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2"
+    tag: "8.10.3-alpine"
+    digest: "sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537"
   # The gateway: the AgentGateway release the Credit Authority runs (v1.6.0).
   gateway:
     repository: cr.agentgateway.dev/agentgateway

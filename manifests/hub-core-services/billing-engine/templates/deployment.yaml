@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: queue
-          image: {{ printf "%s@%s" $img.queue.repository (required "images.queue.digest is required (ADR-113)" $img.queue.digest) }}
+          image: {{ printf "%s:%s@%s" $img.queue.repository (required "images.queue.tag is required (ADR-113)" $img.queue.tag) (required "images.queue.digest is required (ADR-113)" $img.queue.digest) }}
           restartPolicy: Always
           command: ["redis-server"]
           args:

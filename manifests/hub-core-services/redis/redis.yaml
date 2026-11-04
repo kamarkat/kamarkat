@@ -88,7 +88,7 @@ spec:
         # NOT aof-load-truncated. Redis distinguishes the two: `truncated` is for
         # an AOF cut short at a command boundary, this was a CORRUPT tail, and the
         # binary carries both options and both messages separately. Verified in the
-        # pinned image (redis:8.6-alpine, v8.6.6), not assumed from upstream docs.
+        # pinned image (redis:8.10.3-alpine), not assumed from upstream docs.
         #
         # This is the durable half. The incident's own repair was
         # `redis-check-aof --fix` against a verified byte-identical snapshot; see
