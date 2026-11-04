@@ -397,6 +397,11 @@ components:
     repo: cilium/cilium
     layer: machinery
     match: ["quay.io/cilium/*"]
+    # certgen is its own project, shipped by the Cilium chart and matched here by
+    # the quay.io/cilium/* glob. Without its own repo it was compared against
+    # Cilium's releases, so a current certgen read as far behind.
+    repos:
+      quay.io/cilium/certgen: cilium/certgen
     behind:
       - versions: ["v1.17.18"]
         status: held
