@@ -5,6 +5,6 @@ resources:
 - manager.yaml
 
 images:
-- digest: sha256:b1198ef017ca812d7b670fdc6037cca58408c1f5b68e853092e55b937037a36f
+- digest: sha256:980ea2ee48960d1912c3bcac765fd09caa23c9efa40f0099857a17fbbf09c431
   name: controller
   newName: ghcr.io/kamarkat/kamarkat/spoke-identity-operator
