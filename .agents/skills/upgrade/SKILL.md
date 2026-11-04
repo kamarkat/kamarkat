@@ -28,9 +28,10 @@ release reports the component twice at two versions with nobody having decided
 that. Every such split found so far was an accident of delivery, not a decision.
 
 Exceptions exist and are narrow: where two clusters run a component for different
-applications with different supported ranges (a database major chosen per
-application, say), the versions differ by design. Record that in the catalog as
-the reason; do not let it excuse a split nobody chose.
+applications with different supported ranges, the versions differ by design.
+PostgreSQL is the standing case, and `references/databases.md` records how its
+majors are chosen and why `TenantDatabase` exposes none. Record the reason in the
+catalog; do not let the exception excuse a split nobody chose.
 
 **Latest-compatible, not latest.** Every component is in scope. Each takes its
 newest upstream release that works with the target Kubernetes version and the
@@ -104,6 +105,10 @@ infrastructure provider, clusterctl, packer, cert-manager and the GitOps chart.
 Those are the versions the CLI must know *before* GitOps exists. Every other
 component's version lives somewhere else, and a typical upgrade touches
 twenty-odd directories.
+
+`references/delivery-map.md` is the map of which mechanism each component is
+actually in, plus every file the Kubernetes version reaches. Start there rather
+than grepping: it turns a sweep into a short list.
 
 Do not look for one file, and do not try to create one. Several of these
 mechanisms are the declaration a controller reconciles, so a central copy would
@@ -193,6 +198,10 @@ migration nobody asked for.
   use.
 - Build what you touched. A version constant that does not compile is a fast
   failure; a vendored manifest that no longer matches its digest is a slow one.
+- Refresh the generated mirror and update the catalog's `behind` items in the
+  same change as the pins. `references/release-gates.md` lists the gates a
+  version change trips, what each means, and the order to fix them — read it
+  before the first rehearsal, not after it refuses.
 
 ## 7. Record the decisions as you make them
 
