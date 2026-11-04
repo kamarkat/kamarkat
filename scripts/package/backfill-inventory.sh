@@ -10,7 +10,7 @@
 # the wrong one. Versions are compared in the order given, each against the one
 # before it.
 #
-# Upstream renders and fetched manifests are cached in dist/inventory-cache, the
+# Upstream renders and fetched manifests are cached in dist/_inventory-cache, the
 # cache publish.sh uses, so a chart rendered for one version or release is not
 # downloaded again for the next.
 #
@@ -53,7 +53,7 @@ for v in "$@"; do
     git -C "$HERE" worktree add --detach -q "$WORK/$v/src" "$commit"
 
     args=(--repo "$WORK/$v/src" --catalog "$HERE/manifests/architecture/component-catalog.yaml"
-          --expand "$HERE/dist/inventory-cache")
+          --expand "$HERE/dist/_inventory-cache")
     if [ -n "$previous" ]; then
         args+=(--previous-version "$previous")
         [ -f "$OUT/$previous.json" ] && args+=(--previous "$OUT/$previous.json")

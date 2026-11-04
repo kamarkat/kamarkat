@@ -244,7 +244,17 @@ EOF
 # PREVIOUS_VERSION names the version this one is compared against. Its inventory
 # is read from its own published chart; a version published before inventories
 # existed carries none, and is said to rather than compared against nothing.
-inventory_args=(--expand dist/inventory-cache)
+# dist/_inventory-cache, with the underscore. The scraper writes UPSTREAM GO
+# SOURCE here -- kubeadm's constants, fetched to read the etcd version -- and
+# dist/ is gitignored but Go walks the filesystem, not git. Under any name Go
+# would compile, `go mod tidy` takes that file for part of this module: it added
+# k8s.io/kubernetes and k8s.io/component-base as DIRECT requirements and raised
+# some forty transitive versions through MVS, including the test-only ginkgo and
+# gomega, whose full hashes it then did not write because no test was built. The
+# next `go vet ./...` failed on the missing go.sum entry. Go ignores a directory
+# whose name begins with `_` outright, which is the only part of this that
+# cannot be forgotten.
+inventory_args=(--expand dist/_inventory-cache)
 if [ -n "${PREVIOUS_VERSION:-}" ]; then
     rm -rf dist/previous && mkdir -p dist/previous
     helm pull "oci://ghcr.io/${OWNER}/charts/environment-manager" --version "$PREVIOUS_VERSION" \
