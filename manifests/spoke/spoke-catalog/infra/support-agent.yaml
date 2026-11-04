@@ -194,7 +194,7 @@ spec:
           # Rewritten in place by .github/workflows/support-agent.yml.
           # Not pullable until that has run, which is deliberate: a
           # visible failure beats an unpinned image.
-          image: ghcr.io/kamarkat/kamarkat/support-agent@sha256:2e30f0e97c40e9b7df5b7e158f6c3c860a72f0f33f2b93f13ce6ab5998db37e4
+          image: ghcr.io/kamarkat/kamarkat/support-agent@sha256:94b18661d576e5a25dd55fc6b216dd1e02464aa0290f8f87bd8f097749fb0592
           args:
             - --allowlist=/etc/support-agent/allowlist.yaml
             - --interval=1h

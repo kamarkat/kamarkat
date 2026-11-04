@@ -72,7 +72,7 @@ spec:
             # never published this image; the first CI run replaces it with a
             # real digest and the workflow fails loudly if it cannot.
             - name: WORKSPACE_SYNC_IMAGE
-              value: ghcr.io/kamarkat/kamarkat/workspace-sync@sha256:e08dda56940ceefe137db3332a1d0687b2b945bf2e9ad88a35372cb07e21eefb
+              value: ghcr.io/kamarkat/kamarkat/workspace-sync@sha256:6c2c57d4f2a91b769fac3e139b518ccbc0b6a517838cdf2ec0a7e08a8b6c4363
             # The object-store credential and location are NOT set here. The
             # operator's own defaults are the platform convention:
             #   WORKSPACE_SYNC_SECRET  {fleetId}-sdk-secrets  (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY)
