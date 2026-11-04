@@ -42,7 +42,7 @@ patches:
 # Same image as the operator, pinned by the same CI step (both kustomizations
 # are updated together in .github/workflows/ephemeral-job-operator.yml).
 images:
-- digest: sha256:1f21045648b505bead52752b68da504d9016be8b5a8ef35c7210d0d979db09ae
+- digest: sha256:72e315fc18fa7d906b78881e394946d1b6f84bf65edc316a0c34015809bf88ad
   name: ephemeral-job-operator
   newName: ghcr.io/kamarkat/kamarkat/ephemeral-job-operator
 apiVersion: kustomize.config.k8s.io/v1beta1
