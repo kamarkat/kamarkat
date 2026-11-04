@@ -123,7 +123,7 @@ spec:
   # reconcile" setting and defeats all three: a Secret deleted by hand stayed
   # deleted, and VMAuth answered 401 until someone noticed.
   #
-  # refreshPolicy CreatedOnce is how both halves hold at once (ESO v2.2.0, the API
+  # refreshPolicy CreatedOnce is how both halves hold at once (ESO v2.14.0, the API
   # served on this cluster): ESO keeps reconciling and recreates the Secret whenever
   # it does not exist, and does not rewrite it thereafter -- so the generator does
   # not mint a new token under running consumers every interval. Rotation becomes a

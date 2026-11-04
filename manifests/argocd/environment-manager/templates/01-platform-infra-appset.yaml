@@ -481,7 +481,6 @@ spec:
 
               image:
                 repository: ghcr.io/external-secrets/external-secrets
-                tag: "v2.2.0"
                 pullPolicy: IfNotPresent
 
               resources:

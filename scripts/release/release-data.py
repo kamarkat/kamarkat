@@ -45,23 +45,21 @@ CATALOG = Path(__file__).resolve().parents[2] / "manifests/architecture/componen
 RELEASE_TAG = r"^v?(\d+)\.(\d+)\.(\d+)$"
 
 
-def gh(path: str, paginate: bool = True, missing_ok: bool = False) -> list[dict] | None:
-    """The API's rows, or None when it has no such resource and that is expected.
+def gh(path: str, paginate: bool = True) -> list[dict]:
+    """The API's rows.
 
     `check=True` raised a CalledProcessError whose message was the command line,
     so a 404 on one package surfaced as a traceback that named no component and
-    discarded the reason gh printed. Every failure now says what gh said, and a
-    caller that can carry on without the resource asks for `missing_ok`.
+    discarded the reason gh printed. Every failure now says what gh said.
     """
     r = subprocess.run(["gh", "api", *(["--paginate"] if paginate else []), path, "--jq", ".[] | @json"],
                        capture_output=True, text=True)
     if r.returncode:
         err = " ".join((r.stderr or "").split()) or "no output on stderr"
         if "HTTP 404" in err:
-            if missing_ok:
-                return None
-            print(f"release-data: {path} does not exist\n  {err}", file=sys.stderr)
-            sys.exit(4)
+            # Exit 1, not 4: a missing resource is a wrong name or an unpublished
+            # image, and running the command again finds it missing again.
+            sys.exit(f"release-data: {path} does not exist\n  {err}")
         # Exit 4, not 1: the caller tells a transport failure from an unexplained
         # version. A timeout reaching the API is not a catalog problem, and
         # advising someone to edit the catalog for one costs them the time it
@@ -166,16 +164,10 @@ class Upstream:
         owner, name = package.split("/", 1)
         path = f"/orgs/{owner}/packages/container/{name.replace('/', '%2F')}/versions?per_page=100"
         if ("ghcr", package) not in self.cache:
-            rows = gh(path, missing_ok=True)
-            if rows is None:
-                # The platform builds this image, but nothing has been published
-                # under that name: a component whose build workflow has not run
-                # yet, usually because the commit that adds it is not pushed.
-                # There is no latest for it to be behind, so it is reported as
-                # neither current nor behind rather than failing the run.
-                print(f"release-data: {package} is not published in the registry; "
-                      f"reporting no latest version for it", file=sys.stderr)
-                rows = []
+            rows = gh(path)
+            if not rows:
+                sys.exit(f"release-data: {package} has no image in the registry. The release ships "
+                         f"it, so its build must publish it before the release can be checked.")
             self.cache[("ghcr", package)] = rows
         built = [v for v in self.cache[("ghcr", package)] if v["created_at"] <= before]
         if not built:
