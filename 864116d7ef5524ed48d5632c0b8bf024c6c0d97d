@@ -1,0 +1,24 @@
+Commit message is narrower than the commit.
+
+The message describes only the catalog change -- dropping `behind` items for
+versions this release no longer ships, which is the 13 deletions in
+manifests/architecture/component-catalog.yaml.
+
+The other five files in this commit are unrelated release-tooling work that was
+already staged in the shared tree when the commit was made, and were swept in by
+`git add <one path> && git commit`, which commits the whole index rather than the
+named path:
+
+  .agents/skills/release/SKILL.md
+  .agents/skills/release/references/doc-sync.md
+  cmd/soloz/release.go
+  scripts/release.sh
+  scripts/release/release-data.py   (new, 383 lines)
+
+scripts/release/release-data.py is where the upstream-lookup and reasons logic
+moved to from the docs repository's scripts/sync-releases.py. It is introduced
+here only by accident of staging; search for it by path rather than by this
+message.
+
+Nothing in the commit is wrong or unwanted -- the grouping and the message are.
+Recorded rather than rewritten because the commit was already published.
