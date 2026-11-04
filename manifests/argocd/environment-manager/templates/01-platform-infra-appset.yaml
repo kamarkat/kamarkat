@@ -328,7 +328,7 @@ spec:
                     requests:
                       cpu: 100m
                       memory: 256Mi
-{{- if eq .Values.provider "hybrid" }}
+                {{- if eq .Values.provider "hybrid" }}
                 # HYBRID ONLY: the admission webhook runs on the on-prem worker,
                 # beside the other fail-closed webhooks (ADR-046 §11).
                 #
@@ -380,7 +380,7 @@ spec:
                 nodeSelector:
                   workload-location: on-prem
                   node-role.kubernetes.io/worker: ""
-{{- end }}
+                {{- end }}
 
               # Webhook configuration
               #
@@ -435,7 +435,7 @@ spec:
                     memory: 128Mi
                   limits:
                     memory: 256Mi
-{{- if eq .Values.provider "hybrid" }}
+                {{- if eq .Values.provider "hybrid" }}
               # HYBRID ONLY: the webhook runs beside the API server.
               #
               # It is a validating admission webhook, so the API server calls it
@@ -464,7 +464,7 @@ spec:
                 nodeSelector:
                   workload-location: on-prem
                   node-role.kubernetes.io/worker: ""
-{{- end }}
+                {{- end }}
 
               crds:
                 createClusterExternalSecret: true
