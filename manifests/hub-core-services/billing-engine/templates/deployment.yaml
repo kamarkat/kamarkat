@@ -14,7 +14,7 @@ The billing engine's pod, in the order Kubernetes starts it (ADR-113 §4):
 {{- $img := .Values.images -}}
 {{- $hubDomain := required "global.hubDomain is required: the engine's public address" .Values.global.hubDomain -}}
 {{- $hardened := dict "allowPrivilegeEscalation" false "readOnlyRootFilesystem" true "capabilities" (dict "drop" (list "ALL")) -}}
-{{- $engineImage := printf "%s@%s" $img.engine.repository (required "images.engine.digest is required (ADR-113)" $img.engine.digest) -}}
+{{- $engineImage := printf "%s:%s@%s" $img.engine.repository (required "images.engine.tag is required (ADR-113)" $img.engine.tag) (required "images.engine.digest is required (ADR-113)" $img.engine.digest) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
