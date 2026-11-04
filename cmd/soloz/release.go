@@ -9,8 +9,10 @@ import (
 )
 
 // newReleaseCmd groups the platform team's release operations. Each runs the
-// script that implements it -- scripts/release.sh, scripts/argocd-hard-sync.sh --
-// so there is one release path, and these commands only name its modes.
+// script that implements it -- scripts/release.sh, scripts/argocd-hard-sync.sh,
+// scripts/release/release-data.py -- so there is one release path, and these
+// commands only name its modes. The docs' release pages are generated from
+// `inventory`, so the docs and the release check read one implementation.
 //
 // They run from the root of a zero-ops checkout, where those scripts and the
 // packaging live. A box owner never runs them; their upgrade is a proposal to
@@ -36,16 +38,33 @@ func newReleaseCmd() *cobra.Command {
 		return args
 	}
 
-	var docsDir string
 	check := &cobra.Command{
 		Use:   "check",
 		Short: "Rehearse the next version and check every component behind latest has a reason; pushes nothing",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runScript(env("DOCS_DIR="+docsDir), "scripts/release.sh", withVersion("--check")...)
+			return runScript(env(), "scripts/release.sh", withVersion("--check")...)
 		},
 	}
-	check.Flags().StringVar(&docsDir, "docs-dir", "../kamarkat", "The docs checkout, whose sync-releases.py checks the reasons")
+
+	var out string
+	inventory := &cobra.Command{
+		Use:   "inventory",
+		Short: "Write a published version's components, each against its latest release as of the release date",
+		Long: `Write a published version's component inventory, each component annotated with
+the newest release its project had published on the version's release date,
+whether the version shipped is that release, and the catalog's reason when it is
+not. A version behind with no reason fails. The docs' release pages are generated
+from this file.`,
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if version == "" || out == "" {
+				return fmt.Errorf("name the published version and the file to write: --version, --out")
+			}
+			return runScript(nil, "scripts/release/release-data.py", "inventory", version, "--owner", owner, "--out", out)
+		},
+	}
+	inventory.Flags().StringVar(&out, "out", "", "The JSON file to write")
 
 	var dryRun, noPromote, noSync bool
 	publish := &cobra.Command{
@@ -107,7 +126,7 @@ this again. Never re-publish. KUBECONFIG names the hub to drive.`,
 	}
 
 	// A failed release prints the state it left; usage text would bury it.
-	for _, c := range []*cobra.Command{check, publish, promote, sync} {
+	for _, c := range []*cobra.Command{check, publish, promote, sync, inventory} {
 		c.SilenceUsage = true
 		cmd.AddCommand(c)
 	}

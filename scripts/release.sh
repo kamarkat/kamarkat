@@ -47,7 +47,6 @@ PUBLISH=1
 PROMOTE=1
 SYNC=1
 CHECK=0
-DOCS_DIR="${DOCS_DIR:-../kamarkat}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -154,22 +153,20 @@ $EVERY_REF"
 cd - >/dev/null
 
 # ---------------------------------------------------------------------------
-# --check: rehearse this version and ask the docs whether it can be explained.
+# --check: rehearse this version and check it can be explained.
 #
 # Every packaging step and gate runs and nothing is pushed, so the version stays
-# free. Then the docs' sync-releases.py -- where the latest-version lookups live,
-# once -- names every component behind its latest release with no `behind` reason
-# in the catalog. The docs sync refuses a published version it cannot explain, and
-# finding that after publishing is a release page nobody can write.
+# free. Then release-data.py -- the same lookups the release pages are generated
+# from -- names every component behind its latest release today with no `behind`
+# reason in the catalog. A published version that cannot be explained cannot be
+# documented, and finding that after publishing is a release page nobody can write.
 # ---------------------------------------------------------------------------
 if [ "$CHECK" = 1 ]; then
-  [ -f "$DOCS_DIR/scripts/sync-releases.py" ] || die "no docs checkout at $DOCS_DIR (set DOCS_DIR)"
   say "3. Rehearse $VERSION (nothing is pushed)"
   PREVIOUS_VERSION="$CURRENT" SKIP_PUSH=1 make publish-local VERSION="$VERSION" OWNER="$OWNER" \
     || die "the rehearsal failed a gate -- fix the cause on main before releasing"
   say "4. Every component behind its latest release has a reason"
-  python3 "$DOCS_DIR/scripts/sync-releases.py" --check dist/charts/platform-bundle/components.json \
-    --catalog manifests/architecture/component-catalog.yaml \
+  scripts/release/release-data.py check dist/charts/platform-bundle/components.json \
     || die "the versions above are behind their latest release with no reason. Add a \`behind\` item
    for each in manifests/architecture/component-catalog.yaml (format in its header)."
   say "Ready. $VERSION can be released."

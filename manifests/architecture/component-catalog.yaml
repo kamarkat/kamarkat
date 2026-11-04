@@ -424,11 +424,6 @@ components:
     layer: machinery
     match: ["ghcr.io/zitadel/*"]
     behind:
-      - versions: ["v4.15.3"]
-        status: not assessed
-        reason: >-
-          Behind by several minors within the same major, in a vendored chart. It runs
-          database migrations on start, so the move needs its own validation.
       - versions: ["v4.19.2"]
         status: held
         reason: Newest chart ships 4.19.2
@@ -475,14 +470,6 @@ components:
     repo: redis/redis
     layer: capability
     match: [docker.io/library/redis]
-    behind:
-      - versions: ["digest-pinned"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: one copy is pinned by digest with no tag, so the release cannot
-          report what it runs and nobody can tell whether it is current. A tag is restored
-          alongside the digest in the next release.
-        target: 0.1.16-rc.189
   # ── Observability ───────────────────────────────────────────────────────
   - name: Grafana Alloy
     description: Collects metrics and logs on every node and cluster.

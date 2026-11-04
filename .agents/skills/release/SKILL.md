@@ -1,6 +1,6 @@
 ---
 name: release
-description: Make a zero-ops platform release end to end with `soloz release` — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions soloz release, release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (sync-releases.py), even if they only ask "can we release now?" or "why did the publish fail?".
+description: Make a zero-ops platform release end to end with `soloz release` — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions soloz release, release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (sync-releases.py, soloz release inventory), even if they only ask "can we release now?" or "why did the publish fail?".
 ---
 
 # Release
@@ -85,7 +85,7 @@ after minutes of packaging, or something no gate catches at all.
    `yq`, `gh` authenticated, `helm registry login ghcr.io`, Python with PyYAML.
 10. **Rehearse, and check every component behind latest has a reason.**
     ```bash
-    soloz release check            # kamarkat/ checked out beside zero-ops/, or --docs-dir
+    soloz release check
     ```
     Runs every packaging step and gate for the next version and pushes nothing;
     the version stays free. Then it lists every component behind today's latest

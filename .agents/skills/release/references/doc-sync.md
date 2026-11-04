@@ -13,8 +13,9 @@ to publish has no page.
 ## Before
 
 - `kamarkat/` and `zero-ops/` are checked out side by side, and `zero-ops` is on
-  current `main`: the sync reads `manifests/architecture/component-catalog.yaml`
-  from it to link each component.
+  current `main`: the sync runs `soloz release inventory` there, which reads
+  `manifests/architecture/component-catalog.yaml`. Go is installed (it runs the
+  checkout's CLI with `go run`).
 - `gh` is authenticated (the release date comes from the registry, upstream
   versions from GitHub); `helm registry login ghcr.io`.
 
@@ -33,7 +34,9 @@ fetched <version>: <behind> of <total> components behind their latest release
 sync-releases: <n> versions on <m> lines
 ```
 
-It pulls the version's `components.json` from the bundle chart and records, as
+For each version it runs, in `zero-ops/`,
+`go run ./cmd/soloz release inventory --version <version> --out <kamarkat>/data/releases/<version>.json`.
+That pulls the version's `components.json` from the bundle chart and records, as
 of the day the version was published:
 
 - the release date;
@@ -67,7 +70,7 @@ they are regenerated on every run.
 | `no <track> version found for <source>` | Its `track`, `tag` or `repo` does not match where the project publishes | Fix the entry on `zero-ops` `main` (see the catalog header) |
 | `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it | Add one to each listed entry on `zero-ops` `main` (format in the catalog header), then fetch again. `soloz release check` (Prepare 10) catches this before publishing |
 | `unknown track '<x>'` | Typo in the catalog | Use one of the tracks in the catalog header |
-| `no component catalog at …` | No `zero-ops` checkout beside `kamarkat` | Check one out, or pass `--catalog <path>` |
+| `no zero-ops checkout at …` | No `zero-ops` checkout beside `kamarkat` | Check one out, or pass `--zero-ops <path>` |
 | `<version> was fetched without its release date, upstream versions or the reasons components are behind` | Data file in the old shape | `--fetch <version>` again |
 
 ## Reading the page
