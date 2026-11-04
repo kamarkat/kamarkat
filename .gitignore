@@ -101,7 +101,20 @@ manifests/argocd/environment-manager/descriptors/
 # repository here. It is a separate repository with its own remote, and a
 # `git add -A` in this checkout has swept one in before.
 .local-e2e/
-support-agent
+# `go build ./cmd/support-agent` drops a host binary here. ANCHORED, like /kakt
+# above, and for the same reason: without the leading slash the pattern matches
+# a path component of that name at ANY depth, so it covered the hub component
+# at manifests/hub-core-services/support-agent/ and its copy in the embed set.
+# Both are tracked, so nothing looked wrong locally -- but the image workflow
+# ends in `git add internal/platform/embedded`, and git refuses a pathspec whose
+# subtree is ignored:
+#
+#   The following paths are ignored by one of your .gitignore files:
+#   manifests/hub-core-services/support-agent
+#
+# so the step exited 1, the `chore(support-agent): update image to <sha>` commit
+# never landed, and the release shipped an image the deployment did not point at.
+/support-agent
 .state
 # macOS directory metadata; swept in by a directory pathspec on 2026-09-28
 .DS_Store
