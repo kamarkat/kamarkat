@@ -959,7 +959,7 @@ spec:
         # This box schedules onto both an on-prem worker and cloud nodes, and an
         # arch-specific digest is a pod that runs on some nodes and reports
         # ErrImagePull on others -- as a scheduling problem, not an image one.
-        image: cr.agentgateway.dev/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+        image: cr.agentgateway.dev/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
         args: ["-f", "/etc/agentgateway/config.yaml"]
         ports:
         - containerPort: 3000
