@@ -57,23 +57,58 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Pull latest remote changes
-        run: git pull --rebase
-
-      - name: Update Kustomization with new image
+      # The edit is re-derived from the branch tip on every attempt, and never
+      # rebased. A build takes minutes, so main has usually moved on and a plain
+      # push from the stale checkout is rejected:
+      #
+      #   ! [rejected]  main -> main (fetch first)
+      #
+      # which is what happens when ten image workflows pin back at once.
+      # Rebasing looks like the fix and is not: two runs of THIS workflow rewrite
+      # the same digest line in the same file, so the rebase conflicts and the
+      # retry then fails on the unmerged files instead.
+      #
+      # Resetting to the tip and re-applying cannot conflict -- there is never a
+      # divergent commit to merge -- and it is self-correcting: if a newer run
+      # already pinned a newer digest, this one finds nothing to change and exits
+      # rather than reverting it. Same loop as auth-proxy, kube-sbt, mcp-server
+      # and postgres-partman.
+      - name: Pin the digest just built, re-deriving from the branch tip
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          apply() (
           # Both components ship the same image (ADR-108): the operator and
           # the preview-access service. Pinned together so they cannot drift.
           for d in manager preview-access; do
             (cd operators/ephemeral-job-operator/config/$d && \
               kustomize edit set image ephemeral-job-operator=ghcr.io/${{ github.repository }}/ephemeral-job-operator@${{ steps.build.outputs.digest }})
           done
+          )
 
-      - name: Commit and push image update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add operators/ephemeral-job-operator/config/manager/kustomization.yaml \
-                  operators/ephemeral-job-operator/config/preview-access/kustomization.yaml
-          git commit -m "chore(ephemeral-job-operator): update image to ${{ github.sha }}" || exit 0
-          git push
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin "${GITHUB_REF_NAME}"
+            git reset --quiet --hard "origin/${GITHUB_REF_NAME}"
+
+            # apply runs in a subshell, so its own `exit` does not reach here.
+            apply || exit 1
+
+            git add operators/ephemeral-job-operator/config/manager/kustomization.yaml \
+                    operators/ephemeral-job-operator/config/preview-access/kustomization.yaml
+            if git diff --cached --quiet; then
+              echo "digest already pinned on ${GITHUB_REF_NAME} -- nothing to do"
+              exit 0
+            fi
+
+            git commit --quiet -m "chore(ephemeral-job-operator): update image to ${{ github.sha }}"
+            if git push --quiet origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "pinned on attempt ${attempt}"
+              exit 0
+            fi
+
+            echo "attempt ${attempt} lost a push race; re-deriving from the new tip"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not pin the image digest after 5 attempts"
+          exit 1
