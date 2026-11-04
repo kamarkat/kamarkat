@@ -93,14 +93,14 @@ These components are for the `{r.get("provider", "hetzner")}` provider. Your app
 def line_page(line: str, rows: list[dict]) -> str:
     return f"""---
 title: "{line}"
-description: "Every bundle version on the {line} line, and what each one changed."
+description: "Every bundle version on the {line} line."
 keywords: ["{line}", "releases", "versions", "component changes"]
 ---
 
 import {{ ReleaseLine }} from "/snippets/release-line.jsx";
 import {{ line }} from "/snippets/releases/line-{slug(line)}.jsx";
 
-> {len(rows)} versions on the {line} line, newest first. Open a version to see what changed, or follow its link for every component it installs.
+> {len(rows)} versions on the {line} line, newest first. Open a version to see what it changed and every component it installs.
 
 <ReleaseLine line={{line}} />
 """
@@ -146,7 +146,7 @@ def main() -> None:
             "components": len(r["components"]),
             "behind": sum(1 for c in r["components"] if c["current"] is False),
             "previous": r.get("previous", ""),
-            "changes": r.get("changes"),
+            "changed": len(r["changes"]) if r.get("changes") is not None else None,
         })
 
     for line, rows in lines.items():

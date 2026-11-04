@@ -21,8 +21,8 @@ green. Follow the order; do not improvise around a gate.
 `kakt release` runs from the root of a kamarkat checkout: each subcommand runs
 the checkout's own `scripts/release.sh` or `scripts/argocd-hard-sync.sh`. Without
 an installed `kakt`, use `go run ./cmd/kakt release …`. Flags common to all:
-`--gitops-dir` (default `.local-e2e/nutgraf-gitops`), `--owner` (default
-`soloz-io`), `--version`.
+`--gitops-dir` (no default: a tenant's checkout, e.g. `../nutgraf-gitops`; without
+it nothing is promoted or synced), `--owner` (default `kamarkat`), `--version`.
 
 One person can hold several roles, but only the release owner publishes. A
 version is consumed the moment publishing starts (ADR-063), so two people
@@ -30,8 +30,9 @@ publishing is two burned versions.
 
 ## Versions
 
-- **Prerelease** `X.Y.Z-rc.N`: `kakt release publish` publishes from a laptop and
-  promotes the tenant. With no `--version` it takes the tenant's current rc + 1.
+- **Prerelease** `X.Y.Z-rc.N`: `kakt release publish` publishes from a laptop, and
+  with `--gitops-dir` promotes that tenant. With no `--version` it takes the
+  newest published rc + 1.
 - **Stable** `X.Y.Z`: a GitHub Release triggers
   `.github/workflows/publish-platform-charts.yml`, which publishes the bundle and
   attaches the CLI. Once that run is green, the release owner promotes it with
@@ -78,9 +79,9 @@ after minutes of packaging, or something no gate catches at all.
    operator version. If you bumped grafana-operator or the VictoriaMetrics
    operator, re-read the defaults at the new tag and update `OPERATED` in
    `scripts/package/inventory.py`, or the inventory refuses to run.
-8. **The tenant checkout is clean.** `GITOPS_DIR` (default
-   `.local-e2e/nutgraf-gitops`) has no uncommitted changes under `registry/` or
-   `environments/`, and every cluster is on one `environmentRevision`.
+8. **The tenant checkout is clean** (to promote). The `--gitops-dir` checkout has
+   no uncommitted changes under `registry/` or `environments/`, and every
+   cluster is on one `environmentRevision`.
 9. **Tools.** Helm 3 (Helm 4 breaks kustomize's chart inflation), `kustomize`,
    `yq`, `gh` authenticated, `helm registry login ghcr.io`, Python with PyYAML.
 10. **Rehearse, and check every component behind latest has a reason.**
@@ -103,26 +104,29 @@ after minutes of packaging, or something no gate catches at all.
 ## 2. Publish and promote — the release owner
 
 ```bash
-kakt release publish                        # next rc after the tenant's current version
+kakt release publish                        # publish the next rc after the newest published
+kakt release publish --gitops-dir ../nutgraf-gitops   # publish, promote that tenant, sync its box
 kakt release publish --version X.Y.Z-rc.N
-kakt release promote --version X.Y.Z        # already published by CI
+kakt release promote --version X.Y.Z --gitops-dir ../nutgraf-gitops   # already published by CI
 kakt release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
 ```
 
 What it does, in this order, and why the order matters:
 
-1. **Pulls the tenant repository** — the current version is read from it.
-2. **Decides the version** from the tenant's `environmentRevision`, and refuses
-   one already referenced.
+1. **Decides the version** from the registry: the newest published rc + 1.
+2. **Pulls the tenant repository** (with `--gitops-dir`), before anything is
+   published: refuses uncommitted version files, clusters on different
+   versions, and a version the tenant already references.
 3. **Publishes** via `make publish-local`: refuses a tree behind its upstream,
    packages, runs every gate, writes the inventory (`components.json`), refuses
    a version already in the registry, pushes. If it fails, nothing is promoted.
-4. **Promotes every reference** under `registry/` (a bundle carries the version
+4. **Promotes every reference** (with `--gitops-dir`) under `registry/` (a bundle carries the version
    twice), verifies none of the old one survives, commits, rebases, pushes.
-5. **Hard-syncs and verifies** the box reached the version
+5. **Hard-syncs and verifies** (with `--gitops-dir`) the box reached the version
    (`scripts/argocd-hard-sync.sh --promote`). Its exit code is the answer.
 
-`--no-promote` publishes only; `--no-sync` stops after the push.
+Without `--gitops-dir`, steps 2, 4 and 5 do not run. With it, `--no-promote`
+publishes only and `--no-sync` stops after the push.
 
 Success ends with: `Done. <version> is published, promoted and running.`
 

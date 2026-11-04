@@ -14,7 +14,7 @@ import (
 // commands only name its modes. The docs' release pages are written by
 // `docs`, so the docs and the release check read one implementation.
 //
-// They run from the root of a zero-ops checkout, where those scripts and the
+// They run from the root of a kamarkat checkout, where those scripts and the
 // packaging live. A box owner never runs them; their upgrade is a proposal to
 // their own repository (kakt proposal).
 func newReleaseCmd() *cobra.Command {
@@ -23,10 +23,10 @@ func newReleaseCmd() *cobra.Command {
 		Use:   "release",
 		Short: "Publish a bundle version and promote a tenant to it (platform team)",
 	}
-	cmd.PersistentFlags().StringVar(&gitopsDir, "gitops-dir", ".local-e2e/nutgraf-gitops",
-		"The tenant's GitOps checkout, whose registry/ the version is read from and promoted in")
+	cmd.PersistentFlags().StringVar(&gitopsDir, "gitops-dir", "",
+		"A tenant's GitOps checkout to promote and sync; without it a release only publishes")
 	cmd.PersistentFlags().StringVar(&owner, "owner", "kamarkat", "GitHub organisation whose registry the bundle is published to")
-	cmd.PersistentFlags().StringVar(&version, "version", "", "The version; default the tenant's current rc + 1")
+	cmd.PersistentFlags().StringVar(&version, "version", "", "The version; default the newest published rc + 1")
 
 	env := func(extra ...string) []string {
 		return append([]string{"GITOPS_DIR=" + gitopsDir, "OWNER=" + owner}, extra...)
@@ -77,7 +77,7 @@ With no version, only renders.`,
 	var dryRun, noPromote, noSync bool
 	publish := &cobra.Command{
 		Use:   "publish",
-		Short: "Publish the next version, promote the tenant to it and verify the box reached it",
+		Short: "Publish the next version; with --gitops-dir, promote that tenant and verify its box reached it",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			args := withVersion()
@@ -100,6 +100,9 @@ With no version, only renders.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if version == "" {
 				return fmt.Errorf("name the published version to promote: --version")
+			}
+			if gitopsDir == "" {
+				return fmt.Errorf("name the tenant checkout to promote: --gitops-dir")
 			}
 			args := withVersion("--promote-only")
 			if dryRun {
@@ -141,11 +144,11 @@ this again. Never re-publish. KUBECONFIG names the hub to drive.`,
 	return cmd
 }
 
-// runScript runs a zero-ops script from the checkout root, with its output and
+// runScript runs a kamarkat script from the checkout root, with its output and
 // exit status as the command's own.
 func runScript(env []string, script string, args ...string) error {
 	if _, err := os.Stat(script); err != nil {
-		return fmt.Errorf("run this from the root of a zero-ops checkout: no %s here", script)
+		return fmt.Errorf("run this from the root of a kamarkat checkout: no %s here", script)
 	}
 	c := exec.Command(script, args...)
 	c.Env = append(os.Environ(), env...)

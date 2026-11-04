@@ -33,6 +33,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,6 +78,14 @@ def published(owner: str) -> dict[str, str]:
         for tag in pv["metadata"]["container"]["tags"]:
             days[tag] = pv["created_at"]
     return days
+
+
+def newest(owner: str) -> str:
+    """The highest release version the registry holds: the one the next follows."""
+    versions = [t for t in published(owner) if release_key(t)]
+    if not versions:
+        sys.exit(f"release-data: no release version of environment-manager in ghcr.io/{owner}")
+    return max(versions, key=release_key)
 
 
 class Upstream:
@@ -200,8 +209,17 @@ class Upstream:
 
 
 def http_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=30) as r:
-        return json.load(r)
+    # The same exits as gh(): 5 for a resource that does not exist, 4 for one
+    # that could not be reached, so a timeout is reported as one, not a traceback.
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        print(f"release-data: {url} failed\n  HTTP {e.code} {e.reason}", file=sys.stderr)
+        sys.exit(5 if e.code == 404 else 4)
+    except (urllib.error.URLError, TimeoutError) as e:
+        print(f"release-data: {url} could not be reached\n  {getattr(e, 'reason', e)}", file=sys.stderr)
+        sys.exit(4)
 
 
 def current(version: str, latest: str) -> bool:
@@ -389,6 +407,8 @@ def main() -> None:
     inv.add_argument("--out", required=True)
     chk = sub.add_parser("check", help="which versions of an unpublished inventory are behind with no reason")
     chk.add_argument("components_json")
+    nw = sub.add_parser("newest", help="the highest release version published to the registry")
+    nw.add_argument("--owner", default="kamarkat")
     a = ap.parse_args()
     catalog_file = Path(a.catalog)
     if not catalog_file.exists():
@@ -396,6 +416,8 @@ def main() -> None:
     catalog = yaml.safe_load(catalog_file.read_text())["components"]
     if a.cmd == "inventory":
         inventory(a.version, a.owner, catalog, Path(a.out))
+    elif a.cmd == "newest":
+        print(newest(a.owner))
     else:
         check(a.components_json, catalog)
 
