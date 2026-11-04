@@ -17,6 +17,21 @@ first few pins look obvious.
 
 ## The policy
 
+**One version per component, everywhere it runs.** A component that exists on both
+the management and the managed clusters runs the SAME version on both. There is no
+such thing as upgrading it on one side: the pair moves together or neither moves.
+
+This is not tidiness. The two sides are delivered differently -- the management
+cluster usually pulls a chart, the managed clusters usually carry a vendored
+render -- so a bump applied to one path leaves the other behind silently, and the
+release reports the component twice at two versions with nobody having decided
+that. Every such split found so far was an accident of delivery, not a decision.
+
+Exceptions exist and are narrow: where two clusters run a component for different
+applications with different supported ranges (a database major chosen per
+application, say), the versions differ by design. Record that in the catalog as
+the reason; do not let it excuse a split nobody chose.
+
 **Latest-compatible, not latest.** Every component is in scope. Each takes its
 newest upstream release that works with the target Kubernetes version and the
 platform's existing contracts. Where the newest does not fit, take the newest

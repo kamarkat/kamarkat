@@ -19,6 +19,7 @@ happens, and what to do instead.
 - [Re-rendering without reproducing first](#re-rendering-without-reproducing-first)
 - [Round-tripping a file that carries comments](#round-tripping-a-file-that-carries-comments)
 - [A script that succeeds and changes nothing](#a-script-that-succeeds-and-changes-nothing)
+- [Upgrading a component on one side only](#upgrading-a-component-on-one-side-only)
 - [Sweeping only the components that have descriptors](#sweeping-only-the-components-that-have-descriptors)
 - [Editing a constant nothing reads](#editing-a-constant-nothing-reads)
 - [A test that pins the version it should be guarding](#a-test-that-pins-the-version-it-should-be-guarding)
@@ -179,6 +180,24 @@ brittle assumption: a `grep -A1` that assumed two keys were adjacent, say.
 "ran and changed nothing" as a result to verify, never to accept. When you find
 one, fix the detection rather than working around it — and make the failure
 print its reason.
+
+## Upgrading a component on one side only
+
+**Looks like:** the bump is done — you changed the chart version the component is
+installed from, and the release shows the new version.
+
+**Why it fails:** the same component usually reaches the management and managed
+clusters by different routes. One pulls a chart; the other carries a vendored
+render, a hand-assembled manifest, or an image literal in a bootstrap payload.
+Changing the chart moves one side. The other keeps its old version, the release
+reports the component twice, and the split looks deliberate to whoever reads it
+next.
+
+**Instead:** before bumping anything, list every cluster the component runs on and
+every mechanism that delivers it there. The release inventory is the fastest way:
+group its rows by component and source, and any component present on both sides
+with different versions is a split. Fix them in one change, so the two sides are
+never committed disagreeing.
 
 ## Sweeping only the components that have descriptors
 
