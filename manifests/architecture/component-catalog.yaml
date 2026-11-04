@@ -47,7 +47,9 @@
 #   ref         optional: an ADR, plan or issue
 #
 # A red version with no reason fails the docs sync. Update the item when you
-# change the pin: a reason is for the version it names.
+# change the pin: a reason is for the version it names. A target must be a release
+# version, and a release that still ships the version fails its check when the
+# target is that release or an earlier one: land the change, or retarget it.
 
 components:
   # ── Nodes ───────────────────────────────────────────────────────────────

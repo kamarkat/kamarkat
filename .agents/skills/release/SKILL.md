@@ -89,8 +89,9 @@ after minutes of packaging, or something no gate catches at all.
     ```
     Runs every packaging step and gate for the next version and pushes nothing;
     the version stays free. Then it lists every component behind today's latest
-    release with no reason in the catalog: one newly behind, or one whose pin
-    changed. Each release page explains why a red version is behind, from the
+    release with no reason in the catalog (one newly behind, or one whose pin
+    changed), and every reason whose `target` is this release or an earlier one
+    while this release still ships the version: a promise the release breaks. Each release page explains why a red version is behind, from the
     entry's `behind` items (format in the catalog header), and the docs sync
     refuses a version it cannot explain. Add or update the item on `main`.
     It ends `Ready. <version> can be released.`

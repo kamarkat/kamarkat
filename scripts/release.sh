@@ -167,8 +167,10 @@ if [ "$CHECK" = 1 ]; then
     || die "the rehearsal failed a gate -- fix the cause on main before releasing"
   say "4. Every component behind its latest release has a reason"
   scripts/release/release-data.py check dist/charts/platform-bundle/components.json \
-    || die "the versions above are behind their latest release with no reason. Add a \`behind\` item
-   for each in manifests/architecture/component-catalog.yaml (format in its header)."
+    || die "the versions above are behind their latest release and not explained: no reason, or a
+   reason whose target is this release. Fix the \`behind\` item for each in
+   manifests/architecture/component-catalog.yaml (format in its header): land the change, or
+   give the real status and a later target."
   say "Ready. $VERSION can be released."
   exit 0
 fi

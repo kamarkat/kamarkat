@@ -285,11 +285,26 @@ def annotate(doc: dict, released: str, catalog: list[dict], upstream: Upstream) 
 STATUSES = ("held", "scheduled", "not assessed", "declined")
 
 
+def release_key(v: str) -> tuple | None:
+    """A bundle version's order: 0.1.16 after every 0.1.16-rc.N, rc.10 after rc.9.
+    None when v is not a bundle version."""
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?", v)
+    if not m:
+        return None
+    major, minor, patch, rc = m.groups()
+    return (int(major), int(minor), int(patch), int(rc) if rc else float("inf"))
+
+
 def unexplained(doc: dict, catalog: list[dict]) -> list[str]:
     """Copy onto each component behind its latest the catalog's `behind` items for
-    the versions it ships, and name every version no item explains. A reason is for
-    the version it names, so a changed pin needs a new one."""
+    the versions it ships, and name every version they do not truly explain. A
+    reason is for the version it names, so a changed pin needs a new one. A reason
+    whose target is this release, or one before it, promised a change this release
+    does not carry: shown on its page it would be false, so it is refused too."""
     entries = {e["name"]: e for e in catalog}
+    this = release_key(doc["version"])
+    if this is None:
+        sys.exit(f"release-data: {doc['version']} is not a release version")
     missing = []
     for c in doc["components"]:
         c.pop("behind", None)
@@ -306,8 +321,15 @@ def unexplained(doc: dict, catalog: list[dict]) -> list[str]:
                 continue
             item = next((i for i in items if v in i.get("versions", [])), None)
             if not item:
-                missing.append(f"{c['component']} [{v}]")
-            elif item not in found:
+                missing.append(f"{c['component']} [{v}]: no reason")
+                continue
+            target = item.get("target")
+            if target and release_key(target) is None:
+                missing.append(f"{c['component']} [{v}]: target '{target}' is not a release version")
+            elif target and release_key(target) <= this:
+                missing.append(f"{c['component']} [{v}]: its reason says it changes in {target}, "
+                               f"but {doc['version']} still ships it")
+            if item not in found:
                 found.append(item)
         c["behind"] = [{k: i[k] for k in ("status", "reason", "blocked_by", "target", "ref") if i.get(k)}
                        for i in found]
@@ -318,7 +340,7 @@ def explain(doc: dict, catalog: list[dict]) -> None:
     missing = unexplained(doc, catalog)
     if missing:
         sys.exit(f"release-data: {doc['version']} ships versions behind their latest release that the "
-                 f"catalog does not explain. Add a `behind` item for each to its entry in {CATALOG.name}:\n  "
+                 f"catalog does not explain. Fix the `behind` item for each in {CATALOG.name}:\n  "
                  + "\n  ".join(missing))
 
 
@@ -353,7 +375,7 @@ def check(path: str, catalog: list[dict]) -> None:
     missing = unexplained(doc, catalog)
     behind = sum(1 for c in doc["components"] if c["current"] is False)
     print(f"check: {behind} of {len(doc['components'])} components behind their latest release, "
-          f"{len(missing)} without a reason")
+          f"{len(missing)} not explained")
     if missing:
         sys.exit("  " + "\n  ".join(missing))
 

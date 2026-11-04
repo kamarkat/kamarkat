@@ -66,7 +66,7 @@ they are regenerated on every run.
 | `<source> has no entry in component-catalog.yaml` | The version ships a component the current catalog no longer describes | Pull `zero-ops` `main`. If the entry was removed since, the version cannot be synced; ask before dropping or keeping it |
 | `catalog entry <name> has no repo for <source>` | Catalog incomplete | Add `repo` to the entry on `zero-ops` `main` |
 | `no <track> version found for <source>` | Its `track`, `tag` or `repo` does not match where the project publishes | Fix the entry on `zero-ops` `main` (see the catalog header) |
-| `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it | Add one to each listed entry on `zero-ops` `main` (format in the catalog header), then fetch again. `soloz release check` (Prepare 10) catches this before publishing |
+| `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it (`no reason`), or its item's `target` is this release or an earlier one while the release still ships it (`its reason says it changes in …`) | Add the item, or land the change / give the real status and a later target, on `zero-ops` `main` (format in the catalog header), then run again. `soloz release check` (Prepare 10) catches both before publishing |
 | `unknown track '<x>'` | Typo in the catalog | Use one of the tracks in the catalog header |
 | `no docs checkout at …` | No `kamarkat` checkout beside `zero-ops` | Check one out, or pass `--docs-dir <path>` |
 | `<version> was fetched without its release date, upstream versions or the reasons components are behind` | Data file in the old shape | `go run ./cmd/soloz release docs <version>` again |
