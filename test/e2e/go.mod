@@ -1,9 +1,9 @@
-module github.com/soloz-io/zero-ops/test/e2e
+module github.com/kamarkat/kamarkat/test/e2e
 
 go 1.26.0
 
 require (
-	github.com/soloz-io/zero-ops v0.0.0
+	github.com/kamarkat/kamarkat v0.0.0
 	sigs.k8s.io/e2e-framework v0.7.0
 )
 
@@ -96,4 +96,4 @@ require (
 )
 
 // Replace directive to use the parent module during development
-replace github.com/soloz-io/zero-ops => ../../
+replace github.com/kamarkat/kamarkat => ../../

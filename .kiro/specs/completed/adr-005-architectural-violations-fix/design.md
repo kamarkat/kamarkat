@@ -40,7 +40,7 @@ END FUNCTION
 
 - **Abstraction Leakage**: Tenant `acme-corp` provisioning triggers ApplicationSet 1 (deploys `AINativeSaaS` XR to Hub namespace `tenant-acme-corp`) AND ApplicationSet 2 (deploys Namespace, RBAC, ResourceQuota, ConfigMap to Spoke namespace `tenant-acme-corp`). Expected: ONLY ApplicationSet 1 deploys XR, Composition provisions Spoke resources.
 
-- **ConfigMap Bloat**: Tenant `widgets-inc` with 50 SQL migration files causes Helm to glob all files into ConfigMap `tenant-widgets-inc-migrations` (500KB+), requiring ArgoCD to push massive ConfigMap to Spoke. Expected: AtlasMigration pulls from Git URL `https://github.com/soloz-io/zero-ops.git` path `migrations/tenant-baseline`.
+- **ConfigMap Bloat**: Tenant `widgets-inc` with 50 SQL migration files causes Helm to glob all files into ConfigMap `tenant-widgets-inc-migrations` (500KB+), requiring ArgoCD to push massive ConfigMap to Spoke. Expected: AtlasMigration pulls from Git URL `https://github.com/kamarkat/kamarkat.git` path `migrations/tenant-baseline`.
 
 - **Missing XRD Fields**: Tenant `beta-saas` requires ResourceQuota (cpu: 2000m, memory: 4Gi) but XRD lacks `spec.resourceQuota` field, forcing values into Helm template instead of XR spec. Expected: XRD contains `spec.resourceQuota` mapped from `values.yaml`.
 
@@ -585,7 +585,7 @@ Assuming our root cause analysis is correct:
                    name: ""  # Patched: <tenantId>-pooler-app
                    key: url
                dir:
-                 url: "https://github.com/soloz-io/zero-ops.git"
+                 url: "https://github.com/kamarkat/kamarkat.git"
                  ref: "main"
                  path: ""  # Patched from database.migrations.baseline
                  credentials:

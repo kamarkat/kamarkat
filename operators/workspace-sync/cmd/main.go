@@ -30,7 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/soloz-io/zero-ops/operators/workspace-sync/internal/store"
+	"github.com/kamarkat/kamarkat/operators/workspace-sync/internal/store"
 )
 
 const defaultRoot = "/workspace"

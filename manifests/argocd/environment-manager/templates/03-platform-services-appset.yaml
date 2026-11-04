@@ -457,9 +457,9 @@ spec:
           # be written once, by the tenant, and never computed.
           #
           # So the claim is the tenant's, at clusters/<name>/infrastructure/, hydrated
-          # by `soloz tenant add-cluster`: one management cluster per repository and as
+          # by `kakt tenant add-cluster`: one management cluster per repository and as
           # many workload clusters as it declares -- kubefirst's layout, which
-          # cmd/soloz/bootstrap.go already names as ours. The Application that CREATES
+          # cmd/kakt/bootstrap.go already names as ours. The Application that CREATES
           # each one sits in the management cluster's own directory, addressed
           # in-cluster; everything that runs ON the cluster is addressed to it.
           #

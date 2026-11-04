@@ -8,7 +8,7 @@
 #
 # Scope, stated precisely: this asserts that everything the guide NAMES still
 # exists -- labels the admission policy requires, values keys the chart or XRD
-# defines, ADRs, soloz commands, exported library functions. It does not assert
+# defines, ADRs, kakt commands, exported library functions. It does not assert
 # the guide is COMPLETE, because completeness is a judgement and this is a gate.
 # A platform capability added without documenting it passes here, deliberately.
 #

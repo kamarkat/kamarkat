@@ -262,7 +262,7 @@ recovers nothing and is no longer part of the contract.
 
 So the row reads "required while present" rather than "required" or "optional". An
 operator finding it in the escrow has learned something true about the cluster: someone
-started a rotation and has not finished it. `soloz encryption rotate` writes it, and
+started a rotation and has not finished it. `kakt encryption rotate` writes it, and
 `--finalize` is the step after which it stops mattering.
 
 `secret-encryption-key` there is no Infisical copy at all and the escrow IS the

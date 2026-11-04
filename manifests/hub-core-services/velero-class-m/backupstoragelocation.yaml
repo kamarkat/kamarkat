@@ -30,7 +30,7 @@ spec:
     bucket: PLACEHOLDER_CLASS_M_BUCKET
     prefix: PLACEHOLDER_BOX_ID
   # The credential that reaches the bucket. Delivered from tenant-controlled escrow by
-  # `soloz escrow deliver-backup-credentials`, never through this box's Infisical --
+  # `kakt escrow deliver-backup-credentials`, never through this box's Infisical --
   # a credential whose purpose is to work when Infisical is gone cannot depend on it.
   #
   # Rotatable, unlike the key below: replacing it is part of fencing a replaced hub,
@@ -63,7 +63,7 @@ spec:
     #   * the Secret is read from the namespace named by the VELERO_NAMESPACE
     #     environment variable, and an unset variable is a hard error -- chart 12.2.2
     #     sets it, so the chart is a dependency of this line working at all;
-    #   * `secret.Data[key]` must be EXACTLY 32 bytes. `soloz escrow
+    #   * `secret.Data[key]` must be EXACTLY 32 bytes. `kakt escrow
     #     deliver-backup-credentials` writes the 32 raw bytes, not their hex form,
     #     which is why it decodes the escrowed value first;
     #   * only one of kmsKeyId, customerKeyEncryptionFile or customerKeyEncryptionSecret

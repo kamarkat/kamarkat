@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // ADR-094: one project per application. These cover the three ways an

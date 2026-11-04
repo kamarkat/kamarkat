@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	computev1alpha1 "github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/api/v1alpha1"
-	"github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/internal/controller"
+	computev1alpha1 "github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/api/v1alpha1"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/internal/controller"
 )
 
 var (

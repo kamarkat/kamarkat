@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/soloz-io/zero-ops/internal/platform/agent-core/service"
+	"github.com/kamarkat/kamarkat/internal/platform/agent-core/service"
 )
 
 // GetAgentStatusArgs defines the input schema for get_agent_status tool

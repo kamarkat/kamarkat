@@ -4,7 +4,7 @@
 AUTH_PROXY_BINARY=auth-proxy
 MCP_SERVER_BINARY=mcp-server
 KUBE_SBT_API_BINARY=kube-sbt
-SOLOZ_BINARY=soloz
+KAKT_BINARY=kakt
 BUILD_DIR=bin
 GO=go
 DATABASE_URL?=postgres://localhost:5432/zeroops?sslmode=disable
@@ -16,15 +16,15 @@ build-all:
 	$(GO) build -o $(BUILD_DIR)/$(AUTH_PROXY_BINARY) ./cmd/auth-proxy
 	$(GO) build -o $(BUILD_DIR)/$(MCP_SERVER_BINARY) ./cmd/mcp-server
 	$(GO) build -o $(BUILD_DIR)/$(KUBE_SBT_API_BINARY) ./cmd/kube-sbt
-	$(GO) build -o $(BUILD_DIR)/$(SOLOZ_BINARY) ./cmd/soloz
+	$(GO) build -o $(BUILD_DIR)/$(KAKT_BINARY) ./cmd/kakt
 	@echo "✓ All builds complete"
 
 # Build the hub binary (main CLI)
 build:
-	@echo "Building $(SOLOZ_BINARY)..."
+	@echo "Building $(KAKT_BINARY)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/$(SOLOZ_BINARY) ./cmd/soloz
-	@echo "✓ Build complete: $(BUILD_DIR)/$(SOLOZ_BINARY)"
+	$(GO) build -o $(BUILD_DIR)/$(KAKT_BINARY) ./cmd/kakt
+	@echo "✓ Build complete: $(BUILD_DIR)/$(KAKT_BINARY)"
 
 # Build the auth-proxy binary
 build-auth-proxy:
@@ -49,10 +49,10 @@ build-kube-sbt:
 
 # Build the hub binary
 build-hub:
-	@echo "Building $(SOLOZ_BINARY)..."
+	@echo "Building $(KAKT_BINARY)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/$(SOLOZ_BINARY) ./cmd/soloz
-	@echo "✓ Build complete: $(BUILD_DIR)/$(SOLOZ_BINARY)"
+	$(GO) build -o $(BUILD_DIR)/$(KAKT_BINARY) ./cmd/kakt
+	@echo "✓ Build complete: $(BUILD_DIR)/$(KAKT_BINARY)"
 
 # The whole released-path loop in one command: publish, build the CLI, scaffold a
 # tenant repository and bootstrap from it. Credentials come from k8-secrets/, so
@@ -142,8 +142,8 @@ publish-local:
 cli-release:
 	@test -n "$(VERSION)" || { echo "usage: make cli-release VERSION=0.1.16-rc.1"; exit 1; }
 	TARGETS=host ./scripts/package/build-cli.sh "$(VERSION)" $(BUILD_DIR)
-	@cp $(BUILD_DIR)/soloz-$$($(GO) env GOOS)-$$($(GO) env GOARCH) $(BUILD_DIR)/$(SOLOZ_BINARY)
-	@echo "✓ $(BUILD_DIR)/$(SOLOZ_BINARY) declares $(VERSION)"
+	@cp $(BUILD_DIR)/kakt-$$($(GO) env GOOS)-$$($(GO) env GOARCH) $(BUILD_DIR)/$(KAKT_BINARY)
+	@echo "✓ $(BUILD_DIR)/$(KAKT_BINARY) declares $(VERSION)"
 
 # Fetch the exact binary CI built for VERSION, rather than rebuilding it.
 #
@@ -165,15 +165,15 @@ cli-fetch:
 	        | while read -r id; do \
 	            if gh api "repos/{owner}/{repo}/actions/runs/$$id/artifacts" \
 	                 --jq '.artifacts[].name' 2>/dev/null \
-	               | grep -qx "soloz-$(VERSION)"; then echo "$$id"; break; fi; \
+	               | grep -qx "kakt-$(VERSION)"; then echo "$$id"; break; fi; \
 	          done); \
 	fi; \
-	test -n "$$run" || { echo "no successful publish run carries soloz-$(VERSION); pass RUN=<id>"; exit 1; }; \
-	echo "fetching soloz-$(VERSION) from run $$run"; \
-	gh run download "$$run" --name "soloz-$(VERSION)" --dir $(BUILD_DIR)
-	@cp $(BUILD_DIR)/soloz-$$($(GO) env GOOS)-$$($(GO) env GOARCH) $(BUILD_DIR)/$(SOLOZ_BINARY)
-	@chmod +x $(BUILD_DIR)/$(SOLOZ_BINARY)
-	@echo "✓ $(BUILD_DIR)/$(SOLOZ_BINARY) is the CI build of $(VERSION)"
+	test -n "$$run" || { echo "no successful publish run carries kakt-$(VERSION); pass RUN=<id>"; exit 1; }; \
+	echo "fetching kakt-$(VERSION) from run $$run"; \
+	gh run download "$$run" --name "kakt-$(VERSION)" --dir $(BUILD_DIR)
+	@cp $(BUILD_DIR)/kakt-$$($(GO) env GOOS)-$$($(GO) env GOARCH) $(BUILD_DIR)/$(KAKT_BINARY)
+	@chmod +x $(BUILD_DIR)/$(KAKT_BINARY)
+	@echo "✓ $(BUILD_DIR)/$(KAKT_BINARY) is the CI build of $(VERSION)"
 
 # Clean build artifacts
 clean:
@@ -200,7 +200,7 @@ install: build
 # Initialize Go module
 init:
 	@echo "Initializing Go module..."
-	$(GO) mod init github.com/soloz-io/zero-ops
+	$(GO) mod init github.com/kamarkat/kamarkat
 	$(GO) mod tidy
 	@echo "✓ Go module initialized"
 

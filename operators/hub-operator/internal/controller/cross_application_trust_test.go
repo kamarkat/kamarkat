@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-logr/logr"
 
-	client2 "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // The PROVISIONING CALL SITE, not the resolver (ADR-094 invariant 2, ADR-110).

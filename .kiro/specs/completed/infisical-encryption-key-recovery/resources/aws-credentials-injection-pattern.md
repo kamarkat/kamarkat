@@ -61,7 +61,7 @@ func (i *Installer) FixArgoCDGitHubAuth(ctx context.Context, githubToken string)
         Type: corev1.SecretTypeOpaque,
         StringData: map[string]string{
             "type":     "git",
-            "url":      "https://github.com/soloz-io/zero-ops",
+            "url":      "https://github.com/kamarkat/kamarkat",
             "username": "zero-ops-bot",
             "password": githubToken,
         },
@@ -166,7 +166,7 @@ spec:
       type: Opaque
       data:
         type: git
-        url: https://github.com/soloz-io/zero-ops
+        url: https://github.com/kamarkat/kamarkat
         username: "{{ .username }}"
         password: "{{ .password }}"
   

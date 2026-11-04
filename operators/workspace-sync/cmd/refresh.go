@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/soloz-io/zero-ops/operators/workspace-sync/internal/store"
+	"github.com/kamarkat/kamarkat/operators/workspace-sync/internal/store"
 )
 
 // generations is the shared workspace of a READER that may refresh it

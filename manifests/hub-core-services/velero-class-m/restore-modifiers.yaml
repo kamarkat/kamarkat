@@ -16,7 +16,7 @@
 # THREE TIERS, because pausing the leaves is not enough. A paused `Machine` does not
 # stop its `MachineSet` creating another one, and nothing stops the topology controller
 # except `Cluster.spec.paused`. Release order is the reverse: complete the graph,
-# classify against the provider's inventory (`soloz spoke match-inventory`), unpause the
+# classify against the provider's inventory (`kakt spoke match-inventory`), unpause the
 # Cluster, release matched leaves, release the creators last.
 #
 # MERGE PATCHES, not JSON patches. A JSON patch `remove` on a path that is absent fails
@@ -146,7 +146,7 @@ data:
               {"metadata":{"ownerReferences":null}}
 
       # The infrastructure object, which is restored PASSIVELY rather than at
-      # activation -- `soloz spoke match-inventory` derives the provider label
+      # activation -- `kakt spoke match-inventory` derives the provider label
       # (`caph-cluster-<HetznerCluster name>`) from it, and matching has to happen
       # before activation, so it cannot be in the activation stream. Paused anyway:
       # with no Cluster yet restored its controller has nothing to own it and waits,

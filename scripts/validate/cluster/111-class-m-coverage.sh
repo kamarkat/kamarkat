@@ -56,8 +56,8 @@
 #   * the Class E artefacts a reconstruction needs are all escrowed,
 #   * or the restored CAPI graph can resume management safely.
 #
-# Those are four separate questions with four separate answers -- `soloz escrow verify`,
-# a real restore, `soloz spoke match-inventory`. This is a coverage check, and a box
+# Those are four separate questions with four separate answers -- `kakt escrow verify`,
+# a real restore, `kakt spoke match-inventory`. This is a coverage check, and a box
 # that passes it is not thereby recoverable.
 #
 # Checked here rather than against Velero: these are facts about coverage, true or

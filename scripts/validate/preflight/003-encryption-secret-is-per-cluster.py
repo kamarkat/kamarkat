@@ -17,7 +17,7 @@ garbage-collected the Secret and left a ClusterClass referencing nothing.
 
 THE NAME IS BUILT TWICE, IN TWO LANGUAGES THAT CANNOT SEE EACH OTHER:
 
-  Go      assets.EncryptionSecretName, for `soloz encryption enable` and the Day-0
+  Go      assets.EncryptionSecretName, for `kakt encryption enable` and the Day-0
           provisioner, which CREATE the Secret.
   CAPI    a `valueFrom.template` in each ClusterClass's `secretEncryptionConfig`
           patch, rendered from `{{ .builtin.cluster.name }}` at topology-reconcile

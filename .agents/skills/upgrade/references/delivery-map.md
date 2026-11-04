@@ -65,8 +65,8 @@ Not charts — a release artefact downloaded and committed, or applied from a UR
 
 | What | Where | Applied by |
 | :- | :- | :- |
-| cert-manager (prerequisite) | `internal/assets/manifests/core/cert-manager/install.yaml` | pivot (`internal/soloz-cli/pivot/orchestrator.go`) |
-| cert-manager (from a URL) | no file — `versions.CertManagerVersion` builds the URL | capi-init (`internal/soloz-cli/capi/operator.go`) |
+| cert-manager (prerequisite) | `internal/assets/manifests/core/cert-manager/install.yaml` | pivot (`internal/kakt-cli/pivot/orchestrator.go`) |
+| cert-manager (from a URL) | no file — `versions.CertManagerVersion` builds the URL | capi-init (`internal/kakt-cli/capi/operator.go`) |
 | Cluster API operator | `internal/assets/manifests/core/capi-operator/install.yaml` | the CLI |
 | cert-manager CRDs (spoke) | `spoke/spoke-catalog/infra/crds/cert-manager-crds.yaml` | GitOps |
 | Argo CD core (spoke) | `spoke/spoke-bootstrap/argocd-core-template.yaml` | ClusterResourceSet |
@@ -118,7 +118,7 @@ scraper, do not pin the images.
 Each provider has a CR under
 `internal/assets/manifests/core/capi-operator/providers/` whose `spec.version` is
 authoritative, **and** a matching constant in
-`internal/soloz-cli/versions/versions.go`. `TestProviderManifestVersionParity`
+`internal/kakt-cli/versions/versions.go`. `TestProviderManifestVersionParity`
 compares them; move both in one commit.
 
 What caps the set is usually the *infrastructure* provider's published

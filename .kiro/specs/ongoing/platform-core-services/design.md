@@ -842,7 +842,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     targetRevision: HEAD
     path: manifests/hub-core-services
   destination:

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 VERSION="${1:?usage: released-cli-standalone.sh <version> [binary]}"
-BIN="${2:-dist/bin/soloz-$(go env GOOS)-$(go env GOARCH)}"
+BIN="${2:-dist/bin/kakt-$(go env GOOS)-$(go env GOARCH)}"
 
 if [[ ! -x "$BIN" ]]; then
     echo "released-cli-standalone: $BIN is not executable" >&2

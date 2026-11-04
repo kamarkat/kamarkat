@@ -23,7 +23,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/soloz-io/zero-ops
+        repoURL: https://github.com/kamarkat/kamarkat
         targetRevision: '{{.head_sha}}'
         path: manifests/argocd/environment-manager
         helm:

@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // A platform capability with one caller: a selectable service of the box, run

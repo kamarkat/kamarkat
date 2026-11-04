@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	infisicalclient "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
+	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 )
 
 // SecretUploader handles uploading secrets to Infisical

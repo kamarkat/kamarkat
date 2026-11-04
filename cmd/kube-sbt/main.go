@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/api/handlers"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/api/middleware"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/providers/zitadel"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/api/handlers"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/api/middleware"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/providers/zitadel"
 )
 
 func main() {

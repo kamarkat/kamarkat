@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // ownerRecorder is an issuer that already holds the owner's email address in

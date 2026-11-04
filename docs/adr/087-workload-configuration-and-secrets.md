@@ -130,7 +130,7 @@ declared key is asserted against the provider as a precondition of the fleet's
 workloads being admitted, not discovered when a container fails to start. The
 check reports key NAMES and never values.
 
-**Supply is an explicit, auditable operation.** `soloz fleet secrets` is the
+**Supply is an explicit, auditable operation.** `kakt fleet secrets` is the
 sanctioned path and the only one. It reports which declared secrets are present
 and which are absent, by NAME and with the capability each serves, and never
 discloses a value: the type returned by the listing has no field a value could
@@ -224,7 +224,7 @@ Per ADR-039.
 |---|---|---|---|---|---|
 | Fleet configuration and secret DECLARATIONS | Tenant GitOps repository | Tenant | ArgoCD | universal-tenant | Day-1+ |
 | Platform-generated credential VALUES | Infisical | Platform | hub-operator | ESO | Day-1+ |
-| Tenant secret VALUES | Infisical | Tenant | `soloz fleet secrets` | ESO | Day-1+ |
+| Tenant secret VALUES | Infisical | Tenant | `kakt fleet secrets` | ESO | Day-1+ |
 | Tenant configuration VALUES | Tenant GitOps repository | Tenant | ArgoCD | universal-tenant | Day-1+ |
 | Per-workload ExternalSecret | Tenant GitOps repository | Platform | ArgoCD | Workload | Day-1+ |
 | Workload ConfigMap | Tenant GitOps repository | Platform | ArgoCD | Workload | Day-1+ |

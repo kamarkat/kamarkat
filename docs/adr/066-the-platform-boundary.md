@@ -258,7 +258,7 @@ than given a toggle.
 Application to gate and nothing deployed either way. It sat in a table of things
 that have Applications, which is why its `enable` field read as a fiction. Its
 selection mechanism is the credential tiering in
-`internal/soloz-cli/tenant/platform_credentials.go`, which already distinguishes
+`internal/kakt-cli/tenant/platform_credentials.go`, which already distinguishes
 a capability the platform refuses to run without from a destination it reports
 the absence of. Removed from the declaration; it is not lost, it is recorded
 where it belongs.

@@ -1,6 +1,6 @@
 ---
 name: release
-description: Make a zero-ops platform release end to end with `soloz release` — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions soloz release, release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (soloz release docs), even if they only ask "can we release now?" or "why did the publish fail?".
+description: Make a Kamarkat platform release end to end with `kakt release` — readiness, publishing a bundle version, promoting the tenant, verifying the box and syncing the release pages in the Kamarkat docs. Use this whenever anyone mentions kakt release, release.sh, cutting or publishing an rc, a bundle version, promoting a box to a new version, a failed publish or promotion, the release gate, components.json, the component inventory or catalog, or adding a release to the docs (kakt release docs), even if they only ask "can we release now?" or "why did the publish fail?".
 ---
 
 # Release
@@ -14,13 +14,13 @@ green. Follow the order; do not improvise around a gate.
 
 | Who | Does | Never |
 | :- | :- | :- |
-| Contributor | Lands changes on `main`, keeps CI green, readies the catalog and packaging | Runs `soloz release publish`, publishes, promotes |
-| Release owner | Runs `soloz release`, decides the version | Edits code to get past a gate |
+| Contributor | Lands changes on `main`, keeps CI green, readies the catalog and packaging | Runs `kakt release publish`, publishes, promotes |
+| Release owner | Runs `kakt release`, decides the version | Edits code to get past a gate |
 | Verifier | Checks the box once, syncs the docs | Re-publishes, re-promotes |
 
-`soloz release` runs from the root of a zero-ops checkout: each subcommand runs
+`kakt release` runs from the root of a kamarkat checkout: each subcommand runs
 the checkout's own `scripts/release.sh` or `scripts/argocd-hard-sync.sh`. Without
-an installed `soloz`, use `go run ./cmd/soloz release …`. Flags common to all:
+an installed `kakt`, use `go run ./cmd/kakt release …`. Flags common to all:
 `--gitops-dir` (default `.local-e2e/nutgraf-gitops`), `--owner` (default
 `soloz-io`), `--version`.
 
@@ -30,12 +30,12 @@ publishing is two burned versions.
 
 ## Versions
 
-- **Prerelease** `X.Y.Z-rc.N`: `soloz release publish` publishes from a laptop and
+- **Prerelease** `X.Y.Z-rc.N`: `kakt release publish` publishes from a laptop and
   promotes the tenant. With no `--version` it takes the tenant's current rc + 1.
 - **Stable** `X.Y.Z`: a GitHub Release triggers
   `.github/workflows/publish-platform-charts.yml`, which publishes the bundle and
   attaches the CLI. Once that run is green, the release owner promotes it with
-  `soloz release promote --version X.Y.Z`, which confirms the version
+  `kakt release promote --version X.Y.Z`, which confirms the version
   is in the registry and then promotes, syncs and verifies exactly as below.
 - **A version is published once.** Never re-publish, re-tag or delete one. If a
   publish fails part way, the next attempt takes the next version.
@@ -85,7 +85,7 @@ after minutes of packaging, or something no gate catches at all.
    `yq`, `gh` authenticated, `helm registry login ghcr.io`, Python with PyYAML.
 10. **Rehearse, and check every component behind latest has a reason.**
     ```bash
-    soloz release check
+    kakt release check
     ```
     Runs every packaging step and gate for the next version and pushes nothing;
     the version stays free. Then it lists every component behind today's latest
@@ -95,16 +95,16 @@ after minutes of packaging, or something no gate catches at all.
     entry's `behind` items (format in the catalog header), and the docs sync
     refuses a version it cannot explain. Add or update the item on `main`.
     It ends `Ready. <version> can be released.`
-    Then `soloz release publish --dry-run` shows the version, files and sync a
+    Then `kakt release publish --dry-run` shows the version, files and sync a
     release would touch.
 
 ## 2. Publish and promote — the release owner
 
 ```bash
-soloz release publish                        # next rc after the tenant's current version
-soloz release publish --version X.Y.Z-rc.N
-soloz release promote --version X.Y.Z        # already published by CI
-soloz release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
+kakt release publish                        # next rc after the tenant's current version
+kakt release publish --version X.Y.Z-rc.N
+kakt release promote --version X.Y.Z        # already published by CI
+kakt release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
 ```
 
 What it does, in this order, and why the order matters:
@@ -135,7 +135,7 @@ through the normal path, then release again.
 | `publish failed — nothing has been promoted` | Version possibly partly pushed | Fix the cause; release the **next** version |
 | `version … is already published` | Consumed | Release the next version |
 | `<v> IS PUBLISHED but not promoted` | Registry has it, git does not | Resolve in `GITOPS_DIR`, push. Do not re-publish |
-| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `soloz release sync --version <v>` again. Do not re-publish |
+| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `kakt release sync --version <v>` again. Do not re-publish |
 | `clusters are on different versions` | A half-applied promotion | Bring them to one version, or pass `--version` |
 | `could not confirm <v> in oci://…` (`promote`) | Not published, or no registry login | Check the publish run; `helm registry login ghcr.io` |
 
@@ -161,11 +161,11 @@ Check each thing once and report what you see. Do not loop waiting for a state.
 
 Each published version gets a release page in the Kamarkat docs. Nothing does
 this automatically. Follow [references/doc-sync.md](references/doc-sync.md).
-The short form, in `zero-ops/` on `main` with `kamarkat/` checked out beside it:
+The short form, in `kamarkat/` on `main` with `kamarkat-docs/` checked out beside it:
 
 ```bash
-go run ./cmd/soloz release docs <version>
-cd ../kamarkat && mint validate && mint broken-links
+go run ./cmd/kakt release docs <version>
+cd ../kamarkat-docs && mint validate && mint broken-links
 git add data/releases versions snippets/releases docs.json
 git commit -m "docs(releases): <version>" && git push
 ```
@@ -179,7 +179,7 @@ Release <version>
   Published: <yes/no> at <registry time>; promoted: <commit sha in GITOPS_DIR>
   Box: <N> Applications Synced/Healthy; not healthy: <list, each marked new or pre-existing>
   Changed components verified: <list>; unproven: <list and why>
-  Docs: <kamarkat commit sha>; <behind> of <total> components behind latest
+  Docs: <kamarkat-docs commit sha>; <behind> of <total> components behind latest
   Follow-ups: <anything the release revealed>
 ```
 

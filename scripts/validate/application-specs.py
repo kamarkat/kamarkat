@@ -48,7 +48,7 @@ DISTRIBUTION_CHART = "platform"
 
 # The platform's own repository. A released Application resolving it is the
 # runtime dependency ADR-063 forbids.
-PLATFORM_GIT = "github.com/soloz-io/zero-ops"
+PLATFORM_GIT = "github.com/kamarkat/kamarkat"
 
 # The organisation the platform controls. ADR-063 forbids a released bundle from
 # resolving "the platform's repository" at runtime, and the check below read that

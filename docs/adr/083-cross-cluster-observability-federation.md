@@ -666,7 +666,7 @@ acceptance:
   - scripts/validate/cluster/37-spoke-public-endpoints.sh
   - scripts/validate/cluster/87-observability-tenant-scoping.sh
   - scripts/validate/cluster/88-observability-federation-topology.sh
-  - internal/soloz-cli/bootstrap
+  - internal/kakt-cli/bootstrap
 ```
 
 Gate 37 is separate from 35-public-api-endpoints.sh on purpose. That module's

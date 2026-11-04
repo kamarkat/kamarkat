@@ -24,7 +24,7 @@ What that means in practice, from the repository as it stands:
 - `manifests/hub-core-services/grafana-alloy/deployment.yaml` writes to `sys.env("PROMETHEUS_URL")` and `sys.env("LOKI_URL")`, sourced from a Grafana Cloud ExternalSecret. A tenant without a Grafana Cloud account receives collection that terminates nowhere.
 - That same Alloy scrapes `discovery.kubernetes.pods` and `discovery.kubernetes.services` with no namespace filter — every tenant workload's metrics, forwarded off-cluster — and stamps `external_labels = { cluster = "hub" }`, a constant, so two clusters arriving at one destination are indistinguishable.
 - `manifests/hub-core-services/victoriametrics/` holds an operator, a `VMCluster`, CRDs and an ingress. `manifests/hub-core-services/victoriametrics-alerts/` holds `platform-core-alerts`, 211 lines of working pod-health and memory-pressure expressions. Five hundred and seventy-seven lines in total, referenced by no component descriptor and named in no ApplicationSet. None of it has ever been applied to a cluster.
-- `internal/soloz-cli/bootstrap/hubdomain.go:83` computes `victoriametrics.hub.<domain>` for every box — a DNS name for a service nothing deploys.
+- `internal/kakt-cli/bootstrap/hubdomain.go:83` computes `victoriametrics.hub.<domain>` for every box — a DNS name for a service nothing deploys.
 
 Three settled positions decide what to do about this.
 
@@ -188,7 +188,7 @@ See ADR-039 for the complete ownership matrix.
 - `manifests/argocd/components/03/` gains descriptors for the observability components.
 - `manifests/hub-core-services/victoriametrics{,-alerts}/` are deployed as they stand; `victoria-logs/`, `grafana/` and `vmalert/` are new.
 - `manifests/hub-core-services/grafana-alloy/` is rewritten: in-box destination by default, platform-namespace scoping, real cluster labels, tenant opt-in.
-- `internal/soloz-cli/bootstrap/hubdomain.go:83` — `victoriametrics.hub.<domain>` resolves to something.
+- `internal/kakt-cli/bootstrap/hubdomain.go:83` — `victoriametrics.hub.<domain>` resolves to something.
 - Dashboard JSON becomes a packaged artifact set.
 - A new release gate asserts the Support Agent names no observability component (§8).
 
@@ -573,7 +573,7 @@ pipeline had both, so one signal identified the box and the other did not.
 
 ```architecture
 acceptance:
-  - internal/soloz-cli/bootstrap
+  - internal/kakt-cli/bootstrap
 ```
 
 Four gates, each verified to fail on the defect it guards: a scrape reading raw
@@ -615,7 +615,7 @@ series-level filter closes the path a target selector cannot reach, and the
 evidence is a query rather than a reading of the config.
 
 **Four defects only a live run found.** Each is now gated
-(`internal/soloz-cli/bootstrap/observability_gates_test.go`), and each was
+(`internal/kakt-cli/bootstrap/observability_gates_test.go`), and each was
 invisible to every check that preceded it:
 
 | defect | how it presented |

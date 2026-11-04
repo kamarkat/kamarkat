@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // TierManager implements ITierManager backed by PostgreSQL with an in-memory

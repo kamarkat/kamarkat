@@ -12,7 +12,7 @@ resources:
   # configuration from a FLEET-WIDE Infisical value while ADR-100 decides the
   # encryption key is per cluster and escrow-sourced. Two writers for one key, and
   # on this box they had already diverged. The configuration Secret is written by
-  # `soloz encryption enable` and by the Day-0 provisioner, from the escrow, and
+  # `kakt encryption enable` and by the Day-0 provisioner, from the escrow, and
   # nothing reconciles it afterwards -- which is correct for a value that must not
   # change under a running control plane.
   - spoke-addons/ccm-addon-template.yaml

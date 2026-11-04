@@ -94,7 +94,7 @@ type HubEnvironmentSpec struct {
 	// platform-capi/hub-environment-kubeconfig, which CAPI never creates, so it
 	// was never escrowed on any box; and the master keys went to the escrow path
 	// /hub-operator/hub-environment, a constant, so every box in a shared escrow
-	// project overwrote the same entry while `soloz kubeconfig` read
+	// project overwrote the same entry while `kakt kubeconfig` read
 	// /hub-operator/<cluster> and found nothing.
 	//
 	// +optional

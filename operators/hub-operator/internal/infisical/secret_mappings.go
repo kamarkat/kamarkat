@@ -1,6 +1,6 @@
 package infisical
 
-import "github.com/soloz-io/zero-ops/internal/platform/escrow"
+import "github.com/kamarkat/kamarkat/internal/platform/escrow"
 
 // ============================================================================
 // SECRET MAPPINGS REGISTRY
@@ -567,7 +567,7 @@ var ApplicationSecretMappings = []ApplicationSecretDefinition{
 	// between would have become unreadable at the next restart.
 	//
 	// The encryption key's lifecycle is therefore entirely outside this registry:
-	// the escrow is the recovery source, `soloz encryption enable` and the Day-0
+	// the escrow is the recovery source, `kakt encryption enable` and the Day-0
 	// provisioner are the only writers, and there is no Infisical copy to disagree
 	// with them (ADR-003 section 6, ADR-100).
 	// AgentGateway's OIDC session cookie encryption key. It belongs here because

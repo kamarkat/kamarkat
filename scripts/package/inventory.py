@@ -11,7 +11,7 @@ worker nodes:
     management   the cluster the control plane runs on
     managed      every cluster the management cluster provisions
 
-plus the tools the soloz CLI runs during Day-0, which are installed on no cluster.
+plus the tools the kakt CLI runs during Day-0, which are installed on no cluster.
 Every row says which cluster it belongs to and which node roles it runs on. The
 applications a tenant deploys are not the platform's and are never listed.
 
@@ -76,7 +76,7 @@ MANAGEMENT_CLASS = "internal/assets/manifests/classes/hetzner-mgmt-ubuntu-v1.yam
 MANAGED_CLASS = "manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml"
 
 # What the CLI applies to the hetzner management cluster itself, outside GitOps
-# (internal/soloz-cli/bootstrap/driver_hetzner.go: CiliumAddonPath, the CCM
+# (internal/kakt-cli/bootstrap/driver_hetzner.go: CiliumAddonPath, the CCM
 # addon, the CSI catalog entry, and the Cluster API operator).
 MANAGEMENT_ADDONS = [
     "manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml",
@@ -87,7 +87,7 @@ MANAGEMENT_ADDONS = [
 
 # The Cluster API providers the operator installs on the management cluster:
 # (provider manifest, upstream repository, release asset). The CLI applies each
-# manifest as written (internal/soloz-cli/capi/operator.go), so the version that
+# manifest as written (internal/kakt-cli/capi/operator.go), so the version that
 # runs is the manifest's spec.version -- not a Go constant, which has disagreed
 # with it before (v0.1.15). The manifests set no fetchConfig, so the operator
 # fetches each release asset from the upstream repository, as clusterctl's
@@ -101,8 +101,8 @@ CAPI_PROVIDERS = [
 CAPI_PROVIDER_DIR = "internal/assets/manifests/core/capi-operator/providers"
 
 # Binaries the CLI downloads and runs during a hetzner Day-0, on the machine or CI
-# that runs soloz; installed on no cluster. Each version is the constant the CLI's
-# own download manager uses (internal/soloz-cli/binaries/<tool>.go). Packer is
+# that runs kakt; installed on no cluster. Each version is the constant the CLI's
+# own download manager uses (internal/kakt-cli/binaries/<tool>.go). Packer is
 # not listed: it builds only the hybrid provider's Flatcar image.
 BOOTSTRAP_TOOLS = ["clusterctl"]
 
@@ -531,7 +531,7 @@ def scan_management_addons(inv: Inventory, repo: Path) -> None:
         for doc in load_docs(path.read_text(), rel):
             for ref, nodes in walk_images(doc):
                 if TEMPLATED not in ref:
-                    inv.image(ref, cluster="management", nodes=nodes, where="installed by the soloz CLI")
+                    inv.image(ref, cluster="management", nodes=nodes, where="installed by the kakt CLI")
 
 
 def scan_capi_providers(inv: Inventory, repo: Path, cache: Path) -> None:
@@ -718,7 +718,7 @@ def scan_bootstrap(inv: Inventory, repo: Path) -> None:
         if not m:
             sys.exit(f"inventory: the CLI's {name} download names no {name}Version")
         inv.add(kind="binary", key=f"tool:{name}", name=name, version=m.group(1),
-                cluster="bootstrap", nodes=set(), where="soloz CLI")
+                cluster="bootstrap", nodes=set(), where="kakt CLI")
 
 
 # ── Output ──────────────────────────────────────────────────────────────────

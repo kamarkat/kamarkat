@@ -356,7 +356,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/soloz-io/zero-ops
+        repoURL: https://github.com/kamarkat/kamarkat
         targetRevision: HEAD
         # DYNAMIC PATH: Resolved from cluster label
         # Uses platform-env label (dev | staging | prod)
@@ -397,7 +397,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     targetRevision: HEAD
     path: manifests/argocd  # Single root directory with kustomization.yaml
   destination:

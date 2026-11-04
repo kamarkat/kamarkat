@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	authproxy "github.com/soloz-io/zero-ops/internal/auth-proxy"
+	authproxy "github.com/kamarkat/kamarkat/internal/auth-proxy"
 )
 
 func main() {

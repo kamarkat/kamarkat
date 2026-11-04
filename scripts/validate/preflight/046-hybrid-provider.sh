@@ -346,7 +346,7 @@ PY
     # 6. The hub has no SpokePool and no renderer, so the CLI composes its copy at
     #    Day-0 from the same base. If that concatenation is dropped the hub boots with
     #    no cilium-config at all.
-    local day0="$VALIDATE_ROOT/internal/soloz-cli/bootstrap/provider_cloud.go"
+    local day0="$VALIDATE_ROOT/internal/kakt-cli/bootstrap/provider_cloud.go"
     if grep -q 'cilium-config-base.yaml' "$day0" 2>/dev/null; then
         pass "hub Day-0 install recomposes the addon with the cilium-config base"
     else
@@ -359,7 +359,7 @@ PY
     #    the API server through 10.96.0.1 and deadlocked on 2026-10-28 when the API
     #    server was OOM-killed. The CLI is the single owner of the hub's two keys, and
     #    it must read the endpoint from the Cluster and render after the Cluster exists.
-    local prov="$VALIDATE_ROOT/internal/soloz-cli/cluster/provisioner.go"
+    local prov="$VALIDATE_ROOT/internal/kakt-cli/cluster/provisioner.go"
     if grep -q 'func injectAPIServerEndpoint' "$prov" 2>/dev/null &&
         grep -q 'func (p \*Provisioner) controlPlaneEndpoint' "$prov" 2>/dev/null; then
         pass "hub Day-0 CNI render injects the API server endpoint into cilium-config"

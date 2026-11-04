@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	computev1alpha1 "github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/api/v1alpha1"
+	computev1alpha1 "github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/api/v1alpha1"
 )
 
 // The two decisions that differ between environments, as interfaces.

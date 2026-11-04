@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/soloz-io/zero-ops/internal/platform/agent-core/service"
+	"github.com/kamarkat/kamarkat/internal/platform/agent-core/service"
 )
 
 // DeleteAgentArgs defines the input schema for delete_agent tool

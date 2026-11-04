@@ -112,15 +112,15 @@ Download the CLI from a release and run it once:
 ```
 # the latest release, for this machine
 gh release download --repo soloz-io/zero-ops \
-  --pattern "soloz-$(uname -s | tr 'A-Z' 'a-z')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
-  --output soloz && chmod +x soloz
+  --pattern "kakt-$(uname -s | tr 'A-Z' 'a-z')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+  --output kakt && chmod +x kakt
 
-./soloz tenant scaffold \
+./kakt tenant scaffold \
   --tenant acme --org acme-inc --domain acme.example
 ```
 
 The version a box starts on is the version of the binary that scaffolded it, so
-downloading the latest release is how a tenant starts current. `soloz
+downloading the latest release is how a tenant starts current. `kakt
 bundle-version` says which one a binary carries.
 
 Three inputs. The platform version comes from the binary, the control plane is named for the tenant, and the rest is defaulted — `--help` lists what can be overridden.
@@ -178,7 +178,7 @@ A tenant that wants the fast path enables auto-merge on that repository.
 
 ### Adding a cluster
 
-A workload cluster is a declaration, not a command. `soloz tenant add-cluster` renders `templates/workload-cluster/` into `registry/clusters/<name>/`; commit it. The control plane already running in the box provisions it and keeps it in that state.
+A workload cluster is a declaration, not a command. `kakt tenant add-cluster` renders `templates/workload-cluster/` into `registry/clusters/<name>/`; commit it. The control plane already running in the box provisions it and keeps it in that state.
 
 There is no second mechanism for this: the thing that keeps a cluster in its desired state is the thing that creates it.
 
@@ -198,7 +198,7 @@ nothing was held.
 ## Repository layout
 
 ```
-cmd/                 soloz, kube-sbt, auth-proxy, mcp-server
+cmd/                 kakt, kube-sbt, auth-proxy, mcp-server
 internal/            private packages behind those binaries
 manifests/           the platform: boundaries, components, compositions, charts
 docs/adr/            architecture decision records
@@ -236,7 +236,7 @@ from the tenant's own repository.
   differs from kubefirst, and where Day-0 runs.
 - `docs/runbooks/bootstrap-and-binaries.md` — the binaries, teardown and state
   management.
-- `make build` builds `soloz`. A build from source reports its version as
+- `make build` builds `kakt`. A build from source reports its version as
   `development` and reads platform content from the working tree; a released
   build carries both (ADR-068).
 

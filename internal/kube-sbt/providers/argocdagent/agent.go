@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // Config for the ArgoCD Agent provider.

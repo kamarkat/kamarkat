@@ -13,7 +13,7 @@ Bootstrap and manage Hub (Management) Clusters on Hetzner Cloud using Cluster AP
 ```bash
 make build-hub
 # or
-go build -o bin/soloz ./cmd/hub
+go build -o bin/kakt ./cmd/hub
 ```
 
 **Usage:**
@@ -22,7 +22,7 @@ go build -o bin/soloz ./cmd/hub
 
 # Legacy way
 # export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
-# ./bin/soloz bootstrap \
+# ./bin/kakt bootstrap \
 #   --name=hub \
 #   --region=hel1 \
 #   --debug 2>&1 | tee .zero-ops/bootstrap-hub.log
@@ -43,7 +43,7 @@ go build -o bin/soloz ./cmd/hub
 # - Any other repositories in the soloz-io organization
 # CRITICAL: Must run BEFORE init-secrets so platform-data namespace exists
 export GITHUB_TOKEN=$(cat k8-secrets/github/github-pat-token)
-./bin/soloz configure-github-access \
+./bin/kakt configure-github-access \
   --ghcr-pat=$GITHUB_TOKEN \
   --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
 
@@ -63,7 +63,7 @@ kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/platform-data \
 # TLS is enabled from Day 0 - no upgrade step needed
 # Step 3.5 automatically bootstraps Infisical (Org, Project, Machine Identity)
 # No port-forward needed - the CLI uses pod exec + REST API internally
-INFISICAL_API_URL=http://localhost:8080 ./bin/soloz init-secrets --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+INFISICAL_API_URL=http://localhost:8080 ./bin/kakt init-secrets --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
 
 # Step 6: Wait for ArgoCD to sync and deploy database
 kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
@@ -74,25 +74,25 @@ kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
 # The deprecated `hub configure-eso` has been replaced by automatic bootstrapping.
 
 # Teardown Hub cluster
-./bin/soloz teardown --name=hub
+./bin/kakt teardown --name=hub
 
 # Only use if local kind cluster does not exist and already pivoted
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/soloz teardown --name=hub --force --confirm 2>&1 | tee .zero-ops/teardown-hub.log
+export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt teardown --name=hub --force --confirm 2>&1 | tee .zero-ops/teardown-hub.log
 
 # Teardown spoke clusters (independent of hub)
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/soloz spoke teardown --force 2>&1 | tee .zero-ops/teardown-spoke.log
+export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt spoke teardown --force 2>&1 | tee .zero-ops/teardown-spoke.log
 
 # Teardown specific spoke cluster
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/soloz spoke teardown --name=spoke-pool-eu-prod-01 --force 2>&1 | tee .zero-ops/teardown-spoke.log
+export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt spoke teardown --name=spoke-pool-eu-prod-01 --force 2>&1 | tee .zero-ops/teardown-spoke.log
 
 ```
 
 **Command Execution Order (CRITICAL):**
 
-1. **`soloz bootstrap-mgmt`** - Creates Kubernetes cluster and deploys ArgoCD
-2. **`soloz configure-github-access`** - Injects GitHub credentials (enables ArgoCD sync and namespace creation)
+1. **`kakt bootstrap-mgmt`** - Creates Kubernetes cluster and deploys ArgoCD
+2. **`kakt configure-github-access`** - Injects GitHub credentials (enables ArgoCD sync and namespace creation)
 3. **Wait for namespaces** - ArgoCD creates platform-data, platform-security, etc.
-4. **`soloz init-secrets`** - Generates CA, Infisical keys, AND bootstraps Infisical (Org/Project/Machine Identity)
+4. **`kakt init-secrets`** - Generates CA, Infisical keys, AND bootstraps Infisical (Org/Project/Machine Identity)
 5. **Wait for Database** - ArgoCD syncs and deploys PostgreSQL cluster with TLS
 
 **Why this order matters:**
@@ -211,7 +211,7 @@ Hub bootstrap state is tracked in `.zero-ops/state/<cluster-name>.json`. Bootstr
 # Clear state for specific cluster
 rm -f .zero-ops/state/<cluster-name>.json
 
-# Example: clear state for 'soloz' cluster
+# Example: clear state for 'kakt' cluster
 rm -f .zero-ops/state/hub.json
 
 # View bootstrap logs

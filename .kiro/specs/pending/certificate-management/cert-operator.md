@@ -86,7 +86,7 @@ Run Kubebuilder to initialize the new operator:
 ```bash
 mkdir -p operators/cert-operator
 cd operators/cert-operator
-kubebuilder init --domain nutgraf.in --repo github.com/soloz-io/zero-ops/operators/cert-operator
+kubebuilder init --domain nutgraf.in --repo github.com/kamarkat/kamarkat/operators/cert-operator
 # We don't create a new API. The operator will watch the existing Crossplane SpokePool XR.
 ```
 
@@ -539,7 +539,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/soloz-io/zero-ops/operators/cert-operator/internal/infisical"
+	"github.com/kamarkat/kamarkat/operators/cert-operator/internal/infisical"
 )
 
 const (

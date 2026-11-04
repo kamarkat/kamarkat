@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render the docs' release pages from each version's annotated inventory.
 
-    soloz release docs [<version>...] --docs-dir <docs checkout>
+    kakt release docs [<version>...] --docs-dir <docs checkout>
 
-`soloz release docs` first writes each named version's data with
+`kakt release docs` first writes each named version's data with
 release-data.py inventory into <docs>/data/releases/<version>.json, then runs
 this, which renders whatever that directory holds:
 
@@ -82,7 +82,7 @@ Your box has one management cluster and the managed clusters it provisions. Each
 
 ## Bootstrap tools
 
-Run by the `soloz` CLI on your machine or in your CI during Day-0. Not installed in any cluster.
+Run by the `kakt` CLI on your machine or in your CI during Day-0. Not installed in any cluster.
 
 <BootstrapTools release={{release}} />
 
@@ -121,7 +121,7 @@ def main() -> None:
         if ("released" not in r or any("url" not in c for c in r["components"])
                 or any(c["current"] is False and not c.get("behind") for c in r["components"])):
             sys.exit(f"release-pages: {r['version']} was fetched without its release date, upstream "
-                     f"versions or the reasons components are behind. Fetch it again: soloz release docs {r['version']}")
+                     f"versions or the reasons components are behind. Fetch it again: kakt release docs {r['version']}")
     releases.sort(key=lambda r: semver_key(r["version"]), reverse=True)
 
     for d in (PAGES, LINES, SNIPPETS):

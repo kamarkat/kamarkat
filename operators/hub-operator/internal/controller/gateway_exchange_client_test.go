@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	client2 "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
+	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 )
 
 // ADR-095: the gateway authenticates its token exchange as a CONFIDENTIAL

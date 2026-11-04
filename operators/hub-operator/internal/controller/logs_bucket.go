@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/objectstore"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/objectstore"
 )
 
 // objectStorageSecret is the box's object-storage credential, written at

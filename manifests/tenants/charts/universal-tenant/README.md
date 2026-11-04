@@ -34,7 +34,7 @@ helm install tenant-acme charts/universal-tenant \
 | `tier` | Tenant tier (starter/enterprise) | Yes | `starter` |
 | `region` | Region for resources | Yes | `fsn1` |
 | `database.schemaName` | PostgreSQL schema name | No | `tenant_{tenantId}` |
-| `database.migrations.gitRepo` | Git repo with migrations | No | `https://github.com/soloz-io/zero-ops` |
+| `database.migrations.gitRepo` | Git repo with migrations | No | `https://github.com/kamarkat/kamarkat` |
 | `database.migrations.gitRevision` | Git branch/tag | No | `main` |
 | `database.migrations.gitPath` | Path to migrations | No | `migrations/tenant-baseline` |
 | `resourceQuota.cpu` | CPU limit | No | `1000m` |
@@ -72,7 +72,7 @@ region: fsn1
 database:
   schemaName: tenant_acme
   migrations:
-    gitRepo: https://github.com/soloz-io/zero-ops
+    gitRepo: https://github.com/kamarkat/kamarkat
     gitRevision: main
     gitPath: migrations/tenant-baseline
 resourceQuota:

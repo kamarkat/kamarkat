@@ -157,7 +157,7 @@ resolve_target() {
 #   DEL VHDX|ARTEFACT|TEMP <what> <size>
 HOST_SWEEP_PS=$(cat <<'PS_EOF'
 $ErrorActionPreference = 'SilentlyContinue'
-$dir = 'C:\ProgramData\soloz\flatcar'
+$dir = 'C:\ProgramData\kakt\flatcar'
 
 function Get-CFree { (Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace }
 

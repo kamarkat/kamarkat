@@ -5,10 +5,10 @@ scratch-pad
 bin
 scratch-pad
 # The built CLI binaries, not the package directory. A bare "hub" also matched
-# cmd/soloz/, so every new source file added there was silently ignored — the file
+# cmd/kakt/, so every new source file added there was silently ignored — the file
 # stays untracked, the build keeps working locally, and the change is lost.
 /hub
-/cmd/soloz/soloz
+/cmd/kakt/kakt
 hub.exe
 codebase.md
 .kiro/specs/agentic-enterprise-onboarding/references
@@ -48,7 +48,7 @@ __pycache__
 # 24 of these reached history before this rule existed — roughly 969MB across
 # eight paths, every one a macOS build from a laptop. They arrive the same way
 # each time: `go build` writes next to the source unless told otherwise, and a
-# later `git add -A` sweeps the result in. `cmd/soloz/soloz` is what `go build`
+# later `git add -A` sweeps the result in. `cmd/kakt/kakt` is what `go build`
 # produces run from inside that directory; `main` is what it produces with no
 # -o flag at all.
 #
@@ -69,7 +69,7 @@ __pycache__
 # Built INSIDE their own package directory, so they cannot be anchored to the
 # root. Named in full for the same reason: a bare `hub` would also ignore any
 # directory called hub.
-cmd/soloz/soloz
+cmd/kakt/kakt
 cmd/mcp-server/mcp-server
 cmd/auth-proxy/auth-proxy
 cmd/kube-sbt/kube-sbt
@@ -86,14 +86,14 @@ bin/
 manifests/argocd/environment-manager/descriptors/
 # The built CLI at the repository root (bin/ is already ignored above).
 #
-# Anchored. A bare `soloz` is a PATTERN, not a path: it matches any file or
-# DIRECTORY of that name at any depth, and cmd/soloz is a directory of that name.
+# Anchored. A bare `kakt` is a PATTERN, not a path: it matches any file or
+# DIRECTORY of that name at any depth, and cmd/kakt is a directory of that name.
 # Every source file added there since this line was written has been silently
 # untracked -- verify.go, proposal.go, kubeconfig.go, support.go and two tests --
-# so a fresh clone cannot build `soloz verify`, which the tenant bootstrap
+# so a fresh clone cannot build `kakt verify`, which the tenant bootstrap
 # workflow calls. The files already committed survived only because they predate
 # the pattern.
-/soloz
+/kakt
 # Scaffolded tenant repositories created during local testing. They are their own
 # git repositories and belong to the tenant, not to the platform.
 *-gitops/

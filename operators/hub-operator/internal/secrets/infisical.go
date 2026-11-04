@@ -15,7 +15,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/constant"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/constant"
 )
 
 const (

@@ -82,7 +82,7 @@ main() {
 
     check "docker_cli" "docker CLI" bash -c "command -v docker >/dev/null 2>&1" || failed=1
     check "docker_daemon" "docker daemon" bash -c "docker info >/dev/null 2>&1" || failed=1
-    check "soloz_binary" "soloz binary" test -f "$ZERO_OPS_DIR/bin/soloz" || failed=1
+    check "kakt_binary" "kakt binary" test -f "$ZERO_OPS_DIR/bin/kakt" || failed=1
 
     check "hetzner_token" "Hetzner token" test -f "$ZERO_OPS_DIR/k8-secrets/hetzner/token" || { log "  Fix: create k8-secrets/hetzner/token"; failed=1; }
     check "github_pat" "GitHub PAT" test -f "$ZERO_OPS_DIR/k8-secrets/github/github-pat-token" || { log "  Fix: create k8-secrets/github/github-pat-token"; failed=1; }

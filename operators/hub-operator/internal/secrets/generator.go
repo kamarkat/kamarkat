@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"github.com/soloz-io/zero-ops/internal/platform/escrow"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"

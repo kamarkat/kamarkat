@@ -263,7 +263,7 @@ spec:
     spec:
       project: platform-infrastructure
       source:
-        repoURL: https://github.com/soloz-io/zero-ops
+        repoURL: https://github.com/kamarkat/kamarkat
         path: edge-catalog/spoke-pool
         targetRevision: main
       destination:
@@ -300,7 +300,7 @@ metadata:
 spec:
   project: platform-infrastructure
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     path: edge-catalog/spoke-pool/apps
     targetRevision: main
   destination:

@@ -15,7 +15,7 @@ fact must not be a literal in a published chart.
 
 It also could not express what a box actually has. A repository holds one
 management cluster and as many workload clusters as it declares (kubefirst's
-layout, `soloz tenant add-cluster`), and two of those can share an environment
+layout, `kakt tenant add-cluster`), and two of those can share an environment
 and a provider -- at which point one key has two answers and the table is
 silently wrong for one of them.
 

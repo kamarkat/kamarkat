@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Validate that the Day-0 ArgoCD seed matches what GitOps declares for ArgoCD.
 #
-# The hub bootstrap installs ArgoCD imperatively (internal/soloz-cli/components/
+# The hub bootstrap installs ArgoCD imperatively (internal/kakt-cli/components/
 # installer.go) because nothing can deploy the deployer. That seed is superseded
 # at sync wave 1 by the 'platform-argocd' Application in boundary 01, which
 # adopts the release.
@@ -30,8 +30,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-versions_go="$repo_root/internal/soloz-cli/versions/versions.go"
-installer_go="$repo_root/internal/soloz-cli/components/installer.go"
+versions_go="$repo_root/internal/kakt-cli/versions/versions.go"
+installer_go="$repo_root/internal/kakt-cli/components/installer.go"
 env_mgr="$repo_root/manifests/argocd/environment-manager"
 
 fail_count=0

@@ -335,7 +335,7 @@ result                     tls.* never written, CrashLoopBackOff, control plane 
 ```
 
 **What this means, stated without softening: as implemented, any control-plane Machine
-created more than `BootstrapLeafValidity` after `soloz kms leaf issue` cannot boot.** That
+created more than `BootstrapLeafValidity` after `kakt kms leaf issue` cannot boot.** That
 covers scale-up, failure replacement and every roll — the normal lifecycle, not a corner
 case. A cluster provisioned today works until the first time it needs a new control-plane
 node, and then cannot get one.
@@ -409,7 +409,7 @@ leaf, placeholder digest, stale harness fixture): **a value that is correct when
 silently wrong later, with nothing comparing it to the thing it must match.**
 
 **Remaining gate:** re-wrapping `leaf.enc` before the long-lived leaf expires. Until then
-this design is sound for roughly 87 days from the last `soloz kms leaf issue`, after which
+this design is sound for roughly 87 days from the last `kakt kms leaf issue`, after which
 node replacement fails exactly as it did before the reconciler.
 
 **Open, and the ADR is not closed until these land:**
@@ -439,10 +439,10 @@ disk-bounding work. Recorded here because the commit message does not mention KM
 | area | what |
 |---|---|
 | `internal/platform/kms/` | the dedicated CA, bootstrap and long-lived leaf issuance, KEK wrapping/unwrapping, secret naming |
-| `cmd/soloz/kms.go` | `kms ca ensure`, `kms leaf issue` |
-| `internal/soloz-cli/cluster/kms_preconditions.go` | the six-check provisioning gate (condition 1) |
-| `internal/soloz-cli/pivot/orchestrator.go` | the Day-0 CA copy, gated on encryption mode |
-| `internal/soloz-cli/versions/` | provider-version parity with the applied manifests, and the test that enforces it |
+| `cmd/kakt/kms.go` | `kms ca ensure`, `kms leaf issue` |
+| `internal/kakt-cli/cluster/kms_preconditions.go` | the six-check provisioning gate (condition 1) |
+| `internal/kakt-cli/pivot/orchestrator.go` | the Day-0 CA copy, gated on encryption mode |
+| `internal/kakt-cli/versions/` | provider-version parity with the applied manifests, and the test that enforces it |
 | `operators/kms-plugin/` | the fork, metrics, and the removal of on-node issuance (`internal/nodecert` deleted) |
 | `internal/assets/manifests/secrets/` | the three KMS Secret templates |
 | `docs/analysis/bootstrap-material-exposure.md` | the independent finding, which this ADR does **not** address |
@@ -519,7 +519,7 @@ The remaining findings are accepted as blocking and are **not** closed by this r
 |---|---|---|---|
 | 1 | one coherent target state; no Infisical-as-KMS remnants | platform | **closed** |
 | 2 | Git-managed desired state and a named reconciler for key, IAM, federation, rotation, retention | platform | **decided, not built, and its premise now verified.** Crossplane on the hub, already installed and ArgoCD-delivered at wave 01; the provider schema was checked and does enforce forward-only rotation. Not Terraform, and not as a substitute for it — see "Declarative delivery" |
-| 3 | exact key-scoped IAM policy, federation claim mapping, credential bootstrap and rebuild path, revocation procedure | platform | **the IAM policy half is CLOSED** — applied by `soloz kms init` and verified against real IAM on 2026-10-06, **12 of 12** by real authorization-denial calls, running as the plugin's own identity. See "Real-project IAM evidence". Federation claim mapping and the full-rebuild credential path remain open — Gate 3 |
+| 3 | exact key-scoped IAM policy, federation claim mapping, credential bootstrap and rebuild path, revocation procedure | platform | **the IAM policy half is CLOSED** — applied by `kakt kms init` and verified against real IAM on 2026-10-06, **12 of 12** by real authorization-denial calls, running as the plugin's own identity. See "Real-project IAM evidence". Federation claim mapping and the full-rebuild credential path remain open — Gate 3 |
 | 4 | a durable, independently enforceable no-reactivation policy, **or removal of the guarantee** | platform | **closed as far as expressibility goes.** Removed from the plugin; enforcement moved to condition 2, and the provider schema was verified on 2026-10-06 to have no primary-version field at all. Two caveats recorded: the schema is beta, and inexpressible is not the same as detected |
 | 5 | real-GCP evidence: cold restart during outage, credential expiry and revocation, denied cross-key access, rotation, rollback, migration, backup restoration | **needs a GCP project** | open — Gate 3 |
 | 6 | repository locations so the abstractions can be verified | — | see below |
@@ -549,14 +549,14 @@ round produced.
 |---|---|---|
 | 1 | one coherent GCP-only design; no Infisical-KMS claims, tests, costs or recovery language | **CLOSED.** `internal/keystore/infisical.go` and its test are deleted; the remaining mentions of Infisical in this ADR and in the plugin are either historical record of why it was rejected, or correct statements about it being the secret store and the ADR-076 escrow — which it still is |
 | 2 | Git-managed declarative ownership of key, IAM, federation, rotation policy, retention, recovery metadata | **OPEN.** Decided and its premise verified (Crossplane on the hub; the provider schema was checked); not built. See "Declarative delivery" |
-| 3 | a real reconciler / IaC mechanism, not manual cloud-console steps | **BOOTSTRAP HALF CLOSED; reconciliation is condition 2.** There are no console steps: `soloz kms init` applies the key, the IAM policy and the identity, idempotently, with tests asserting the binding lands at the key, that an existing unrelated binding survives, and that no call ever touches the service-account key endpoint. A command run once is still not a reconciler, which is why condition 2 is separate and open |
+| 3 | a real reconciler / IaC mechanism, not manual cloud-console steps | **BOOTSTRAP HALF CLOSED; reconciliation is condition 2.** There are no console steps: `kakt kms init` applies the key, the IAM policy and the identity, idempotently, with tests asserting the binding lands at the key, that an existing unrelated binding survives, and that no call ever touches the service-account key endpoint. A command run once is still not a reconciler, which is why condition 2 is separate and open |
 | 4a | one cluster's plugin cannot use another cluster's key | **PROVEN** against real GCP: `PERMISSION_DENIED` encrypting under a second key in the same ring. Each cluster also has its own key and its own service account bound only to it. The probe key is a sibling rather than literally a second cluster's key; the IAM check is identical, and it becomes literal once a second cluster is provisioned |
 | 4b | plugin cannot rotate, disable, destroy, administer or alter IAM | **CLOSED.** 12 of 12 against real GCP on 2026-10-06, all five administrative operations refused on a canary carrying the identical binding. Real calls on the enforcement path, aimed at a canary key carrying the IDENTICAL binding, with the aim enforced in code by `mustBeCanary`. Three designs preceded it and all were wrong: live-key mutation (performs the action it tests for), an unbound throwaway (refused for the wrong reason), and `testIamPermissions` (documented by Google as unsuitable for authorization checking and able to fail open). Policy Troubleshooter would add *attribution* of which binding decides and is **not implemented** — recorded as a complement, not a substitute |
 | 4c | the required `GetCryptoKey` permission is explicitly accounted for | **CLOSED, and it is no longer required.** This is the finding from the first round, and the fix was to remove the need rather than grant it: the plugin discovers its active version by encrypting against the parent key and reading `EncryptResponse.Name`. `cryptoKeys.get` is not held, the plugin does not call it, the denial is proven against real GCP, and a preflight fails the build if the call reappears |
 | 5 | complete bootstrap identity design: issuer, per-cluster credential source, renewal, revocation and expiry, full hub-rebuild path, no long-lived key on disk | **DECIDED, NOT BUILT — still the critical path.** See "The bootstrap identity". X.509 federation against the per-cluster CA; the API surface, the attribute mapping, the token exchange and the Go support were all **verified on 2026-10-06** against the pinned modules, and the plugin's client already routes through the auth library that supports it with no dependency change. Node replacement needs no action and identity isolation is structural. **Three things remain open and are named there:** the hub-rebuild trust-anchor step is a procedure whose *enforcement* is not written; nothing reports the certificate's remaining lifetime, so a pod that does not restart for a year expires into a failed cold read; and credential failure is **not** cleanly distinguishable by gRPC status code, so the health classification needs a separate credential probe rather than the code |
-| 6 | a durable rotation authority enforcing monotonic progression; not plugin memory, not operator discipline | **CLOSED for detection; remediation is deliberately manual.** Plugin memory gone (Amendment 2); operator discipline gone (Amendment 3 removed the suffix). Reactivation is not expressible in the reconciler's desired state, and a durable **version floor** now lives on the reviewed manifest with `soloz kms drift` alarming on a regression — see "Drift control". No automatic repair, by decision: that would restore the mutation authority withheld from anything in-cluster. **Open:** nothing runs the check on a schedule or routes its failure to an owner |
+| 6 | a durable rotation authority enforcing monotonic progression; not plugin memory, not operator discipline | **CLOSED for detection; remediation is deliberately manual.** Plugin memory gone (Amendment 2); operator discipline gone (Amendment 3 removed the suffix). Reactivation is not expressible in the reconciler's desired state, and a durable **version floor** now lives on the reviewed manifest with `kakt kms drift` alarming on a regression — see "Drift control". No automatic repair, by decision: that would restore the mutation authority withheld from anything in-cluster. **Open:** nothing runs the check on a schedule or routes its failure to an owner |
 | 7 | remove the synthetic key-ID suffix unless a shared-key use case is formally enforced | **CLOSED, and more completely in Amendment 4.** There is no shared-key use case: the key is per cluster and cross-cluster use is denied by IAM. Amendment 3 removed the suffix from the identifier but kept the flag as break-glass; the second review was right that an available flag *is* the manual mutation path, so Amendment 4 **deletes it**. No configuration can append anything to the identifier |
-| 8 | defined availability design: location, latency/SLO budget, quotas, retry/timeouts, monitoring, alerting, incident ownership, DR assumptions | **CARRIER, OWNER, SIGNING-KEY POLICY AND INSTRUMENTATION DONE; BUDGETS OPEN.** Location signed off; timeouts, retries and probe rates recorded. `soloz kms check` plus a scheduled CI workflow observe from outside the clusters they check. Owner is **Platform Security / Control-Plane on-call**, and the workflow refuses to run without one. Signing-key rotation is event-driven with a stated expiry condition. The plugin now exports latency, failures by reason, the active key version and health — the inputs an SLO needs. **Open:** the SLO and error budget themselves, measured quotas, and a recovery objective, all of which want numbers from running it rather than from design |
+| 8 | defined availability design: location, latency/SLO budget, quotas, retry/timeouts, monitoring, alerting, incident ownership, DR assumptions | **CARRIER, OWNER, SIGNING-KEY POLICY AND INSTRUMENTATION DONE; BUDGETS OPEN.** Location signed off; timeouts, retries and probe rates recorded. `kakt kms check` plus a scheduled CI workflow observe from outside the clusters they check. Owner is **Platform Security / Control-Plane on-call**, and the workflow refuses to run without one. Signing-key rotation is event-driven with a stated expiry condition. The plugin now exports latency, failures by reason, the active key version and health — the inputs an SLO needs. **Open:** the SLO and error budget themselves, measured quotas, and a recovery objective, all of which want numbers from running it rather than from design |
 | 9 | real-GCP end-to-end evidence: bootstrap, key-scoped IAM denial, rotation, API-server restart during outage, credential expiry and revocation, migration, backup restoration, full recovery | **IAM DENIAL DONE** — 12 of 12 by real denial calls, see "Real-project IAM evidence". Bootstrap of the KEY is done. Everything else is **blocked on condition 5**: running a real control plane against Cloud KMS needs the node credential that condition 5 has not decided |
 | 10 | verified repository review showing static pod, CAPI template, GitOps reconciliation, image supply chain and product boundary actually implement this ADR | **OPEN**, and partly downstream of 2 and 5. The static pod, the image and its supply chain exist and are asserted by preflight; the CAPI template work is gate 3; GitOps reconciliation is condition 2 |
 | 11 | status **Proposed** until mandatory controls and production evidence are complete | **ALREADY DONE** — the acceptance was withdrawn in the first round, before this list arrived |
@@ -668,7 +668,7 @@ byte-identical to the live key's, asserts the deny probe stays unbound, and asse
 call which *succeeds* fails its row — because a fake that refuses everything would pass
 whatever the assertion was.
 
-`--with-canary` on `soloz kms init` creates and binds it. Without it the administrative
+`--with-canary` on `kakt kms init` creates and binds it. Without it the administrative
 rows report `not-tested` rather than being redirected at the live key.
 
 ### Amendment 4 — 2026-10-06: the break-glass flag is deleted, and the denial checks stop mutating
@@ -683,7 +683,7 @@ boundary. There is now no configuration that can produce an identifier other tha
 `CryptoKeyVersion` resource name.
 
 **The administrative denials are established by asking, not by attempting.**
-`soloz kms prove` used to call `setIamPolicy`, `createCryptoKeyVersion`, `disable` and
+`kakt kms prove` used to call `setIamPolicy`, `createCryptoKeyVersion`, `disable` and
 `destroy` and record the refusals. Amendment 3 bounded the blast radius by aiming the
 destructive two at a throwaway key; the review was right that this did not fix the
 problem:
@@ -728,7 +728,7 @@ durable invariant on that. Cluster scoping, its other claimed job, is done by IA
 proven. `--cluster` on the plugin is now a log label; `--key-suffix` survives unset as a
 disaster-recovery escape hatch.
 
-**`soloz kms prove` now attempts the whole administrative surface**, not just
+**`kakt kms prove` now attempts the whole administrative surface**, not just
 `updatePrimaryVersion`: `setIamPolicy`, `createCryptoKeyVersion`, `disable` and
 `destroy`. The last two are aimed at the deny-probe key rather than the live one, because
 a check that establishes a denial by performing the call does the damage if the policy is
@@ -1054,7 +1054,7 @@ convention and the figure already in force.
 permission to wait.** A key known to have left its trust boundary is an incident: it is
 replaced now, and the 90-day clock governs keys that have not. Treating a disclosure as
 "due at the next window" keeps a known-compromised key in force for a quarter.
-`soloz encryption rotate --help` states both halves, so the distinction is in front of
+`kakt encryption rotate --help` states both halves, so the distinction is in front of
 whoever runs it.
 
 **This has an open instance.** `nutgraf-01`'s secretbox key was disclosed into session
@@ -1264,7 +1264,7 @@ Two ways out, and the choice is not obvious:
    is now a recovery dependency for encryption as well as for PKI, and a compromised
    escrow yields the ability to mint a plugin identity.
 2. **Re-upload the trust anchor as a rebuild step.** The operator holds GCP credentials
-   outside the cluster, so `soloz kms` can replace the provider's trust anchor with the new
+   outside the cluster, so `kakt kms` can replace the provider's trust anchor with the new
    CA before the control plane is expected to decrypt. Nothing extra is escrowed, and the
    rebuild gains a mandatory ordered step that, if skipped, produces a hub that starts and
    cannot read a Secret.
@@ -1288,7 +1288,7 @@ is not good enough for a platform whose claim is that operations are not manual*
 now a check rather than a sentence in a runbook:
 
 ```
-soloz kms trust-anchor --cluster <name> --ca-file <the cluster CA, PEM>
+kakt kms trust-anchor --cluster <name> --ca-file <the cluster CA, PEM>
 ```
 
 It refuses, before anything is configured to depend on the identity, when the provider
@@ -1320,7 +1320,7 @@ is two phases:
 
 ```
 1  provision the control plane under secretbox        CA now exists
-2  upload the trust anchor from that CA               soloz kms trust-anchor verifies it
+2  upload the trust anchor from that CA               kakt kms trust-anchor verifies it
 3  roll the control plane onto the KMS provider       a new template name, as ADR-041 requires
 ```
 
@@ -1419,7 +1419,7 @@ surfacing as a reconciler that cannot authenticate with nothing in the cluster h
 changed. So it is a platform control rather than a setup step:
 
 ```
-soloz kms jwks --cluster <name> --jwks-file jwks.json
+kakt kms jwks --cluster <name> --jwks-file jwks.json
 ```
 
 - **Idempotent by content**, not by string. It compares key identifiers, so a key set
@@ -1474,7 +1474,7 @@ that this is the one point on which the withdrawn design was better.
 certificate's remaining lifetime", and that was correct at the time.
 `soloz_kms_plugin_certificate_remaining_fraction` now exists, the plugin watches its own
 certificate and can only read it — it holds no issuing capability — and
-`soloz kms check` surfaces it with weeks of margin rather than hours.
+`kakt kms check` surfaces it with weeks of margin rather than hours.
 
 #### Credential failure is NOT cleanly distinguishable, correcting an earlier assumption
 
@@ -1539,7 +1539,7 @@ create the WIF provider + anchor      │  all of this, with no Cluster in exist
 create the key + IAM binding          │
 issue the leaf, store both Secrets   ─┘
         ↓
-VERIFY all five                          soloz kms check must exit 0
+VERIFY all five                          kakt kms check must exit 0
         ↓
 submit the Cluster                       the first machine may now be created
 ```
@@ -1626,7 +1626,7 @@ CA-discovery race, because a dedicated CA does not come from CAPI and can exist 
 cluster does. It does **not** remove the need for the dependency to be declared: a GitOps
 apply that creates the Cluster while the provider is still converging is the same failure
 with a different cause. The gate is a precondition on provisioning, checked by
-`soloz kms check` returning zero before `applyCluster` is called.
+`kakt kms check` returning zero before `applyCluster` is called.
 
 **2. Revocation is a dual-trust procedure, because "rotate the CA" alone is an outage.**
 A trust store holds multiple anchors, and that is what makes this survivable:
@@ -1672,8 +1672,8 @@ in whichever cluster CAPI reads control-plane file content from, which at Day-0 
 encryption configuration. So the hub's dedicated KMS CA is necessarily created *there*.
 
 **And that cluster is then destroyed.** The platform pivots with `clusterctl move`
-(`internal/soloz-cli/pivot/orchestrator.go:122`) and deletes the kind cluster afterwards
-(`internal/soloz-cli/bootstrap/orchestrator.go:424-426`). `clusterctl move` relocates
+(`internal/kakt-cli/pivot/orchestrator.go:122`) and deletes the kind cluster afterwards
+(`internal/kakt-cli/bootstrap/orchestrator.go:424-426`). `clusterctl move` relocates
 CAPI-owned objects; a Secret that no CAPI object owns is not among them.
 
 **The failure this produces is on a timer, which is why it would have shipped.** The hub's
@@ -1724,7 +1724,7 @@ leaf and the plugin picking it up on its refresh loop — **no control-plane rol
 "scheduled roll" requirement is satisfied by removing the need for one, which is a better
 answer than scheduling it reliably.
 
-`soloz_kms_plugin_certificate_remaining_fraction` and the `soloz kms check` reporting remain,
+`soloz_kms_plugin_certificate_remaining_fraction` and the `kakt kms check` reporting remain,
 now as detection for a renewal path that has stopped working rather than as the trigger for a
 roll somebody has to perform.
 
@@ -1734,7 +1734,7 @@ argument for proceeding rather than against it.**
 Investigated against the **deployed** provider versions — core CAPI v1.10.0, kubeadm
 bootstrap and control plane **v1.8.5**, CAPH **v1.0.7**, read from
 `internal/assets/manifests/core/capi-operator/providers/*.yaml`, which is what
-`internal/soloz-cli/capi/operator.go:454` applies verbatim.
+`internal/kakt-cli/capi/operator.go:454` applies verbatim.
 
 | | finding | confidence |
 |---|---|---|
@@ -2154,7 +2154,7 @@ It also shrinks the credential question it depends on: a read-only reconciler ne
 the cluster.
 
 **What it costs, stated rather than glossed.** Git holds the desired state and the
-reconciler holds the alarm, not the pen. Remediation is a deliberate `soloz kms` action with
+reconciler holds the alarm, not the pen. Remediation is a deliberate `kakt kms` action with
 an operator credential from outside the cluster. And the alarm itself — comparing
 `status.atProvider` against the spec — is **not built**; it is the drift control still open
 under condition 6. A preflight forbids `Create`, `Update` and `Delete` on anything under
@@ -2192,14 +2192,14 @@ Terraform could not either — a `terraform apply` is also somebody running a co
 What makes it GitOps rather than an ad-hoc action is where the desired state lives and
 what happens afterwards.
 
-**`soloz kms`** (`cmd/soloz/kms.go`, `internal/platform/kms/`), modelled on `soloz escrow
+**`kakt kms`** (`cmd/kakt/kms.go`, `internal/platform/kms/`), modelled on `kakt escrow
 init`. What stays manual is the GCP project and nothing else:
 
 ```
-soloz kms init --cluster nutgraf-01 [--with-deny-probe] [--grant-impersonation-to user:…]
-soloz kms keyrings create
-soloz kms keys create <key-id>
-soloz kms verify --cluster nutgraf-01
+kakt kms init --cluster nutgraf-01 [--with-deny-probe] [--grant-impersonation-to user:…]
+kakt kms keyrings create
+kakt kms keys create <key-id>
+kakt kms verify --cluster nutgraf-01
 ```
 
 `init` establishes, in dependency order and idempotently: the API, the key ring, the
@@ -2236,7 +2236,7 @@ Identity Federation lands it changes only HOW that same account is assumed on a 
 none of this evidence is invalidated by that decision still being open.
 
 Impersonation is an escalation path, so it is opt-in, never part of a default run, and
-`soloz kms verify` prints who holds it — making its revocation a visible decision rather
+`kakt kms verify` prints who holds it — making its revocation a visible decision rather
 than a forgotten one.
 
 The resource names land in `k8-secrets/gcp/<cluster>/` (gitignored), and
@@ -2288,7 +2288,7 @@ reconciler that may not repair is only useful if something notices when repair i
 **Nothing here repairs anything, and that is the decision.** A controller that quietly
 fixed drift would hand back exactly the mutation authority deliberately withheld from
 anything running inside the cluster whose etcd the key protects — and would use it where
-nobody is looking. `soloz kms drift` runs from **outside** the cluster with an operator
+nobody is looking. `kakt kms drift` runs from **outside** the cluster with an operator
 credential, reports, and exits non-zero. It needs `cloudkms.cryptoKeys.get` and nothing
 else, which is a permission the plugin's own identity is proven to be denied.
 
@@ -2358,7 +2358,7 @@ that reintroduces repair fails rather than reconciling.
 
 #### Still open
 
-The alarm has no **carrier**. `soloz kms drift` exits non-zero; nothing yet runs it on a
+The alarm has no **carrier**. `kakt kms drift` exits non-zero; nothing yet runs it on a
 schedule or routes the failure to an owner, and condition 8's alerting and incident
 ownership are unassigned. A check nobody runs is a status field with extra steps.
 
@@ -2383,7 +2383,7 @@ cluster, project, key and provider in every result. It authenticates by **Worklo
 Identity Federation** — GitHub mints an OIDC token, GCP exchanges it — so the carrier
 stores no key either, holding the same prohibition as every other component here.
 
-#### `soloz kms check`, and the third exit code
+#### `kakt kms check`, and the third exit code
 
 `drift`, `jwks` and `trust-anchor` are written for a person. `check` is written for a
 scheduler: one run, one JSON report, every field that identifies the subject at the top
@@ -2492,9 +2492,9 @@ cluster rebuild / signing-key replacement
         ↓
 new JWKS generated
         ↓
-update the GCP WIF provider          soloz kms jwks
+update the GCP WIF provider          kakt kms jwks
         ↓
-verify the new JWKS is authoritative soloz kms check
+verify the new JWKS is authoritative kakt kms check
         ↓
 only then activate the rebuilt control plane
 ```
@@ -2589,7 +2589,7 @@ different fixes.
 
 | | |
 |---|---|
-| key location | **`europe-west3`** (Frankfurt), regional rather than multi-region. **Signed off 2026-10-06.** Closest to the Hetzner sites this platform runs in; keeps residency inside the EU alongside the clusters whose Secrets it protects; a regional key's availability is the same order as the single region those clusters already depend on. It is the default when no location is passed — `soloz kms init` and `--kms-location` both take it. A multi-region key would trade residency for availability, and that trade was considered and declined. Cheap to change only before the key holds data |
+| key location | **`europe-west3`** (Frankfurt), regional rather than multi-region. **Signed off 2026-10-06.** Closest to the Hetzner sites this platform runs in; keeps residency inside the EU alongside the clusters whose Secrets it protects; a regional key's availability is the same order as the single region those clusters already depend on. It is the default when no location is passed — `kakt kms init` and `--kms-location` both take it. A multi-region key would trade residency for availability, and that trade was considered and declined. Cheap to change only before the key holds data |
 | quota budget | the 60/min outage figure above is the number to size against, per cluster. `Encrypt` is a cryptographic operation and counts against the cryptographic quota, not the management one. **To be measured in Gate 3**, not assumed: if it needs capping, the cap belongs in the plugin as a minimum interval between probes, with the staleness that buys stated explicitly |
 | availability target | the key authority is on the **cold-read** path, not the write path — a write survives an outage shorter than the DEK cache lifetime, and this is established rather than assumed (Gate 1, step 9). So the target is stated against cold reads and control-plane restarts, which is where an outage actually surfaces. **Needs an owner** |
 | recovery objective | **not yet defined, and it is the one with teeth.** The key is deliberately not escrowed (above), so "restore the key" is not a recovery path. The objective has to be expressed as: how long a control plane may be unable to cold-read, and what the procedure is when the authority is gone for longer than that. **Needs an owner** |
@@ -3237,7 +3237,7 @@ on its own.
 |---|---|
 | collected | 2026-10-06 |
 | repository commit | `2ec812d6` (working tree; the plugin and CLI changes are uncommitted pending review) |
-| command | `soloz kms prove --cluster nutgraf-01 --impersonate kms-nutgraf-01@nutgraf-510805.iam.gserviceaccount.com` |
+| command | `kakt kms prove --cluster nutgraf-01 --impersonate kms-nutgraf-01@nutgraf-510805.iam.gserviceaccount.com` |
 | ran as | `kms-nutgraf-01@nutgraf-510805.iam.gserviceaccount.com` — **the plugin's own service account**, assumed by impersonation, NOT the operator, who is a project owner and would be denied nothing |
 | project | `nutgraf-510805` |
 | live key | `…/locations/europe-west3/keyRings/soloz-etcd/cryptoKeys/etcd-kek-nutgraf-01` |
@@ -3304,7 +3304,7 @@ Identity Federation, so this proves the POLICY and says nothing about how a stat
 Hetzner node obtains that identity. It says nothing about credential expiry or revocation
 behaviour, quotas, or latency. Those need gate 3.
 
-**The temporary impersonation grant was revoked** with `soloz kms revoke-impersonation`, and
+**The temporary impersonation grant was revoked** with `kakt kms revoke-impersonation`, and
 `kms verify` confirms nobody can assume the identity. The grant exists to collect this
 evidence and must not outlive it.
 
@@ -3318,7 +3318,7 @@ The method is asserted per surface now, and reverting the fix fails the test.
 
 Second: the temporary grant was first revoked by hand with a `setIamPolicy` carrying an
 empty binding list, which is correct only for a policy holding exactly one binding and
-silently destroys every other. `soloz kms revoke-impersonation` does it as a
+silently destroys every other. `kakt kms revoke-impersonation` does it as a
 read-modify-write with the etag, drops a role left with no members rather than writing it
 back empty, and reads the policy back afterwards.
 

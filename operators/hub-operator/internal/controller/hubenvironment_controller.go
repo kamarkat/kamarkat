@@ -32,13 +32,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/soloz-io/zero-ops/internal/pki"
-	"github.com/soloz-io/zero-ops/internal/platform/escrow"
-	opsv1alpha1 "github.com/soloz-io/zero-ops/operators/hub-operator/api/v1alpha1"
-	infisicalclient "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/database"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/infisical"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	"github.com/kamarkat/kamarkat/internal/pki"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	opsv1alpha1 "github.com/kamarkat/kamarkat/operators/hub-operator/api/v1alpha1"
+	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/database"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/infisical"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // HubEnvironmentReconciler reconciles a HubEnvironment object
@@ -1613,7 +1613,7 @@ const veleroExcludeLabel = "velero.io/exclude-from-backup"
 //
 // The residual window is worth naming rather than hiding. A certificate authority
 // created between one reconcile and the next could be captured by a backup taken in
-// that gap. It is harmless rather than merely unlikely: `soloz spoke restore-pki` is
+// that gap. It is harmless rather than merely unlikely: `kakt spoke restore-pki` is
 // the only writer of PKI, it reads from the escrow alone, and Velero does not replace
 // an existing resource -- so a stray copy in an archive is never promoted into a
 // second authority. The label removes it from the archive; the single-writer rule is
@@ -1645,7 +1645,7 @@ const classMBootstrapLabel = "recovery.platform.io/class-m"
 // trust root inside a Class M archive -- outside the Class E boundary it is supposed to
 // live in. Worse, if it were later restored, VELERO would create it, and Velero is a
 // writer. An earlier revision of this design argued the window was harmless because
-// `soloz spoke restore-pki` reads only the escrow; that conclusion was wrong, because
+// `kakt spoke restore-pki` reads only the escrow; that conclusion was wrong, because
 // it reasoned about one writer and there are two.
 //
 // So the credentials stream selects on this label and takes nothing else. Any Secret

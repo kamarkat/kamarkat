@@ -1,4 +1,4 @@
-module github.com/soloz-io/zero-ops/operators/workspace-sync
+module github.com/kamarkat/kamarkat/operators/workspace-sync
 
 go 1.25.0
 

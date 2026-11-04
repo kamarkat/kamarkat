@@ -3,7 +3,7 @@ package controller
 import (
 	"testing"
 
-	client2 "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
+	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 )
 
 // ADR-094 invariant 2: a target's allowlist names the caller by the client a

@@ -1854,7 +1854,7 @@ the endpoint on the spoke only.
 
 1. **Every box running KPR has its endpoint injected, the hub included.** The
    exemption in §24.1 is withdrawn.
-2. **The owner of the hub's copy is the soloz CLI, at Day-0, and only the CLI.** It
+2. **The owner of the hub's copy is the kakt CLI, at Day-0, and only the CLI.** It
    renders the hub's `cilium-config` from the same base with the hub
    `Cluster.spec.controlPlaneEndpoint` as `k8s-service-host` / `k8s-service-port`.
    This follows §24.1's ordering invariant: CAPH sets the endpoint before any
@@ -1893,7 +1893,7 @@ the endpoint on the spoke only.
   is kept so that an agent with a missing key fails loudly on the Service path,
   instead of failing to start with `CreateContainerConfigError`. Whether to make
   the keys required is for review.
-- The comment in `internal/soloz-cli/bootstrap/provider_cloud.go` that repeats the
+- The comment in `internal/kakt-cli/bootstrap/provider_cloud.go` that repeats the
   "keeps kube-proxy" premise is corrected with the code.
 - Separately, Argo CD's application controller now has a memory request and limit
   (`manifests/argocd/components/01/platform-argocd.yaml`). A sync-time spike is
@@ -1918,12 +1918,12 @@ the endpoint on the spoke only.
 
 ##### Codified
 
-- `internal/soloz-cli/cluster/provisioner.go` — `Provision` applies the CNI addon
+- `internal/kakt-cli/cluster/provisioner.go` — `Provision` applies the CNI addon
   after the Cluster; `controlPlaneEndpoint` reads and waits for the field, with no
   fallback; `injectAPIServerEndpoint` writes the two keys into the cilium-config
   document, refusing a stream with no such ConfigMap, with two of them, or with the
   keys already pinned.
-- `internal/soloz-cli/bootstrap/provider_cloud.go` — the "keeps kube-proxy" premise
+- `internal/kakt-cli/bootstrap/provider_cloud.go` — the "keeps kube-proxy" premise
   is removed from the Day-0 comment and the owner recorded.
 - `scripts/validate/preflight/046-hybrid-provider.sh` — check 7: the render injects
   the endpoint, it runs after the Cluster, and it reads the Cluster's field.

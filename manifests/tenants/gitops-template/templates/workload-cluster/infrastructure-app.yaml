@@ -36,7 +36,7 @@ spec:
     automated:
       # prune: false. A claim removed from git must not silently delete a running
       # cluster and every tenant workload on it; removing a workload cluster is a
-      # teardown, which is deliberate and is `soloz teardown`.
+      # teardown, which is deliberate and is `kakt teardown`.
       prune: false
       selfHeal: true
     syncOptions:

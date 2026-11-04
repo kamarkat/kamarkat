@@ -91,7 +91,7 @@ Modify the Kustomize block in your `spoke-infrastructure` AppSet to dynamically 
   template:
     spec:
       source:
-        repoURL: https://github.com/soloz-io/zero-ops
+        repoURL: https://github.com/kamarkat/kamarkat
         targetRevision: HEAD
         path: manifests/spoke/spoke-catalog/infra
         kustomize:

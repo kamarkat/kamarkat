@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
 )
 
 // Config for the GitOps Helm Provisioner.

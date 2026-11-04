@@ -360,17 +360,17 @@ do_clean() {
     # named from it (ADR-082), so it matches the hub's servers and the spokes'
     # alike. Without it, a run that provisioned a spoke and then failed left those
     # servers running and billing.
-    if ! "$ROOT/bin/soloz" teardown --name "$CLUSTER" --force --confirm \
+    if ! "$ROOT/bin/kakt" teardown --name "$CLUSTER" --force --confirm \
              --tenant "$TENANT" \
              --gitops-dir "$WORKSPACE/$repo" \
              ${pool:+--spoke "$pool"} 2>&1 | sed 's/^/  /'; then
         echo "local-e2e: teardown did not complete cleanly." >&2
         echo "  Records this box published may be left in the zone. They cannot be" >&2
         echo "  reclaimed by a later box -- check now, and release them with:" >&2
-        echo "    soloz teardown --name $CLUSTER --confirm --dns-only \\" >&2
+        echo "    kakt teardown --name $CLUSTER --confirm --dns-only \\" >&2
         echo "      --dns-owner <owner> --dns-zone <zone>" >&2
         echo "  Spoke servers may also be left running. Check and remove with:" >&2
-        echo "    soloz teardown --name $CLUSTER --force --confirm --tenant $TENANT \\" >&2
+        echo "    kakt teardown --name $CLUSTER --force --confirm --tenant $TENANT \\" >&2
         echo "      --gitops-dir $WORKSPACE/$repo${pool:+ --spoke $pool}" >&2
     fi
 
@@ -444,17 +444,17 @@ do_publish() {
 do_cli() {
     say "building a CLI that declares $VERSION"
     TARGETS=host ./scripts/package/build-cli.sh "$VERSION" "$ROOT/bin"
-    cp "$ROOT/bin/soloz-$(go env GOOS)-$(go env GOARCH)" "$ROOT/bin/soloz"
+    cp "$ROOT/bin/kakt-$(go env GOOS)-$(go env GOARCH)" "$ROOT/bin/kakt"
 
     # The one check worth making twice. A binary reporting `development` reads the
     # working tree and renders a git-shaped bundle, and every phase below would
     # succeed while testing the path this script exists to avoid.
-    local got; got="$("$ROOT/bin/soloz" bundle-version)"
+    local got; got="$("$ROOT/bin/kakt" bundle-version)"
     [ "$got" = "$VERSION" ] || {
         echo "local-e2e: the built CLI declares '${got}', expected '${VERSION}'" >&2
         return 1
     }
-    echo "bin/soloz declares $VERSION"
+    echo "bin/kakt declares $VERSION"
 }
 
 # Scaffolding refuses to clone over an existing directory, deliberately: a stale
@@ -497,7 +497,7 @@ workspace_is_clear() {
 # project is not a box: it belongs to the tenant, outlives every cluster built
 # against it, and holds the master keys of any box still running. Creating a
 # second one per run would leave those keys reachable by nothing, which is why
-# `soloz escrow init` refuses an id that is already recorded. This skips instead,
+# `kakt escrow init` refuses an id that is already recorded. This skips instead,
 # the same way a completed bootstrap phase does.
 #
 # What stays manual is the Infisical ACCOUNT and its first machine identity. That
@@ -512,7 +512,7 @@ do_escrow() {
     fi
 
     say "creating the escrow project for $TENANT"
-    "$ROOT/bin/soloz" escrow init \
+    "$ROOT/bin/kakt" escrow init \
         --url "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_URL" \
                    "the escrow Infisical URL" "https://app.infisical.com")" \
         --client-id "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_CLIENT_ID" \
@@ -531,7 +531,7 @@ do_scaffold() {
     workspace_is_clear || return 1
 
     say "scaffolding $GIT_ORG/$repo against $VERSION"
-    ( cd "$WORKSPACE" && "$ROOT/bin/soloz" tenant scaffold --local \
+    ( cd "$WORKSPACE" && "$ROOT/bin/kakt" tenant scaffold --local \
         --tenant "$TENANT" --org "$GIT_ORG" --domain "$DOMAIN" \
         --cluster "$CLUSTER" --environment "$ENVIRONMENT" --provider "$PROVIDER" \
         --subdomain "$SUBDOMAIN" \
@@ -578,7 +578,7 @@ do_scaffold() {
     # what the fleet ApplicationSets select on (ADR-047).
     local cell="${CELL:-$TENANT-01}"
     say "declaring workload cluster $cell"
-    "$ROOT/bin/soloz" tenant add-cluster \
+    "$ROOT/bin/kakt" tenant add-cluster \
         --gitops-dir "$WORKSPACE/$repo" \
         --mgmt-cluster "$CLUSTER" --name "$cell" \
         --provider "$PROVIDER" --region "$REGION" --environment "$ENVIRONMENT" \
@@ -681,7 +681,7 @@ do_bootstrap() {
     #
     # The script runs the CLI itself, as its first step.
     ( cd "$WORKSPACE/$repo" \
-      && ZERO_OPS_DIR="$WORKSPACE/$repo" SOLOZ_BINARY="$ROOT/bin/soloz" \
+      && ZERO_OPS_DIR="$WORKSPACE/$repo" KAKT_BINARY="$ROOT/bin/kakt" \
          bash "$ROOT/scripts/hub-bootstrap.sh" \
            --name "$CLUSTER" --provider "$PROVIDER" --region "$REGION" \
            --environment "$ENVIRONMENT" --gitops-dir . \
@@ -722,7 +722,7 @@ do_workload() {
     ENVIRONMENT="$ENVIRONMENT" \
     SPOKEPOOL_NAME="$pool" \
     ZERO_OPS_DIR="$ws" \
-    SOLOZ_BINARY="$ROOT/bin/soloz" \
+    KAKT_BINARY="$ROOT/bin/kakt" \
     bash -c '
         source "'"$ROOT"'/scripts/hub-bootstrap.sh"
         read_kubeconfig_from_state
@@ -756,11 +756,11 @@ do_verify() {
     # The same command the tenant's workflow runs, not a local re-implementation.
     # A second implementation would be a second thing to keep true, and the whole
     # point of this loop is that local and CI take one path.
-    "$ROOT/bin/soloz" verify --kubeconfig "$kc" --timeout "${VERIFY_DEADLINE:-45m}" || return 1
+    "$ROOT/bin/kakt" verify --kubeconfig "$kc" --timeout "${VERIFY_DEADLINE:-45m}" || return 1
 
     # Then the component checks, which converging does not cover.
     #
-    # `soloz verify` watches ArgoCD Applications reach Synced+Healthy -- a statement
+    # `kakt verify` watches ArgoCD Applications reach Synced+Healthy -- a statement
     # about reconciliation, not about the platform working. external-dns crash-looped
     # 108 times on an invalid --provider while its Application sat Synced, so no
     # hostname for the box was ever published and every hub URL was unreachable,
@@ -773,7 +773,7 @@ do_verify() {
     #
     # Run from HERE and not from the CLI, deliberately. ADR-063 fails a release that
     # references the platform's repository at runtime, and these scripts live in it,
-    # so a tenant's released `soloz bootstrap-mgmt` cannot call them (ADR-072 moved Day-0
+    # so a tenant's released `kakt bootstrap-mgmt` cannot call them (ADR-072 moved Day-0
     # into the tenant's own repository). This script IS a platform checkout, so the
     # check runs where it is runnable without putting a repository reference into
     # the artefact. Carrying these checks to tenants is separate work: they would
@@ -814,7 +814,7 @@ do_verify() {
 #
 # A repository holds one management cluster and as many workload clusters as it
 # declares, each at clusters/<name>/infrastructure/spokepool.yaml (kubefirst's
-# layout; `soloz tenant add-cluster` writes them). So this returns a LIST, and
+# layout; `kakt tenant add-cluster` writes them). So this returns a LIST, and
 # callers that can only act on one say which.
 #
 # Unknown is an error rather than a guess. A name this script invents is one the
@@ -834,7 +834,7 @@ workload_clusters() {
         echo "local-e2e: $repo declares no workload cluster." >&2
         echo "  A management cluster provisions the workload clusters its repository" >&2
         echo "  declares, and this one declares none. Add one:" >&2
-        echo "    $ROOT/bin/soloz tenant add-cluster --gitops-dir $repo \\" >&2
+        echo "    $ROOT/bin/kakt tenant add-cluster --gitops-dir $repo \\" >&2
         echo "      --mgmt-cluster $CLUSTER --name <cell> --provider $PROVIDER \\" >&2
         echo "      --environment $ENVIRONMENT --tenant $TENANT \\" >&2
         echo "      --bundle-version $VERSION --gitops-repo-url <url>" >&2
@@ -998,7 +998,7 @@ if wants bootstrap; then
 
 Tear down when finished:
 
-  $ROOT/bin/soloz teardown --name $CLUSTER --force --confirm --tenant $TENANT --gitops-dir $WORKSPACE/$TENANT-gitops
+  $ROOT/bin/kakt teardown --name $CLUSTER --force --confirm --tenant $TENANT --gitops-dir $WORKSPACE/$TENANT-gitops
   rm -rf $WORKSPACE/$TENANT-gitops
   gh repo delete $GIT_ORG/$TENANT-gitops --yes
 EOF

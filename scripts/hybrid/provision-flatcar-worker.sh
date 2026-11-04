@@ -77,7 +77,7 @@ K8S_VERSION="v1.35.10"
 TAILSCALE_VERSION="1.102.2"
 FLATCAR_RELEASE_CHANNEL="stable"
 UPGRADE_FLATCAR="false"
-CACHE_DIR="${HOME}/.cache/soloz/flatcar-bin"
+CACHE_DIR="${HOME}/.cache/kakt/flatcar-bin"
 # Digest-pinned Gateway API dependency-gate image, pinned to the linux/amd64
 # MANIFEST digest rather than the multi-arch index digest. That is deliberate and
 # load-bearing: `docker save` of an index digest fails outright, because pulling
@@ -313,9 +313,9 @@ phase_prep_binaries() {
   echo "    [0/6] Verifying offline worker binary cache on Mac..."
   mkdir -p "${CACHE_DIR}"
 
-  # Also check /tmp/soloz-flatcar-cache
-  if [[ -d "/tmp/soloz-flatcar-cache" ]]; then
-    cp -n /tmp/soloz-flatcar-cache/* "${CACHE_DIR}/" 2>/dev/null || true
+  # Also check /tmp/kakt-flatcar-cache
+  if [[ -d "/tmp/kakt-flatcar-cache" ]]; then
+    cp -n /tmp/kakt-flatcar-cache/* "${CACHE_DIR}/" 2>/dev/null || true
   fi
 
   if [[ ! -f "${CACHE_DIR}/kubelet" ]]; then
@@ -456,8 +456,8 @@ try {
 
 Write-Output '=== [2d/2d] Flatcar Directories & Virtual Switch ==='
 try {
-  \$solozDir = 'C:\ProgramData\soloz\flatcar'
-  if (!(Test-Path \$solozDir)) { New-Item -ItemType Directory -Path \$solozDir -Force | Out-Null }
+  \$kaktDir = 'C:\ProgramData\kakt\flatcar'
+  if (!(Test-Path \$kaktDir)) { New-Item -ItemType Directory -Path \$kaktDir -Force | Out-Null }
   
   # Host networking is host prep, not a manual per-box chore. A box that arrived
   # without the switch used to get a warning here and then fail five phases later
@@ -531,10 +531,10 @@ phase_prep_flatcar_and_ignition() {
 
   # 1. Ensure Flatcar base VHDX exists on Windows Host
   local PS_VHDX="
-\$solozDir = 'C:\ProgramData\soloz\flatcar';
-\$baseVhdx = Join-Path \$solozDir 'flatcar-base.vhdx';
-\$rawVhdx = Join-Path \$solozDir 'flatcar_production_hyperv_vhdx_image.vhdx';
-\$zipPath = Join-Path \$solozDir 'flatcar-base.vhdx.zip';
+\$kaktDir = 'C:\ProgramData\kakt\flatcar';
+\$baseVhdx = Join-Path \$kaktDir 'flatcar-base.vhdx';
+\$rawVhdx = Join-Path \$kaktDir 'flatcar_production_hyperv_vhdx_image.vhdx';
+\$zipPath = Join-Path \$kaktDir 'flatcar-base.vhdx.zip';
 
 if ('$UPGRADE_FLATCAR' -eq 'true') {
   Remove-Item \$baseVhdx -Force -ErrorAction SilentlyContinue
@@ -557,7 +557,7 @@ if (!(Test-Path \$baseVhdx)) {
   (New-Object Net.WebClient).DownloadFile(\$url, \$zipPath)
 
   Write-Output '    → Expanding archive (Expand-Archive, no external tools needed)...'
-  Expand-Archive -Path \$zipPath -DestinationPath \$solozDir -Force
+  Expand-Archive -Path \$zipPath -DestinationPath \$kaktDir -Force
   if (Test-Path \$rawVhdx) {
     Move-Item -Path \$rawVhdx -Destination \$baseVhdx -Force
   }
@@ -579,7 +579,7 @@ if (!(Test-Path \$baseVhdx)) {
   # this file, and a missing one turns into a cascade of PathNotFound/ObjectNotFound
   # noise that buries its own cause.
   local BASE_STATE
-  BASE_STATE=$(win_ps "$SSH_TARGET" "if (Test-Path 'C:\\ProgramData\\soloz\\flatcar\\flatcar-base.vhdx') { 'OK' } else { 'MISSING' }" \
+  BASE_STATE=$(win_ps "$SSH_TARGET" "if (Test-Path 'C:\\ProgramData\\kakt\\flatcar\\flatcar-base.vhdx') { 'OK' } else { 'MISSING' }" \
     | tr -d '\r' | grep -Ex 'OK|MISSING' | tail -1 || true)
   if [[ "$BASE_STATE" != "OK" ]]; then
     echo "    ✗ Base Flatcar VHDX is missing on ${SSH_TARGET} — the download or the expand failed." >&2
@@ -1323,8 +1323,8 @@ EOF
 
   # 6. SCP Ignition config & ISO bundle to Windows host
   echo "    → Uploading Ignition config and binary ISO bundle to host..."
-  local REMOTE_IGN="C:/ProgramData/soloz/flatcar/${VM_NAME}-config.ign"
-  local REMOTE_ISO="C:/ProgramData/soloz/flatcar/${VM_NAME}-ignition.iso"
+  local REMOTE_IGN="C:/ProgramData/kakt/flatcar/${VM_NAME}-config.ign"
+  local REMOTE_ISO="C:/ProgramData/kakt/flatcar/${VM_NAME}-ignition.iso"
   # The previous VM must let go of the ISO first.
   #
   # Hyper-V holds an open handle on a mounted DVD image, so writing over
@@ -1394,13 +1394,13 @@ EOF
   # Windows nor Flatcar, so a host that never had it hand-placed silently skips the
   # injection and falls back to the config-2 DVD alone.
   local KVP_STATE
-  KVP_STATE=$(win_ps "$SSH_TARGET" "if (Test-Path 'C:\\ProgramData\\soloz\\flatcar\\kvpctl.exe') { 'OK' } else { 'MISSING' }" \
+  KVP_STATE=$(win_ps "$SSH_TARGET" "if (Test-Path 'C:\\ProgramData\\kakt\\flatcar\\kvpctl.exe') { 'OK' } else { 'MISSING' }" \
     | tr -d '\r' | grep -Ex 'OK|MISSING' | tail -1 || true)
   if [[ "$KVP_STATE" != "OK" ]]; then
     if [[ -f "${CACHE_DIR}/kvpctl.exe" ]]; then
       echo "    → Uploading kvpctl.exe (host is missing it)..."
       scp -o BatchMode=yes -o StrictHostKeyChecking=no "${CACHE_DIR}/kvpctl.exe" \
-        "${SSH_TARGET}:C:/ProgramData/soloz/flatcar/kvpctl.exe" >/dev/null </dev/null
+        "${SSH_TARGET}:C:/ProgramData/kakt/flatcar/kvpctl.exe" >/dev/null </dev/null
       echo "    ✓ kvpctl.exe uploaded"
     else
       echo "    ⚠ kvpctl.exe is on neither this host nor ${CACHE_DIR} — Ignition will rely on the config-2 DVD only" >&2
@@ -1468,16 +1468,16 @@ phase_provision_flatcar_vm() {
   #    resolve on a non-English host.
   local PS_VM="
 \$vmName = '${VM_NAME}';
-\$solozDir = 'C:\ProgramData\soloz\flatcar';
-\$baseVhdx = Join-Path \$solozDir 'flatcar-base.vhdx';
-\$rawVhdx = Join-Path \$solozDir 'flatcar_production_hyperv_vhdx_image.vhdx';
+\$kaktDir = 'C:\ProgramData\kakt\flatcar';
+\$baseVhdx = Join-Path \$kaktDir 'flatcar-base.vhdx';
+\$rawVhdx = Join-Path \$kaktDir 'flatcar_production_hyperv_vhdx_image.vhdx';
 if (!(Test-Path \$baseVhdx) -and (Test-Path \$rawVhdx)) {
   Move-Item -Path \$rawVhdx -Destination \$baseVhdx -Force
 }
-\$vhdPath = Join-Path \$solozDir '${VM_NAME}.vhdx';
-\$ignPath = Join-Path \$solozDir '${VM_NAME}-config.ign';
-\$isoPath = Join-Path \$solozDir '${VM_NAME}-ignition.iso';
-\$kvpctl = Join-Path \$solozDir 'kvpctl.exe';
+\$vhdPath = Join-Path \$kaktDir '${VM_NAME}.vhdx';
+\$ignPath = Join-Path \$kaktDir '${VM_NAME}-config.ign';
+\$isoPath = Join-Path \$kaktDir '${VM_NAME}-ignition.iso';
+\$kvpctl = Join-Path \$kaktDir 'kvpctl.exe';
 
 \$existingVM = Get-VM -Name \$vmName -ErrorAction SilentlyContinue
 if (\$existingVM) {
@@ -1494,7 +1494,7 @@ if (\$existingVM) {
 }
 
 # Clean any stale checkpoint avhdx files
-Get-ChildItem \$solozDir -Filter '${VM_NAME}*.avhdx' | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem \$kaktDir -Filter '${VM_NAME}*.avhdx' | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Host disk headroom guard (ADR-046): ensure C: has room for bounded growth (60%) plus 20 GB reserve
 \$cFree = [int64](Get-PSDrive C).Free

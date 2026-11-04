@@ -137,7 +137,7 @@
 - [x] 3.7 Update AtlasMigration to use Git URL with credentials AND add status mapping
   - Replace existing atlasmigration resource (resource #6)
   - Change spec.dir from configMapRef to url-based Git pull
-  - Set url: "https://github.com/soloz-io/zero-ops.git"
+  - Set url: "https://github.com/kamarkat/kamarkat.git"
   - Set ref: "main"
   - **Add credentials block**: Reference github-migrations-pat secret created in 3.6
   - Configure path patch from database.migrations.baseline
@@ -187,7 +187,7 @@
       - `kubectl get resourcequota -n tenant-test-tenant-001` - verify tenant-test-tenant-001-quota exists with correct limits
       - **Verify GitHub PAT secret**: `kubectl get secret github-migrations-pat -n tenant-test-tenant-001 -o yaml` - should exist with `token` key
       - **Verify AtlasMigration Git config**: `kubectl get atlasmigration -n tenant-test-tenant-001 -o yaml`
-        - Check `spec.dir.url == "https://github.com/soloz-io/zero-ops.git"`
+        - Check `spec.dir.url == "https://github.com/kamarkat/kamarkat.git"`
         - Check `spec.dir.credentials.secretRef.name == "github-migrations-pat"`
         - Check `spec.dir.credentials.secretRef.key == "token"`
     - **Verify Dependency Ordering**:

@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // Config holds PostgreSQL connection configuration (4.17 — pgxpool = PgBouncer-compatible)

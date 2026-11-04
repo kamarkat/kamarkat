@@ -21,8 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	client2 "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // AINativeSaaSReconciler provisions tenant resources into Infisical when an

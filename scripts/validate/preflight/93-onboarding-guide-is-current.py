@@ -17,7 +17,7 @@ Checked:
     A  every label the tenant ABI policy REQUIRES is named in the guide
     B  every values key the guide shows is a real key somewhere
     C  every ADR the guide cites exists
-    D  every `soloz` command the guide shows is registered
+    D  every `kakt` command the guide shows is registered
     E  every zero-ops-auth function the guide shows is exported
 
 Emits tab-separated lines the shell wrapper classifies:
@@ -36,7 +36,7 @@ ABI = Path("manifests/spoke/spoke-catalog/infra/kyverno-tenant-abi.yaml")
 CHART_VALUES = Path("manifests/tenants/charts/universal-tenant/values.yaml")
 XRD = Path("manifests/hub-core-services/crossplane/tenant-platform/xrds/ainativesaas-v1.yaml")
 AUTH_INDEX = Path("packages/auth/src/index.ts")
-SOLOZ = Path("cmd/soloz")
+KAKT = Path("cmd/kakt")
 ADR_DIR = Path("docs/adr")
 
 bad = False
@@ -170,14 +170,14 @@ def main() -> int:
     if cited:
         ok(f"every ADR the guide cites exists ({len(cited)} checked)")
 
-    # D — soloz commands the guide shows are registered.
-    soloz_src = "\n".join(p.read_text() for p in SOLOZ.glob("*.go"))
-    for cmd in sorted(set(re.findall(r"soloz ([a-z]+(?: [a-z-]+)*)", text))):
+    # D — kakt commands the guide shows are registered.
+    kakt_src = "\n".join(p.read_text() for p in KAKT.glob("*.go"))
+    for cmd in sorted(set(re.findall(r"kakt ([a-z]+(?: [a-z-]+)*)", text))):
         leaf = cmd.split()[-1]
-        if re.search(rf'Use:\s+"{re.escape(leaf)}[ "]', soloz_src):
+        if re.search(rf'Use:\s+"{re.escape(leaf)}[ "]', kakt_src):
             continue
-        fail(f"the guide shows `soloz {cmd}`, and no command named {leaf!r} is registered")
-    ok("every soloz command the guide shows is registered")
+        fail(f"the guide shows `kakt {cmd}`, and no command named {leaf!r} is registered")
+    ok("every kakt command the guide shows is registered")
 
     # E — zero-ops-auth functions the guide shows are exported.
     if AUTH_INDEX.is_file():

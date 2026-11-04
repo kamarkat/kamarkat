@@ -7,7 +7,7 @@ domain: nutgraf.in
 layout:
 - go.kubebuilder.io/v4
 projectName: hub-operator
-repo: github.com/soloz-io/zero-ops/operators/hub-operator
+repo: github.com/kamarkat/kamarkat/operators/hub-operator
 resources:
 - api:
     crdVersion: v1
@@ -16,6 +16,6 @@ resources:
   domain: nutgraf.in
   group: ops
   kind: HubEnvironment
-  path: github.com/soloz-io/zero-ops/operators/hub-operator/api/v1alpha1
+  path: github.com/kamarkat/kamarkat/operators/hub-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

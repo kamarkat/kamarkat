@@ -7,7 +7,7 @@
 bin
 cmd
 internal
-!internal/soloz-cli
+!internal/kakt-cli
 k8-secrets
 memory
 reference-projects
@@ -42,4 +42,4 @@ manifests/hub-core-services/gateway
 
 packages/*
 manifests/tenants
-soloz
+kakt

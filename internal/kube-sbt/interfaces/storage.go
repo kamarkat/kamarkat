@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // Transaction represents a database transaction

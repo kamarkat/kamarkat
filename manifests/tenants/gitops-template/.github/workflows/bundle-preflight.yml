@@ -74,8 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "v${{ steps.p.outputs.candidate }}" \
-              --repo <PLATFORM_REPO_SLUG> --pattern 'soloz-linux-amd64' --output soloz
-          chmod +x soloz
+              --repo <PLATFORM_REPO_SLUG> --pattern 'kakt-linux-amd64' --output kakt
+          chmod +x kakt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -118,7 +118,7 @@ jobs:
         id: verdict
         continue-on-error: true
         run: |
-          ./soloz proposal preflight \
+          ./kakt proposal preflight \
             --candidate '${{ steps.p.outputs.candidate }}' \
             --cluster   '${{ steps.p.outputs.cluster }}' \
             --gitops-dir . \

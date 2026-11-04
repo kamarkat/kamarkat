@@ -1,7 +1,7 @@
 # Fields of the api-gateway that depend on which hub is reconciling it.
 #
 # ADR-051 makes the environment overlay the system of record for the base
-# domain, and DeriveHubEndpoints (internal/soloz-cli/bootstrap/hubdomain.go)
+# domain, and DeriveHubEndpoints (internal/kakt-cli/bootstrap/hubdomain.go)
 # derives every host from it -- id., api., infisical. and the rest. The
 # agentgateway config never took part in that: it carried the platform's own
 # `dev.nutgraf.in` as a literal, so every tenant's box was configured to trust

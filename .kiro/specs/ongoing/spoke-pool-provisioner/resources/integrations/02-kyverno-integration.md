@@ -637,7 +637,7 @@ metadata:
 spec:
   project: platform-core
   source:
-    repoURL: https://github.com/soloz-io/zero-ops.git
+    repoURL: https://github.com/kamarkat/kamarkat.git
     path: manifests/platform-gitops/kyverno-policies
     targetRevision: main
   destination:

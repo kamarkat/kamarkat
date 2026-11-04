@@ -3,7 +3,7 @@ package controller
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	computev1alpha1 "github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/api/v1alpha1"
+	computev1alpha1 "github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/api/v1alpha1"
 )
 
 // withOutputStorageEnv gives a workload that writes its own result

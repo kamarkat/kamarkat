@@ -38,23 +38,23 @@ esac
 # one failure this script is positioned to prevent.
 ./scripts/package/embed-platform-assets.sh
 
-pkg=github.com/soloz-io/zero-ops/internal/soloz-cli/versions
+pkg=github.com/kamarkat/kamarkat/internal/kakt-cli/versions
 mkdir -p "$OUTDIR"
 
 for t in $targets; do
     os="${t%%/*}" arch="${t##*/}"
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
         -ldflags "-s -w -X ${pkg}.BundleVersion=${VERSION}" \
-        -o "$OUTDIR/soloz-${os}-${arch}" ./cmd/soloz
+        -o "$OUTDIR/kakt-${os}-${arch}" ./cmd/kakt
     # Re-sign on macOS. Go writes an ad-hoc signature, and REPLACING the binary
     # in place -- which the local loop does on every rebuild -- invalidates it.
     # The kernel then kills the process with "Killed: 9" and no other
     # diagnostic, which reads like a corrupt build rather than a signature.
     # Only darwin enforces this and codesign exists nowhere else.
     if [ "$os" = darwin ] && command -v codesign >/dev/null 2>&1; then
-        codesign --force -s - "$OUTDIR/soloz-${os}-${arch}" >/dev/null 2>&1 || true
+        codesign --force -s - "$OUTDIR/kakt-${os}-${arch}" >/dev/null 2>&1 || true
     fi
-    echo "built $OUTDIR/soloz-${os}-${arch}"
+    echo "built $OUTDIR/kakt-${os}-${arch}"
 done
 
 # The binary must request the version that was published. A build that reported
@@ -65,7 +65,7 @@ done
 # Asked through `go run` rather than by executing a built artifact, because most
 # of the targets above do not run on the machine that built them.
 got=$(go run -ldflags "-X ${pkg}.BundleVersion=${VERSION}" \
-      ./cmd/soloz bundle-version 2>/dev/null || true)
+      ./cmd/kakt bundle-version 2>/dev/null || true)
 if [ "$got" != "$VERSION" ]; then
     echo "build-cli: built CLI reports '${got}', expected '${VERSION}'" >&2
     exit 1

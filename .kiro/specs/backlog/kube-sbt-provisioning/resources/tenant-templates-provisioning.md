@@ -98,7 +98,7 @@ spec:
     spec:
       sources:
         # MAGIC HAPPENS HERE: Dynamically select the product chart!
-        - repoURL: https://github.com/soloz-io/zero-ops
+        - repoURL: https://github.com/kamarkat/kamarkat
           path: manifests/tenants/charts/{{.productType}}
           helm:
             valueFiles:
@@ -458,7 +458,7 @@ Update `manifests/argocd/apps/platform-tenant-applicationset.yaml` to dynamicall
 ```yaml
       sources:
         # MAGIC: Dynamically load the specific product chart
-        - repoURL: https://github.com/soloz-io/zero-ops
+        - repoURL: https://github.com/kamarkat/kamarkat
           targetRevision: main
           path: manifests/tenants/charts/{{.productType}}
 ```

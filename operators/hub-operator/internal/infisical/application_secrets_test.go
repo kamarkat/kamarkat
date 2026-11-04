@@ -2,7 +2,7 @@ package infisical
 
 import (
 	"encoding/hex"
-	"github.com/soloz-io/zero-ops/internal/platform/escrow"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"testing"
 )
 

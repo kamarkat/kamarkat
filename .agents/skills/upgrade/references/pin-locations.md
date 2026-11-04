@@ -23,7 +23,7 @@ editing anything — most of these do not behave the way the file looks.
 
 ## What `versions.go` is, and is not
 
-`internal/soloz-cli/versions/versions.go` is the **Day-0 bootstrap** version
+`internal/kakt-cli/versions/versions.go` is the **Day-0 bootstrap** version
 authority, not the platform's. It holds nine constants:
 
 | Constant | Covers |
@@ -157,7 +157,7 @@ version bump. Scope it separately from a component upgrade.
 
 Each provider has a CR under `internal/assets/manifests/core/capi-operator/providers/`
 whose `spec.version` is authoritative for what the operator installs, **and** a
-matching constant in `internal/soloz-cli/versions/versions.go`. A parity test
+matching constant in `internal/kakt-cli/versions/versions.go`. A parity test
 compares them.
 
 Change both, in one commit. The constants file also pins the bootstrap binary

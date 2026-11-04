@@ -720,7 +720,7 @@ const (
 // Three properties, because the material is irreplaceable and the failure modes
 // are silent:
 //
-//   - It COPIES. Nothing here generates, derives or rotates. `soloz encryption`
+//   - It COPIES. Nothing here generates, derives or rotates. `kakt encryption`
 //     cannot serve as this migration: finding nothing at the scoped path, it mints
 //     a fresh 32-byte key and applies it, and the first thing that key does is fail
 //     to decrypt every Secret already written.

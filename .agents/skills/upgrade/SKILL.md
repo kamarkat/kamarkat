@@ -98,7 +98,7 @@ target is not the newest release. Read the column headings.
 
 ## 3. Classify every pin before changing it
 
-**There is no central version file.** `internal/soloz-cli/versions/versions.go`
+**There is no central version file.** `internal/kakt-cli/versions/versions.go`
 looks like one and is not: it holds nine constants covering the Day-0 bootstrap
 surface only — the CAPI operator, CAPI core, the two kubeadm providers, the
 infrastructure provider, clusterctl, packer, cert-manager and the GitOps chart.

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // Role keys granted within a tenant's project.

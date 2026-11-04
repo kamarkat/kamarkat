@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
 )
 
 // JWTValidator validates JWT tokens and extracts user context

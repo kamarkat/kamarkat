@@ -61,7 +61,7 @@ spec:
 # Thin, and that is a property of this topology rather than an oversight: almost every
 # live Cluster API object here either commands infrastructure (stream 3) or is rendered
 # from the bundle (Class R). What remains is the per-machine bootstrap configuration and
-# the infrastructure object, the latter because `soloz spoke match-inventory` derives
+# the infrastructure object, the latter because `kakt spoke match-inventory` derives
 # the provider's label from it and matching precedes activation.
 apiVersion: velero.io/v1
 kind: Schedule

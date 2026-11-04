@@ -203,7 +203,7 @@ region: hel1
 database:
   schemaName: tenant_acme  # Deterministic naming
   migrations:
-    gitRepo: https://github.com/soloz-io/zero-ops
+    gitRepo: https://github.com/kamarkat/kamarkat
     path: migrations/tenant-baseline
     revision: main
   
@@ -260,7 +260,7 @@ spec:
 
 ### 5.1 Git Repository Layout
 
-**Repository**: `https://github.com/soloz-io/zero-ops`
+**Repository**: `https://github.com/kamarkat/kamarkat`
 
 ```
 migrations/

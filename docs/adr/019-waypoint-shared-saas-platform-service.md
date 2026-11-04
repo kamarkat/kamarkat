@@ -117,7 +117,7 @@ database:
   name: tenant-waypoint-db
   migrations:
     baseline:
-      gitRepo: "https://github.com/soloz-io/zero-ops"
+      gitRepo: "https://github.com/kamarkat/kamarkat"
       gitRevision: "main"
       gitPath: "migrations/tenant-baseline"
     tenantSpecific:

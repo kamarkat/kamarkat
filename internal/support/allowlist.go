@@ -183,7 +183,7 @@ func (c Collector) Project(observed map[string]string) map[string]string {
 }
 
 // Fields lists every field that may leave, across all collectors, sorted.
-// Used by `soloz support preview` and by the release gate.
+// Used by `kakt support preview` and by the release gate.
 func (a *Allowlist) Fields() []string {
 	seen := map[string]bool{}
 	for _, c := range a.Collectors {

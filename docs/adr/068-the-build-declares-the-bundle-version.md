@@ -139,7 +139,7 @@ running the loop:
 
 - The embedded tree is asserted to carry every path Day-0 reads, per provider,
   environment and boundary, enumerated from the working tree so a new one is covered
-  by the commit that adds it (`internal/soloz-cli/bootstrap/embedded_assets_test.go`).
+  by the commit that adds it (`internal/kakt-cli/bootstrap/embedded_assets_test.go`).
 - The check that the embedded tree matches its source runs in CI, not only in a
   pre-commit hook on one machine, and triggers on any manifest rather than on a
   restatement of the embed set — the narrower pattern it replaces omitted the Cilium
@@ -155,22 +155,22 @@ Every clause above is now implemented and guarded. The last one outstanding was
 defaulted to whatever the binary carried, so a scaffold against a fork pinned a
 version that fork had never published and said so only when the first
 Application failed to load its source. `refuseUndeclaredSourceOverride` in
-`cmd/soloz/tenant.go` refuses it, and
-`cmd/soloz/tenant_source_override_test.go` asserts the refusal, the permitted
+`cmd/kakt/tenant.go` refuses it, and
+`cmd/kakt/tenant_source_override_test.go` asserts the refusal, the permitted
 form, and that the default path is untouched.
 
 ## Acceptance
 
 ```architecture
 acceptance:
-  - internal/soloz-cli/bootstrap
-  - cmd/soloz
+  - internal/kakt-cli/bootstrap
+  - cmd/kakt
   - scripts/validate/released-cli-standalone.sh
 ```
 
 `embedded_assets_test.go` asserts a released binary carries every path Day-0
 reads, per provider, environment and boundary. `released-cli-standalone.sh`
-refuses a release whose CLI needs a checkout. `cmd/soloz` covers the source
+refuses a release whose CLI needs a checkout. `cmd/kakt` covers the source
 override that must name its version.
 
 ## References

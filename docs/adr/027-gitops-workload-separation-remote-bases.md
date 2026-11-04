@@ -73,7 +73,7 @@ overlays. Each overlay imports the platform base as a remote resource:
 
 ```yaml
 resources:
-  - github.com/soloz-io/zero-ops/manifests/tenants/workloads/bases/stateless-web?ref=main
+  - github.com/kamarkat/kamarkat/manifests/tenants/workloads/bases/stateless-web?ref=main
 ```
 
 The overlay provides **only** business-specific configuration:
@@ -111,7 +111,7 @@ In development, overlays reference `?ref=main`. In production, every overlay
 
 ```yaml
 resources:
-  - github.com/soloz-io/zero-ops/manifests/tenants/workloads/bases/stateless-web?ref=8f3c9d1e2a4b5c6d
+  - github.com/kamarkat/kamarkat/manifests/tenants/workloads/bases/stateless-web?ref=8f3c9d1e2a4b5c6d
 ```
 
 This creates:

@@ -3,7 +3,7 @@ package handlers
 import (
 	"testing"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // A fleet that declares a confidential client must get its credentials back.

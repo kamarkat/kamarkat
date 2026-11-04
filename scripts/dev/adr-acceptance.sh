@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assert what ADR-062 through ADR-070 actually claim, against a live box.
 #
-# `soloz verify` answers "did this converge". That is necessary and it is not the
+# `kakt verify` answers "did this converge". That is necessary and it is not the
 # same question as "does the thing each decision promised hold". A run can
 # converge perfectly while the bundle names a chart nobody published, the
 # promotion matcher matches nothing, or a capability switched off is still
@@ -136,9 +136,9 @@ done
 fi
 
 # ── ADR-067: the box can judge a proposal, and can show what it would send ──
-if command -v soloz >/dev/null 2>&1 || [ -x ./bin/soloz ]; then
-    SOLOZ=$(command -v soloz || echo ./bin/soloz)
-    if "$SOLOZ" proposal preflight --candidate "$VERSION" --gitops-dir "$GITOPS" \
+if command -v kakt >/dev/null 2>&1 || [ -x ./bin/kakt ]; then
+    KAKT=$(command -v kakt || echo ./bin/kakt)
+    if "$KAKT" proposal preflight --candidate "$VERSION" --gitops-dir "$GITOPS" \
             --kubeconfig "$KUBECONFIG_PATH" --registry "$REGISTRY" >/tmp/verdict.md 2>/dev/null; then
         ok ADR-067 "pre-flight produced a verdict for $VERSION"
     else
@@ -147,16 +147,16 @@ if command -v soloz >/dev/null 2>&1 || [ -x ./bin/soloz ]; then
             && ok ADR-067 "pre-flight produced a verdict ($(head -1 /tmp/verdict.md | sed 's/## //'))" \
             || no ADR-067 "pre-flight produced no verdict"
     fi
-    "$SOLOZ" support scope >/dev/null 2>&1 \
+    "$KAKT" support scope >/dev/null 2>&1 \
         && ok ADR-067 "the evidence scope is readable before anything is sent" \
-        || no ADR-067 "soloz support scope failed"
+        || no ADR-067 "kakt support scope failed"
 else
-    na ADR-067 "no soloz binary on PATH"
+    na ADR-067 "no kakt binary on PATH"
 fi
 
 # ── ADR-068: the released path, not the working tree ────────────────────────
-if [ -x ./bin/soloz ]; then
-    got=$(./bin/soloz bundle-version 2>/dev/null)
+if [ -x ./bin/kakt ]; then
+    got=$(./bin/kakt bundle-version 2>/dev/null)
     [ "$got" = "$VERSION" ] \
         && ok ADR-068 "the CLI declares $VERSION" \
         || no ADR-068 "the CLI declares '${got}', not $VERSION"

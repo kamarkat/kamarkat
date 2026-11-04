@@ -98,8 +98,8 @@ config: {}
 #
 # Supply each one with (from the root of this repository):
 #
-#     soloz fleet secrets status <env>            what is declared vs present
-#     soloz fleet secrets set <env> <KEY>         supply one, prompted, no echo
+#     kakt fleet secrets status <env>            what is declared vs present
+#     kakt fleet secrets set <env> <KEY>         supply one, prompted, no echo
 #
 # Rotation is `set` again. There is no flag that takes a value as an argument,
 # and no batch form -- both would put the value somewhere it persists.

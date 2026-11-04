@@ -418,7 +418,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     targetRevision: HEAD
     path: manifests/hub-core-services/platform-database  # Syncs ALL: component + toolserver + agent
   destination:
@@ -528,7 +528,7 @@ vim manifests/hub-core-services/platform-database/cnpg-cluster.yaml
 
 # Implement MCP tool server
 cd tools/cnpg-mcp-server
-go mod init github.com/soloz-io/zero-ops/tools/cnpg-mcp-server
+go mod init github.com/kamarkat/kamarkat/tools/cnpg-mcp-server
 # ... implement tools
 
 # Build and push image

@@ -128,7 +128,7 @@ that version was safe for **this** cluster was a judgement the tenant had no way
 to make and the platform had no standing to make for them — it holds no access
 to the cluster and under ADR-065 never will.
 
-`soloz proposal preflight` is that judgement, made where the cluster is. The
+`kakt proposal preflight` is that judgement, made where the cluster is. The
 tenant's own CI runs it on the pull request, in the tenant's runners, under the
 tenant's secrets; only the verdict is ever seen elsewhere. It checks that the
 release's declared minimum permits the step this cluster is taking, that the
@@ -147,7 +147,7 @@ Unverified does not, unless the tenant asks: blocking every merge on a check
 that could not reach the cluster is how a check gets deleted rather than fixed,
 and whether to require it is the tenant's rule to set (ADR-065).
 
-`internal/soloz-cli/proposal/`, `cmd/soloz/proposal.go`, and
+`internal/kakt-cli/proposal/`, `cmd/kakt/proposal.go`, and
 `.github/workflows/bundle-preflight.yml` in the tenant template.
 
 
@@ -164,7 +164,7 @@ acceptance:
   - scripts/validate/cluster/82-support-agent-independence.sh
   - scripts/validate/cluster/83-support-agent-no-ingress.sh
   - internal/support
-  - internal/soloz-cli/proposal
+  - internal/kakt-cli/proposal
 ```
 
 Three claims and their instruments. *"No platform component queries a box"* is a
@@ -174,7 +174,7 @@ and knowable in advance"* is the allowlist (81) enforced against the shipped
 contract with a fixture cluster full of tenant identifiers (`internal/support`).
 *"A proposal is gated on evidence from its target"* is the verdict, including
 that a check which could not run never reads as a pass
-(`internal/soloz-cli/proposal`).
+(`internal/kakt-cli/proposal`).
 
 ## References
 

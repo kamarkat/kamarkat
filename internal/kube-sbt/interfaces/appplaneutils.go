@@ -3,7 +3,7 @@ package interfaces
 import (
 	"context"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // MigrationStep describes a single step in a tier migration plan (31.8).

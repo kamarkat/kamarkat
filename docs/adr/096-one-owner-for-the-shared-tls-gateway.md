@@ -81,7 +81,7 @@ One object, one Application, one field manager, one authoritative desired state.
 ```
 environments/<env>/<app>/values.yaml  public.hosts     tenant intent
         |
-        v  soloz fleet hosts aggregate                 one producer
+        v  kakt fleet hosts aggregate                 one producer
 registry/clusters/<spoke>/generated/values/public-hosts.yaml
         |
         v  platform-spoke-gateway                      one owner per spoke

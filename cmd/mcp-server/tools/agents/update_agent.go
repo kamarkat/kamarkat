@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/soloz-io/zero-ops/internal/platform/agent-core/service"
+	"github.com/kamarkat/kamarkat/internal/platform/agent-core/service"
 )
 
 // UpdateAgentArgs defines the input schema for update_agent tool

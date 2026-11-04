@@ -209,8 +209,8 @@ secrets:
 Then supply the value — never in git, in any form:
 
 ```bash
-soloz fleet secrets status <env> <app>      # what is declared vs present, by NAME
-soloz fleet secrets set <env> <app> <KEY>   # echo disabled, or --stdin from a password manager
+kakt fleet secrets status <env> <app>      # what is declared vs present, by NAME
+kakt fleet secrets set <env> <app> <KEY>   # echo disabled, or --stdin from a password manager
 ```
 
 `workloads:` decides which ExternalSecret the key lands in, and that matters: an

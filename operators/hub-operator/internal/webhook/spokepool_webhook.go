@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/infisical"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/infisical"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 

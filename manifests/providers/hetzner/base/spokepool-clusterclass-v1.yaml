@@ -187,7 +187,7 @@ spec:
   # the whole entry and has no index to be wrong about.
   #
   # NOTHING RECONCILES THE SECRET ITSELF. It is written once by
-  # `soloz encryption enable` from the key in this cluster's escrow. A value that
+  # `kakt encryption enable` from the key in this cluster's escrow. A value that
   # must not change under a running control plane has no business being reasserted
   # on a timer, which is why the ExternalSecret that used to do it was removed.
   - name: secretEncryptionConfig

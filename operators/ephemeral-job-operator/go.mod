@@ -1,4 +1,4 @@
-module github.com/soloz-io/zero-ops/operators/ephemeral-job-operator
+module github.com/kamarkat/kamarkat/operators/ephemeral-job-operator
 
 go 1.26.0
 

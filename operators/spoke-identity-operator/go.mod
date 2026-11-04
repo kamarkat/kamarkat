@@ -1,4 +1,4 @@
-module github.com/soloz-io/zero-ops/operators/spoke-identity-operator
+module github.com/kamarkat/kamarkat/operators/spoke-identity-operator
 
 go 1.26.0
 

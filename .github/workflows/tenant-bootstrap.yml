@@ -164,21 +164,21 @@ jobs:
           set -euo pipefail
           # The binary carries the platform content Day-0 needs (ADR-063), so
           # nothing here checks out the platform's repository.
-          url="https://github.com/soloz-io/zero-ops/releases/download/v${{ inputs.bundle-version }}/soloz-linux-amd64"
-          if ! curl -fsSL --retry 3 --retry-connrefused -o soloz "$url"; then
+          url="https://github.com/kamarkat/kamarkat/releases/download/v${{ inputs.bundle-version }}/kakt-linux-amd64"
+          if ! curl -fsSL --retry 3 --retry-connrefused -o kakt "$url"; then
             echo "::error::could not download $url"
             echo "::error::The asset must be published on a public release. An"
             echo "::error::unauthenticated fetch of a private repository returns 404,"
             echo "::error::and so does a release that does not carry this asset."
             exit 1
           fi
-          chmod +x soloz
+          chmod +x kakt
 
           # It must be the version the cluster is being bootstrapped on. A binary
           # reporting something else would seed a version this repository does
           # not pin, and the disagreement would surface as a cluster running
           # content its own declaration does not name.
-          got=$(./soloz bundle-version)
+          got=$(./kakt bundle-version)
           if [[ "$got" != "${{ inputs.bundle-version }}" ]]; then
             echo "::error::the downloaded CLI reports '$got', expected '${{ inputs.bundle-version }}'"
             exit 1
@@ -201,7 +201,7 @@ jobs:
           fi
 
       # Step 1 of two. This builds the MANAGEMENT cluster and stops there:
-      # `soloz bootstrap-mgmt` returns when the hub's phases are done, which says
+      # `kakt bootstrap-mgmt` returns when the hub's phases are done, which says
       # nothing about the workload cluster the hub then composes. Splitting the
       # two makes a run that got the hub up and the workload cluster wrong show as
       # one step green and the next red, instead of one green step and a tenant
@@ -289,7 +289,7 @@ jobs:
             workers=(--workers "${{ inputs.workers }}")
           fi
 
-          # hub-bootstrap.sh, not `soloz bootstrap-mgmt` directly.
+          # hub-bootstrap.sh, not `kakt bootstrap-mgmt` directly.
           #
           # The CLI builds the management cluster and stops there. The steps that
           # decide whether the box is USABLE -- Tailscale for a hybrid box, GitHub
@@ -320,7 +320,7 @@ jobs:
           echo "spoke pool: $pool"
 
           ZERO_OPS_DIR="$PWD" \
-          SOLOZ_BINARY="$PWD/soloz" \
+          KAKT_BINARY="$PWD/kakt" \
           bash .platform-validators/scripts/hub-bootstrap.sh \
             --spoke "$pool" \
             --name "${{ inputs.cluster }}" \
@@ -347,7 +347,7 @@ jobs:
         id: verify
         continue-on-error: true
         run: |
-          ./soloz verify --cluster "${{ inputs.cluster }}" --timeout 15m
+          ./kakt verify --cluster "${{ inputs.cluster }}" --timeout 15m
 
       # In-cluster readiness is not the same claim as "a tenant can reach it".
       # These probe the published hostnames through public DNS with the
@@ -416,7 +416,7 @@ jobs:
           ENVIRONMENT="${{ inputs.environment }}" \
           SPOKEPOOL_NAME="$pool" \
           ZERO_OPS_DIR="$PWD" \
-          SOLOZ_BINARY="$PWD/soloz" \
+          KAKT_BINARY="$PWD/kakt" \
           bash -c '
             source .platform-validators/scripts/hub-bootstrap.sh
             read_kubeconfig_from_state
@@ -455,7 +455,7 @@ jobs:
           # rather than assumed from the environment name (ADR-051). Without it
           # the probes fall back to the PLATFORM's own zone, and a tenant's box
           # would be judged by hostnames that are not its own.
-          ./soloz kubeconfig --cluster "${{ inputs.cluster }}" >/dev/null 2>&1 || true
+          ./kakt kubeconfig --cluster "${{ inputs.cluster }}" >/dev/null 2>&1 || true
           HUB_DOMAIN=$(kubectl --kubeconfig "$kc" get hubenvironment hub-environment \
             -n platform-ops -o jsonpath='{.spec.domain}')
           if [ -z "$HUB_DOMAIN" ]; then
@@ -527,7 +527,7 @@ jobs:
               echo
               echo "This is not necessarily a failed bootstrap: re-running verify is safe and cheap."
               echo '```'
-              echo "soloz verify --cluster ${{ inputs.cluster }} --timeout 15m"
+              echo "kakt verify --cluster ${{ inputs.cluster }} --timeout 15m"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi

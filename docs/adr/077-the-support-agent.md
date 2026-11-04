@@ -358,7 +358,7 @@ was nothing for a proxy to authenticate callers to. **There is now no ClusterRol
 and no binding at all**, which is a stronger form of the claim this ADR makes
 than a minimal one.
 
-**`soloz support preview` asked for a cluster name.** The agent reports the
+**`kakt support preview` asked for a cluster name.** The agent reports the
 certificate's subject, so preview could render a payload labelled differently
 from the one that would be sent — which defeats the point of reading it first. It
 now takes the identity from the certificate, and says so plainly when there is
@@ -924,7 +924,7 @@ under the platform's own licence.
 **Nothing inside it is secret, and this ADR is what made that true.** The allowlist
 ships as a ConfigMap in the tenant's own cluster and is annotated per entry because
 *"the list is the contract, and reviewing it is how the claim stays true"*.
-`soloz support preview` renders the exact payload before it is sent. The wire
+`kakt support preview` renders the exact payload before it is sent. The wire
 format is now a public standard (decision 2 below). A competitor reading the source
 learns a list of metric names they could already read in any tenant's cluster, and
 an exporter conforming to a published specification.
@@ -1059,7 +1059,7 @@ deltas are accurate to at most one restart per collection interval.
 and the `cluster` argument to `Collect` go. OTLP `Resource` attributes are
 client-supplied, so the Support Plane **stamps** `service.instance.id` from the
 authenticated identity and never trusts what arrived. Addendum 2 caught the CLI half
-of this when `soloz support preview` asked for a cluster name; the struct is the
+of this when `kakt support preview` asked for a cluster name; the struct is the
 other half.
 
 ### 4. Two bounds are added: label values, and payload limits

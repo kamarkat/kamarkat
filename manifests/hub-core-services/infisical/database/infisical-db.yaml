@@ -27,7 +27,7 @@
 # shared `s3-credentials` -- pointing this cluster at the Infisical-delivered credential
 # would make its recovery depend on the service being recovered, which is the circularity
 # ADR-076 exists to break, at the one cluster where it is fatal. That Secret is delivered
-# from escrow by `soloz escrow deliver-backup-credentials`.
+# from escrow by `kakt escrow deliver-backup-credentials`.
 #
 # THE BOOTSTRAP METHOD DEPENDS ON THE OPERATION, and only one may be declared for a
 # cluster's creation:

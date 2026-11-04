@@ -27,8 +27,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	computev1alpha1 "github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/api/v1alpha1"
-	"github.com/soloz-io/zero-ops/operators/ephemeral-job-operator/internal/previewaccess"
+	computev1alpha1 "github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/api/v1alpha1"
+	"github.com/kamarkat/kamarkat/operators/ephemeral-job-operator/internal/previewaccess"
 )
 
 // Config is local mode's whole configuration, from the environment.

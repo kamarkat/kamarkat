@@ -134,7 +134,7 @@ claimed that behaviour was fail-safe. **That claim was wrong, and this section r
 
 **Deployed versions.** CAPI core `v1.10.0`, clusterctl `v1.10.0`, kubeadm bootstrap and
 control-plane providers `v1.8.5`, Hetzner infrastructure provider (CAPH) `v1.0.7`
-(`internal/soloz-cli/versions/versions.go`, asserted by its test). CAPH's `metadata.yaml`
+(`internal/kakt-cli/versions/versions.go`, asserted by its test). CAPH's `metadata.yaml`
 maps release series 1.0 to Cluster API contract **`v1beta1`**, which is the contract CAPI
 v1.10.0 serves. Only `HCloudMachineTemplate` is in use; no `HetznerBareMetalHost` appears in
 the manifests, so the bare-metal host-inventory model is out of scope.
@@ -559,7 +559,7 @@ has:
   bucket at all. Keeping only the key outside the box would leave the credential inside the
   Infisical that has to be recovered from that bucket. Both are box-scoped Class E
   (`backup-ssec-key`, `backup-store-credential`), delivered straight into the cluster by
-  `soloz escrow deliver-backup-credentials` and never through Infisical or ESO -- routing the
+  `kakt escrow deliver-backup-credentials` and never through Infisical or ESO -- routing the
   delivery of a value whose purpose is to work without Infisical through Infisical is the
   circularity ADR-076 exists to break.
 * **Credential isolation.** A dedicated credential for the Class M bucket, distinct from the
@@ -936,7 +936,7 @@ silently passed over, and a Secret restored from the backup first would become t
 root with nothing ever comparing the two. Restore order would decide which authority won.
 
 So the PKI is excluded from the Class M backup outright. The escrow is its only source, and
-`soloz spoke restore-pki` its only writer.
+`kakt spoke restore-pki` its only writer.
 
 **Separating it needs more than exclusion, and an earlier revision got this wrong.** A
 bootstrap-data Secret and a certificate authority carry the same type

@@ -2,5 +2,5 @@ domain: zeroops.io
 layout:
 - go.kubebuilder.io/v4
 projectName: spoke-identity-operator
-repo: github.com/soloz-io/zero-ops/operators/spoke-identity-operator
+repo: github.com/kamarkat/kamarkat/operators/spoke-identity-operator
 version: "3"

@@ -18,9 +18,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	identityv1alpha1 "github.com/soloz-io/zero-ops/operators/spoke-identity-operator/api/v1alpha1"
-	"github.com/soloz-io/zero-ops/operators/spoke-identity-operator/internal/controller"
-	"github.com/soloz-io/zero-ops/operators/spoke-identity-operator/internal/infisical"
+	identityv1alpha1 "github.com/kamarkat/kamarkat/operators/spoke-identity-operator/api/v1alpha1"
+	"github.com/kamarkat/kamarkat/operators/spoke-identity-operator/internal/controller"
+	"github.com/kamarkat/kamarkat/operators/spoke-identity-operator/internal/infisical"
 )
 
 var (

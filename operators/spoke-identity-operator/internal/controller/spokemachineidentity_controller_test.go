@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	identityv1alpha1 "github.com/soloz-io/zero-ops/operators/spoke-identity-operator/api/v1alpha1"
-	"github.com/soloz-io/zero-ops/operators/spoke-identity-operator/internal/infisical"
+	identityv1alpha1 "github.com/kamarkat/kamarkat/operators/spoke-identity-operator/api/v1alpha1"
+	"github.com/kamarkat/kamarkat/operators/spoke-identity-operator/internal/infisical"
 )
 
 func newSchemeForTest(t *testing.T) *runtime.Scheme {

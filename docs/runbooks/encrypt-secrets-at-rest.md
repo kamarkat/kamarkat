@@ -67,7 +67,7 @@ up with the file missing or misnamed is an ordinary healthy node, and step 3 is 
 on it. v4 adds one line, after that evidence exists.
 
 Each phase is a template SPEC change, so each needs a new template NAME and each
-rolls the control plane. Each also needs a release: `soloz encryption enable` applies
+rolls the control plane. Each also needs a release: `kakt encryption enable` applies
 the ClusterClass from the CLI's own embedded assets, so the CLI binary has to carry
 the phase you are applying.
 
@@ -85,7 +85,7 @@ snapshot of that cluster, but anyone holding both reads every credential in it.
 > **CORRECTION, 2026-10-07.** This paragraph used to end *"rotation is not supported …
 > an exposed key is not a thing that gets fixed; it gets lived with, or the cluster gets
 > rebuilt."* **That is no longer true and following it would be wrong.**
-> `soloz encryption rotate` performs a staged two-key rotation: the new key becomes the
+> `kakt encryption rotate` performs a staged two-key rotation: the new key becomes the
 > write key while the previous one is RETAINED for reads, so nothing becomes unreadable,
 > and the old key is removed only after every Secret is verified rewritten. A disclosed
 > key is now an incident with a procedure, and ADR-100 classes it as one — it is replaced
@@ -99,8 +99,8 @@ So compare fingerprints:
 
 ```bash
 # Does the cluster's Secret hold the key the escrow holds? Neither is printed.
-soloz escrow verify     --cluster <cluster> --workload   # what the escrow holds
-soloz encryption rotate --cluster <cluster> --dry-run    # what the cluster uses
+kakt escrow verify     --cluster <cluster> --workload   # what the escrow holds
+kakt encryption rotate --cluster <cluster> --dry-run    # what the cluster uses
 ```
 
 The two `sha256:` values for the same generation **must match**.
@@ -125,7 +125,7 @@ kubectl --kubeconfig <HUB> -n platform-capi get secret <cluster>-encryption-conf
   -o jsonpath='{.data.enc\.yaml}' | base64 -d | grep -E 'secretbox|identity|- name:'
 ```
 
-`soloz escrow verify` prints `sha256:` fingerprints only, for the same reason, and is
+`kakt escrow verify` prints `sha256:` fingerprints only, for the same reason, and is
 the right way to ask whether the escrow and the cluster agree.
 
 On the HUB this matters more than anywhere: its etcd holds the secret store's own
@@ -176,7 +176,7 @@ etcd **and every etcd backup** are encrypted with it — so a cluster encrypting
 key held nowhere else has traded disclosure for total loss (ADR-076
 `secret-encryption-key`).
 
-`soloz encryption enable` refuses outright without an escrow rather than generating a
+`kakt encryption enable` refuses outright without an escrow rather than generating a
 key with nowhere to put it, so this check is a courtesy, not a gate:
 
 ```bash
@@ -186,7 +186,7 @@ env | grep -c '^INFISICAL_ESCROW_' ; echo "expect 4"
 # What the escrow already holds for this cluster. Empty is fine on a first run —
 # the key is generated and escrowed. A value means a previous cluster used it, and
 # that is the value the new control plane must use.
-soloz escrow --help >/dev/null && echo "escrow CLI available"
+kakt escrow --help >/dev/null && echo "escrow CLI available"
 ```
 
 Then confirm the cluster you are about to change is the one you mean, because this
@@ -231,7 +231,7 @@ is, `--kubeconfig` says where CAPI lives. Pointing it at the spoke fails with
 Confirm first that the CLI you are about to run carries v3 and not the argument:
 
 ```bash
-soloz encryption enable --cluster <cell> \
+kakt encryption enable --cluster <cell> \
   --class manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml \
   --kubeconfig <path> --dry-run | grep -E 'control-plane-v|encryption-provider-config'
 ```
@@ -242,11 +242,11 @@ roll safe.
 
 ```bash
 # a workload cluster FIRST — see "Which cluster first" below
-soloz encryption enable --cluster <cell> \
+kakt encryption enable --cluster <cell> \
   --class manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml \
   --kubeconfig <path> --dry-run
 
-soloz encryption enable --cluster <cell> \
+kakt encryption enable --cluster <cell> \
   --class manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml \
   --kubeconfig <path>
 ```
@@ -353,7 +353,7 @@ A new template NAME, not an edit: the spec of a template a Cluster references is
 immutable or effectively so, and an edit the webhook rejects leaves ArgoCD wedged on a
 resource it can neither apply nor drop.
 
-`cmd/soloz/encryption_test.go` used to assert the argument was ABSENT. Flipping that
+`cmd/kakt/encryption_test.go` used to assert the argument was ABSENT. Flipping that
 assertion was the recorded phase boundary, deliberately a code change so the boundary
 could not move by accident. It now requires the argument, the mount and the
 per-cluster Secret name together — the argument without the mount is an API server
@@ -365,7 +365,7 @@ never finishes bootstrapping.
 | | delivery | what adopts v4 |
 |---|---|---|
 | workload cluster | `manifests/providers/<provider>`, synced by ArgoCD | **publishing and promoting a bundle**; the roll starts on sync |
-| management cluster | the CLI's embedded assets, synced by nothing | `soloz encryption enable --cluster <hub> --kubeconfig <HUB> --apply-class` |
+| management cluster | the CLI's embedded assets, synced by nothing | `kakt encryption enable --cluster <hub> --kubeconfig <HUB> --apply-class` |
 
 So a spoke adopts v4 by release. The hub's class is reconciled by nothing — it is
 applied once at Day-0 and never again — so `--apply-class` is the only way it ever
@@ -617,7 +617,7 @@ putting the fallback back cannot decrypt what was never encrypted. This step is 
 reversible by re-running it.
 
 ```bash
-./bin/soloz encryption enable --cluster <cell> --kubeconfig <HUB> \
+./bin/kakt encryption enable --cluster <cell> --kubeconfig <HUB> \
   --no-plaintext-fallback
 ```
 

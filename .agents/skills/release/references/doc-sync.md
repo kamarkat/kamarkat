@@ -1,7 +1,7 @@
 # Syncing a release into the docs
 
 Each published bundle version gets a page in the Kamarkat docs
-(`soloz-io/kamarkat`, **Versions › Releases**). The page lists every component the
+(`kamarkat/kamarkat-docs`, **Versions › Releases**). The page lists every component the
 version installs, where, at what version, linked to its upstream repository, with
 the newest upstream release as of the release date beside it.
 
@@ -12,7 +12,7 @@ to publish has no page.
 
 ## Before
 
-- `kamarkat/` and `zero-ops/` are checked out side by side, and `zero-ops` is on
+- `kamarkat-docs/` and `kamarkat/` are checked out side by side, and `kamarkat` is on
   current `main`: the command runs from it and reads its
   `manifests/architecture/component-catalog.yaml`. Go is installed.
 - `gh` is authenticated (the release date comes from the registry, upstream
@@ -20,10 +20,10 @@ to publish has no page.
 
 ## Run
 
-In `zero-ops/`:
+In `kamarkat/`:
 
 ```bash
-go run ./cmd/soloz release docs <version>          # --docs-dir if kamarkat/ is not beside zero-ops/
+go run ./cmd/kakt release docs <version>          # --docs-dir if kamarkat-docs/ is not beside kamarkat/
 ```
 
 Expected, after about two minutes:
@@ -46,7 +46,7 @@ These are recorded once, in the docs' `data/releases/<version>.json`, so the pag
 keeps showing what was latest on its release date. Every release page is then
 regenerated from `data/releases/`. With no version, the command only regenerates.
 
-Then, in `kamarkat/`:
+Then, in `kamarkat-docs/`:
 
 ```bash
 mint validate && mint broken-links
@@ -63,13 +63,13 @@ they are regenerated on every run.
 | :- | :- | :- |
 | `<version> is not published in the registry` | Wrong version, or the publish failed | Check the version |
 | `<version> carries no inventory` | Published before inventories existed | It cannot be synced |
-| `<source> has no entry in component-catalog.yaml` | The version ships a component the current catalog no longer describes | Pull `zero-ops` `main`. If the entry was removed since, the version cannot be synced; ask before dropping or keeping it |
-| `catalog entry <name> has no repo for <source>` | Catalog incomplete | Add `repo` to the entry on `zero-ops` `main` |
-| `no <track> version found for <source>` | Its `track`, `tag` or `repo` does not match where the project publishes | Fix the entry on `zero-ops` `main` (see the catalog header) |
-| `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it (`no reason`), or its item's `target` is this release or an earlier one while the release still ships it (`its reason says it changes in …`) | Add the item, or land the change / give the real status and a later target, on `zero-ops` `main` (format in the catalog header), then run again. `soloz release check` (Prepare 10) catches both before publishing |
+| `<source> has no entry in component-catalog.yaml` | The version ships a component the current catalog no longer describes | Pull `kamarkat` `main`. If the entry was removed since, the version cannot be synced; ask before dropping or keeping it |
+| `catalog entry <name> has no repo for <source>` | Catalog incomplete | Add `repo` to the entry on `kamarkat` `main` |
+| `no <track> version found for <source>` | Its `track`, `tag` or `repo` does not match where the project publishes | Fix the entry on `kamarkat` `main` (see the catalog header) |
+| `ships versions behind their latest release that the catalog does not explain` | A red version has no `behind` item naming it (`no reason`), or its item's `target` is this release or an earlier one while the release still ships it (`its reason says it changes in …`) | Add the item, or land the change / give the real status and a later target, on `kamarkat` `main` (format in the catalog header), then run again. `kakt release check` (Prepare 10) catches both before publishing |
 | `unknown track '<x>'` | Typo in the catalog | Use one of the tracks in the catalog header |
-| `no docs checkout at …` | No `kamarkat` checkout beside `zero-ops` | Check one out, or pass `--docs-dir <path>` |
-| `<version> was fetched without its release date, upstream versions or the reasons components are behind` | Data file in the old shape | `go run ./cmd/soloz release docs <version>` again |
+| `no docs checkout at …` | No `kamarkat-docs` checkout beside `kamarkat` | Check one out, or pass `--docs-dir <path>` |
+| `<version> was fetched without its release date, upstream versions or the reasons components are behind` | Data file in the old shape | `go run ./cmd/kakt release docs <version>` again |
 
 ## Reading the page
 

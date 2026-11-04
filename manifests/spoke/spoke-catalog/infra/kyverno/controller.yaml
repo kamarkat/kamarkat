@@ -29,7 +29,7 @@
 # a day, while the Application reported Synced. Upstream deleted those
 # templates rather than fixing the shell; 3.9.1 renders ZERO CronJobs and ZERO
 # shell-based workloads, asserted by
-# internal/soloz-cli/bootstrap/observability_gates_test.go.
+# internal/kakt-cli/bootstrap/observability_gates_test.go.
 #
 # 3.6.4 was an intermediate stop and is NOT a safe fallback: it required
 # cleanupJobs, policyReportsCleanup and a bare top-level templating that its

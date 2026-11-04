@@ -27,7 +27,7 @@ PROVIDER=hybrid make e2e-workload VERSION=0.1.16-rc.60
 
 PROVIDER=hybrid ./scripts/dev/local-e2e.sh 0.1.16-rc.60 cli bootstrap
 
-./bin/soloz reseed --kubeconfig .local-e2e/acme-gitops/k8-secrets/kubeconfig/acme-hub.kubeconfig \
+./bin/kakt reseed --kubeconfig .local-e2e/acme-gitops/k8-secrets/kubeconfig/acme-hub.kubeconfig \
                    --bundle-version 0.1.16-rc.60
 
 DOMAIN=nutgraf.in PROVIDER=hybrid ./scripts/dev/local-e2e.sh 0.1.16-rc.60 \
@@ -62,7 +62,7 @@ KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfi
 
 ## Tenant repo testing
 ### Once, on a branch you've pushed (ArgoCD reads git, not your working tree)
-./soloz tenant scaffold --tenant local --org soloz-io --domain local.nutgraf.in \
+./kakt tenant scaffold --tenant local --org soloz-io --domain local.nutgraf.in \
   --bundle-version development --local
 
 https://app.infisical.com/organizations/89f6d208-ea9b-4b6d-b4bd-a249f50ead8d/identities/671e356d-76ad-4886-8357-635abf19d435
@@ -72,16 +72,16 @@ cd local-gitops
 
 export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/k8-secrets/hetzner/token)
 
-/Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/soloz bootstrap --name local-hub --provider hetzner --region hel1 \
+/Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/kakt bootstrap --name local-hub --provider hetzner --region hel1 \
   --environment dev --gitops-dir .
 
 ## Cluster Teardown
 
-./soloz teardown --name test-hub --confirm
+./kakt teardown --name test-hub --confirm
 
 ## Fresh Bootstrap
 
-./soloz bootstrap \
+./kakt bootstrap \
   --name devbox \
   --provider hetzner \
   --environment dev \
@@ -95,7 +95,7 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
 - gh release create v0.1.14 --generate-notes
 - gh run watch
 
-- ./bin/soloz reseed --kubeconfig k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \
+- ./bin/kakt reseed --kubeconfig k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \
   --bundle-version 0.1.14     
 
 - KUBECONFIG=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \                   
@@ -114,27 +114,27 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
 
 ## Download the released CLI
 
-gh release download v0.1.15 --pattern 'soloz-darwin-arm64' --output soloz --clobber
-chmod +x soloz
+gh release download v0.1.15 --pattern 'kakt-darwin-arm64' --output kakt --clobber
+chmod +x kakt
 
 ## Scaffold a real tenant repo 
 
 cd /Users/arun_subramanian/Projects/soloz-io/zero-ops
-./soloz tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+./kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
 
 Or from your current directory:
 
-/Users/arun_subramanian/Projects/soloz-io/zero-ops/soloz tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+/Users/arun_subramanian/Projects/soloz-io/zero-ops/kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
 
 ### Interactive
 
-soloz tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
 
 Prompts for the two secrets (no echo), sets them on the tenant's repo, dispatches the bootstrap, prints the Actions URL.
 
 ### Non-interactive:
 
-soloz tenant scaffold --tenant tenant1 --org soloz-io --domain tenant1.nutgraf.in \
+kakt tenant scaffold --tenant tenant1 --org soloz-io --domain tenant1.nutgraf.in \
   --provider-token "$HCLOUD_TOKEN" --gitops-token "$GITOPS_PAT"
 
 No secrets → repository is created, then handover instructions with the exact commands. Not an error, since the repo exists by then.

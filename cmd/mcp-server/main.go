@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/soloz-io/zero-ops/cmd/mcp-server/tools/agents"
-	"github.com/soloz-io/zero-ops/internal/platform/agent-core/client"
-	agentdb "github.com/soloz-io/zero-ops/internal/platform/agent-core/database/generated"
-	"github.com/soloz-io/zero-ops/internal/platform/agent-core/service"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/cmd/mcp-server/tools/agents"
+	"github.com/kamarkat/kamarkat/internal/platform/agent-core/client"
+	agentdb "github.com/kamarkat/kamarkat/internal/platform/agent-core/database/generated"
+	"github.com/kamarkat/kamarkat/internal/platform/agent-core/service"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
 )
 
 type tenantListArgs struct{}

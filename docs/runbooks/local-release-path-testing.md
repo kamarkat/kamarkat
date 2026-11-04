@@ -4,7 +4,7 @@ Bootstrap a cluster from your laptop using the exact path a tenant's Day-0 takes
 platform content read from the binary's embedded tree, charts pulled from GHCR by
 version, bundle rendered in the published-chart shape.
 
-This is not the same as `make build` and running `./soloz`. That produces a
+This is not the same as `make build` and running `./kakt`. That produces a
 **development** build, which ADR-068 sends to the working tree for its manifests and
 which renders a bundle pointing ArgoCD at this repository at a branch. A tenant runs
 neither. Two defects reached clusters through that gap — see ADR-068 addendum 1.
@@ -119,7 +119,7 @@ puts you back on the path you are trying to leave, and nothing downstream will s
 so:
 
 ```bash
-bin/soloz bundle-version   # must print 0.1.16-rc.1
+bin/kakt bundle-version   # must print 0.1.16-rc.1
 ```
 
 ## 3. Scaffold against it
@@ -128,7 +128,7 @@ bin/soloz bundle-version   # must print 0.1.16-rc.1
 export PATH="$PWD/bin:$PATH"
 export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
 
-soloz tenant scaffold --local \
+kakt tenant scaffold --local \
   --tenant acme --org <your-gh-org> --domain acme.example \
   --cluster acme-hub --environment dev --provider hetzner \
   --bundle-version 0.1.16-rc.1
@@ -159,7 +159,7 @@ Run it from the clone, exactly as the workflow does:
 
 ```bash
 cd acme-gitops
-soloz bootstrap \
+kakt bootstrap \
   --name acme-hub --provider hetzner --region hel1 \
   --environment dev --gitops-dir .
 ```
@@ -176,10 +176,10 @@ is resolved against the platform checkout, and you are no longer in it.
 
 ```bash
 cd ..
-soloz teardown --name acme-hub --force --confirm
+kakt teardown --name acme-hub --force --confirm
 ```
 
-Then delete the scaffolded repository and its local clone. `soloz tenant scaffold`
+Then delete the scaffolded repository and its local clone. `kakt tenant scaffold`
 refuses to clone over an existing directory, so a stale clone will stop the next run
 rather than being silently bootstrapped.
 
@@ -212,7 +212,7 @@ not test what ships. Use the first while building, the second before releasing.
 Two checks make the older failure mode a red pull request rather than a tenant's
 first bootstrap:
 
-- `internal/soloz-cli/bootstrap/embedded_assets_test.go` — asserts a released binary
+- `internal/kakt-cli/bootstrap/embedded_assets_test.go` — asserts a released binary
   carries every path Day-0 reads, per provider, environment and boundary. Add a Day-0
   read of a manifest outside `PATHS` in `scripts/package/embed-platform-assets.sh` and
   this fails.

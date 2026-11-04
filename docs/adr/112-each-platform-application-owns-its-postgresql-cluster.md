@@ -199,7 +199,7 @@ empty database and never on a running one (ADR-092).
 
 **`infisical-db`'s archive credential comes from escrow, and its delivery now exists.**
 §4 requires it to come from somewhere other than the service being recovered.
-`soloz escrow deliver-backup-credentials` renders the enrolled object-store credential
+`kakt escrow deliver-backup-credentials` renders the enrolled object-store credential
 into the three discrete keys CloudNativePG reads and writes them as
 `s3-credentials-escrowed` in the clusters' namespace -- the same escrowed credential
 Velero consumes in its own INI shape, so there is one authority and two renderings rather

@@ -112,7 +112,7 @@ PY
     fi
 
     # ── R6: bootstrap issuer mapping is strict ───────────────────────────────
-    local orch="$VALIDATE_ROOT/internal/soloz-cli/bootstrap/orchestrator.go"
+    local orch="$VALIDATE_ROOT/internal/kakt-cli/bootstrap/orchestrator.go"
     if grep -q 'case "ephemeral":' "$orch" \
         && grep -A12 'case "dev", "stg", "prod":' "$orch" | grep -q 'letsencrypt-prod' \
         && grep -q 'refusing to guess TLS policy' "$orch"; then

@@ -2,7 +2,7 @@
 // credential used to do it.
 //
 // Lives beside the tenant-identity code rather than in a package of its own. It
-// was written as internal/soloz-cli/identity and duplicated what is here: a
+// was written as internal/kakt-cli/identity and duplicated what is here: a
 // second HTTP client against the same API, and a second definition of
 // OIDC_AUTH_METHOD_TYPE_NONE twelve directories away from the first. Two
 // implementations of one operation is the drift this repository has been paying

@@ -25,7 +25,7 @@ bundleRegistry: "ghcr.io/soloz-io/charts"
 # Repository identities (ADR-004 dual-repository contract)
 # ──────────────────────────────────────────────────────────────────────────────
 # ArgoCD keys repository credentials and its repo-server cache by the LITERAL
-# URL string. 'https://github.com/soloz-io/zero-ops' and the same URL with a
+# URL string. 'https://github.com/kamarkat/kamarkat' and the same URL with a
 # '.git' suffix are two different repositories to ArgoCD -- separate credential
 # lookup, separate cache entry -- and an AppProject sourceRepos entry matches by
 # exact string. The tree carried both spellings until 2026-09-05, and
@@ -34,7 +34,7 @@ bundleRegistry: "ghcr.io/soloz-io/charts"
 # Declared once here so no element can spell it differently. Third-party chart
 # repositories (jetstack, argo-helm, ...) still carry their own repoURL on the
 # element -- these two values are only for the repositories the platform owns.
-platformRepoURL: "https://github.com/soloz-io/zero-ops"
+platformRepoURL: "https://github.com/kamarkat/kamarkat"
 
 # The instance repository this control plane reconciles: the `<tenant>-gitops`
 # repository ADR-062 establishes, holding this box's cluster declarations and its

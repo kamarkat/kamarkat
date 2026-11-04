@@ -135,7 +135,7 @@ metadata:
   name: platform-bootstrap
 spec:
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     path: argocd/platform-apps
 
 ---
@@ -153,7 +153,7 @@ spec:
   template:
     spec:
       source:
-        repoURL: https://github.com/soloz-io/zero-ops  # Pulls charts from platform repo
+        repoURL: https://github.com/kamarkat/kamarkat  # Pulls charts from platform repo
         path: charts/universal-tenant
 ```
 
@@ -213,7 +213,7 @@ tenant: scale acme resources (cpu: 2 -> 4)
 
 ### Repository Structure
 
-**zero-ops** (https://github.com/soloz-io/zero-ops):
+**zero-ops** (https://github.com/kamarkat/kamarkat):
 ```
 zero-ops/
 ├── operators/              # Kubernetes operators (hub-operator, spoke-operator)
@@ -271,7 +271,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/soloz-io/zero-ops
+    repoURL: https://github.com/kamarkat/kamarkat
     path: argocd/platform-apps
     targetRevision: main
   destination:
@@ -303,7 +303,7 @@ spec:
     spec:
       project: tenants
       source:
-        repoURL: https://github.com/soloz-io/zero-ops
+        repoURL: https://github.com/kamarkat/kamarkat
         path: charts/universal-tenant
         targetRevision: main
         helm:

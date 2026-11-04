@@ -3,7 +3,7 @@ package infisical
 import (
 	"testing"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 func mustHex(t *testing.T, n int) string {

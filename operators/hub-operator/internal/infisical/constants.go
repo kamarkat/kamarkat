@@ -3,7 +3,7 @@ package infisical
 import (
 	"os"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/constant"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/constant"
 )
 
 const (
@@ -73,7 +73,7 @@ const (
 // Admin Credentials — overridable via environment variables.
 // The .env file at the project root is sourced by hub-bootstrap.sh.
 var (
-	// No defaults. See the same pair in internal/soloz-cli/infisical/bootstrap.go:
+	// No defaults. See the same pair in internal/kakt-cli/infisical/bootstrap.go:
 	// these were a personal email and the literal "Password@123" on every box,
 	// which is a shared administrator credential for every tenant's secret store.
 	// Empty here, and the operator refuses to use an empty one rather than falling

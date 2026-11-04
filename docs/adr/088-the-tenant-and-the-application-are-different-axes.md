@@ -147,7 +147,7 @@ So: one change, applied while the fleet is down, in this order within it.
    The label is corrected on its own, later, when moving material is the only
    thing that can go wrong.
 2. **Render everything against both axes** — charts, Kyverno ABI, spoke-catalog
-   policies, AppSet generators, `soloz-cli` scaffolding and path builder,
+   policies, AppSet generators, `kakt-cli` scaffolding and path builder,
    workload charts in every application repository.
 3. **Delete the old namespace and let ArgoCD create the new one.** This is the
    outage. The CloudNativePG cluster, the object store and Infisical all live
@@ -486,7 +486,7 @@ would give them reachability nothing declared.
 - `manifests/argocd/environment-manager/templates/05-tenant-fleet-appset.yaml` —
   generators supply both
 - `internal/kube-sbt/providers/zitadel` — project per app, not per config
-- `internal/soloz-cli` — scaffolding, `soloz fleet secrets`, the secret path
+- `internal/kakt-cli` — scaffolding, `kakt fleet secrets`, the secret path
   builder
 - Every workload chart in every application repository — `app-id` label
 

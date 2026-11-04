@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/soloz-io/zero-ops/internal/platform/embedded"
-	"github.com/soloz-io/zero-ops/internal/soloz-cli/versions"
+	"github.com/kamarkat/kamarkat/internal/platform/embedded"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
 )
 
 // ReadFile returns platform content by its repository-relative path, for

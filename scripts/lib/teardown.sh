@@ -53,7 +53,7 @@ for item in payload.get(kind, []) or []:
     labels = item.get('labels') or {}
     blob = name + ' ' + ' '.join('%s=%s' % kv for kv in labels.items())
     if hub and (name.startswith(hub) or ('caph-cluster-' + hub) in blob):
-        scope = 'soloz'
+        scope = 'kakt'
     elif spoke and (name.startswith(spoke) or ('caph-cluster-' + spoke) in blob):
         scope = 'spoke'
     elif name.startswith('spoke-pool-') or 'caph-cluster-spoke-pool-' in blob:
@@ -342,7 +342,7 @@ _delete_one_home_vm() {
     # multi-line script, and it sidesteps shell/PowerShell quoting entirely.
     local ps
     ps="\$ErrorActionPreference = 'SilentlyContinue'
-\$solozDir = 'C:\\ProgramData\\soloz\\flatcar'
+\$kaktDir = 'C:\\ProgramData\\kakt\\flatcar'
 \$target = Get-VM -Name '${vm}' -ErrorAction SilentlyContinue
 if (\$target) {
   Stop-VM -Name '${vm}' -Force -TurnOff -ErrorAction SilentlyContinue
@@ -352,7 +352,7 @@ if (\$target) {
   Write-Output 'VM ${vm} not present'
 }
 foreach (\$f in @('${vm}.vhdx','${vm}-config.ign','${vm}-ignition.iso','${vm}-ign.vhdx')) {
-  \$fp = Join-Path \$solozDir \$f
+  \$fp = Join-Path \$kaktDir \$f
   if (Test-Path \$fp) {
     Remove-Item \$fp -Force -ErrorAction SilentlyContinue
     if (Test-Path \$fp) { Write-Output ('KEPT ' + \$f) } else { Write-Output ('removed ' + \$f) }
@@ -428,10 +428,10 @@ _local_cleanup() {
 run_full_teardown() {
     # The teardown is driven by the hub CLI; without it only the sweep would run,
     # which would leave the Kubernetes-side cleanup (finalizers, CAPI objects) undone.
-    if [[ ! -x "$SOLOZ_BINARY" ]]; then
-        log "bin/soloz not found — building it (teardown drives the CLI, not just the API)"
-        (cd "$ZERO_OPS_DIR" && go build -o bin/soloz ./cmd/soloz) \
-            || error_exit "could not build bin/soloz; teardown needs it"
+    if [[ ! -x "$KAKT_BINARY" ]]; then
+        log "bin/kakt not found — building it (teardown drives the CLI, not just the API)"
+        (cd "$ZERO_OPS_DIR" && go build -o bin/kakt ./cmd/kakt) \
+            || error_exit "could not build bin/kakt; teardown needs it"
     fi
 
     export HCLOUD_TOKEN="${HCLOUD_TOKEN:-$(cat "$ZERO_OPS_DIR/k8-secrets/hetzner/token" 2>/dev/null | tr -d '\n')}"
@@ -485,13 +485,13 @@ run_full_teardown() {
     if [[ "${SKIP_CLI_SPOKE_TEARDOWN:-0}" == "1" ]]; then
         log "  skipped — handled by the scoped sweep (foreign spokes present)"
     else
-        "$SOLOZ_BINARY" spoke teardown --force --debug 2>&1 | sed 's/^/  /' \
+        "$KAKT_BINARY" spoke teardown --force --debug 2>&1 | sed 's/^/  /' \
             || log "  ⚠️  spoke teardown returned non-zero — the sweep below will catch leftovers"
     fi
 
     log ""
     log "── 3/6 tearing down the hub ──"
-    "$SOLOZ_BINARY" teardown --name="$CLUSTER_NAME" --confirm --force --debug 2>&1 | sed 's/^/  /' \
+    "$KAKT_BINARY" teardown --name="$CLUSTER_NAME" --confirm --force --debug 2>&1 | sed 's/^/  /' \
         || log "  ⚠️  hub teardown returned non-zero — the sweep below will catch leftovers"
 
     log ""
@@ -526,7 +526,7 @@ run_full_teardown() {
     log "  • Tailscale devices (flatcar-hub-node-1 on box-b, flatcar-spoke-node-{1,2} on box-a) — remove in the admin console"
     log "  • AWS Secrets Manager: delete the old ENCRYPTION_KEY / AUTH_SECRET entries."
     log "    Restoring a stale key against a fresh Infisical database is the failure to avoid."
-    log "  • The shared Flatcar base image (C:\\ProgramData\\soloz\\flatcar\\flatcar-base.vhdx)"
+    log "  • The shared Flatcar base image (C:\\ProgramData\\kakt\\flatcar\\flatcar-base.vhdx)"
     log "    is kept on purpose — it is reused by the next provision."
     return 0
 }

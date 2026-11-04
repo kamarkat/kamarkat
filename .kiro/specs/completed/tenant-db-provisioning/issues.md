@@ -93,9 +93,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	
-	infisicalclient "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/infisical"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/infisical"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // SpokePoolReconciler reconciles SpokePool XRs

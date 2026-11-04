@@ -36,9 +36,9 @@ PATHS=(
     # rest of spoke-bootstrap is delivered to spokes by ClusterResourceSet and is
     # never read by the CLI, and the directory is 1.7M against this file's 0.9M.
     "manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml"
-    # The Support Agent's collection contract (cmd/soloz/support.go).
+    # The Support Agent's collection contract (cmd/kakt/support.go).
     #
-    # `soloz support scope` and `soloz support preview` exist so a tenant can
+    # `kakt support scope` and `kakt support preview` exist so a tenant can
     # read what would be sent BEFORE it is sent (ADR-077), and a released binary
     # could not: it is the only file those commands read, and it was not carried.
     # The commands failed with "release 0.1.16-rc.6 carries no

@@ -556,7 +556,7 @@ spec:
     spec:
       project: platform-infrastructure
       source:
-        repoURL: https://github.com/soloz-io/zero-ops.git
+        repoURL: https://github.com/kamarkat/kamarkat.git
         targetRevision: HEAD
         path: manifests/spoke/xrds
         directory:
@@ -606,7 +606,7 @@ spec:
     spec:
       project: platform-infrastructure
       source:
-        repoURL: https://github.com/soloz-io/zero-ops.git
+        repoURL: https://github.com/kamarkat/kamarkat.git
         targetRevision: HEAD
         path: manifests/spoke/compositions
         directory:

@@ -27,7 +27,7 @@ func ReadCatalog(path string) ([]byte, error) {
 //
 // IT EXISTS SO THERE IS EXACTLY ONE SPELLING. The name appears in three places that
 // cannot see each other: this file, the Day-0 Secret template rendered by the
-// provisioner and by `soloz encryption enable`, and the `secretEncryptionConfig`
+// provisioner and by `kakt encryption enable`, and the `secretEncryptionConfig`
 // patch in each ClusterClass, which builds it from `{{ .builtin.cluster.name }}`
 // inside CAPI at topology-reconcile time. A mismatch between the Go half and the
 // CAPI half produces a control-plane node referencing a Secret that does not exist,

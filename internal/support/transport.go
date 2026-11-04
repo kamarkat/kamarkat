@@ -60,7 +60,7 @@ func (e Enrolment) Enrolled() bool {
 // Read from the certificate rather than configured, so the agent cannot report
 // under a name it was not issued. It is informational here -- the receiving end
 // extracts the identity from the certificate itself and never trusts a field in
-// the payload -- but printing it is what lets `soloz support preview` show an
+// the payload -- but printing it is what lets `kakt support preview` show an
 // operator which box this would report as.
 func (e Enrolment) Identity() (string, error) {
 	pair, err := tls.LoadX509KeyPair(e.CertFile, e.KeyFile)

@@ -13,7 +13,7 @@
 
 # The cluster-admin kubeconfig, the GitHub PAT, the Hetzner token, the Tailscale
 # auth key. ADR-076 keeps the admin credential in the escrow and reaches it with
-# `soloz kubeconfig`; what lands here is a working copy for the duration of a
+# `kakt kubeconfig`; what lands here is a working copy for the duration of a
 # run and is meant to die with the runner.
 k8-secrets/
 

@@ -1,7 +1,7 @@
 # ADR-062: Onboarding and Scaffolding a Tenant
 
 **Date:** 2026-09-06
-**Status:** Accepted — implemented as `soloz tenant scaffold`; `nutgraf-gitops` is
+**Status:** Accepted — implemented as `kakt tenant scaffold`; `nutgraf-gitops` is
 a repository this produced.
 
 **Scope: a TENANT, not an application.** This ADR is how an organisation becomes a

@@ -9,7 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // The billing engine is a selectable platform capability of the box (ADR-113),

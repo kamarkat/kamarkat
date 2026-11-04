@@ -27,7 +27,7 @@ set -euo pipefail
 # They were one variable (ZERO_OPS_DIR=$(dirname $SCRIPT_DIR)), which silently
 # made every workspace path relative to wherever the script happened to sit. Run
 # from a temp directory that is true and useless: k8-secrets, .zero-ops and
-# bin/soloz would all resolve under the temp copy.
+# bin/kakt would all resolve under the temp copy.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The workspace. An explicit ZERO_OPS_DIR wins; otherwise fall back to the
@@ -109,10 +109,10 @@ state_file_for() {
 
 # The CLI this script drives.
 #
-# SOLOZ_BINARY wins when set: a released run already downloaded a pinned binary,
+# KAKT_BINARY wins when set: a released run already downloaded a pinned binary,
 # and rebuilding or re-resolving it would discard the version the caller chose.
-# Otherwise the checkout's bin/soloz, which is what build_binary produces.
-SOLOZ_BINARY="${SOLOZ_BINARY:-}"   # resolved in check_prerequisites, once resolve_owned exists
+# Otherwise the checkout's bin/kakt, which is what build_binary produces.
+KAKT_BINARY="${KAKT_BINARY:-}"   # resolved in check_prerequisites, once resolve_owned exists
 
 # Defaults (overridable via flags)
 # The cluster name must be stable across runs: the Go state file is the source
@@ -614,8 +614,8 @@ check_prerequisites() {
     #
     # Resolved here rather than at the top of the file: resolve_owned needs both
     # roots settled, and ZERO_OPS_DIR is not final until the flags are parsed.
-    if [[ -z "$SOLOZ_BINARY" ]]; then
-        SOLOZ_BINARY="$(resolve_owned bin/soloz)"
+    if [[ -z "$KAKT_BINARY" ]]; then
+        KAKT_BINARY="$(resolve_owned bin/kakt)"
     fi
     #
     # A binary that already exists and reports a version is used as-is.
@@ -628,34 +628,34 @@ check_prerequisites() {
     # present. The version the caller chose is the one thing a release must not
     # discard.
     #
-    # SOLOZ_BUILD=always forces a rebuild for the case a developer wants one
+    # KAKT_BUILD=always forces a rebuild for the case a developer wants one
     # despite an existing binary.
     # Skip the build, NOT the rest of this function. check_prerequisites keeps
     # checking tokens and the AWS profile after this block, and returning early
     # would silently drop those -- the same class of bug as a gate that exists
     # and is never called.
     local skip_build=""
-    if [[ "${SOLOZ_BUILD:-}" != "always" && -x "$SOLOZ_BINARY" ]]; then
+    if [[ "${KAKT_BUILD:-}" != "always" && -x "$KAKT_BINARY" ]]; then
         local existing_version
-        existing_version="$("$SOLOZ_BINARY" bundle-version 2>/dev/null || true)"
+        existing_version="$("$KAKT_BINARY" bundle-version 2>/dev/null || true)"
         if [[ -n "$existing_version" ]]; then
-            log "Using existing binary $SOLOZ_BINARY (bundle ${existing_version})"
+            log "Using existing binary $KAKT_BINARY (bundle ${existing_version})"
             # A binary reporting a version other than the one requested is the
             # drift this check exists for.
             if [[ -n "$BUNDLE_VERSION" && "$existing_version" != "$BUNDLE_VERSION" ]]; then
-                log "ERROR: binary at $SOLOZ_BINARY reports bundle '${existing_version}', expected '${BUNDLE_VERSION}'"
-                log "       Set SOLOZ_BUILD=always to rebuild, or point SOLOZ_BINARY at the right one."
+                log "ERROR: binary at $KAKT_BINARY reports bundle '${existing_version}', expected '${BUNDLE_VERSION}'"
+                log "       Set KAKT_BUILD=always to rebuild, or point KAKT_BINARY at the right one."
                 failed=1
             fi
             skip_build=1
         else
-            log "Existing binary $SOLOZ_BINARY reports no version; rebuilding"
+            log "Existing binary $KAKT_BINARY reports no version; rebuilding"
         fi
     fi
 
-    if [[ -z "$skip_build" && ! -d "$(resolve_owned cmd/soloz)" ]]; then
-        log "ERROR: no usable soloz binary, and no source to build one"
-        log "       (no cmd/soloz under $ZERO_OPS_DIR or $PLATFORM_DIR). Set SOLOZ_BINARY to a prebuilt CLI."
+    if [[ -z "$skip_build" && ! -d "$(resolve_owned cmd/kakt)" ]]; then
+        log "ERROR: no usable kakt binary, and no source to build one"
+        log "       (no cmd/kakt under $ZERO_OPS_DIR or $PLATFORM_DIR). Set KAKT_BINARY to a prebuilt CLI."
         failed=1
         skip_build=1
     fi
@@ -666,12 +666,12 @@ check_prerequisites() {
     # this build path with the version set.
     local ldflags=""
     if [[ -n "$BUNDLE_VERSION" ]]; then
-        ldflags="-X github.com/soloz-io/zero-ops/internal/soloz-cli/versions.BundleVersion=${BUNDLE_VERSION}"
+        ldflags="-X github.com/kamarkat/kamarkat/internal/kakt-cli/versions.BundleVersion=${BUNDLE_VERSION}"
         log "Building hub binary for bundle ${BUNDLE_VERSION}..."
     else
         log "Building hub binary..."
     fi
-    if (cd "$(dirname "$(resolve_owned cmd/soloz)")" && go build -mod=mod -ldflags "$ldflags" -o "$SOLOZ_BINARY" ./cmd/soloz 2>&1); then
+    if (cd "$(dirname "$(resolve_owned cmd/kakt)")" && go build -mod=mod -ldflags "$ldflags" -o "$KAKT_BINARY" ./cmd/kakt 2>&1); then
         log "  ✓ hub binary built"
         if [[ -n "$BUNDLE_VERSION" ]]; then
             # The binary must request what was asked for. A build that still
@@ -679,7 +679,7 @@ check_prerequisites() {
             # on every cluster it bootstrapped, which is the failure this flag
             # exists to avoid rather than introduce.
             local got
-            got=$("$SOLOZ_BINARY" bundle-version 2>/dev/null || true)
+            got=$("$KAKT_BINARY" bundle-version 2>/dev/null || true)
             if [[ "$got" != "$BUNDLE_VERSION" ]]; then
                 log "ERROR: built CLI reports '${got}', expected '${BUNDLE_VERSION}'"
                 failed=1
@@ -809,7 +809,7 @@ step1_bootstrap_hub() {
     # the fresh bootstrap still proceeds from scratch.
     if [[ "$TEARDOWN" == "true" ]]; then
         log "TEARDOWN=true — tearing down existing cluster '${CLUSTER_NAME}' (forceful)..."
-        "$SOLOZ_BINARY" teardown --name="${CLUSTER_NAME}" --confirm --force 2>&1 || log "WARNING: Teardown returned non-zero — cluster may not exist, continuing..."
+        "$KAKT_BINARY" teardown --name="${CLUSTER_NAME}" --confirm --force 2>&1 || log "WARNING: Teardown returned non-zero — cluster may not exist, continuing..."
 
         log "Pre-flight: cleaning up any leftover kind clusters (bootstrap kind, prior runs)..."
         # hub teardown only knows about the named hub cluster. The kind
@@ -921,8 +921,8 @@ step1_bootstrap_hub() {
         if [[ -n "${TAILNET_NAME:-}" ]]; then
             hybrid_flags="$hybrid_flags --tailnet-name=$TAILNET_NAME"
         fi
-        log "Running: $SOLOZ_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --provider=hybrid --region=${REGION} $env_flag $topo_flag $gating_flag $hybrid_flags --debug"
-        (cd "$ZERO_OPS_DIR" && "$SOLOZ_BINARY" bootstrap-mgmt \
+        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --provider=hybrid --region=${REGION} $env_flag $topo_flag $gating_flag $hybrid_flags --debug"
+        (cd "$ZERO_OPS_DIR" && "$KAKT_BINARY" bootstrap-mgmt \
             --name="${CLUSTER_NAME}" \
             --provider=hybrid \
             --region="${REGION}" \
@@ -932,8 +932,8 @@ step1_bootstrap_hub() {
             $hybrid_flags \
             --debug 2>&1 | tee "$LOG_DIR/bootstrap-hub.log")
     else
-        log "Running: $SOLOZ_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --region=${REGION} $env_flag $gating_flag --debug"
-        (cd "$ZERO_OPS_DIR" && "$SOLOZ_BINARY" bootstrap-mgmt \
+        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --region=${REGION} $env_flag $gating_flag --debug"
+        (cd "$ZERO_OPS_DIR" && "$KAKT_BINARY" bootstrap-mgmt \
             --name="${CLUSTER_NAME}" \
             --region="${REGION}" \
             $env_flag \
@@ -1001,7 +1001,7 @@ step1c_configure_tailscale() {
     # Passed explicitly. The CLI's own defaults read k8-secrets/ relative to its
     # WORKING DIRECTORY, which here is the tenant's checkout -- so resolving the
     # paths above and then letting it look them up again would find nothing.
-    "$SOLOZ_BINARY" configure-tailscale \
+    "$KAKT_BINARY" configure-tailscale \
         --authkey="$TS_AUTHKEY" \
         --hostname="$TS_HOSTNAME" \
         --kubeconfig="$KUBECONFIG_PATH" || error_exit "configure-tailscale failed"
@@ -1063,8 +1063,8 @@ step3_configure_github() {
 
     local org_url; org_url="$(box_org_url)"
 
-    log "Running: $SOLOZ_BINARY configure-github-access --ghcr-pat=\$GITHUB_TOKEN --org-url=$org_url"
-    "$SOLOZ_BINARY" configure-github-access \
+    log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=\$GITHUB_TOKEN --org-url=$org_url"
+    "$KAKT_BINARY" configure-github-access \
         --ghcr-pat="$GITHUB_TOKEN" \
         --org-url="$org_url" \
         --kubeconfig="$KUBECONFIG_PATH" || error_exit "configure-github-access failed"
@@ -2085,7 +2085,7 @@ main() {
         error_exit "Invalid provider: $PROVIDER (must be 'hetzner' or 'hybrid')"
     fi
 
-    # An empty --environment is not a no-op: cmd/soloz/bootstrap.go coerces "" to
+    # An empty --environment is not a no-op: cmd/kakt/bootstrap.go coerces "" to
     # "prod", which makes the spoke AppSet path spoke-pools/prod/... — a path that
     # does not exist — so the spoke silently never provisions. Refuse it here,
     # where the message can say so, rather than debugging a missing spoke later.

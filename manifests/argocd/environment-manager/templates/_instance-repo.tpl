@@ -10,7 +10,7 @@ The refusal is the point. An unset value would render an ApplicationSet whose
 git generator matches nothing, which ArgoCD reports as Healthy having generated
 zero Applications -- indistinguishable from a box with no tenants yet. Boundaries
 05 and 06 are exactly the two whose inventory is legitimately zero
-(internal/soloz-cli/health/boundary_inventory.go), so nothing downstream catches
+(internal/kakt-cli/health/boundary_inventory.go), so nothing downstream catches
 it either.
 
 Day-0 supplies the value, as it already supplies bundleRegistry: the CLI runs

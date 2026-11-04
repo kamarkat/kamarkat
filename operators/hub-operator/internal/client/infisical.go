@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	opsv1alpha1 "github.com/soloz-io/zero-ops/operators/hub-operator/api/v1alpha1"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/constant"
+	opsv1alpha1 "github.com/kamarkat/kamarkat/operators/hub-operator/api/v1alpha1"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/constant"
 )
 
 // InfisicalClient wraps Infisical API operations with Universal Auth

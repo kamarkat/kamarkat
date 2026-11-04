@@ -21,9 +21,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/soloz-io/zero-ops/internal/platform/escrow"
-	infisicalclient "github.com/soloz-io/zero-ops/operators/hub-operator/internal/client"
-	"github.com/soloz-io/zero-ops/operators/hub-operator/internal/secrets"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // ApplicationSecretUploader handles uploading application secrets directly to Infisical

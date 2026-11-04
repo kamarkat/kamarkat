@@ -141,7 +141,7 @@ Testing the Hub-Spoke architecture is impossible without distributed tracing and
 Create custom business metrics to track agent deployments across the fleet.
 
 ```go
-import "github.com/soloz-io/zero-ops/internal/opensbt/libraries/metrics"
+import "github.com/kamarkat/kamarkat/internal/opensbt/libraries/metrics"
 
 type AgentMetrics struct {
     Manager *metrics.Manager
@@ -161,7 +161,7 @@ func InitAgentMetrics(m *metrics.Manager) *AgentMetrics {
 When the `mcp-server` boots, it must initialize the OpenTelemetry provider and wrap the MCP handler. This ensures traces propagate from the MCP client -> Hub -> AgentRegistry -> Spoke.
 
 ```go
-import "github.com/soloz-io/zero-ops/internal/opensbt/libraries/tracing"
+import "github.com/kamarkat/kamarkat/internal/opensbt/libraries/tracing"
 
 func main() {
     // 1. Initialize OTel Tracer (pointing to Hub's Tempo/Jaeger)

@@ -12,7 +12,7 @@ That makes the recreation test the restore proof, which is the right shape: ADR-
 reconstruction, and recreating a hub is the only exercise that proves the whole chain --
 escrowed master keys, the at-rest encryption key, a managed cluster's trust roots, and the
 object archive -- rather than one restore in isolation. It also exercises the commands added
-for it: `soloz escrow verify`, `escrow verify-recovery`, `spoke restore-pki` and
+for it: `kakt escrow verify`, `escrow verify-recovery`, `spoke restore-pki` and
 `spoke match-inventory`, none of which has been run against a live box.
 
 Sequence: staging is created -> hub recreation test on staging -> that result is the restore
@@ -168,7 +168,7 @@ Kyverno supports 1.36** (Kyverno 1.19.x = K8s 1.33–1.35; 1.20 does not exist).
 |---|---|---|---|
 | Kubernetes | v1.31.6 | v1.31.6 | ClusterClass / topology |
 | Control plane | kubeadm (`KubeadmControlPlane nutgraf-hub-74dl4`) | kubeadm (`nutgraf-01-xq2p2`) | — (no Talos in use; Talos assets archived) |
-| CAPI core | v1.10.0 | — | `internal/soloz-cli/versions/versions.go:8` |
+| CAPI core | v1.10.0 | — | `internal/kakt-cli/versions/versions.go:8` |
 | kubeadm bootstrap / control-plane providers | **v1.8.5** (mismatched with core) | — | `versions.go:16-17` |
 | CAPH | v1.0.7 | — | `versions.go:22` |
 | CAPI operator | v0.13.0 | — | `versions.go:5` |
@@ -307,7 +307,7 @@ the same operation as destroying the Hetzner infrastructure they describe.** The
 reconstruction are usually the ones still serving traffic.
 
 1. **Decide the infrastructure's disposition first, in the provider**, not in Kubernetes. List
-   the servers (`soloz spoke match-inventory` reports them) and establish which are live and
+   the servers (`kakt spoke match-inventory` reports them) and establish which are live and
    which are genuinely orphaned. Nothing below is safe until this is known.
 2. **Do not unpause a deleting object to clear its finalizers.** Resuming the controller is what
    makes it act, and for a `Cluster` or `Machine` being deleted, acting means deleting

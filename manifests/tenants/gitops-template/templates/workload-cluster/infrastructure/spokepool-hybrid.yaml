@@ -57,7 +57,7 @@ spec:
     # applied, and a bootstrap that failed an hour later reporting "the spoke's
     # shared-cnpg has no ready instance", a database that had nowhere to run.
     #
-    # `soloz tenant add-cluster` now says so at declaration, and step 10f of
+    # `kakt tenant add-cluster` now says so at declaration, and step 10f of
     # hub-bootstrap.sh refuses to wait on a database when no node can schedule.
     count: 0
     instanceType: cx33

@@ -76,7 +76,7 @@ spec:
 ```yaml
 spec:
   dir:
-    url: "https://github.com/soloz-io/zero-ops.git"
+    url: "https://github.com/kamarkat/kamarkat.git"
     ref: "main"
     path: "migrations/tenant-baseline"
 ```
@@ -121,7 +121,7 @@ region: hel1
 database:
   schemaName: ""
   migrations:
-    gitRepo: "https://github.com/soloz-io/zero-ops"
+    gitRepo: "https://github.com/kamarkat/kamarkat"
     gitRevision: "main"
     gitPath: "migrations/tenant-baseline"
 resourceQuota:

@@ -7,7 +7,7 @@ on:
       # a change to it can break a tenant's Day-0 without touching a manifest.
       # Until this was added, no workflow ran the CLI's tests at all: both Go
       # workflows are scoped to their own operator directory, and every guard in
-      # internal/soloz-cli was enforced on a laptop and nowhere else.
+      # internal/kakt-cli was enforced on a laptop and nowhere else.
       - 'cmd/**'
       - 'internal/**'
       - 'scripts/**'
@@ -38,7 +38,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test the CLI and the platform content it carries
-        run: go test ./internal/soloz-cli/... ./internal/platform/... ./cmd/soloz/...
+        run: go test ./internal/kakt-cli/... ./internal/platform/... ./cmd/kakt/...
       # The Credit Authority's live suites (ADR-109) run against a deployment;
       # here they must still compile, and skip without a target.
       - name: Compile the Credit Authority suites

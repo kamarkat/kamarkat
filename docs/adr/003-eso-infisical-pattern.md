@@ -356,7 +356,7 @@ releases — the releases because the class is **synced**: ArgoCD's
 promoting a bundle is what puts a template on a cluster and begins the roll.
 
 The **key Secret** is the one piece outside that path, deliberately: it is per
-cluster and escrow-sourced, so it is written once by `soloz encryption enable` and
+cluster and escrow-sourced, so it is written once by `kakt encryption enable` and
 reconciled by nothing. The split matters because it decides who the writer is — an
 earlier draft of this section had the class applied by the CLI, which would have made
 the CLI a second writer for a GitOps-owned object.

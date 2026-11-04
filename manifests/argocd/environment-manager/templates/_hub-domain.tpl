@@ -2,7 +2,7 @@
 Resolve the base domain this box publishes on, refusing to render without one.
 
 ADR-051 makes the environment overlay the system of record for the base domain,
-and DeriveHubEndpoints (internal/soloz-cli/bootstrap/hubdomain.go) derives every
+and DeriveHubEndpoints (internal/kakt-cli/bootstrap/hubdomain.go) derives every
 public host from it. The components never took part in that: agentgateway's
 config carried the platform's own `dev.nutgraf.in` as a literal, so every box
 built from a released bundle trusted the PLATFORM's Zitadel as its OIDC issuer

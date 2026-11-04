@@ -3,7 +3,7 @@ package interfaces
 import (
 	"context"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // EventHandler is a function that handles an event

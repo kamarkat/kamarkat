@@ -157,7 +157,7 @@ weaker and the weakness is the one this decision was taken to avoid: a
 repository created tomorrow is NOT covered, and must be given the credential
 when it is created. The platform cannot close that gap from outside -- it is the
 plan's boundary, not a design choice -- so it is stated rather than worked
-around. `soloz tenant set-gitops-token --discover --gitops-repo <repo>` covers the set
+around. `kakt tenant set-gitops-token --discover --gitops-repo <repo>` covers the set
 that exists; `--repo owner/name` covers one.
 
 The discovered set is DERIVED, never enumerated, for the same reason this
@@ -174,7 +174,7 @@ silently ineffective, because a credential that looks present everywhere except
 where it is read is worse than one that was never set.
 
 Published by the Day-0 CLI at scaffold, and republishable afterwards
-(`soloz tenant set-gitops-token`). The publication is deliberately non-fatal --
+(`kakt tenant set-gitops-token`). The publication is deliberately non-fatal --
 a box is complete without it and aborting a scaffold would destroy a working
 repository over a credential no cluster depends on -- which means a scaffold
 whose token lacked the organisation's "Secrets: write" permission leaves the

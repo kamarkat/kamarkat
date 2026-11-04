@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/interfaces"
-	"github.com/soloz-io/zero-ops/internal/kube-sbt/models"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/interfaces"
+	"github.com/kamarkat/kamarkat/internal/kube-sbt/models"
 )
 
 // Auth implements interfaces.IAuth against an issuer with structural tenancy.

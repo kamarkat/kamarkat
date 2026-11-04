@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/soloz-io/zero-ops/internal/support"
+	"github.com/kamarkat/kamarkat/internal/support"
 	"gopkg.in/yaml.v3"
 )
 
