@@ -163,7 +163,7 @@ spec:
             limits: {cpu: 500m, memory: 512Mi}
           volumeMounts: *engineMounts
         - name: gateway
-          image: {{ printf "%s@%s" $img.gateway.repository (required "images.gateway.digest is required (ADR-113)" $img.gateway.digest) }}
+          image: {{ printf "%s:%s@%s" $img.gateway.repository (required "images.gateway.tag is required (ADR-113)" $img.gateway.tag) (required "images.gateway.digest is required (ADR-113)" $img.gateway.digest) }}
           command: ["/app/agentgateway", "-f", "/etc/agentgateway/config.yaml"]
           ports:
             - {name: http, containerPort: 8080, protocol: TCP}

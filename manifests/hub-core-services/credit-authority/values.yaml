@@ -13,17 +13,25 @@ ledger:
   name: credits
   bucket: credits
 
-# Pinned by digest by the platform, like every platform image (ADR-021).
+# Pinned by digest by the platform, like every platform image (ADR-021). The tag
+# is carried BESIDE the digest, not instead of it. The digest is what is pulled;
+# the tag is what makes the version reportable -- a pin with no tag enters the
+# release inventory as the literal string "digest-pinned", which no upstream
+# version ever equals, so the component reads as permanently behind and the
+# release cannot say which version it runs.
 images:
-  # Formance Ledger v2.4.16 (MIT). The scratch build: the binary and nothing else.
+  # Formance Ledger v2.4.17 (MIT). The scratch build: the binary and nothing else.
   ledger:
     repository: ghcr.io/formancehq/ledger
-    digest: "sha256:fc624af4dde0b9fa8b43ae02b7297fc3f15266df7c9806edec794f1420b40e62"
+    tag: "v2.4.17"
+    digest: "sha256:269cc7079a4375eaaad21dd3565563a0372437216cdda14c200619c647c07ea3"
   # The one-shot provisioner: a shell and an HTTP client (curl 8.23.0).
   provisioner:
     repository: docker.io/curlimages/curl
-    digest: "sha256:11e64e28c5f58c8d93ee95fcf22ac055f48b0bc440e0ce7d8013bbb5ad6aa8ac"
-  # The gateway: the AgentGateway release the tenant gateway runs (v1.6.0).
+    tag: "8.23.0"
+    digest: "sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93"
+  # The gateway: the AgentGateway release every other copy runs (v1.7.0).
   gateway:
     repository: cr.agentgateway.dev/agentgateway
-    digest: "sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c"
+    tag: "v1.7.0"
+    digest: "sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"

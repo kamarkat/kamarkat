@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: ledger
-          image: {{ printf "%s@%s" $img.ledger.repository (required "images.ledger.digest is required (ADR-109)" $img.ledger.digest) }}
+          image: {{ printf "%s:%s@%s" $img.ledger.repository (required "images.ledger.tag is required (ADR-109)" $img.ledger.tag) (required "images.ledger.digest is required (ADR-109)" $img.ledger.digest) }}
           restartPolicy: Always
           args: ["serve", "--bind", "127.0.0.1:3068", "--auto-upgrade"]
           env:
@@ -64,7 +64,7 @@ spec:
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
         - name: provision
-          image: {{ printf "%s@%s" $img.provisioner.repository (required "images.provisioner.digest is required (ADR-109)" $img.provisioner.digest) }}
+          image: {{ printf "%s:%s@%s" $img.provisioner.repository (required "images.provisioner.tag is required (ADR-109)" $img.provisioner.tag) (required "images.provisioner.digest is required (ADR-109)" $img.provisioner.digest) }}
           command: ["/bin/sh", "/provision/provision.sh"]
           securityContext: {{- toYaml $hardened | nindent 12 }}
           resources:
@@ -75,7 +75,7 @@ spec:
             - {name: provisioner, mountPath: /provision, readOnly: true}
       containers:
         - name: gateway
-          image: {{ printf "%s@%s" $img.gateway.repository (required "images.gateway.digest is required (ADR-109)" $img.gateway.digest) }}
+          image: {{ printf "%s:%s@%s" $img.gateway.repository (required "images.gateway.tag is required (ADR-109)" $img.gateway.tag) (required "images.gateway.digest is required (ADR-109)" $img.gateway.digest) }}
           command: ["/app/agentgateway", "-f", "/etc/agentgateway/config.yaml"]
           ports:
             - {name: http, containerPort: 3000, protocol: TCP}

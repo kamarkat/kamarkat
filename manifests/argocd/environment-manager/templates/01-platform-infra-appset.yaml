@@ -171,7 +171,7 @@ spec:
             destinationNamespace: 'platform-ops'
             isPlatformOwned: 'false'
             repoURL: 'https://kyverno.github.io/kyverno'
-            # 3.9.1 (app v1.19.1). The version is load-bearing, not housekeeping.
+            # 3.9.2 (app v1.19.2). The version is load-bearing, not housekeeping.
             #
             # Every release from v1.12.5 to v1.18.x dereferences
             # request.RequestKind in the webhook TRACE middleware with no nil
@@ -383,8 +383,29 @@ spec:
 {{- end }}
 
               # Webhook configuration
+              #
+              # The readiness-checker tag, in both places the chart renders it.
+              # The chart leaves webhooksCleanup.image.tag and test.image.tag
+              # unset, and its own values comment says "Defaults to `latest` if
+              # omitted" -- so five rendered objects asked for
+              # ghcr.io/kyverno/readiness-checker:latest, which is whatever the
+              # registry served last and is not the version this release claims
+              # to ship. The chart renders the other two readiness-checker
+              # references at the app version already; these two were the
+              # outliers.
+              #
+              # A digest cannot be used here: templates/_helpers/_image.tpl
+              # builds `registry/repository:tag` and has no digest branch, so a
+              # released tag is the strongest pin the chart allows. It moves with
+              # targetRevision above -- both must change together.
               webhooksCleanup:
                 enabled: true
+                image:
+                  tag: v1.19.2
+
+              test:
+                image:
+                  tag: v1.19.2
 
               # CRDs
               crds:

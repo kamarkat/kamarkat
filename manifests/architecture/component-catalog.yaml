@@ -290,13 +290,6 @@ components:
     repo: agentgateway/agentgateway
     layer: workload-infrastructure
     match: ["cr.agentgateway.dev/*"]
-    behind:
-      - versions: ["digest-pinned"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: a third copy carries a digest with no tag, so its version is
-          unreportable. A tag is restored alongside the digest in the next release.
-        target: 0.1.16-rc.189
   - name: ExternalDNS
     description: Publishes DNS records for every public hostname.
     license: Apache-2.0
@@ -386,14 +379,6 @@ components:
     repo: kyverno/kyverno
     layer: machinery
     match: ["reg.kyverno.io/*", "ghcr.io/kyverno/*"]
-    behind:
-      - versions: ["latest"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: the readiness-checker image is pinned to a moving tag, so what
-          it runs is whatever the registry served last. It is pinned by digest in the next
-          release.
-        target: 0.1.16-rc.189
   - name: External Secrets
     description: Secret delivery. Copies each workload's secrets from the secret store into its namespace.
     license: Apache-2.0
@@ -656,13 +641,6 @@ components:
     tag: '^curl-(\d+)_(\d+)_(\d+)$'
     layer: machinery
     match: ["docker.io/curlimages/*"]
-    behind:
-      - versions: ["digest-pinned"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: pinned by digest with no tag, so its version is unreportable. A
-          tag is restored alongside the digest in the next release.
-        target: 0.1.16-rc.189
   # ── Kamarkat ────────────────────────────────────────────────────────────
   - name: Platform operator
     description: Reconciles the management cluster's own platform state.
@@ -719,27 +697,12 @@ components:
     track: ghcr
     layer: machinery
     match: [ghcr.io/kamarkat/kamarkat/support-agent]
-    behind:
-      - versions: ["digest-pinned"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: this release ships the 2026-09-13 build. A later build exists,
-          but the commit that pins it back into the deployment never landed, so the newer
-          image was published and never shipped. The pin-back lands in the next release.
-        target: 0.1.16-rc.189
   - name: Formance Ledger
     description: The ledger Credit Authority records every credit grant and spend in.
     license: MIT
     repo: formancehq/ledger
     layer: capability
     match: ["ghcr.io/formancehq/ledger"]
-    behind:
-      - versions: ["digest-pinned"]
-        status: scheduled
-        reason: >-
-          DEFECT, not a hold: pinned by digest with no tag, so the release cannot report which
-          ledger version it runs. A tag is restored alongside the digest in the next release.
-        target: 0.1.16-rc.189
   # ── Billing (ADR-113) ───────────────────────────────────────────────────
   - name: Lago
     description: The billing engine. Rates usage into invoices, run unmodified.
