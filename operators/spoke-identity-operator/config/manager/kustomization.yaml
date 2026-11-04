@@ -5,6 +5,6 @@ resources:
 - manager.yaml
 
 images:
-- digest: sha256:c265343a0d8546312f2f3bf4fa78ed9a6ed6227ff49f9857e05c2d94c3245218
+- digest: sha256:5b6a95cb28615b28f60f61fcbec30d093997da028f98de953539937694f533a2
   name: controller
   newName: ghcr.io/soloz-io/spoke-identity-operator
