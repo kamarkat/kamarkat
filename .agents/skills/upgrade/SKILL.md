@@ -207,10 +207,18 @@ is believed.
 
 ## Traps
 
-`references/revendoring.md` covers replacing a vendored render: how to tell a
-reproducible render from one carrying hand patches from a hand-authored
-manifest, and why that classification decides whether the change is a bump, a
-re-application or a redesign.
+## References
+
+Each covers one thing; read the one the step you are on needs.
+
+| File | When |
+| :- | :- |
+| `delivery-map.md` | which mechanism a component is in, and the Kubernetes version chain |
+| `pin-locations.md` | what each mechanism is and who may change it |
+| `revendoring.md` | replacing a vendored render, and proving it first |
+| `databases.md` | PostgreSQL, which is chosen per application rather than once |
+| `release-gates.md` | the gates a version change trips, and the order to fix them |
+| `traps.md` | the failure modes that have cost time here |
 
 `references/traps.md` lists the failure modes that have actually cost time here
 — the ones that are invisible until late, produce green status while being
