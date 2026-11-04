@@ -304,12 +304,18 @@ func (s Spec) tenantTokens() map[string]string {
 
 // RegistryDir is the directory a tenant's clusters and fleets live under.
 //
-// "registry", as in kubefirst, whose gitops repository holds registry/clusters/
-// and registry/environments/ beside a templates/ directory that renders into
-// them. ADR-071 names kubefirst as the reference this platform is measured
-// against, and a directory that means the same thing should be called the same
-// thing -- a reader who knows one should not have to learn the other's names to
-// find the same file.
+// "registry", as in kubefirst, whose gitops repository holds registry/ beside a
+// templates/ directory that renders into it. ADR-071 names kubefirst as the
+// reference this platform is measured against, and a directory that means the
+// same thing should be called the same thing -- a reader who knows one should
+// not have to learn the other's names to find the same file.
+//
+// Checked against konstructio/gitops-template, 2026-11-05: the template ships
+// registry/environments/ and templates/{mgmt,workload-cluster,workload-vcluster,
+// workload-host-vcluster}. There is no registry/clusters/ in it -- that
+// directory appears only once a workload cluster has been created from a
+// template, which is the same arrangement Render uses here. This comment said
+// the template held both, which it does not.
 const RegistryDir = "registry"
 
 // clusterTokens are facts about ONE cluster, and are substituted only into the

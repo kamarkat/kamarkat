@@ -7,6 +7,34 @@
 # tenant, and a validator cannot assert that about a fact it has to guess.
 tenantId: <TENANT_ID>
 
+# This cluster's name.
+#
+# Written here rather than left for the chart to derive. What the chart derives
+# when this is absent is `<environmentSlug>-<provider>`, which is identical on
+# every cluster built from the same pair -- a category, not a name. The hub's
+# values.yaml carries it for the same reason and says so at greater length.
+#
+# It is one of three independent facts, and conflating any two of them removes a
+# capability the platform has:
+#
+#   clusterName      this Kubernetes cluster, one of a kind. Keys the WAL archive
+#                    prefix, the node and object names, and the escrow scope of
+#                    this incarnation (ADR-111 1).
+#   environmentSlug  which promotion stage this cluster serves. Several clusters
+#                    may serve one (ADR-082), which is what lets a replacement
+#                    cluster be built, restored and verified beside the one it
+#                    replaces before anything is cut over.
+#   cellId           where an application goes, declared by the application in
+#                    environments/<env>/<app>/values.yaml. The cluster publishes
+#                    it as a label; the application names it.
+clusterName: <CLUSTER_NAME>
+
+# The promotion stage this cluster serves.
+#
+# NOT a destination. An application under environments/stg/ is not placed here
+# because this says `stg` -- it is placed on the cell it names, and this is what
+# says that cell is a legitimate home for a staging application. Two clusters may
+# carry the same slug.
 environmentSlug: <ENVIRONMENT>
 provider: <CLOUD_PROVIDER>
 region: <CLOUD_REGION>

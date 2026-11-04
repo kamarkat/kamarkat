@@ -27,12 +27,12 @@ import (
 
 // AINativeSaaSReconciler provisions tenant resources into Infisical when an
 // AINativeSaaS XR is created. This unblocks the Spoke ESO ExternalSecrets which
-// wait for secrets at /spoke-pool/<cellId>/tenants/<tenantId>/<secret-name>.
+// wait for secrets at /spoke-pool/<clusterName>/tenants/<tenantId>/<secret-name>.
 //
 // Currently handles:
 //  1. db-credentials — PostgreSQL user credentials for the tenant database.
 //     ESO remoteRef.key splits on the last '/' so secret NAME is "db-credentials"
-//     and FOLDER path is /spoke-pool/<cellId>/tenants/<tenantId>.
+//     and FOLDER path is /spoke-pool/<clusterName>/tenants/<tenantId>.
 //     ADR-003 Pattern A2a: Kube-SBT → Infisical ONLY → ESO → Spoke K8s Secret.
 //  2. infisical-credentials — Machine Identity credentials for the tenant SDK
 //     workload. ADR-003, ADR-019: scoped identity for runtime plugin resolution.
@@ -57,7 +57,7 @@ type TenantSecretStore interface {
 	CreateSecret(ctx context.Context, secretPath, secretName, secretValue string) error
 	UpdateSecret(ctx context.Context, secretPath, secretName, secretValue string) error
 	DeleteSecret(ctx context.Context, secretPath, secretName string) error
-	EnsureTenantFolderAndCredentials(ctx context.Context, cellId, tenantId, appId string,
+	EnsureTenantFolderAndCredentials(ctx context.Context, clusterName, tenantId, appId string,
 		isFirstTime bool, oauthClients []secrets.OAuthClient,
 		cacheEnabled, cacheIsFirstTime, gatewayEnabled bool) (*secrets.EnsureTenantCredentialsResult, error)
 }
@@ -113,13 +113,13 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	cellId, found, err := unstructured.NestedString(ainativesaas.Object, "spec", "cellId")
-	if err != nil || !found || cellId == "" {
-		logger.Info("AINativeSaaS missing spec.cellId, skipping", "name", req.Name)
+	clusterName, found, err := unstructured.NestedString(ainativesaas.Object, "spec", "clusterName")
+	if err != nil || !found || clusterName == "" {
+		logger.Info("AINativeSaaS missing spec.clusterName, skipping", "name", req.Name)
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Reconciling TenantDatabase credentials", "tenant", tenantId, "cell", cellId)
+	logger.Info("Reconciling TenantDatabase credentials", "tenant", tenantId, "cluster", clusterName)
 
 	// TODO(ADR-039): Move tenant credential generation to Kube-SBT
 	// ADR-031: Delegate to InfisicalClient for tenant secret provisioning.
@@ -162,9 +162,9 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// credential is not evidence of loss.
 	cacheIsFirstTime := !r.isConditionTrue(ainativesaas, conditionTypeCacheSeeded)
 
-	result, err := r.InfisicalClient.EnsureTenantFolderAndCredentials(ctx, cellId, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
+	result, err := r.InfisicalClient.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
 	if err != nil {
-		logger.Error(err, "Failed to ensure tenant credentials in Infisical", "tenant", tenantId, "cell", cellId)
+		logger.Error(err, "Failed to ensure tenant credentials in Infisical", "tenant", tenantId, "cluster", clusterName)
 		if result != nil && result.Result == secrets.EnsureMissing {
 			_ = r.setCondition(ctx, ainativesaas, tenantId, conditionMissing)
 		}
@@ -321,7 +321,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// the workload that authenticates with it cannot start.
 				for _, dc := range identity.Clients {
 					if dc.ClientID != "" {
-						if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+						if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 							secrets.InfisicalOAuthClientIDKey(dc.Name), dc.ClientID); err != nil {
 							logger.Error(err, "Failed to publish OAuth client id",
 								"tenant", tenantId, "client", dc.Name)
@@ -331,7 +331,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					// regenerated: the stored secret is still the live one, and
 					// overwriting it with "" would destroy a working credential.
 					if dc.ClientSecret != "" {
-						if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+						if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 							secrets.InfisicalOAuthClientSecretKey(dc.Name), dc.ClientSecret); err != nil {
 							logger.Error(err, "Failed to publish OAuth client secret",
 								"tenant", tenantId, "client", dc.Name)
@@ -345,14 +345,14 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// again. Publishing it only once this application's dependencies
 				// resolved lost it whenever they did not on that call, and nothing
 				// could re-read it.
-				r.publishServiceIdentity(ctx, logger, cellId, tenantId, appId, identity.ServiceClient)
+				r.publishServiceIdentity(ctx, logger, clusterName, tenantId, appId, identity.ServiceClient)
 
 				// It must have landed, or this application cannot call another as
 				// itself. Checked as the gateway's exchange client is, below, and
 				// for the same reason: absent once minted, it cannot be re-read, and
 				// regenerating a credential is never a reconcile's decision.
 				if serviceClient != "" {
-					servicePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+					servicePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 					if _, err := r.InfisicalClient.GetSecret(ctx, servicePath, serviceClientSecretKey); err != nil {
 						logger.Error(err, "CRITICAL: the service identity's credential is absent. "+
 							"The issuer discloses a generated secret once, so it cannot be re-read: the "+
@@ -379,7 +379,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// regenerated. Checked here, once, where the recovery can be
 				// named.
 				exchangeKey := secrets.InfisicalOAuthClientSecretKey(gatewayExchangeClientName(appId))
-				exchangePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+				exchangePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 				if _, err := r.InfisicalClient.GetSecret(ctx, exchangePath, exchangeKey); err != nil {
 					logger.Error(err, "CRITICAL: the gateway exchange client credential is absent. "+
 						"The issuer discloses a generated secret once, so it cannot be re-read: the client "+
@@ -389,7 +389,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				}
 
 				if identity.OwnerPassword != "" {
-					if err := r.publishTenantSecret(ctx, cellId, tenantId, appId, "OWNER_INITIAL_PASSWORD", identity.OwnerPassword); err != nil {
+					if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId, "OWNER_INITIAL_PASSWORD", identity.OwnerPassword); err != nil {
 						logger.Error(err, "Provisioned the tenant owner but could not publish their initial password",
 							"tenant", tenantId, "owner", ownerEmail)
 					} else {
@@ -405,11 +405,11 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// that to the DEFAULT organisation — the platform's own. The
 				// account is created in the wrong tenant and nothing reports it,
 				// because from the issuer's side nothing went wrong.
-				if err := r.publishTenantSecret(ctx, cellId, tenantId, appId, "OIDC_ORG_ID", identity.TenantRef); err != nil {
+				if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId, "OIDC_ORG_ID", identity.TenantRef); err != nil {
 					logger.Error(err, "Provisioned tenant identity but could not publish its organisation id",
 						"tenant", tenantId)
 				}
-				if err := r.publishTenantClientID(ctx, cellId, tenantId, appId, identity.ClientID); err != nil {
+				if err := r.publishTenantClientID(ctx, clusterName, tenantId, appId, identity.ClientID); err != nil {
 					logger.Error(err, "Provisioned tenant identity but could not publish its client id; will retry",
 						"tenant", tenantId)
 				} else {
@@ -455,7 +455,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					if aerr != nil {
 						logger.Error(aerr, "Refusing this application's user-acting client", "tenant", tenantId, "app", appId)
 					} else {
-						r.publishCrossApplicationTrust(ctx, logger, cellId, tenantId, appId, deps, identity.Clients, identity.ServiceClient, actingClient)
+						r.publishCrossApplicationTrust(ctx, logger, clusterName, tenantId, appId, deps, identity.Clients, identity.ServiceClient, actingClient)
 					}
 				}
 
@@ -467,7 +467,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// audience — but it arrives with the values that are, and
 				// splitting it into a second delivery would add a way for the
 				// two to disagree.
-				if err := r.publishTenantSecret(ctx, cellId, tenantId, appId, "OIDC_PROJECT_ID", identity.ProjectRef); err != nil {
+				if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId, "OIDC_PROJECT_ID", identity.ProjectRef); err != nil {
 					logger.Error(err, "Provisioned tenant identity but could not publish its project id; the gateway cannot exchange",
 						"tenant", tenantId)
 				}
@@ -687,7 +687,7 @@ func orgBindingAmong(items []unstructured.Unstructured, tenantId, self string) (
 // the caller's own next reconcile. Other callers' entries are left exactly as
 // they are; each is rewritten by its own reconcile. A bare `<clientId>` names no
 // application and no kind, admits nothing, and is dropped.
-func (r *AINativeSaaSReconciler) publishAllowedCallers(ctx context.Context, cellId, tenantId string, target resolvedDependency, callerAppID string, entries map[string]callerKind) error {
+func (r *AINativeSaaSReconciler) publishAllowedCallers(ctx context.Context, clusterName, tenantId string, target resolvedDependency, callerAppID string, entries map[string]callerKind) error {
 	if callerAppID == "" {
 		return fmt.Errorf("caller has no application id")
 	}
@@ -696,7 +696,7 @@ func (r *AINativeSaaSReconciler) publishAllowedCallers(ctx context.Context, cell
 			return fmt.Errorf("caller %q has an entry with no client id", callerAppID)
 		}
 	}
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, target.AppID)
+	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, target.AppID)
 	existing := ""
 	if got, err := r.InfisicalClient.GetSecret(ctx, path, allowedAzpKey); err == nil {
 		existing = got
@@ -726,7 +726,7 @@ func (r *AINativeSaaSReconciler) publishAllowedCallers(ctx context.Context, cell
 	if value == existing {
 		return nil // unchanged; do not rewrite
 	}
-	return r.publishTenantSecret(ctx, cellId, tenantId, target.AppID, allowedAzpKey, value)
+	return r.publishTenantSecret(ctx, clusterName, tenantId, target.AppID, allowedAzpKey, value)
 }
 
 // callerKind is what a caller-map entry's tokens carry (ADR-110).
@@ -793,11 +793,11 @@ const (
 // independent, and one target's folder being unavailable must not stop the others
 // from learning their callers.
 func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
-	ctx context.Context, logger logr.Logger, cellId, tenantId, appId string,
+	ctx context.Context, logger logr.Logger, clusterName, tenantId, appId string,
 	deps []resolvedDependency, clients []client2.DeclaredClient,
 	service *client2.ServiceClient, actingClient string,
 ) {
-	if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+	if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 		"OIDC_BACKEND_AUDIENCE_SCOPES", audienceScopesFor(deps)); err != nil {
 		logger.Error(err, "Could not publish this application's backend audience scopes",
 			"tenant", tenantId, "app", appId)
@@ -806,12 +806,12 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 	// Per dependency, for the chart to render one list entry each. See
 	// InfisicalBackendScopeKey for why the aggregate above cannot serve this.
 	for _, d := range deps {
-		if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+		if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 			InfisicalBackendScopeKey(d.AppID), audienceScopeFor(d.ProjectID)); err != nil {
 			logger.Error(err, "Could not publish a backend audience scope",
 				"tenant", tenantId, "app", appId, "target", d.AppID)
 		}
-		if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+		if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 			InfisicalBackendProjectKey(d.AppID), d.ProjectID); err != nil {
 			logger.Error(err, "Could not publish a backend project id",
 				"tenant", tenantId, "app", appId, "target", d.AppID)
@@ -831,7 +831,7 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 	// so no token carries it.
 	entries := map[string]callerKind{}
 	if actingClient != "" {
-		id := r.declaredClientID(ctx, cellId, appId, clients, actingClient)
+		id := r.declaredClientID(ctx, clusterName, appId, clients, actingClient)
 		if id == "" {
 			// Pending, and pending writes NOTHING: publishing the service entry
 			// alone would replace this caller's set and drop a `user` entry a
@@ -842,7 +842,7 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 		}
 		entries[id] = callerKindUser
 	}
-	if id := r.serviceClientID(ctx, cellId, appId, service); id != "" {
+	if id := r.serviceClientID(ctx, clusterName, appId, service); id != "" {
 		entries[id] = callerKindService
 	}
 	if len(entries) > 0 {
@@ -853,7 +853,7 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 			if isPlatformCapabilityAudience(d.AppID) {
 				continue
 			}
-			if err := r.publishAllowedCallers(ctx, cellId, tenantId, d, appId, entries); err != nil {
+			if err := r.publishAllowedCallers(ctx, clusterName, tenantId, d, appId, entries); err != nil {
 				logger.Error(err, "Could not publish the allowed callers onto the target",
 					"tenant", tenantId, "caller", appId, "target", d.AppID)
 			}
@@ -866,11 +866,11 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 // otherwise -- the issuer discloses it with the secret and never again, exactly
 // as for a declared client (declaredClientID). "" when neither has it, which the
 // caller treats as pending rather than publish something else.
-func (r *AINativeSaaSReconciler) serviceClientID(ctx context.Context, cellId, appId string, service *client2.ServiceClient) string {
+func (r *AINativeSaaSReconciler) serviceClientID(ctx context.Context, clusterName, appId string, service *client2.ServiceClient) string {
 	if service != nil && service.ClientID != "" {
 		return service.ClientID
 	}
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 	if got, err := r.InfisicalClient.GetSecret(ctx, path, serviceClientIDKey); err == nil {
 		return got
 	}
@@ -886,7 +886,7 @@ func (r *AINativeSaaSReconciler) serviceClientID(ctx context.Context, cellId, ap
 // implementation written to that belief admits nobody. The id published is the
 // one the issuer actually stamps, which for a machine user is `client_id`.
 func (r *AINativeSaaSReconciler) publishServiceIdentity(
-	ctx context.Context, logger logr.Logger, cellId, tenantId, appId string,
+	ctx context.Context, logger logr.Logger, clusterName, tenantId, appId string,
 	service *client2.ServiceClient,
 ) {
 	if service == nil || service.ClientID == "" {
@@ -903,13 +903,13 @@ func (r *AINativeSaaSReconciler) publishServiceIdentity(
 	// it is stable and cheap; the secret only when the issuer disclosed one, since
 	// writing an empty value over a stored secret is how a running workload loses
 	// the credential it is holding.
-	if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+	if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 		serviceClientIDKey, service.ClientID); err != nil {
 		logger.Error(err, "Could not publish this application's service client id",
 			"tenant", tenantId, "app", appId)
 	}
 	if service.ClientSecret != "" {
-		if err := r.publishTenantSecret(ctx, cellId, tenantId, appId,
+		if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
 			serviceClientSecretKey, service.ClientSecret); err != nil {
 			logger.Error(err, "Could not publish this application's service client secret",
 				"tenant", tenantId, "app", appId)
@@ -932,7 +932,7 @@ func (r *AINativeSaaSReconciler) publishServiceIdentity(
 // published at mint time persists. Returns "" when neither has it yet, which the
 // caller must treat as pending rather than publish something else.
 func (r *AINativeSaaSReconciler) declaredClientID(
-	ctx context.Context, cellId, appId string, clients []client2.DeclaredClient, name string,
+	ctx context.Context, clusterName, appId string, clients []client2.DeclaredClient, name string,
 ) string {
 	if id := exchangeClientIDFrom(clients, name); id != "" {
 		return id
@@ -948,7 +948,7 @@ func (r *AINativeSaaSReconciler) declaredClientID(
 	// fallback: a confidential client's credentials live under the OAUTH_ key
 	// grammar, derived from the client's own name, like every other declared
 	// client's.
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 	if got, err := r.InfisicalClient.GetSecret(ctx, path, secrets.InfisicalOAuthClientIDKey(name)); err == nil {
 		return got
 	}
@@ -1385,8 +1385,8 @@ func tenantGatewayHosts(obj *unstructured.Unstructured) []string {
 // and an "already exists" answer must be success rather than a conflict — but
 // the value is also re-asserted rather than left, so a client id that changed
 // upstream converges instead of being pinned by whatever ran first.
-func (r *AINativeSaaSReconciler) publishTenantClientID(ctx context.Context, cellId, tenantId, appId, clientID string) error {
-	return r.publishTenantSecret(ctx, cellId, tenantId, appId, "OIDC_CLIENT_ID", clientID)
+func (r *AINativeSaaSReconciler) publishTenantClientID(ctx context.Context, clusterName, tenantId, appId, clientID string) error {
+	return r.publishTenantSecret(ctx, clusterName, tenantId, appId, "OIDC_CLIENT_ID", clientID)
 }
 
 // publishTenantSecret writes one value to the tenant's Infisical folder.
@@ -1394,8 +1394,8 @@ func (r *AINativeSaaSReconciler) publishTenantClientID(ctx context.Context, cell
 // Idempotent: create when absent, update when present. Reconciliation repeats,
 // so "already exists" must be success rather than a conflict the caller has to
 // interpret.
-func (r *AINativeSaaSReconciler) publishTenantSecret(ctx context.Context, cellId, tenantId, appId, key, value string) error {
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+func (r *AINativeSaaSReconciler) publishTenantSecret(ctx context.Context, clusterName, tenantId, appId, key, value string) error {
+	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 
 	exists, err := r.InfisicalClient.SecretExists(ctx, path, key)
 	if err != nil {

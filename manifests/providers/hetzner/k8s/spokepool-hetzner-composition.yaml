@@ -54,7 +54,7 @@ spec:
                         spoke-type: pool
                         provider: hetzner
                         take-along-label.capi-to-argocd.spoke-type: ""
-                        take-along-label.capi-to-argocd.cell-id: ""
+                        take-along-label.capi-to-argocd.cluster-name: ""
                         # The workload cluster's own environment, carried to the ArgoCD cluster
                         # Secret so the spoke catalogue reads it there.
                         #
@@ -101,9 +101,22 @@ spec:
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
                 toFieldPath: spec.forProvider.manifest.metadata.name
+              # The cluster's own name, onto the CAPI Cluster. Everything that
+              # places or selects a spoke matches this: the fleet
+              # ApplicationSets' clusters generators, and the ClusterResourceSet
+              # selector below.
+              #
+              # It was `cell-id`, carrying this same value -- patched from the
+              # claim's name, which is the cluster's name -- in the vocabulary of
+              # policy groups. A cell is a policy group (`cells` in a cluster's
+              # values.yaml, several per cluster, each contributing policy per
+              # ADR-064) and never named one cluster. The old key was published
+              # alongside this one for one step so the selectors could move
+              # without a window in which they matched nothing; it is gone now
+              # that nothing reads it.
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.metadata.labels.cell-id
+                toFieldPath: spec.forProvider.manifest.metadata.labels.cluster-name
               # The claim's environment onto the CAPI Cluster; the take-along above
               # then carries it to the ArgoCD cluster Secret.
               - type: FromCompositeFieldPath
@@ -226,7 +239,7 @@ spec:
                       fmt: "%s-bootstrap"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.clusterSelector.matchLabels.cell-id
+                toFieldPath: spec.forProvider.manifest.spec.clusterSelector.matchLabels.cluster-name
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
                 toFieldPath: spec.forProvider.manifest.spec.resources[0].name

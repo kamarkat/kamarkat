@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
-# Validate the cell-id label contract that binds spokes to fleet Applications.
+# Validate the cluster label contract that binds spokes to fleet Applications.
 #
 # Four links carry a spoke's identity from its SpokePool claim to the
 # ApplicationSets that place tenants on it:
 #
-#   1. the SpokePool composition patches metadata.labels.cell-id onto the CAPI
-#      Cluster, from the claim name
-#   2. the same composition sets take-along-label.capi-to-argocd.cell-id, which
+#   1. the SpokePool composition patches the label onto the CAPI Cluster, from
+#      the claim name
+#   2. the same composition sets take-along-label.capi-to-argocd.<label>, which
 #      is what tells capi2argo to copy the label onward
 #   3. capi2argo writes it to the ArgoCD cluster Secret        (runtime -- see the
 #      Kyverno policy in manifests/hub-core-services/security/)
-#   4. the fleet ApplicationSets select on it with a clusters generator
-#      matchLabels
+#   4. the fleet ApplicationSets select on cluster-name with a clusters
+#      generator matchLabels
+#
+# The label is CLUSTER-NAME. It was `cell-id`, which the compositions have
+# always patched from the claim's own name -- so placement was already by cluster
+# identity, under a key borrowed from policy grouping. A cell is the policy group
+# of ADR-064, where a cluster may belong to several and receives the union of
+# their policy; it never named one cluster, and `cells` in a cluster's values.yaml
+# is where membership is declared.
+#
+# cell-id is gone: from the compositions, their take-along markers, the
+# ClusterResourceSet selector that matched it, the AINativeSaaS and tenant-db
+# XRD fields, and the claims the chart renders. No alias remains, so a manifest
+# still naming it selects nothing and this script says which one.
 #
 # Break any link and the clusters generator matches nothing. The result is not an
 # error: the ApplicationSet generates zero Applications and reports Healthy doing
@@ -35,10 +47,12 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# The one label key the whole chain agrees on. Everything below is checked
-# against this rather than against each other, so a rename has exactly one
-# correct edit and this script names the rest.
-readonly CELL_LABEL="cell-id"
+# The cluster's identity, and what placement selects on. The one label key the
+# whole chain agrees on: everything below is checked against this rather than
+# against each other, so a rename has exactly one correct edit and this script
+# names the rest.
+readonly CLUSTER_LABEL="cluster-name"
+readonly PUBLISHED_LABELS="$CLUSTER_LABEL"
 readonly TAKE_ALONG_PREFIX="take-along-label.capi-to-argocd"
 
 compositions=(
@@ -54,7 +68,7 @@ fail() { echo "  ❌ $1"; fail_count=$((fail_count + 1)); }
 
 command -v yq >/dev/null 2>&1 || { echo "❌ required tool not found: yq"; exit 1; }
 
-echo "Validating the ${CELL_LABEL} contract..."
+echo "Validating the ${CLUSTER_LABEL} contract..."
 
 # ─── Links 1 & 2: every SpokePool composition labels its CAPI Cluster ─────────
 for comp in "${compositions[@]}"; do
@@ -65,21 +79,23 @@ for comp in "${compositions[@]}"; do
     continue
   fi
 
-  # Link 1: a patch must write the label from the claim name. Without it the
-  # Cluster carries the take-along marker for a label that does not exist.
-  if grep -q "toFieldPath: spec.forProvider.manifest.metadata.labels.${CELL_LABEL}\b" "$comp"; then
-    pass "$name: patches metadata.labels.${CELL_LABEL}"
-  else
-    fail "$name: no patch writes metadata.labels.${CELL_LABEL} -- spokes from this composition will never match a fleet clusters generator"
-  fi
+  for label in $PUBLISHED_LABELS; do
+    # Link 1: a patch must write the label from the claim name. Without it the
+    # Cluster carries the take-along marker for a label that does not exist.
+    if grep -q "toFieldPath: spec.forProvider.manifest.metadata.labels.${label}\b" "$comp"; then
+      pass "$name: patches metadata.labels.${label}"
+    else
+      fail "$name: no patch writes metadata.labels.${label} -- spokes from this composition will never match a fleet clusters generator"
+    fi
 
-  # Link 2: the take-along marker. Present without link 1 is useless; absent
-  # with link 1 means the label exists on the Cluster but never reaches ArgoCD.
-  if grep -q "${TAKE_ALONG_PREFIX}.${CELL_LABEL}:" "$comp"; then
-    pass "$name: sets ${TAKE_ALONG_PREFIX}.${CELL_LABEL}"
-  else
-    fail "$name: missing ${TAKE_ALONG_PREFIX}.${CELL_LABEL} -- capi2argo will not copy the label to the ArgoCD cluster Secret"
-  fi
+    # Link 2: the take-along marker. Present without link 1 is useless; absent
+    # with link 1 means the label exists on the Cluster but never reaches ArgoCD.
+    if grep -q "${TAKE_ALONG_PREFIX}.${label}:" "$comp"; then
+      pass "$name: sets ${TAKE_ALONG_PREFIX}.${label}"
+    else
+      fail "$name: missing ${TAKE_ALONG_PREFIX}.${label} -- capi2argo will not copy the label to the ArgoCD cluster Secret"
+    fi
+  done
 done
 
 # ─── Link 4: every clusters generator selects on the same key ────────────────
@@ -111,7 +127,7 @@ helm template cell-id-contract "$repo_root/manifests/argocd/environment-manager"
 # weak -- it passes while a tenant ApplicationSet quietly stops using it. So:
 # every key must be one the platform actually publishes, and every ApplicationSet
 # that places tenants must select on this one.
-readonly ALLOWED_SELECTOR_KEYS="$CELL_LABEL spoke-type"
+readonly ALLOWED_SELECTOR_KEYS="$PUBLISHED_LABELS spoke-type"
 
 pairs="$(yq '
   select(.kind == "ApplicationSet") as $a
@@ -152,11 +168,11 @@ EOF
   else
     while IFS= read -r appset; do
       [[ -z "$appset" ]] && continue
-      if printf '%s\n' "$pairs" | grep -qx "$appset $CELL_LABEL"; then
-        pass "$appset selects on ${CELL_LABEL}"
+      if printf '%s\n' "$pairs" | grep -qx "$appset $CLUSTER_LABEL"; then
+        pass "$appset selects on ${CLUSTER_LABEL}"
       else
         got="$(printf '%s\n' "$pairs" | awk -v a="$appset" '$1==a {print $2}' | tr '\n' ' ')"
-        fail "$appset places tenants but does not select on ${CELL_LABEL} (selects on: ${got:-nothing}) -- it will generate zero Applications and report Healthy"
+        fail "$appset places tenants but does not select on ${CLUSTER_LABEL} (selects on: ${got:-nothing}) -- it will generate zero Applications and report Healthy"
       fi
     done <<EOF
 $tenant_appsets
@@ -166,7 +182,7 @@ fi
 
 echo
 if [[ "$fail_count" -gt 0 ]]; then
-  echo "❌ ${CELL_LABEL} contract: $fail_count check(s) failed"
+  echo "❌ ${CLUSTER_LABEL} contract: $fail_count check(s) failed"
   exit 1
 fi
-echo "✅ ${CELL_LABEL} contract: all checks passed"
+echo "✅ ${CLUSTER_LABEL} contract: all checks passed"

@@ -377,16 +377,23 @@ func (c *Client) updateSecret(ctx context.Context, workspaceId, environmentSlug,
 	return nil
 }
 
-// GetInfisicalConfig retrieves Infisical configuration from ClusterSecretStore
+// GetInfisicalConfig reads this box's Infisical coordinates from
+// hub-bootstrap-config.
+//
+// EnvironmentSlug here is the MANAGEMENT scope -- the environment the hub's own
+// secrets live in. It is not the environment of a workload cluster or of an
+// application, and a caller holding either of those must use that one instead.
+//
+// Both of this function's fallbacks are gone. It used to answer `dev` when the
+// ConfigMap was missing and again when either field was empty, which meant a
+// caller on a stg box was handed dev and wrote the box's secrets into the wrong
+// environment -- with no error, because a fallback had been chosen for it. There
+// is no safe guess for which environment someone else's secrets are in.
 func GetInfisicalConfig(ctx context.Context, clientset *kubernetes.Clientset) (*Config, error) {
 	// Look for the correct ConfigMap in the correct namespace
 	cm, err := clientset.CoreV1().ConfigMaps(constants.NamespaceOps).Get(ctx, "hub-bootstrap-config", metav1.GetOptions{})
 	if err != nil {
-		// Fallback to hardcoded values
-		return &Config{
-			ProjectSlug:     SecretsProjectSlug,
-			EnvironmentSlug: "dev",
-		}, nil
+		return nil, fmt.Errorf("read hub-bootstrap-config in %s: %w", constants.NamespaceOps, err)
 	}
 
 	// Use the secrets project slug for secret read/write operations
@@ -396,11 +403,13 @@ func GetInfisicalConfig(ctx context.Context, clientset *kubernetes.Clientset) (*
 	}
 	environmentSlug := cm.Data["INFISICAL_ENVIRONMENT_SLUG"]
 
-	if projectSlug == "" || environmentSlug == "" {
-		return &Config{
-			ProjectSlug:     SecretsProjectSlug,
-			EnvironmentSlug: "dev",
-		}, nil
+	if projectSlug == "" {
+		return nil, fmt.Errorf("hub-bootstrap-config carries neither " +
+			"INFISICAL_SECRETS_PROJECT_SLUG nor INFISICAL_PROJECT_SLUG")
+	}
+	if environmentSlug == "" {
+		return nil, fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG " +
+			"(patched by manifests/environments/<slug>/patch-config.yaml)")
 	}
 
 	return &Config{

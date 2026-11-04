@@ -69,6 +69,6 @@ metadata:
   name: <CLUSTER_NAME>
   labels:
     spoke-type: pool
-    cell-id: <CLUSTER_NAME>
+    cluster-name: <CLUSTER_NAME>
     provider: <CLOUD_PROVIDER>
     environment: <ENVIRONMENT>

@@ -62,7 +62,7 @@ Deferred deliberately. The path is corrected on its own, when moving it is the
 only thing that can go wrong, rather than on the day the namespaces change too.
 */}}
 {{- define "universal-tenant.secretPrefix" -}}
-/spoke-pool/{{ required "cellId must be supplied" .Values.cellId }}/tenants/{{ include "universal-tenant.appId" . }}
+/spoke-pool/{{ required "clusterName must be supplied" .Values.clusterName }}/tenants/{{ include "universal-tenant.appId" . }}
 {{- end -}}
 
 {{/*

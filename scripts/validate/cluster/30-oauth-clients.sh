@@ -111,7 +111,7 @@ except Exception: sys.exit(0)
 for x in d.get('items',[]):
     spec=x.get('spec',{})
     t=spec.get('tenantId') or x['metadata']['name']
-    c=spec.get('cellId') or ''
+    c=spec.get('clusterName') or ''
     if t and c: print(t, c)
 " 2>/dev/null)
 

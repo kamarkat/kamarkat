@@ -115,7 +115,10 @@ spec:
           - clusters:
               selector:
                 matchLabels:
-                  cell-id: '{{"{{"}} .cellId {{"}}"}}'
+                  # The named cluster, on a workload cluster only: see the
+                  # note in 05-tenant-fleet-appset.
+                  spoke-type: pool
+                  cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
 
   template:
     metadata:

@@ -779,7 +779,7 @@ spec:
     # that stops being harmless quietly.
     - secretKey: oidc-cookie-secret
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/AGENTGATEWAY_OIDC_COOKIE_SECRET
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/AGENTGATEWAY_OIDC_COOKIE_SECRET
 ---
 # The tenant's OAuth client id, as ALLOCATED by the issuer.
 #
@@ -812,12 +812,12 @@ spec:
   data:
     - secretKey: oidc-client-id
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/OIDC_CLIENT_ID
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OIDC_CLIENT_ID
     # The tenant's organisation, so a login on this hostname is scoped to it
     # rather than resolving against the platform's own organisation.
     - secretKey: oidc-org-id
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/OIDC_ORG_ID
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OIDC_ORG_ID
     # ── Backend credential minting (ADR-094 Part 2, ADR-095) ────────────────────
     #
     # UNCONDITIONAL. Every gateway mints; none forwards a session token onward.
@@ -831,7 +831,7 @@ spec:
     # exists whether or not the fleet asked for one.
     - secretKey: oidc-project-id
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/OIDC_PROJECT_ID
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OIDC_PROJECT_ID
     # The confidential client the exchange authenticates as, which is what stamps
     # azp on the minted token (ADR-094 invariant 2a).
     #
@@ -842,20 +842,20 @@ spec:
     # for it and no second publisher.
     - secretKey: oidc-exchange-client-id
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/OAUTH_{{ $t | upper | replace "-" "_" }}_GATEWAY_EXCHANGE_CLIENT_ID
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OAUTH_{{ $t | upper | replace "-" "_" }}_GATEWAY_EXCHANGE_CLIENT_ID
     - secretKey: oidc-exchange-client-secret
       remoteRef:
-        key: /spoke-pool/{{ .Values.cellId }}/tenants/{{ $t }}/OAUTH_{{ $t | upper | replace "-" "_" }}_GATEWAY_EXCHANGE_CLIENT_SECRET
+        key: /spoke-pool/{{ .Values.clusterName }}/tenants/{{ $t }}/OAUTH_{{ $t | upper | replace "-" "_" }}_GATEWAY_EXCHANGE_CLIENT_SECRET
 {{- range $deps }}
     # One pair per declared target: the scope requested at login, and the project
     # id sent as the exchange's audience parameter. The COUNT comes from the
     # fleet's declaration in git; each VALUE is allocated by the issuer.
     - secretKey: oidc-backend-audience-scope-{{ . }}
       remoteRef:
-        key: /spoke-pool/{{ $.Values.cellId }}/tenants/{{ $t }}/OIDC_BACKEND_AUDIENCE_SCOPE_{{ . | upper | replace "-" "_" }}
+        key: /spoke-pool/{{ $.Values.clusterName }}/tenants/{{ $t }}/OIDC_BACKEND_AUDIENCE_SCOPE_{{ . | upper | replace "-" "_" }}
     - secretKey: oidc-backend-project-id-{{ . }}
       remoteRef:
-        key: /spoke-pool/{{ $.Values.cellId }}/tenants/{{ $t }}/OIDC_BACKEND_PROJECT_ID_{{ . | upper | replace "-" "_" }}
+        key: /spoke-pool/{{ $.Values.clusterName }}/tenants/{{ $t }}/OIDC_BACKEND_PROJECT_ID_{{ . | upper | replace "-" "_" }}
 {{- end }}
 ---
 apiVersion: apps/v1

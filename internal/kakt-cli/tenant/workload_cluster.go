@@ -29,16 +29,17 @@ import (
 // resource ArgoCD prunes depend on that value -- and for a SpokePool, "prune and
 // recreate" is destroying a cluster.
 //
-// The name is also the cellId. validate-cell-id-contract.sh records that the
-// SpokePool composition derives metadata.labels.cell-id from the claim name, so
-// naming the claim names the cell, and the fleet ApplicationSets select on it.
+// The name is what an application names to run here.
+// validate-cluster-name-contract.sh records that the SpokePool composition
+// derives metadata.labels.cluster-name from the claim name, so naming the claim
+// names the cluster, and the fleet ApplicationSets select on it.
 type WorkloadCluster struct {
 	// GitopsDir is the tenant repository, holding one management cluster.
 	GitopsDir string
 	// MgmtCluster is that management cluster's name: it owns the Application
 	// that creates this one.
 	MgmtCluster string
-	// Name is the workload cluster, and the cellId.
+	// Name is the workload cluster, and what applications target.
 	Name string
 	// Provider, Region, Environment describe where it runs. Same field set as
 	// kubefirst's WorkloadCluster{ClusterName, CloudProvider, CloudRegion,

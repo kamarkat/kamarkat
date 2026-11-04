@@ -23,8 +23,9 @@
 # written once, by the tenant, and never computed at render time. That is what
 # this template is.
 #
-# <CLUSTER_NAME> is also the cellId: validate-cell-id-contract.sh records that
-# the SpokePool composition derives metadata.labels.cell-id from the claim name,
+# <CLUSTER_NAME> is what applications name to run here:
+# validate-cluster-name-contract.sh records that the SpokePool composition
+# derives metadata.labels.cluster-name from the claim name,
 # so naming the claim names the cell, and the fleet ApplicationSets select on it.
 apiVersion: nutgraf.in/v1alpha1
 kind: SpokePool
@@ -55,6 +56,6 @@ metadata:
   name: <CLUSTER_NAME>
   labels:
     spoke-type: pool
-    cell-id: <CLUSTER_NAME>
+    cluster-name: <CLUSTER_NAME>
     provider: <CLOUD_PROVIDER>
     environment: <ENVIRONMENT>

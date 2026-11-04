@@ -19,7 +19,14 @@ const (
 	OrganizationName = "hub-ops"
 	IdentityName     = "hub-operator"
 	IdentityRole     = "admin"
-	EnvironmentSlug  = "dev"
+	// No EnvironmentSlug here. It was `"dev"`, and both uploaders used it as the
+	// Infisical environment they write to -- while every READER takes
+	// INFISICAL_ENVIRONMENT_SLUG from hub-bootstrap-config, which the
+	// manifests/environments/<slug> overlay patches. The two agreed only on a dev
+	// box, by coincidence: on a stg box the writers filled `dev` and the
+	// ExternalSecrets read `stg`, so every secret these uploaders own was absent
+	// from the environment its consumer looks in, and an ExternalSecret that never
+	// syncs reports nothing. See managementEnvironmentSlug in secret_uploader.go.
 
 	// Secret Names
 	SecretInfisicalAuth      = "infisical-auth"

@@ -102,16 +102,16 @@ func TestMalformedHexValuesAreDetectedNotPreserved(t *testing.T) {
 	}
 }
 
-// Every CellScopedKey must also declare HexBytes if its consumer hex-decodes it;
+// Every ClusterScopedKey must also declare HexBytes if its consumer hex-decodes it;
 // without HexBytes the repair path above cannot run, since there is nothing to
 // validate the stored form against.
-func TestCellScopedKeysAreRepairable(t *testing.T) {
+func TestClusterScopedKeysAreRepairable(t *testing.T) {
 	for _, def := range ApplicationSecretMappings {
-		if def.CellScopedKey == "" {
+		if def.ClusterScopedKey == "" {
 			continue
 		}
 		if def.HexBytes == 0 {
-			t.Errorf("%s is cell-scoped but declares no HexBytes: a malformed value there can never be detected", def.CellScopedKey)
+			t.Errorf("%s is cell-scoped but declares no HexBytes: a malformed value there can never be detected", def.ClusterScopedKey)
 		}
 	}
 }

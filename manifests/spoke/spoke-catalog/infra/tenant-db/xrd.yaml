@@ -70,9 +70,9 @@ spec:
                 description: "Database name (e.g., 'tenant-app-creator-db')"
                 pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
                 maxLength: 63
-              cellId:
+              clusterName:
                 type: string
-                description: "Spoke Pool cluster name for Infisical path (e.g., 'spoke-pool-eu-prod-01')"
+                description: "The managed cluster whose Infisical path holds this database's credentials"
                 pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
                 maxLength: 63
               dbRoleName:

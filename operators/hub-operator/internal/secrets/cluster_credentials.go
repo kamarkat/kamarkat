@@ -7,17 +7,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Cell-scoped credential materialisation (ADR-031 Cell-Based Identity Topology).
+// Cluster-scoped credential materialisation (ADR-031 Cell-Based Identity
+// Topology, whose "cell" is one spoke).
 //
-// A spoke's SecretStore is authorised for /spoke-pool/<cellId>/ ONLY, so every
+// Named for the cluster, not the cell: the value scoping these paths has always
+// been one spoke's own name. A cell is a policy group -- `cells` in a cluster's
+// values.yaml, several per cluster, each contributing policy (ADR-064) -- and
+// never scoped a credential.
+//
+// A spoke's SecretStore is authorised for /spoke-pool/<clusterName>/ ONLY, so every
 // spoke ExternalSecret must resolve inside that prefix. Two classes of credential
 // were consumed there with nothing producing them, which is not a seeding gap —
 // the material exists at the root path and the hub reads it fine — but a missing
-// producer for the cell path:
+// producer for the per-cluster path:
 //
 //   - S3_* and the alert-delivery keys are single fleet credentials that must be
-//     materialised into each cell's own path. The alternative — granting each
-//     cell a cross-cell read path to the root — would weaken the ADR-031
+//     materialised into each cluster's own path. The alternative — granting each
+//     cluster a cross-cluster read path to the root — would weaken the ADR-031
 //     invariant that a cell can read only its own prefix. Duplication is the
 //     deliberate trade, so it needs a producer that performs it.
 //
@@ -26,7 +32,7 @@ import (
 //
 // The other cell-scoped credential, AGENTGATEWAY_OIDC_COOKIE_SECRET, is NOT
 // produced here. It is generated, not copied, so it belongs with the other
-// generated application secrets: see CellScopedKey in
+// generated application secrets: see ClusterScopedKey in
 // internal/infisical/secret_mappings.go. Producing it from this reconciler raced
 // the folder this same reconciler creates, which is why it never appeared in the
 // cell path.
@@ -91,9 +97,9 @@ type MaterialiseFleetCredentialsResult struct {
 // Existing cell values are left alone. Overwriting on every reconcile would make
 // the operator fight any deliberate per-cell override, and rotation at the root is
 // a fleet-wide operation that should propagate explicitly, not as a side effect.
-func (c *InfisicalClient) EnsureFleetCredentialsMaterialised(ctx context.Context, cellId string) (*MaterialiseFleetCredentialsResult, error) {
-	logger := log.FromContext(ctx).WithValues("cell", cellId)
-	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, cellId)
+func (c *InfisicalClient) EnsureFleetCredentialsMaterialised(ctx context.Context, clusterName string) (*MaterialiseFleetCredentialsResult, error) {
+	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
+	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
 	out := &MaterialiseFleetCredentialsResult{}
 
 	if err := c.EnsureFolder(ctx, sharedPath); err != nil {

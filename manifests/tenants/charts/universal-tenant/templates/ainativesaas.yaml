@@ -20,7 +20,15 @@ metadata:
     tenant-id: {{ include "universal-tenant.tenantId" . }}
     app-id: {{ include "universal-tenant.appId" . }}
     tier: {{ .Values.tier }}
-    cell-id: {{ .Values.cellId }}
+    # The XR's own field and label still say `cellId`; what FEEDS them has been
+    # renamed, and the value was always the cluster's name.
+    #
+    # Pending P3, which renames the XRD field itself. Whether that is a breaking
+    # change depends on whether claims are installed -- this repository declares
+    # four applications that would each produce one (environments/dev/{waypoint,
+    # oranger,nutgraf-im,docs} in nutgraf-gitops), which is evidence of claims
+    # and not a reading of the cluster.
+    cluster-name: {{ .Values.clusterName }}
 spec:
   tenantId: {{ include "universal-tenant.tenantId" . }}
   appId: {{ include "universal-tenant.appId" . }}
@@ -29,7 +37,7 @@ spec:
   # sixty-five chances to produce a plausible wrong name instead of an error.
   scopeId: {{ include "universal-tenant.tenantId" . }}-{{ include "universal-tenant.appId" . }}
   tier: {{ .Values.tier }}
-  cellId: {{ .Values.cellId }}
+  clusterName: {{ .Values.clusterName }}
 
   database:
     name: {{ $databaseName }}

@@ -34,23 +34,33 @@ type Declaration struct {
 //
 // TenantID is the organisation whose box this is; AppID is the product
 // (ADR-088). They were one field until 2026-09-24, which is why the path below
-// read /tenants/<product>/ while the cell segment above it already carried the
+// read /tenants/<product>/ while the cluster segment above it already carried the
 // customer.
 type Fleet struct {
-	TenantID string        `yaml:"tenantId"`
-	AppID    string        `yaml:"appId"`
-	CellID   string        `yaml:"cellId"`
-	Secrets  []Declaration `yaml:"secrets"`
+	TenantID string `yaml:"tenantId"`
+	AppID    string `yaml:"appId"`
+
+	// ClusterName is the managed cluster this application runs on. It was
+	// `cellId`, which named a cluster in the vocabulary of policy groups: the
+	// label it selects on has always been patched from the cluster's own name,
+	// so placement was already by cluster identity under a key that said
+	// otherwise. A cell is the policy group of ADR-064 and groups nothing here.
+	ClusterName string        `yaml:"clusterName"`
+	Secrets     []Declaration `yaml:"secrets"`
 }
 
 // SecretPath is where this fleet's values live in the provider.
 //
 // DERIVED from the fleet's own declaration, never passed in. The legacy fleet
 // wrote this path out per key, twenty-three times, each one an opportunity to
-// name a cell the fleet does not run on -- which fails as "could not get secret
+// name a cluster the fleet does not run on -- which fails as "could not get secret
 // data from provider", indistinguishable from a store or auth fault.
 func (f Fleet) SecretPath() string {
-	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", f.CellID, f.AppID)
+	// The `/spoke-pool/<name>/` segment keeps its spelling. The value in it has
+	// always been the cluster's name, so renaming the field that supplies it
+	// moves no secret; renaming the segment would orphan every one already
+	// written, on every box.
+	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", f.ClusterName, f.AppID)
 }
 
 // Load reads one environment's fleet declaration.
@@ -74,10 +84,86 @@ func Load(repoRoot, environment, app string) (*Fleet, error) {
 	if f.TenantID == "" {
 		return nil, fmt.Errorf("%s declares no tenantId, which is half of this fleet's secret path", path)
 	}
-	if f.CellID == "" {
-		return nil, fmt.Errorf("%s declares no cellId, which is half of this fleet's secret path", path)
+	if f.ClusterName == "" {
+		return nil, fmt.Errorf("%s declares no clusterName, which is half of this fleet's secret path", path)
+	}
+	if err := VerifyTargetCluster(repoRoot, environment, f.ClusterName); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &f, nil
+}
+
+// registryClustersDir holds this box's cluster declarations. The authority for
+// the name is tenant.RegistryDir; repeated rather than imported because that
+// package carries the whole scaffolder and this one reads two fields.
+const registryClustersDir = "registry/clusters"
+
+// VerifyTargetCluster checks that the cluster an application names is somewhere
+// it can run.
+//
+// Three independent facts, and this is the only place they meet: the
+// application names a cluster, that cluster declares the environment it serves,
+// and the application's own directory names the environment it belongs to.
+// Nothing derives any of them from the others -- several clusters may serve one
+// environment (ADR-082), and during a replacement two deliberately do (ADR-111),
+// so an environment does not name a cluster and a cluster does not claim an
+// environment's applications.
+//
+// What is checked is the pair being coherent:
+//
+//   - the cluster exists at all. A name with no cluster behind it produces a
+//     clusters generator that matches nothing, which ArgoCD reports as Healthy
+//     while generating zero Applications -- indistinguishable from an
+//     environment nobody has deployed to yet.
+//   - it is a workload cluster. A management cluster's directory holds root.yaml
+//     and no spoke-pool claim; a tenant's secrets scoped under the control plane
+//     would be a boundary violation that nothing downstream would notice.
+//   - it serves this application's environment. environments/stg/app naming a
+//     dev cluster is a staging application running on development capacity, with
+//     its secrets in the development scope, and both halves look correct in
+//     isolation.
+func VerifyTargetCluster(repoRoot, environment, clusterName string) error {
+	dir := filepath.Join(repoRoot, registryClustersDir, clusterName)
+	declaration := filepath.Join(dir, "values.yaml")
+
+	raw, err := os.ReadFile(declaration)
+	if err != nil {
+		return fmt.Errorf("declares clusterName %q, and this box has no such cluster at %s/%s: "+
+			"an application placed on a cluster that does not exist generates no Application "+
+			"and reports nothing", clusterName, registryClustersDir, clusterName)
+	}
+
+	// spokepool*.yaml, not spokepool-*.yaml. The TEMPLATE ships one claim per
+	// provider -- spokepool-hetzner.yaml, spokepool-hybrid.yaml -- but
+	// adjustDriver keeps the one in use and renames it to spokepool.yaml
+	// (workload_cluster.go), so that is what a hydrated cluster actually holds.
+	// Matching only the template's spelling matched no real cluster at all, and
+	// every application would have been refused as targeting the management
+	// cluster. nutgraf-01 is the counter-example: registry/clusters/nutgraf-01/
+	// infrastructure/spokepool.yaml.
+	claims, err := filepath.Glob(filepath.Join(dir, "infrastructure", "spokepool*.yaml"))
+	if err != nil {
+		return fmt.Errorf("read %s: %w", dir, err)
+	}
+	if len(claims) == 0 {
+		return fmt.Errorf("declares clusterName %q, which is not a workload cluster: it has no "+
+			"spoke-pool claim, so it is this box's management cluster and applications do not "+
+			"run on it", clusterName)
+	}
+
+	var cluster struct {
+		EnvironmentSlug string `yaml:"environmentSlug"`
+	}
+	if err := yaml.Unmarshal(raw, &cluster); err != nil {
+		return fmt.Errorf("parse %s: %w", declaration, err)
+	}
+	if cluster.EnvironmentSlug != environment {
+		return fmt.Errorf("declares clusterName %q, which serves environmentSlug %q and not %q: "+
+			"the cluster and the directory disagree about which stage this application is, "+
+			"and each is correct on its own",
+			clusterName, cluster.EnvironmentSlug, environment)
+	}
+	return nil
 }
 
 // Declared reports whether the fleet declares this key, and returns it.

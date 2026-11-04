@@ -316,7 +316,7 @@ config: {}
 #
 # Each entry declares the key, the capability it serves, and the workloads that
 # read it. All three are required; the template refuses an entry missing either
-# of the last two. The Infisical path is derived from cellId and tenantId and is
+# of the last two. The Infisical path is derived from clusterName and tenantId and is
 # never written per key.
 #
 # Platform-generated credentials are NOT declared here. A fleet that declares a

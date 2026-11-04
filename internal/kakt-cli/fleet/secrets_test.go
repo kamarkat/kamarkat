@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,9 +11,9 @@ import (
 
 func fleetFixture() Fleet {
 	return Fleet{
-		TenantID: "acme",
-		AppID:    "storefront",
-		CellID:   "nutgraf-01",
+		TenantID:    "acme",
+		AppID:       "storefront",
+		ClusterName: "nutgraf-01",
 		Secrets: []Declaration{
 			{Name: "ACME_INTERNAL_TOKEN", Capability: "the BFF/SDK channel", Workloads: []string{"bff", "sdk"}},
 			{Name: "AI_GATEWAY_API_KEY", Capability: "the AI gateway", Workloads: []string{"sdk"}},
@@ -22,7 +23,7 @@ func fleetFixture() Fleet {
 }
 
 // The path is derived from the fleet's own declaration. Written out per key, it
-// was twenty-three chances to name the wrong cell.
+// was twenty-three chances to name the wrong cluster.
 func TestSecretPathIsDerived(t *testing.T) {
 	// The segment is the APP. That is what it always held -- before ADR-088 the
 	// field feeding it was called tenantId but carried a product -- so the
@@ -119,8 +120,8 @@ func TestLoadRejectsAFleetWithNoPath(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantErr string
 	}{
-		{"no tenantId", "cellId: nutgraf-01\n", "tenantId"},
-		{"no cellId", "tenantId: acme\n", "cellId"},
+		{"no tenantId", "clusterName: nutgraf-01\n", "tenantId"},
+		{"no clusterName", "tenantId: acme\n", "clusterName"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -145,15 +146,82 @@ func TestLoadRejectsAFleetWithNoPath(t *testing.T) {
 	}
 }
 
+// writeWorkloadCluster declares a workload cluster the way a tenant repository
+// does: values.yaml naming the environment it serves, beside the spoke-pool
+// claim that tells a workload cluster from the management one.
+func writeWorkloadCluster(t *testing.T, repoRoot, name, environment string) {
+	t.Helper()
+	dir := filepath.Join(repoRoot, "registry", "clusters", name)
+	if err := os.MkdirAll(filepath.Join(dir, "infrastructure"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	values := fmt.Sprintf("clusterName: %s\nenvironmentSlug: %s\n", name, environment)
+	if err := os.WriteFile(filepath.Join(dir, "values.yaml"), []byte(values), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// spokepool.yaml -- what adjustDriver leaves behind, not the template's
+	// per-provider spelling. The fixture named the template and so agreed with
+	// a glob that matched nothing real.
+	claim := filepath.Join(dir, "infrastructure", "spokepool.yaml")
+	if err := os.WriteFile(claim, []byte("kind: SpokePool\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Several clusters may serve one environment, and during a replacement two
+// deliberately do (ADR-082, ADR-111). What is refused is an application naming a
+// cluster that is not a workload cluster serving its own environment.
+func TestLoadVerifiesTheCellAgainstTheEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkloadCluster(t, dir, "nutgraf-01", "dev")
+	writeWorkloadCluster(t, dir, "nutgraf-02", "stg")
+	writeWorkloadCluster(t, dir, "nutgraf-03", "stg")
+
+	app := func(t *testing.T, env, cluster string) error {
+		t.Helper()
+		envDir := filepath.Join(dir, "environments", env, "acme")
+		if err := os.MkdirAll(envDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "tenantId: acme\nclusterName: " + cluster + "\n"
+		if err := os.WriteFile(filepath.Join(envDir, "values.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir, env, "acme")
+		return err
+	}
+
+	// Two clusters serve stg; an application names one of them and is placed.
+	if err := app(t, "stg", "nutgraf-02"); err != nil {
+		t.Errorf("a cluster serving stg was refused for a stg application: %v", err)
+	}
+	// Its replacement, serving the same environment, is equally valid -- which is
+	// what lets it be built and verified before anything is cut over.
+	if err := app(t, "stg", "nutgraf-03"); err != nil {
+		t.Errorf("the replacement cluster was refused: %v", err)
+	}
+	// A cluster serving another environment is not.
+	if err := app(t, "stg", "nutgraf-01"); err == nil {
+		t.Error("a dev cluster accepted a stg application")
+	} else if !strings.Contains(err.Error(), "environmentSlug") {
+		t.Errorf("error should name the disagreeing slug, got: %v", err)
+	}
+	// Nor is one that does not exist.
+	if err := app(t, "stg", "nutgraf-99"); err == nil {
+		t.Error("a name with no cluster behind it was accepted")
+	}
+}
+
 func TestLoadReadsDeclarations(t *testing.T) {
 	dir := t.TempDir()
+	writeWorkloadCluster(t, dir, "nutgraf-01", "dev")
 	envDir := filepath.Join(dir, "environments", "dev", "acme")
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	body := `
 tenantId: acme
-cellId: nutgraf-01
+clusterName: nutgraf-01
 secrets:
   - name: AI_GATEWAY_API_KEY
     capability: "the AI gateway the SDK calls"

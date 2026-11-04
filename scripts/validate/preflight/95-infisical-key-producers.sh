@@ -65,7 +65,7 @@ SRC = glob.glob("operators/hub-operator/internal/infisical/*.go") + \
       glob.glob("operators/hub-operator/internal/database/*.go") + \
       glob.glob("operators/hub-operator/internal/secrets/*.go")
 
-# Keys produced INTO a cell path (/spoke-pool/<cellId>/...), as opposed to the
+# Keys produced INTO a cluster path (/spoke-pool/<clusterName>/...), as opposed to the
 # Infisical root. This distinction is the whole point of the check: a spoke's
 # SecretStore is authorised for its own prefix ONLY (ADR-031), so a producer that
 # writes S3_ACCESS_KEY_ID to the root does NOT satisfy a spoke consumer reading

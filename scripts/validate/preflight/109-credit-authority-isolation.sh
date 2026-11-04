@@ -205,7 +205,7 @@ if e3 or e4 or e5 or e6:
 else:
     off, on = elements(s_off), elements(s_on)
     gw_flag = lambda els: yaml.safe_load(els["hub-gateway"]["helmValues"]).get("creditAuthority", {}).get("enabled")
-    declared = {"tenantId": "acme", "appId": "waypoint", "cellId": "cell-1", "oidcIssuer": "https://id.example.test",
+    declared = {"tenantId": "acme", "appId": "waypoint", "clusterName": "spoke-1", "oidcIssuer": "https://id.example.test",
                 "capabilities": {"credits": {"enabled": True}}}
     _, refused = render(UT, declared)
     admitted, e7 = render(UT, {**declared, "creditAuthorityUrl": "https://credits.example.test"})

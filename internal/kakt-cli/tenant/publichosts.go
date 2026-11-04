@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/fleet"
 )
 
 // PublicHostsFile is where the aggregate for one spoke is written, relative to
@@ -41,8 +43,10 @@ type publicHostsDoc struct {
 type appDeclaration struct {
 	TenantID string `yaml:"tenantId"`
 	AppID    string `yaml:"appId"`
-	CellID   string `yaml:"cellId"`
-	Public   struct {
+	// The managed cluster this application runs on. Was `cellId`; a cell is a
+	// policy group (ADR-064) and never named this.
+	ClusterName string `yaml:"clusterName"`
+	Public      struct {
 		Hosts []string `yaml:"hosts"`
 	} `yaml:"public"`
 }
@@ -81,11 +85,21 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 			continue
 		}
 		rel, _ := filepath.Rel(gitopsDir, path)
-		if decl.CellID == "" {
-			return nil, fmt.Errorf("%s declares public hosts but no cellId, so there is no spoke to put the listener on", rel)
+		if decl.ClusterName == "" {
+			return nil, fmt.Errorf("%s declares public hosts but no clusterName, so there is no spoke to put the listener on", rel)
 		}
 		if decl.TenantID == "" || decl.AppID == "" {
 			return nil, fmt.Errorf("%s declares public hosts but not both tenantId and appId, which the certificate Secret name is derived from", rel)
+		}
+		// The named cluster has to exist, be a workload cluster, and serve this
+		// directory's environment. The listener is written into that cluster's
+		// aggregate, so a name with nothing behind it publishes a hostname onto
+		// nothing, and one serving another environment publishes a staging
+		// hostname on development capacity -- neither of which the Gateway can
+		// report.
+		environment := filepath.Base(filepath.Dir(filepath.Dir(path)))
+		if err := fleet.VerifyTargetCluster(gitopsDir, environment, decl.ClusterName); err != nil {
+			return nil, fmt.Errorf("%s %w", rel, err)
 		}
 		for _, host := range decl.Public.Hosts {
 			// Refused here as well as in preflight. Two apps sharing a hostname
@@ -95,7 +109,7 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 				return nil, fmt.Errorf("hostname %q is declared by both %s and %s; a public hostname has one owner", host, prev, rel)
 			}
 			owner[host] = rel
-			bySpoke[decl.CellID] = append(bySpoke[decl.CellID], PublicHost{
+			bySpoke[decl.ClusterName] = append(bySpoke[decl.ClusterName], PublicHost{
 				Host:      host,
 				TLSSecret: fmt.Sprintf("%s-%s-public-tls", decl.TenantID, decl.AppID),
 				App:       rel,

@@ -53,7 +53,10 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 		return fmt.Errorf("neither INFISICAL_SECRETS_PROJECT_SLUG nor INFISICAL_PROJECT_SLUG environment variable is set")
 	}
 
-	environmentSlug := EnvironmentSlug
+	environmentSlug, err := managementEnvironmentSlug()
+	if err != nil {
+		return err
+	}
 	tenantID := os.Getenv("TENANT_ID")
 
 	logger.Info("Uploading CLI secrets to Infisical", "project", projectSlug, "environment", environmentSlug)
@@ -175,6 +178,32 @@ func resolveInfisicalPath(p, tenantID string) (string, error) {
 		p = strings.ReplaceAll(p, TenantPlaceholder, tenantID)
 	}
 	return p, nil
+}
+
+// managementEnvironmentSlug is the Infisical environment the HUB's own secrets
+// live in -- every mapping in CLISecretMappings and ApplicationSecretMappings,
+// all of which are read from a hub namespace and consumed by a hub component.
+//
+// Read from the same variable the readers use, so writer and reader cannot
+// disagree: hub-bootstrap-config carries INFISICAL_ENVIRONMENT_SLUG, patched by
+// the manifests/environments/<slug> overlay. It is required, with no default,
+// because the only possible default is a guess at which environment someone
+// else's secrets are in -- and guessing wrong is silent, as the comment in
+// constants.go records.
+//
+// This is deliberately NOT the environment of a workload cluster or of an
+// application. Those have their own authorities -- a spoke's own `environment`
+// label, and the slug the tenant names in `kakt fleet secrets set <env> …` --
+// and nothing here may stand in for either.
+func managementEnvironmentSlug() (string, error) {
+	slug := strings.TrimSpace(os.Getenv("INFISICAL_ENVIRONMENT_SLUG"))
+	if slug == "" {
+		return "", fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is not set: the hub's own " +
+			"secrets have no environment to be written to, and defaulting would write them " +
+			"where their ExternalSecrets do not read (hub-bootstrap-config, patched by " +
+			"manifests/environments/<slug>)")
+	}
+	return slug, nil
 }
 
 // applyTransform derives the uploaded value. Errors never include the value.

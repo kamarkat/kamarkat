@@ -85,7 +85,7 @@ spec:
   #
   # `name` resolves against the ArgoCD cluster Secret capi2argo writes when the
   # CAPI Cluster comes up, and that Secret is named for the cell
-  # (validate-cell-id-contract.sh, links 2-3). So this Application cannot sync
+  # (validate-cluster-name-contract.sh, links 2-3). So this Application cannot sync
   # until the cluster it targets exists, which is the correct ordering: the
   # SpokePool claim beside this file is what brings it into being.
   #

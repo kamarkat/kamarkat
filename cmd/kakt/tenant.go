@@ -243,7 +243,7 @@ brings it into being, addressed to the management cluster. Commit and push, and
 the management cluster provisions it.
 
 The name is this cell's id (ADR-047): the SpokePool composition derives
-metadata.labels.cell-id from it and the fleet ApplicationSets select on it, so
+metadata.labels.cluster-name from it and the fleet ApplicationSets select on it, so
 choose something meaningful -- it names the cluster for its whole life.`,
 		RunE: runAddWorkloadCluster,
 	}

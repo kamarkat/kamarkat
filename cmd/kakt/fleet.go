@@ -168,7 +168,14 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 
 			var status fleet.Status
 			err = withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
-				present, err := c.ListSecretNames(cmd.Context(), icfg.ProjectSlug, icfg.EnvironmentSlug, f.SecretPath())
+				// args[0], not icfg.EnvironmentSlug: an application's secrets live in
+				// the environment the application runs in, and icfg carries the
+				// HUB's. A hub manages clusters whose environments differ from its
+				// own, and the spoke reads with its own slug
+				// (03-platform-services-appset.yaml patches its ClusterSecretStore),
+				// so reading the hub's environment here reports a stg app's secrets
+				// as absent while they are present where the app looks.
+				present, err := c.ListSecretNames(cmd.Context(), icfg.ProjectSlug, args[0], f.SecretPath())
 				if err != nil {
 					return err
 				}
@@ -281,7 +288,9 @@ within its refresh interval, and the workload's reloader restarts on the change.
 
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				return c.CreateOrUpdateSecret(cmd.Context(),
-					icfg.ProjectSlug, icfg.EnvironmentSlug, f.SecretPath(), key, value)
+					// The environment named on the command line, not the hub's: see
+					// the note in `fleet secrets status`.
+					icfg.ProjectSlug, environment, f.SecretPath(), key, value)
 			}); err != nil {
 				return err
 			}
@@ -409,7 +418,8 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				for _, k := range willWrite {
 					if err := c.CreateOrUpdateSecret(cmd.Context(),
-						icfg.ProjectSlug, icfg.EnvironmentSlug, f.SecretPath(), k, values[k]); err != nil {
+						// The named environment, not the hub's: see `fleet secrets status`.
+						icfg.ProjectSlug, environment, f.SecretPath(), k, values[k]); err != nil {
 						return fmt.Errorf("write %s: %w", k, err)
 					}
 					fmt.Printf("  wrote  %s\n", k)

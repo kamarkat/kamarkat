@@ -44,7 +44,7 @@ spec:
           status: "True"
     patches:
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
+      fromFieldPath: spec.clusterName
       toFieldPath: spec.providerConfigRef.name
     - type: FromCompositeFieldPath
       fromFieldPath: spec.scopeId
@@ -78,8 +78,8 @@ spec:
       fromFieldPath: spec.dbOwnerRoleName
       toFieldPath: spec.forProvider.manifest.spec.dbOwnerRoleName
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
-      toFieldPath: spec.forProvider.manifest.spec.cellId
+      fromFieldPath: spec.clusterName
+      toFieldPath: spec.forProvider.manifest.spec.clusterName
 
   # 2. CNPG Pooler CR - Wrapped in provider-kubernetes Object
   #    Uses tenant-specific credentials from tenant-<id>-db-credentials Secret
@@ -178,14 +178,14 @@ spec:
     - type: CombineFromComposite
       combine:
         variables:
-          - fromFieldPath: spec.cellId
+          - fromFieldPath: spec.clusterName
           - fromFieldPath: spec.appId
         strategy: string
         string:
           fmt: "/spoke-pool/%s/tenants/%s/CACHE_PASSWORD"
       toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
+      fromFieldPath: spec.clusterName
       toFieldPath: spec.providerConfigRef.name
     - type: FromCompositeFieldPath
       fromFieldPath: spec.scopeId
@@ -247,7 +247,7 @@ spec:
         providerConfigRef:
           name: ""
     patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cellId, toFieldPath: spec.providerConfigRef.name}
+    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-certificate"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.secretName, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
@@ -290,7 +290,7 @@ spec:
         providerConfigRef:
           name: ""
     patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cellId, toFieldPath: spec.providerConfigRef.name}
+    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-service"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
@@ -390,7 +390,7 @@ spec:
         providerConfigRef:
           name: ""
     patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cellId, toFieldPath: spec.providerConfigRef.name}
+    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-deployment"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
@@ -460,7 +460,7 @@ spec:
         providerConfigRef:
           name: ""
     patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cellId, toFieldPath: spec.providerConfigRef.name}
+    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-network-policy"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
     - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
@@ -508,7 +508,7 @@ spec:
           name: ""  # Patched from cellId
     patches:
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
+      fromFieldPath: spec.clusterName
       toFieldPath: spec.providerConfigRef.name
     - type: FromCompositeFieldPath
       fromFieldPath: spec.scopeId
@@ -654,7 +654,7 @@ spec:
           status: "True"
     patches:
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
+      fromFieldPath: spec.clusterName
       toFieldPath: spec.providerConfigRef.name
     - type: FromCompositeFieldPath
       fromFieldPath: spec.scopeId
@@ -688,7 +688,7 @@ spec:
     - type: CombineFromComposite
       combine:
         variables:
-          - fromFieldPath: spec.cellId
+          - fromFieldPath: spec.clusterName
         strategy: string
         string:
           fmt: "/spoke-pool/%s/shared/infisical-credentials"
@@ -696,7 +696,7 @@ spec:
     - type: CombineFromComposite
       combine:
         variables:
-          - fromFieldPath: spec.cellId
+          - fromFieldPath: spec.clusterName
         strategy: string
         string:
           fmt: "/spoke-pool/%s/shared/infisical-credentials"
@@ -704,7 +704,7 @@ spec:
     - type: CombineFromComposite
       combine:
         variables:
-          - fromFieldPath: spec.cellId
+          - fromFieldPath: spec.clusterName
         strategy: string
         string:
           fmt: "/spoke-pool/%s/shared/infisical-credentials"
@@ -750,7 +750,7 @@ spec:
           status: "True"
     patches:
     - type: FromCompositeFieldPath
-      fromFieldPath: spec.cellId
+      fromFieldPath: spec.clusterName
       toFieldPath: spec.providerConfigRef.name
     - type: FromCompositeFieldPath
       fromFieldPath: spec.scopeId

@@ -60,7 +60,7 @@ CELL_ID="${1:-}"
 DRY_RUN=0
 [[ "${2:-}" == "--dry-run" ]] && DRY_RUN=1
 
-[[ -z "$CELL_ID" || "$CELL_ID" == -* ]] && usage "no <cell-id>. It is the cell whose /spoke-pool/<cell-id>/shared folder receives the shared keys."
+[[ -z "$CELL_ID" || "$CELL_ID" == -* ]] && usage "no <cluster-name>. It is the cluster whose /spoke-pool/<cluster-name>/shared folder receives the shared keys."
 [[ -n "${2:-}" && "${2:-}" != "--dry-run" ]] && usage "unknown argument '${2}'."
 
 # ── key : source file : infisical path ──────────────────────────────────────

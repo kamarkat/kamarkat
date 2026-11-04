@@ -28,7 +28,7 @@ import json, subprocess, tempfile, yaml
 # A fixture that renders every SDK ingress policy the chart has: allowedConsumers
 # is what makes the cross-app ingress policy exist.
 FIXTURE = {
-    "tenantId": "acme", "appId": "shop", "cellId": "cell-1",
+    "tenantId": "acme", "appId": "shop", "clusterName": "spoke-1",
     "oidcIssuer": "https://id.example.test",
     "identity": {"allowedConsumers": ["store"], "backendDependencies": ["ledger"]},
     "sandbox": {"agentVault": {"enabled": True}},

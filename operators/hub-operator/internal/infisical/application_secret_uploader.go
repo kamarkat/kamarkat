@@ -81,7 +81,10 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		return fmt.Errorf("neither INFISICAL_SECRETS_PROJECT_SLUG nor INFISICAL_PROJECT_SLUG environment variable is set")
 	}
 
-	environmentSlug := EnvironmentSlug
+	environmentSlug, err := managementEnvironmentSlug()
+	if err != nil {
+		return err
+	}
 	secretPath := "/"
 
 	logger.Info("Uploading application secrets to Infisical", "count", len(ApplicationSecretMappings))
@@ -430,13 +433,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		successCount++
 	}
 
-	// Entries carrying CellScopedKey are ALSO produced once per spoke, into
-	// /spoke-pool/<cellId>/shared. This is in addition to the root upload above, not
+	// Entries carrying ClusterScopedKey are ALSO produced once per spoke, into
+	// /spoke-pool/<clusterName>/shared. This is in addition to the root upload above, not
 	// instead of it: the hub agentgateway reads the root key while each spoke can
 	// only read its own prefix (ADR-031). The cell folder is created by the SpokePool
 	// reconciler (EnsureInfisicalCredentials); if it does not exist yet the write
 	// fails and the next HubEnvironment reconcile retries, so ordering self-resolves.
-	if err := u.uploadCellScopedSecrets(ctx, infisicalClient, projectSlug, environmentSlug); err != nil {
+	if err := u.uploadClusterScopedSecrets(ctx, infisicalClient, projectSlug, environmentSlug); err != nil {
 		logger.Error(err, "Cell-scoped application secrets could not be uploaded")
 	}
 
@@ -536,7 +539,7 @@ func generateSvixJWT(signingSecret string) (string, error) {
 	return token.SignedString([]byte(signingSecret))
 }
 
-// uploadCellScopedSecrets writes every CellScoped mapping into each SpokePool's
+// uploadClusterScopedSecrets writes every ClusterScoped mapping into each SpokePool's
 // shared path, generating values exactly as the root path does so a cell-scoped
 // secret and a fleet-wide one of the same kind can never differ in form. The
 // agentgateway cookie key carries HexBytes: 32 because agentgateway hex-decodes it
@@ -546,7 +549,7 @@ func generateSvixJWT(signingSecret string) (string, error) {
 //
 // Existing values are left alone: this key signs live browser sessions, so
 // regenerating it on a reconcile would invalidate every session on that spoke.
-func (u *ApplicationSecretUploader) uploadCellScopedSecrets(
+func (u *ApplicationSecretUploader) uploadClusterScopedSecrets(
 	ctx context.Context, infisicalClient *infisicalclient.InfisicalClient,
 	projectSlug, environmentSlug string,
 ) error {
@@ -554,7 +557,7 @@ func (u *ApplicationSecretUploader) uploadCellScopedSecrets(
 
 	var cellScoped []ApplicationSecretDefinition
 	for _, def := range ApplicationSecretMappings {
-		if def.CellScopedKey != "" {
+		if def.ClusterScopedKey != "" {
 			cellScoped = append(cellScoped, def)
 		}
 	}
@@ -571,24 +574,24 @@ func (u *ApplicationSecretUploader) uploadCellScopedSecrets(
 	}
 
 	for _, sp := range spokes.Items {
-		cellID := sp.GetName()
-		sharedPath := fmt.Sprintf(secrets.InfisicalSharedPathFormat, cellID)
+		clusterName := sp.GetName()
+		sharedPath := fmt.Sprintf(secrets.InfisicalSharedPathFormat, clusterName)
 		for _, def := range cellScoped {
-			exists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, sharedPath, def.CellScopedKey)
+			exists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey)
 			if err != nil {
-				logger.Error(err, "Failed to check cell-scoped secret", "cell", cellID, "key", def.CellScopedKey)
+				logger.Error(err, "Failed to check cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey)
 				continue
 			}
 			if exists && def.HexBytes > 0 {
-				if current, found, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, sharedPath, def.CellScopedKey); err != nil {
+				if current, found, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey); err != nil {
 					logger.Error(err, "Failed to read existing cell secret for validation; leaving it untouched",
-						"cell", cellID, "key", def.CellScopedKey)
+						"cluster", clusterName, "key", def.ClusterScopedKey)
 				} else if found && !hexValueIsWellFormed(current, def.HexBytes) {
 					// Rotating this invalidates live sessions on the spoke, which is the
 					// lesser harm: while it is malformed agentgateway will not start at
 					// all, so there are no sessions to preserve.
 					logger.Info("Existing cell secret is malformed for its consumer; regenerating",
-						"cell", cellID, "key", def.CellScopedKey,
+						"cluster", clusterName, "key", def.ClusterScopedKey,
 						"expectedChars", def.HexBytes*2, "actualChars", len(current))
 					exists = false
 				}
@@ -604,15 +607,15 @@ func (u *ApplicationSecretUploader) uploadCellScopedSecrets(
 				value, err = secrets.GenerateSecurePassword()
 			}
 			if err != nil {
-				logger.Error(err, "Failed to generate cell-scoped secret", "cell", cellID, "key", def.CellScopedKey)
+				logger.Error(err, "Failed to generate cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey)
 				continue
 			}
 
-			if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, sharedPath, def.CellScopedKey, value); err != nil {
-				logger.Error(err, "Failed to upload cell-scoped secret", "cell", cellID, "key", def.CellScopedKey, "path", sharedPath)
+			if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey, value); err != nil {
+				logger.Error(err, "Failed to upload cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey, "path", sharedPath)
 				continue
 			}
-			logger.Info("Uploaded cell-scoped secret", "cell", cellID, "key", def.CellScopedKey, "path", sharedPath)
+			logger.Info("Uploaded cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey, "path", sharedPath)
 		}
 	}
 	return nil

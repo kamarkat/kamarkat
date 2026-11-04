@@ -332,7 +332,7 @@ func (r *PlatformCapabilityReconciler) publishCaller(ctx context.Context, logger
 	}
 
 	ownerApp, _, _ := unstructured.NestedString(owner.Object, "spec", "appId")
-	ownerCell, _, _ := unstructured.NestedString(owner.Object, "spec", "cellId")
+	ownerCell, _, _ := unstructured.NestedString(owner.Object, "spec", "clusterName")
 	ownerOrg, _, _ := unstructured.NestedString(owner.Object, "status", "identity", "zitadelOrgId")
 	callerID, err := r.InfisicalClient.GetSecret(ctx, fmt.Sprintf(secrets.InfisicalTenantPathFormat, ownerCell, ownerApp), serviceClientIDKey)
 	if err != nil || callerID == "" || ownerOrg == "" {

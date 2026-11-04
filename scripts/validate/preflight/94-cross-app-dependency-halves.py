@@ -104,7 +104,7 @@ def key_grammar_agrees() -> None:
         [
             "helm", "template", "t", str(chart),
             "--set", "oidcIssuer=https://issuer.example",
-            "--set", "tenantId=t", "--set", "appId=a", "--set", "cellId=c",
+            "--set", "tenantId=t", "--set", "appId=a", "--set", "clusterName=c",
             "--set", "scopeId=t-a", "--set", "deployXR=false",
             "--set-json", 'gateway={"enabled":true,"hostnames":["h.example"]}',
             "--set-json", 'identity={"backendDependencies":["code-builder"]}',

@@ -21,7 +21,7 @@ import (
 const (
 	// Enterprise Alignment: ADR-003 / ADR-031 Isolation Boundaries
 	InfisicalSharedPathFormat = "/spoke-pool/%s/shared"
-	// Takes cellId and APP id. The segment named `tenants` holds a product and
+	// Takes clusterName and APP id. The segment named `tenants` holds a product and
 	// always has -- before ADR-088 the field feeding it was called tenantId but
 	// held one. Correcting the NAME is deferred: moving live key material is a
 	// data migration, and bundling it with an identifier rename made the
@@ -29,14 +29,20 @@ const (
 	InfisicalTenantPathFormat = "/spoke-pool/%s/tenants/%s"
 
 	// credentialRotationBackoff is the minimum interval between self-healing
-	// rotations of stale shared credentials per cell. A persistently-invalid
+	// rotations of stale shared credentials per cluster. A persistently-invalid
 	// credential must not trigger an API rotation on every reconcile.
 	credentialRotationBackoff = 15 * time.Minute
 )
 
 // InfisicalClient is a lightweight HTTP client for ADR-031 topology management.
 // Uses Machine Identity credentials (client-id + client-secret) for folder/secret
-// operations. EnvironmentSlug defaults to "dev" but is configurable via env var.
+// operations.
+//
+// EnvironmentSlug has no default. It used to be "dev", which made every caller
+// that forgot to set it write into the development environment of whatever box
+// it was running on -- and a hub manages spokes whose environments differ from
+// its own, so one process-wide value cannot address them all. A client is
+// obtained per environment through ForEnvironment.
 type InfisicalClient struct {
 	BaseURL         string
 	ClientID        string
@@ -49,10 +55,18 @@ type InfisicalClient struct {
 	token      string
 	tokenExp   time.Time
 
-	// mu guards lastRotationAttempt. Used to rate-limit self-healing credential
-	// rotations so a persistently-invalid credential does not hammer Infisical.
+	// mu guards lastRotationAttempt and derived. Used to rate-limit self-healing
+	// credential rotations so a persistently-invalid credential does not hammer
+	// Infisical.
 	mu                  sync.Mutex
 	lastRotationAttempt map[string]time.Time
+
+	// derived holds one client per Infisical environment other than this one's,
+	// built by ForEnvironment. Cached rather than built per call because each
+	// carries its own rotation backoff: a fresh client every reconcile would have
+	// an empty lastRotationAttempt and so would rotate a stale credential on every
+	// pass, which is the behaviour credentialRotationBackoff exists to prevent.
+	derived map[string]*InfisicalClient
 }
 
 // NewInfisicalClient creates a new InfisicalClient from env-provided credentials.
@@ -66,12 +80,49 @@ func NewInfisicalClient(baseURL, clientID, clientSecret, projectID, organization
 		ClientSecret:        clientSecret,
 		ProjectID:           projectID,
 		OrganizationID:      organizationID,
-		EnvironmentSlug:     "dev",
 		lastRotationAttempt: make(map[string]time.Time),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// ForEnvironment returns the client for one Infisical environment.
+//
+// The hub writes three kinds of secret and they do not share an environment: its
+// own (the management scope, from hub-bootstrap-config), a workload cluster's
+// (the environment that cluster declares), and an application's (the environment
+// the tenant deploys it to). A spoke's credentials written into the hub's
+// environment are read by nothing -- the spoke's ClusterSecretStore is patched
+// with the SPOKE's slug (03-platform-services-appset.yaml), so the write and the
+// read land in different places and the ExternalSecret simply never syncs.
+//
+// Returns the receiver when the slug already matches, so the common case adds
+// nothing. A new client is NOT a struct copy: this type holds a mutex, and
+// copying it is both a vet error and a way to share rotation state unsafely.
+func (c *InfisicalClient) ForEnvironment(slug string) (*InfisicalClient, error) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return nil, fmt.Errorf("no Infisical environment named for this target: " +
+			"refusing to fall back to the hub's own environment, which is where a " +
+			"credential goes to be unreadable by the cluster that needs it")
+	}
+	if slug == c.EnvironmentSlug {
+		return c, nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if existing, ok := c.derived[slug]; ok {
+		return existing, nil
+	}
+	scoped := NewInfisicalClient(c.BaseURL, c.ClientID, c.ClientSecret, c.ProjectID, c.OrganizationID)
+	scoped.EnvironmentSlug = slug
+	if c.derived == nil {
+		c.derived = make(map[string]*InfisicalClient)
+	}
+	c.derived[slug] = scoped
+	return scoped, nil
 }
 
 // authenticate performs Universal Auth login to get an access token.
@@ -170,12 +221,12 @@ func (c *InfisicalClient) validateClientCredentials(ctx context.Context, clientI
 }
 
 // rotationBackoffElapsed reports whether enough time has passed since the last
-// self-healing rotation for this cell to attempt another one. This prevents a
+// self-healing rotation for this cluster to attempt another one. This prevents a
 // persistently-invalid credential from hammering the Infisical API.
-func (c *InfisicalClient) rotationBackoffElapsed(cellId string, backoff time.Duration) bool {
+func (c *InfisicalClient) rotationBackoffElapsed(clusterName string, backoff time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	last, ok := c.lastRotationAttempt[cellId]
+	last, ok := c.lastRotationAttempt[clusterName]
 	if !ok {
 		return true
 	}
@@ -183,10 +234,10 @@ func (c *InfisicalClient) rotationBackoffElapsed(cellId string, backoff time.Dur
 }
 
 // recordRotationAttempt timestamps a self-healing rotation for backoff purposes.
-func (c *InfisicalClient) recordRotationAttempt(cellId string) {
+func (c *InfisicalClient) recordRotationAttempt(clusterName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.lastRotationAttempt[cellId] = time.Now()
+	c.lastRotationAttempt[clusterName] = time.Now()
 }
 
 // newAuthenticatedRequest creates an HTTP request with the auth bearer token set.
@@ -207,7 +258,7 @@ func (c *InfisicalClient) newAuthenticatedRequest(ctx context.Context, method, u
 // ============================================================================
 
 // EnsureFolder creates a folder hierarchy in Infisical.
-// Multi-segment paths (e.g. /spoke-pool/<cellId>/tenants/<tenantId>) are
+// Multi-segment paths (e.g. /spoke-pool/<clusterName>/tenants/<tenantId>) are
 // created one segment at a time. Idempotent: 400 "already exists" is treated
 // as success.
 func (c *InfisicalClient) EnsureFolder(ctx context.Context, folderPath string) error {
@@ -800,9 +851,9 @@ type OAuthClient struct {
 //     reuse it, otherwise create a new MI. Then attach Universal Auth, generate
 //     client secret, grant project viewer access, upload creds, return Created.
 //   - If missing AND !isFirstTime → return Missing (manual intervention required).
-func (c *InfisicalClient) EnsureInfisicalCredentials(ctx context.Context, cellId string, isFirstTime bool) (*EnsureInfisicalCredentialsResult, error) {
+func (c *InfisicalClient) EnsureInfisicalCredentials(ctx context.Context, clusterName string, isFirstTime bool) (*EnsureInfisicalCredentialsResult, error) {
 	logger := log.FromContext(ctx)
-	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, cellId)
+	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
 
 	logger.Info("Ensuring Infisical folder hierarchy", "path", sharedPath)
 	if err := c.EnsureFolder(ctx, sharedPath); err != nil {
@@ -829,107 +880,107 @@ func (c *InfisicalClient) EnsureInfisicalCredentials(ctx context.Context, cellId
 		} else {
 			validationErr := c.validateClientCredentials(ctx, stored.ClientID, stored.ClientSecret)
 			if validationErr == nil {
-				setCredentialStatus(cellId, metricCredentialStatusValid)
-				logger.Info("Machine Identity credentials already exist and are valid", "cell", cellId, "path", sharedPath)
+				setCredentialStatus(clusterName, metricCredentialStatusValid)
+				logger.Info("Machine Identity credentials already exist and are valid", "cluster", clusterName, "path", sharedPath)
 				return &EnsureInfisicalCredentialsResult{Result: EnsureAlreadyExists}, nil
 			}
 
 			if !errors.Is(validationErr, ErrInvalidCredentials) {
 				// Transient (5xx) or unexpected status — do not rotate; retry later.
-				setCredentialStatus(cellId, metricCredentialStatusFailed)
+				setCredentialStatus(clusterName, metricCredentialStatusFailed)
 				return nil, fmt.Errorf("failed to validate existing infisical-credentials: %w", validationErr)
 			}
 
 			// Credentials are stale/invalid: rotate the shared identity client
 			// secret and update the stored value atomically, subject to backoff.
-			if !c.rotationBackoffElapsed(cellId, credentialRotationBackoff) {
-				setCredentialStatus(cellId, metricCredentialStatusFailed)
+			if !c.rotationBackoffElapsed(clusterName, credentialRotationBackoff) {
+				setCredentialStatus(clusterName, metricCredentialStatusFailed)
 				logger.Info("infisical-credentials are invalid but rotation is in backoff; skipping this reconcile",
-					"cell", cellId, "path", sharedPath)
+					"cluster", clusterName, "path", sharedPath)
 				return &EnsureInfisicalCredentialsResult{Result: EnsureAlreadyExists}, nil
 			}
 
-			if err := c.rotateSharedIdentityCredentials(ctx, cellId, sharedPath, stored.ProjectID); err != nil {
-				setCredentialStatus(cellId, metricCredentialStatusFailed)
-				logger.Error(err, "Failed to self-heal stale infisical-credentials", "cell", cellId, "path", sharedPath)
+			if err := c.rotateSharedIdentityCredentials(ctx, clusterName, sharedPath, stored.ProjectID); err != nil {
+				setCredentialStatus(clusterName, metricCredentialStatusFailed)
+				logger.Error(err, "Failed to self-heal stale infisical-credentials", "cluster", clusterName, "path", sharedPath)
 				return nil, fmt.Errorf("failed to self-heal stale infisical-credentials: %w", err)
 			}
 
-			setCredentialStatus(cellId, metricCredentialStatusRotated)
-			incCredentialRotation(cellId)
-			logger.Info("Self-healed stale infisical-credentials by rotation", "cell", cellId, "path", sharedPath)
+			setCredentialStatus(clusterName, metricCredentialStatusRotated)
+			incCredentialRotation(clusterName)
+			logger.Info("Self-healed stale infisical-credentials by rotation", "cluster", clusterName, "path", sharedPath)
 			return &EnsureInfisicalCredentialsResult{Result: EnsureRotated}, nil
 		}
 	}
 
 	if !isFirstTime {
-		setCredentialStatus(cellId, metricCredentialStatusMissing)
+		setCredentialStatus(clusterName, metricCredentialStatusMissing)
 		logger.Error(nil, "CRITICAL: infisical-credentials missing from Infisical but SpokePool was already provisioned. Manual intervention required.",
-			"cell", cellId, "path", sharedPath)
+			"cluster", clusterName, "path", sharedPath)
 		return &EnsureInfisicalCredentialsResult{Result: EnsureMissing},
-			fmt.Errorf("infisical-credentials missing from Infisical for already-provisioned SpokePool %s — manual recovery required", cellId)
+			fmt.Errorf("infisical-credentials missing from Infisical for already-provisioned SpokePool %s — manual recovery required", clusterName)
 	}
 
 	// Provision a REAL Machine Identity via Infisical API
-	identityName := fmt.Sprintf("spoke-pool-%s", cellId)
+	identityName := fmt.Sprintf("spoke-pool-%s", clusterName)
 
 	// Step 1: Resolve the organization ID from the current auth context
 	orgID, err := c.getOrganizationID(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to get organization ID from auth context", "cell", cellId)
+		logger.Error(err, "Failed to get organization ID from auth context", "cluster", clusterName)
 		return nil, fmt.Errorf("failed to get organization ID: %w", err)
 	}
 
 	// Step 2: Look for an existing identity with this name (idempotent recovery)
 	identityID, err := c.findIdentityByName(ctx, identityName, orgID)
 	if err != nil {
-		logger.Error(err, "Failed to search for existing Machine Identity", "cell", cellId, "identity", identityName)
+		logger.Error(err, "Failed to search for existing Machine Identity", "cluster", clusterName, "identity", identityName)
 		return nil, fmt.Errorf("failed to search for Machine Identity %s: %w", identityName, err)
 	}
 
 	if identityID != "" {
-		logger.Info("Found existing Machine Identity, reusing", "cell", cellId, "identityID", identityID, "identity", identityName)
+		logger.Info("Found existing Machine Identity, reusing", "cluster", clusterName, "identityID", identityID, "identity", identityName)
 	} else {
 		// Step 2a: Create a new Machine Identity
 		identityID, err = c.createMachineIdentityInInfisical(ctx, identityName, orgID)
 		if err != nil {
-			logger.Error(err, "Failed to create Machine Identity in Infisical", "cell", cellId, "identity", identityName)
+			logger.Error(err, "Failed to create Machine Identity in Infisical", "cluster", clusterName, "identity", identityName)
 			return nil, fmt.Errorf("failed to create Machine Identity %s: %w", identityName, err)
 		}
-		logger.Info("Machine Identity created in Infisical", "cell", cellId, "identityID", identityID)
+		logger.Info("Machine Identity created in Infisical", "cluster", clusterName, "identityID", identityID)
 	}
 
 	// Step 3: Attach Universal Auth
 	if err := c.attachUniversalAuth(ctx, identityID); err != nil {
-		logger.Error(err, "Failed to attach Universal Auth to Machine Identity", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to attach Universal Auth to Machine Identity", "cluster", clusterName, "identityID", identityID)
 		return nil, fmt.Errorf("failed to attach Universal Auth to identity %s: %w", identityID, err)
 	}
-	logger.Info("Universal Auth attached to Machine Identity", "cell", cellId, "identityID", identityID)
+	logger.Info("Universal Auth attached to Machine Identity", "cluster", clusterName, "identityID", identityID)
 
 	// Step 4: Retrieve the clientId from the UA configuration
 	clientID, err := c.getClientIDFromUniversalAuth(ctx, identityID)
 	if err != nil {
-		logger.Error(err, "Failed to get clientId from Universal Auth", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to get clientId from Universal Auth", "cluster", clusterName, "identityID", identityID)
 		return nil, fmt.Errorf("failed to get clientId for identity %s: %w", identityID, err)
 	}
-	logger.Info("Retrieved clientId for Machine Identity", "cell", cellId)
+	logger.Info("Retrieved clientId for Machine Identity", "cluster", clusterName)
 
 	// Step 5: Generate a client secret (plaintext, shown once by API)
 	clientSecret, err := c.generateClientSecret(ctx, identityID)
 	if err != nil {
-		logger.Error(err, "Failed to generate client secret", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to generate client secret", "cluster", clusterName, "identityID", identityID)
 		return nil, fmt.Errorf("failed to generate client secret for identity %s: %w", identityID, err)
 	}
-	logger.Info("Client secret generated for Machine Identity", "cell", cellId)
+	logger.Info("Client secret generated for Machine Identity", "cluster", clusterName)
 
 	// Step 6: Grant project-level viewer access (least privilege for ESO)
 	if err := c.grantProjectAccess(ctx, identityID, "viewer"); err != nil {
-		logger.Error(err, "Failed to grant project access to Machine Identity", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to grant project access to Machine Identity", "cluster", clusterName, "identityID", identityID)
 		// Continue — credentials still exist, just without project scope
 		// The tenant SecretStore will fail with "no access" rather than "invalid credentials"
 		logger.Info("Continuing despite partial project access failure; this MI will need manual role assignment")
 	} else {
-		logger.Info("Project viewer access granted to Machine Identity", "cell", cellId, "identityID", identityID)
+		logger.Info("Project viewer access granted to Machine Identity", "cluster", clusterName, "identityID", identityID)
 	}
 
 	// Store the real credentials at the shared path
@@ -946,13 +997,13 @@ func (c *InfisicalClient) EnsureInfisicalCredentials(ctx context.Context, cellId
 		return nil, fmt.Errorf("failed to marshal infisical credentials: %w", err)
 	}
 
-	logger.Info("Uploading real Machine Identity credentials to Infisical", "cell", cellId, "path", sharedPath)
+	logger.Info("Uploading real Machine Identity credentials to Infisical", "cluster", clusterName, "path", sharedPath)
 	if err := c.CreateSecret(ctx, sharedPath, "infisical-credentials", string(jsonBytes)); err != nil {
-		logger.Error(err, "Failed to push infisical-credentials secret to Infisical", "cell", cellId, "path", sharedPath)
+		logger.Error(err, "Failed to push infisical-credentials secret to Infisical", "cluster", clusterName, "path", sharedPath)
 		return nil, fmt.Errorf("failed to push infisical-credentials secret: %w", err)
 	}
 
-	logger.Info("SpokePool real Machine Identity credentials seeded in Infisical", "cell", cellId, "path", sharedPath)
+	logger.Info("SpokePool real Machine Identity credentials seeded in Infisical", "cluster", clusterName, "path", sharedPath)
 	return &EnsureInfisicalCredentialsResult{Result: EnsureCreated}, nil
 }
 
@@ -1008,7 +1059,7 @@ func (c *InfisicalClient) EnsureCrossplaneAdminPassword(ctx context.Context, spo
 }
 
 // rotateSharedIdentityCredentials self-heals stale shared Machine Identity
-// credentials for a cell by rotating the existing identity's client secret and
+// credentials for a cluster by rotating the existing identity's client secret and
 // atomically updating the stored infisical-credentials value. It mirrors the
 // provisioning steps (find/reuse identity, attach UA, generate client secret,
 // grant project access) but uses the identity that already owns the stored
@@ -1019,19 +1070,19 @@ func (c *InfisicalClient) EnsureCrossplaneAdminPassword(ctx context.Context, spo
 // which runs on every tenant reconcile and copies shared → tenant when stale,
 // so a rotation here propagates to tenants (and their ExternalSecrets) without
 // additional plumbing.
-func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, cellId, sharedPath, storedProjectID string) error {
-	logger := log.FromContext(ctx).WithValues("cell", cellId, "path", sharedPath)
+func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, clusterName, sharedPath, storedProjectID string) error {
+	logger := log.FromContext(ctx).WithValues("cluster", clusterName, "path", sharedPath)
 
-	identityName := fmt.Sprintf("spoke-pool-%s", cellId)
+	identityName := fmt.Sprintf("spoke-pool-%s", clusterName)
 	orgID, err := c.getOrganizationID(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to get organization ID during rotation", "cell", cellId)
+		logger.Error(err, "Failed to get organization ID during rotation", "cluster", clusterName)
 		return fmt.Errorf("failed to get organization ID: %w", err)
 	}
 
 	identityID, err := c.findIdentityByName(ctx, identityName, orgID)
 	if err != nil {
-		logger.Error(err, "Failed to search for existing Machine Identity during rotation", "cell", cellId, "identity", identityName)
+		logger.Error(err, "Failed to search for existing Machine Identity during rotation", "cluster", clusterName, "identity", identityName)
 		return fmt.Errorf("failed to search for Machine Identity %s: %w", identityName, err)
 	}
 
@@ -1041,33 +1092,33 @@ func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, c
 		// credential to authenticate with.
 		identityID, err = c.createMachineIdentityInInfisical(ctx, identityName, orgID)
 		if err != nil {
-			logger.Error(err, "Failed to create Machine Identity during rotation", "cell", cellId, "identity", identityName)
+			logger.Error(err, "Failed to create Machine Identity during rotation", "cluster", clusterName, "identity", identityName)
 			return fmt.Errorf("failed to create Machine Identity %s: %w", identityName, err)
 		}
-		logger.Info("Recreated deleted Machine Identity during credential self-heal", "cell", cellId, "identityID", identityID)
+		logger.Info("Recreated deleted Machine Identity during credential self-heal", "cluster", clusterName, "identityID", identityID)
 	}
 
 	if err := c.attachUniversalAuth(ctx, identityID); err != nil {
-		logger.Error(err, "Failed to attach Universal Auth during rotation", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to attach Universal Auth during rotation", "cluster", clusterName, "identityID", identityID)
 		return fmt.Errorf("failed to attach Universal Auth to identity %s: %w", identityID, err)
 	}
 
 	clientID, err := c.getClientIDFromUniversalAuth(ctx, identityID)
 	if err != nil {
-		logger.Error(err, "Failed to get clientId during rotation", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to get clientId during rotation", "cluster", clusterName, "identityID", identityID)
 		return fmt.Errorf("failed to get clientId for identity %s: %w", identityID, err)
 	}
 
 	clientSecret, err := c.generateClientSecret(ctx, identityID)
 	if err != nil {
-		logger.Error(err, "Failed to generate client secret during rotation", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to generate client secret during rotation", "cluster", clusterName, "identityID", identityID)
 		return fmt.Errorf("failed to generate client secret for identity %s: %w", identityID, err)
 	}
-	logger.Info("Rotated client secret for shared Machine Identity", "cell", cellId, "identityID", identityID)
+	logger.Info("Rotated client secret for shared Machine Identity", "cluster", clusterName, "identityID", identityID)
 
 	// Ensure the identity retains (or regains) project-level viewer access.
 	if err := c.grantProjectAccess(ctx, identityID, "viewer"); err != nil {
-		logger.Error(err, "Failed to grant project access during rotation (credentials still rotated)", "cell", cellId, "identityID", identityID)
+		logger.Error(err, "Failed to grant project access during rotation (credentials still rotated)", "cluster", clusterName, "identityID", identityID)
 	}
 
 	// Preserve the stored project ID (secrets project) while rotating the secret.
@@ -1085,14 +1136,14 @@ func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, c
 		return fmt.Errorf("failed to marshal rotated infisical credentials: %w", err)
 	}
 
-	logger.Info("Updating rotated Machine Identity credentials in Infisical", "cell", cellId, "path", sharedPath)
+	logger.Info("Updating rotated Machine Identity credentials in Infisical", "cluster", clusterName, "path", sharedPath)
 	if err := c.UpdateSecret(ctx, sharedPath, "infisical-credentials", string(jsonBytes)); err != nil {
-		logger.Error(err, "Failed to update rotated infisical-credentials", "cell", cellId, "path", sharedPath)
+		logger.Error(err, "Failed to update rotated infisical-credentials", "cluster", clusterName, "path", sharedPath)
 		return fmt.Errorf("failed to update rotated infisical-credentials: %w", err)
 	}
 
-	c.recordRotationAttempt(cellId)
-	logger.Info("SpokePool real Machine Identity credentials rotated and updated in Infisical", "cell", cellId, "path", sharedPath)
+	c.recordRotationAttempt(clusterName)
+	logger.Info("SpokePool real Machine Identity credentials rotated and updated in Infisical", "cluster", clusterName, "path", sharedPath)
 	return nil
 }
 
@@ -1116,9 +1167,9 @@ func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, c
 //   - If missing AND isFirstTime → copy infisical-credentials from shared path,
 //     generate db-credentials, upload, return Created.
 //   - If missing AND !isFirstTime → return Missing (manual intervention required).
-func (c *InfisicalClient) EnsureTenantFolderAndCredentials(ctx context.Context, cellId, tenantId, appId string, isFirstTime bool, oauthClients []OAuthClient, cacheEnabled, cacheIsFirstTime, gatewayEnabled bool) (*EnsureTenantCredentialsResult, error) {
-	logger := log.FromContext(ctx).WithValues("tenant", tenantId, "app", appId, "cell", cellId)
-	tenantPath := fmt.Sprintf(InfisicalTenantPathFormat, cellId, appId)
+func (c *InfisicalClient) EnsureTenantFolderAndCredentials(ctx context.Context, clusterName, tenantId, appId string, isFirstTime bool, oauthClients []OAuthClient, cacheEnabled, cacheIsFirstTime, gatewayEnabled bool) (*EnsureTenantCredentialsResult, error) {
+	logger := log.FromContext(ctx).WithValues("tenant", tenantId, "app", appId, "cluster", clusterName)
+	tenantPath := fmt.Sprintf(InfisicalTenantPathFormat, clusterName, appId)
 
 	// Declared with the other outcomes so every early return reports it. A
 	// tenant with no cache reports Skipped, never AlreadyExists — the controller
@@ -1135,7 +1186,7 @@ func (c *InfisicalClient) EnsureTenantFolderAndCredentials(ctx context.Context, 
 	// Always reads shared and updates tenant if missing or stale.
 	infisicalCredsOutcome := EnsureAlreadyExists
 	infisicalSecretName := "infisical-credentials"
-	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, cellId)
+	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
 
 	sharedValue, err := c.GetSecret(ctx, sharedPath, infisicalSecretName)
 	if err != nil {

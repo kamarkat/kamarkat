@@ -187,7 +187,7 @@ test:
 	$(GO) test -v ./...
 	./scripts/validate-spokepool-compositions.sh
 	./scripts/validate-argocd-seed-parity.sh
-	./scripts/validate-cell-id-contract.sh
+	./scripts/validate-cluster-name-contract.sh
 	./scripts/validate-component-descriptors.sh
 	@echo "✓ Tests complete"
 

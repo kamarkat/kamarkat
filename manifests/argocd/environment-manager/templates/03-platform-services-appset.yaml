@@ -773,8 +773,20 @@ spec:
             platform-spoke-catalog:
               enabled: true
               spokeName: '{{"{{"}}.name{{"}}"}}'
-            # The SPOKE's own environment, overriding the hub's -- passed INTO
-            # globalValues rather than appended after it.
+            # The SPOKE's own environment AND provider, overriding the hub's --
+            # passed INTO globalValues rather than appended after it.
+            #
+            # Both are facts about the cluster being rendered onto, and the hub
+            # is not necessarily either of them: ADR-075 makes on-prem capacity a
+            # capability rather than a property of a box, so a hetzner spoke
+            # under a hybrid hub is supported and so is the reverse. Taking the
+            # hub's provider gave such a spoke an on-prem nodeSelector and a
+            # local-path storage class, which renders cleanly and then never
+            # schedules.
+            #
+            # Independent of each other and of the cluster's name: provider,
+            # environment, identity and cell-policy membership are four separate
+            # declarations, and nothing here derives one from another.
             #
             # globalValues carries the hub's environmentSlug, and a workload
             # cluster reading it would take the environment of the cluster that
@@ -800,7 +812,7 @@ spec:
             # No line here may end in a colon: these comments sit at the top
             # level of a values block, and application-specs.py reads that
             # position for enabled components.
-            {{- include "environment-manager.globalValues" (dict "root" $ "environmentSlug" (printf "'%s index .metadata.labels \"environment\" %s'" "{{" "}}")) | nindent 12 }}
+            {{- include "environment-manager.globalValues" (dict "root" $ "environmentSlug" (printf "'%s index .metadata.labels \"environment\" %s'" "{{" "}}") "provider" (printf "'%s index .metadata.labels \"provider\" %s'" "{{" "}}")) | nindent 12 }}
 {{- else }}
         kustomize:
           patches:

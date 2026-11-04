@@ -26,8 +26,8 @@ spec:
                 fromFieldPath: spec.tenantId
                 toFieldPath: metadata.labels[tenant-id]
               - type: FromCompositeFieldPath
-                fromFieldPath: spec.cellId
-                toFieldPath: metadata.labels[cell-id]
+                fromFieldPath: spec.clusterName
+                toFieldPath: metadata.labels[cluster-name]
 
         resources:
           # Resource 1: ESO ExternalSecret (restore credentials from Infisical on cluster rebuild)
@@ -134,7 +134,7 @@ spec:
               - type: CombineFromComposite
                 combine:
                   variables:
-                    - fromFieldPath: spec.cellId
+                    - fromFieldPath: spec.clusterName
                     - fromFieldPath: spec.appId
                   strategy: string
                   string:
@@ -294,7 +294,7 @@ spec:
               - type: CombineFromComposite
                 combine:
                   variables:
-                    - fromFieldPath: spec.cellId
+                    - fromFieldPath: spec.clusterName
                     - fromFieldPath: spec.appId
                   strategy: string
                   string:

@@ -1,12 +1,19 @@
 ---
-# Audit the runtime half of the cell-id contract (ADR-047 tenant placement).
+# Audit the runtime half of the cluster-name contract (tenant placement).
 #
-# A spoke's identity travels: SpokePool composition patches cell-id onto the CAPI
-# Cluster -> the take-along-label marker tells capi2argo to copy it -> capi2argo
-# writes it onto the ArgoCD cluster Secret -> the fleet ApplicationSets select on
-# it with a clusters generator.
+# A spoke's identity travels: SpokePool composition patches cluster-name onto the
+# CAPI Cluster -> the take-along-label marker tells capi2argo to copy it ->
+# capi2argo writes it onto the ArgoCD cluster Secret -> the fleet ApplicationSets
+# select on it with a clusters generator.
 #
-# scripts/validate-cell-id-contract.sh covers the links that live in Git. This
+# This audited cell-id, which the compositions patch from the same claim name.
+# Placement moved to cluster-name because cell-id borrowed the vocabulary of
+# policy grouping (ADR-064: a cluster may belong to several cells and receives
+# the union of their policy) for a value that was always one cluster's name.
+# cell-id is still published; nothing selects on it, so its absence is no longer
+# the silent failure this policy exists to report.
+#
+# scripts/validate-cluster-name-contract.sh covers the links that live in Git. This
 # policy covers the one that does not: capi2argo actually having written the
 # label onto the Secret. The label can be correct in every manifest and still be
 # absent here -- a capi2argo version that changes its take-along handling, a
@@ -29,7 +36,7 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: audit-spoke-cell-id
+  name: audit-spoke-cluster-name
   labels:
     app.kubernetes.io/component: platform-governance
     app.kubernetes.io/managed-by: argocd
@@ -38,7 +45,7 @@ metadata:
     # wave 1, so the CRDs are established before this is applied. The wave here
     # orders it within this Application's own sync only.
     argocd.argoproj.io/sync-wave: "5"
-    policies.kyverno.io/title: Audit spoke cluster Secrets for cell-id
+    policies.kyverno.io/title: Audit spoke cluster Secrets for cluster-name
     policies.kyverno.io/category: Platform Governance
     policies.kyverno.io/severity: high
     policies.kyverno.io/subject: Secret
@@ -48,10 +55,10 @@ spec:
   rules:
     # Scoped to spoke registrations only. capi2argo names the ArgoCD cluster
     # Secret after the CAPI Cluster, which is the SpokePool claim name, so
-    # spoke-pool-* is the set of Secrets that must carry a cell. Any other
+    # spoke-pool-* is the set of Secrets that must carry a name. Any other
     # cluster registration (a manually added cluster, a non-spoke target) is out
     # of scope and must not be reported as a violation.
-    - name: spoke-cluster-secret-has-cell-id
+    - name: spoke-cluster-secret-has-cluster-name
       match:
         any:
           - resources:
@@ -67,13 +74,13 @@ spec:
       validate:
         message: >-
           Spoke cluster Secret {{ request.object.metadata.name }} has no non-empty
-          cell-id label. The fleet ApplicationSets
+          cluster-name label. The fleet ApplicationSets
           (tenant-fleet-xr/spoke/workload-provisioning, tenant-public-tls) select
           spokes with a clusters generator on this label, so every tenant
           targeting this spoke will generate zero Applications while the
           ApplicationSet reports Healthy. Check that the CAPI Cluster carries both
-          cell-id and take-along-label.capi-to-argocd.cell-id, and that capi2argo
-          is running.
+          cluster-name and take-along-label.capi-to-argocd.cluster-name, and that
+          capi2argo is running.
         pattern:
           metadata:
             labels:
@@ -81,4 +88,4 @@ spec:
               # empty value is the more dangerous case: the label is present, so
               # a presence check would pass, but matchLabels still matches
               # nothing.
-              cell-id: "?*"
+              cluster-name: "?*"

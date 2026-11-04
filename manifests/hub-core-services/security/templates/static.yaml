@@ -2,7 +2,7 @@
 Static manifests of this component, emitted verbatim.
 
 They live under files/ rather than templates/ because Helm applies Go templating
-to everything in templates/, and audit-spoke-cell-id.yaml is a Kyverno policy
+to everything in templates/, and audit-spoke-cluster-name.yaml is a Kyverno policy
 whose {{ request.* }} JMESPath expressions are not Go template syntax. Rendering
 it as a template fails outright with `function "request" not defined`, and
 escaping every delimiter would leave the policy unreadable and one edit away

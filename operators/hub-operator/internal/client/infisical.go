@@ -577,10 +577,10 @@ func (c *InfisicalClient) createFolder(ctx context.Context, workspaceId, environ
 
 // EnsureTenantFolder ensures the directory structure exists in Infisical before writing secrets.
 // This prevents the "Folder ... not found" API rejection from Infisical V3 API.
-// ADR-003: The folder hierarchy /spoke-pool/<cellId>/tenants/<tenantId> must exist before
+// ADR-003: The folder hierarchy /spoke-pool/<clusterName>/tenants/<tenantId> must exist before
 // secrets can be placed inside it. The ESO Infisical provider splits remoteRef.key on the
 // last '/' so the secret name is the final segment and the folder path is the prefix.
-func (c *InfisicalClient) EnsureTenantFolder(ctx context.Context, projectSlug, environmentSlug, cellID, tenantID, appID string) error {
+func (c *InfisicalClient) EnsureTenantFolder(ctx context.Context, projectSlug, environmentSlug, clusterName, tenantID, appID string) error {
 	logger := log.FromContext(ctx)
 
 	// Ensure we have a valid token
@@ -596,15 +596,15 @@ func (c *InfisicalClient) EnsureTenantFolder(ctx context.Context, projectSlug, e
 
 	// Build folder hierarchy from root to leaf. ESO remoteRef.key uses the last path
 	// segment as the secret name and the prefix as the folder path, so the folder
-	// hierarchy need only go to /spoke-pool/<cellId>/tenants/<tenantId>/apps/<appId>.
+	// hierarchy need only go to /spoke-pool/<clusterName>/tenants/<tenantId>/apps/<appId>.
 	// ADR-003 path pattern, extended by ADR-088 with the app level: one
 	// customer's two products keep separate folders, so a key written for one
 	// is not readable by the other's ExternalSecret.
 	foldersToEnsure := []string{
 		"/spoke-pool",
-		fmt.Sprintf("/spoke-pool/%s", cellID),
-		fmt.Sprintf("/spoke-pool/%s/tenants", cellID),
-		fmt.Sprintf("/spoke-pool/%s/tenants/%s", cellID, appID),
+		fmt.Sprintf("/spoke-pool/%s", clusterName),
+		fmt.Sprintf("/spoke-pool/%s/tenants", clusterName),
+		fmt.Sprintf("/spoke-pool/%s/tenants/%s", clusterName, appID),
 	}
 
 	for _, folder := range foldersToEnsure {
@@ -614,7 +614,7 @@ func (c *InfisicalClient) EnsureTenantFolder(ctx context.Context, projectSlug, e
 		}
 	}
 
-	logger.Info("Tenant folder hierarchy ensured in Infisical", "cellID", cellID, "tenantID", tenantID)
+	logger.Info("Tenant folder hierarchy ensured in Infisical", "clusterName", clusterName, "tenantID", tenantID)
 	return nil
 }
 

@@ -315,9 +315,26 @@ func main() {
 		projectID,
 		orgID,
 	)
-	if envSlug := os.Getenv("INFISICAL_ENVIRONMENT_SLUG"); envSlug != "" {
-		pkiInfisicalClient.EnvironmentSlug = envSlug
+	// The management scope: the environment the HUB's own secrets live in.
+	//
+	// Assigned unconditionally. The guard here was `if envSlug != ""`, which left
+	// the client on its old built-in "dev" whenever hub-bootstrap-config had not
+	// been patched -- so a stg hub wrote its secrets into dev and read them from
+	// stg. There is no default now, and an empty value fails on the first call
+	// naming the key rather than succeeding against the wrong environment.
+	//
+	// Not fatal at startup: this operator also reconciles paths that need no
+	// Infisical at all (the hybrid home-worker join runs before the Infisical
+	// gate for exactly that reason), and INFISICAL_PROJECT_ID above already
+	// establishes that Infisical configuration can arrive after the operator does.
+	mgmtEnvironmentSlug := os.Getenv("INFISICAL_ENVIRONMENT_SLUG")
+	if mgmtEnvironmentSlug == "" {
+		setupLog.Error(fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is empty"),
+			"the hub's own secrets have no environment; every Infisical write will be "+
+				"refused until hub-bootstrap-config carries it (patched by "+
+				"manifests/environments/<slug>/patch-config.yaml)")
 	}
+	pkiInfisicalClient.EnvironmentSlug = mgmtEnvironmentSlug
 
 	secretsInfisicalClient := secrets.NewInfisicalClient(
 		baseURL,
@@ -326,9 +343,7 @@ func main() {
 		secretsProjectID,
 		orgID,
 	)
-	if envSlug := os.Getenv("INFISICAL_ENVIRONMENT_SLUG"); envSlug != "" {
-		secretsInfisicalClient.EnvironmentSlug = envSlug
-	}
+	secretsInfisicalClient.EnvironmentSlug = mgmtEnvironmentSlug
 
 	if err := (&controller.SpokePoolReconciler{
 		Client:          mgr.GetClient(),

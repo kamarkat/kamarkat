@@ -73,12 +73,37 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Non-fatal: retried on next reconcile; token rotation is time-driven.
 	}
 
+	// The spoke's OWN Infisical environment, not the hub's.
+	//
+	// Every credential below belongs to this cluster, and the spoke reads them
+	// with its own slug: 03-platform-services-appset.yaml patches the spoke's
+	// ClusterSecretStore with `index .metadata.labels "environment"`, so a hub
+	// managing a stg spoke would write to `dev` and the spoke would look in `stg`.
+	// Nothing reports that -- the ExternalSecret stays unsynced and the component
+	// waiting on the credential fails for its own reasons somewhere else.
+	//
+	// The label is on the SpokePool claim the tenant wrote
+	// (templates/workload-cluster/infrastructure/spokepool-*.yaml), which is the
+	// same declaration the composition copies onto the cluster. Missing is fatal
+	// and not defaulted: a secret written to a guessed environment is unreadable
+	// by its consumer and indistinguishable from one that was never written.
+	//
+	// Placed AFTER the home-worker join deliberately: that path is independent of
+	// Infisical and must not be blocked by an Infisical misconfiguration.
+	spokeEnvironment := spokePool.GetLabels()["environment"]
+	spokeInfisical, err := r.InfisicalClient.ForEnvironment(spokeEnvironment)
+	if err != nil {
+		logger.Error(err, "SpokePool carries no environment label; its credentials have nowhere to go",
+			"spoke", spokeName)
+		return ctrl.Result{}, fmt.Errorf("spoke %s: %w", spokeName, err)
+	}
+
 	// ADR-031: Delegate to InfisicalClient for Machine Identity lifecycle.
 	// isFirstTime is always true because EnsureInfisicalCredentials performs its own
 	// idempotency check by querying Infisical directly. Passing false would prevent
 	// credential creation for existing SpokePools whose Infisical paths are empty
 	// (e.g. first deployment of ADR-031 controller code).
-	result, err := r.InfisicalClient.EnsureInfisicalCredentials(ctx, spokeName, true)
+	result, err := spokeInfisical.EnsureInfisicalCredentials(ctx, spokeName, true)
 	if err != nil {
 		logger.Error(err, "Failed to ensure Infisical credentials for SpokePool", "spoke", spokeName)
 		if result != nil && result.Result == secrets.EnsureMissing {
@@ -94,7 +119,7 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// condition so a password deleted after provisioning triggers manual recovery
 	// rather than a silent regeneration that would desync the spoke CNPG role.
 	crossplaneIsFirstTime := !r.isStatusConditionTrue(spokePool, "CrossplaneAdminPasswordGenerated")
-	crossplaneResult, err := r.InfisicalClient.EnsureCrossplaneAdminPassword(ctx, spokeName, crossplaneIsFirstTime)
+	crossplaneResult, err := spokeInfisical.EnsureCrossplaneAdminPassword(ctx, spokeName, crossplaneIsFirstTime)
 	if err != nil {
 		logger.Error(err, "Failed to ensure crossplane-admin password for SpokePool", "spoke", spokeName)
 		if crossplaneResult == secrets.EnsureMissing {
@@ -104,16 +129,16 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Fleet credentials (S3, alert delivery) are issued outside the platform
-	// and seeded once at the Infisical root. A cell SecretStore is authorised for
-	// /spoke-pool/<cellId>/ ONLY (ADR-031), so they must be copied into the cell
+	// and seeded once at the Infisical root. A spoke's SecretStore is authorised for
+	// /spoke-pool/<clusterName>/ ONLY (ADR-031), so they must be copied into the cell
 	// path — never generated, since a fabricated key authenticates to nothing and
 	// fails at the first WAL archive instead of at the cause.
 	//
 	// Non-fatal: a spoke missing these credentials is degraded, not
 	// unprovisionable, and failing here would block the cluster lifecycle on a
 	// credential this operator may not be able to obtain.
-	if fleet, err := r.InfisicalClient.EnsureFleetCredentialsMaterialised(ctx, spokeName); err != nil {
-		logger.Error(err, "Failed to materialise fleet credentials into the cell path", "spoke", spokeName)
+	if fleet, err := spokeInfisical.EnsureFleetCredentialsMaterialised(ctx, spokeName); err != nil {
+		logger.Error(err, "Failed to materialise fleet credentials into the cluster path", "spoke", spokeName)
 	} else if len(fleet.MissingAtRoot) > 0 {
 		logger.Error(nil, "Fleet credentials absent at the Infisical root; seed them from k8-secrets/ or the consuming feature stays down",
 			"spoke", spokeName, "missing", fleet.MissingAtRoot)
@@ -125,10 +150,10 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Error(err, "Failed to ensure the spoke's log bucket", "spoke", spokeName)
 	}
 
-	// The per-cell OIDC session signing key is produced by the hub-operator's
-	// application-secret uploader (internal/infisical), which writes CellScoped
-	// mappings into /spoke-pool/<cellId>/shared. It is deliberately NOT produced
-	// here: this reconciler creates the cell's Infisical folder, and a producer
+	// The per-cluster OIDC session signing key is produced by the hub-operator's
+	// application-secret uploader (internal/infisical), which writes ClusterScoped
+	// mappings into /spoke-pool/<clusterName>/shared. It is deliberately NOT produced
+	// here: this reconciler creates the cluster's Infisical folder, and a producer
 	// that runs in the same pass races its own prerequisite.
 
 	// create bootstrap certificate for ArgoCD Agent mTLS via cert-manager (ADR-035)
@@ -188,7 +213,7 @@ func (r *SpokePoolReconciler) isStatusConditionTrue(spokePool *unstructured.Unst
 // updateStatusCondition sets CrossplaneAdminSecretGenerated and
 // CrossplaneAdminPasswordGenerated conditions on SpokePool XR.
 // CrossplaneAdminSecretGenerated tracks Machine Identity credentials at
-// /spoke-pool/<cellId>/shared/infisical-credentials (ADR-031 Cell-Based Identity
+// /spoke-pool/<clusterName>/shared/infisical-credentials (ADR-031 Cell-Based Identity
 // Topology). CrossplaneAdminPasswordGenerated tracks the platform-bootstrap
 // crossplane_admin password at /<spoke>-crossplane-admin-password.
 func (r *SpokePoolReconciler) updateStatusCondition(ctx context.Context, spokePool *unstructured.Unstructured, spokeName string, success bool, alreadyExisted bool, crossplaneResult secrets.EnsureResult) error {

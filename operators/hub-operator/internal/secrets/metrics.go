@@ -19,7 +19,12 @@ const (
 
 var (
 	// credentialStatus reflects the last observed outcome of credential
-	// validation/rotation for a cell (1.0 for the current state).
+	// validation/rotation for a cluster (1.0 for the current state).
+	//
+	// The LABEL is still named "cell" while the value in it is a cluster name.
+	// A metric label is queried by dashboards and alert rules, so renaming it is
+	// a change to observability surface rather than to internals, and belongs
+	// with whatever updates those queries -- not with a source rename.
 	credentialStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: credentialMetricsNamespace,

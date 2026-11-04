@@ -30,7 +30,7 @@ spec:
             - appId
             - scopeId
             - tier
-            - cellId
+            - clusterName
             - database
             - dbRoleName
             x-kubernetes-validations:
@@ -132,9 +132,16 @@ spec:
                 enum:
                 - starter
                 - enterprise
-              cellId:
+              # The managed cluster this tenant's workloads run on.
+              #
+              # Renamed from `cellId`: the description already said cluster
+              # name, and that is all the field ever held -- the label it was
+              # matched against is patched from the SpokePool claim's own name.
+              # A cell is a policy group (ADR-064), several per cluster, and
+              # scoped nothing here.
+              clusterName:
                 type: string
-                description: "Target Spoke Pool cluster name (e.g., 'spokepool-01')"
+                description: "The managed cluster this tenant runs on (e.g., 'nutgraf-01')"
                 pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
               database:
                 type: object

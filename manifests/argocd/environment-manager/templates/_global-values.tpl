@@ -64,8 +64,8 @@ is certainly present.
 {{- end -}}
 
 {{- /*
-environmentSlugOverride lets a caller emit the SAME global block with one key
-replaced, instead of appending a second `global:` mapping after it.
+An override lets a caller emit the SAME global block with one key replaced,
+instead of appending a second `global:` mapping after it.
 
 That distinction is not cosmetic. YAML has no merge for duplicate keys at the
 same level: a second `global:` REPLACES the first outright, so every other
@@ -82,7 +82,9 @@ resources synced and 11 pruned. Verified on nutgraf-01 2026-09-20.
 */ -}}
 {{- define "environment-manager.globalValues" -}}
 {{- /* Called either with the root context, or with
-   (dict "root" $ "environmentSlug" "<expr>") to replace that one key. */ -}}
+   (dict "root" $ "environmentSlug" "<expr>" "provider" "<expr>") to replace
+   those keys. Each is independent: a caller may override either, both or
+   neither. */ -}}
 {{- $root := .root | default . -}}
 global:
   {{- /*
@@ -97,7 +99,26 @@ global:
   {{- else }}
   environmentSlug: {{ $root.Values.environmentSlug | quote }}
   {{- end }}
+  {{- /*
+    The provider, overridable for the same reason environmentSlug is.
+    $root.Values.provider is the HUB's, and a hub manages spokes that are not
+    all what it is: ADR-075 makes on-prem capacity a capability rather than a
+    property of a box, so a hetzner spoke under a hybrid hub is a supported
+    arrangement and the reverse is too.
+    Taking the hub's value gave such a spoke the wrong half of the placement
+    pair ADR-046 11 defines -- a `workload-location` nodeSelector of on-prem
+    and a `local-path` storage class -- which does not fail: the catalogue
+    renders, the pods go Pending for want of a node carrying that label, and the
+    PVCs bind to a class whose provisioner is on machines the spoke has none of.
+    The label is published by both compositions as
+    take-along-label.capi-to-argocd.provider, from the claim's own `provider`,
+    so this reads what the cluster declares itself to be.
+  */}}
+  {{- if .provider }}
+  provider: {{ .provider }}
+  {{- else }}
   provider: {{ $root.Values.provider | quote }}
+  {{- end }}
   hubDomain: {{ include "environment-manager.hubDomain" $root | quote }}
   {{- /* ADR-108: the registrable domain session previews are served from. The
          preview-access service refuses to start without it. */}}

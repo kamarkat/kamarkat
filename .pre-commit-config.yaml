@@ -43,9 +43,9 @@ repos:
         language: system
         pass_filenames: false
         files: '(manifests/argocd/components/.*|manifests/argocd/environment-manager/.*)'
-      - id: cell-id-contract
-        name: Spoke cell-id Contract
-        entry: scripts/validate-cell-id-contract.sh
+      - id: cluster-name-contract
+        name: Spoke cluster-name Contract
+        entry: scripts/validate-cluster-name-contract.sh
         language: system
         pass_filenames: false
         files: '(manifests/argocd/environment-manager/.*|manifests/providers/.*/k8s/spokepool-.*-composition\.yaml)'

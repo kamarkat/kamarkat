@@ -76,8 +76,8 @@ func (f *fakeSecretStore) EnsureTenantFolderAndCredentials(
 	return &secrets.EnsureTenantCredentialsResult{}, nil
 }
 
-func tenantPath(cellId, appId string) string {
-	return fmt.Sprintf(secrets.InfisicalTenantPathFormat, cellId, appId)
+func tenantPath(clusterName, appId string) string {
+	return fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
 }
 
 // orangerCallsWaypoint is the fixture the chain describes: oranger declares

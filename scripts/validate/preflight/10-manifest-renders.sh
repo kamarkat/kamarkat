@@ -39,7 +39,7 @@ validate_manifest_renders() {
     # ADR-088: the tenant chart renders one APP of one TENANT, and neither
     # identifier defaults to the other. A fixture short of either reports the
     # chart broken when it is the fixture that is incomplete.
-    local ut_values=(--set tenantId=example --set appId=demo --set cellId=cell-01
+    local ut_values=(--set tenantId=example --set appId=demo --set clusterName=spoke-01
                      --set oidcIssuer=https://id.example.test)
 
     local chart

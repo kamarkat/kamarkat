@@ -30,10 +30,19 @@ tenantId: <TENANT_ID>
 # and it would be invisible in every file that relied on it.
 appId: <APP_ID>
 
-# Required. Must match the cell-id label on the spoke cluster this fleet runs on,
-# or no Application is generated for it -- deliberately: a certificate or an XR
-# for a cell that does not exist yet is a resource nothing can reconcile.
-cellId: <CELL_ID>
+# Required. The managed cluster this application runs on, by name.
+#
+# It must match a workload cluster this box declares -- a directory under
+# registry/clusters/ whose own environmentSlug is the environment above this
+# file. Both halves are checked when the declaration is read; a name with no
+# cluster behind it generates no Application at all, and an ApplicationSet that
+# generates nothing reports Healthy doing it.
+#
+# This was `cellId`, which named the same thing and said something else. A cell
+# is a policy group (ADR-064: a cluster may belong to several and receives the
+# union of their policy); this is one cluster's identity, and the label it
+# matched has always been patched from the cluster's own name.
+clusterName: <TARGET_CLUSTER>
 
 tier: starter
 

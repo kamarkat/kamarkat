@@ -23,9 +23,32 @@ func writeApp(t *testing.T, root, env, app, body string) {
 	}
 }
 
+// spokeDir declares a workload cluster: the directory the aggregate is written
+// into, plus the two facts VerifyCell reads -- the environment it serves and the
+// spoke-pool claim that tells it from the management cluster.
+//
+// Defaults to dev, because most of these tests are about grouping rather than
+// about environments, and because two spokes serving ONE environment is a
+// capability (ADR-082) rather than a case to avoid.
 func spokeDir(t *testing.T, root, name string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, RegistryDir, "clusters", name), 0o755); err != nil {
+	spokeDirIn(t, root, name, "dev")
+}
+
+func spokeDirIn(t *testing.T, root, name, environment string) {
+	t.Helper()
+	dir := filepath.Join(root, RegistryDir, "clusters", name)
+	if err := os.MkdirAll(filepath.Join(dir, "infrastructure"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	values := "clusterName: " + name + "\nenvironmentSlug: " + environment + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "values.yaml"), []byte(values), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The hydrated name, not the template's: see writeWorkloadCluster in the
+	// fleet package.
+	claim := filepath.Join(dir, "infrastructure", "spokepool.yaml")
+	if err := os.WriteFile(claim, []byte("kind: SpokePool\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -47,9 +70,9 @@ func TestAggregateGroupsHostsBySpoke(t *testing.T) {
 	root := t.TempDir()
 	spokeDir(t, root, "spoke-a")
 	spokeDir(t, root, "spoke-b")
-	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\ncellId: spoke-a\npublic:\n  hosts: [waypoint.example.test]\n")
-	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\ncellId: spoke-a\npublic:\n  hosts: [oranger.example.test]\n")
-	writeApp(t, root, "dev", "other", "tenantId: acme\nappId: other\ncellId: spoke-b\npublic:\n  hosts: [other.example.test]\n")
+	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\nclusterName: spoke-a\npublic:\n  hosts: [waypoint.example.test]\n")
+	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\nclusterName: spoke-a\npublic:\n  hosts: [oranger.example.test]\n")
+	writeApp(t, root, "dev", "other", "tenantId: acme\nappId: other\nclusterName: spoke-b\npublic:\n  hosts: [other.example.test]\n")
 
 	if _, err := AggregatePublicHosts(root); err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -79,7 +102,7 @@ func TestAggregateWritesAnEmptyFileForASpokeWithNoPublicApp(t *testing.T) {
 	// list in place forever.
 	root := t.TempDir()
 	spokeDir(t, root, "spoke-a")
-	writeApp(t, root, "dev", "internal", "tenantId: nutgraf\nappId: internal\ncellId: spoke-a\npublic:\n  hosts: []\n")
+	writeApp(t, root, "dev", "internal", "tenantId: nutgraf\nappId: internal\nclusterName: spoke-a\npublic:\n  hosts: []\n")
 
 	if _, err := AggregatePublicHosts(root); err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -93,8 +116,8 @@ func TestAggregateRefusesAHostnameClaimedTwice(t *testing.T) {
 	// One listener, two Certificates racing for it. The producer must not pick.
 	root := t.TempDir()
 	spokeDir(t, root, "spoke-a")
-	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\ncellId: spoke-a\npublic:\n  hosts: [shared.example.test]\n")
-	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\ncellId: spoke-a\npublic:\n  hosts: [shared.example.test]\n")
+	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\nclusterName: spoke-a\npublic:\n  hosts: [shared.example.test]\n")
+	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\nclusterName: spoke-a\npublic:\n  hosts: [shared.example.test]\n")
 
 	_, err := AggregatePublicHosts(root)
 	if err == nil {
@@ -106,22 +129,23 @@ func TestAggregateRefusesAHostnameClaimedTwice(t *testing.T) {
 }
 
 func TestAggregateRefusesAPublicAppWithNoSpoke(t *testing.T) {
-	// Without cellId there is no Gateway to add the listener to, and writing it
+	// Without a cluster name there is no Gateway to add the listener to, and
+	// writing it
 	// nowhere would present as a hostname that simply does not resolve.
 	root := t.TempDir()
 	spokeDir(t, root, "spoke-a")
 	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [w.example.test]\n")
 
-	if _, err := AggregatePublicHosts(root); err == nil || !strings.Contains(err.Error(), "cellId") {
-		t.Fatalf("expected a refusal naming cellId, got: %v", err)
+	if _, err := AggregatePublicHosts(root); err == nil || !strings.Contains(err.Error(), "clusterName") {
+		t.Fatalf("expected a refusal naming clusterName, got: %v", err)
 	}
 }
 
 func TestAggregateIsDeterministic(t *testing.T) {
 	root := t.TempDir()
 	spokeDir(t, root, "spoke-a")
-	writeApp(t, root, "dev", "b", "tenantId: t\nappId: b\ncellId: spoke-a\npublic:\n  hosts: [b.example.test]\n")
-	writeApp(t, root, "dev", "a", "tenantId: t\nappId: a\ncellId: spoke-a\npublic:\n  hosts: [a.example.test]\n")
+	writeApp(t, root, "dev", "b", "tenantId: t\nappId: b\nclusterName: spoke-a\npublic:\n  hosts: [b.example.test]\n")
+	writeApp(t, root, "dev", "a", "tenantId: t\nappId: a\nclusterName: spoke-a\npublic:\n  hosts: [a.example.test]\n")
 
 	if _, err := AggregatePublicHosts(root); err != nil {
 		t.Fatal(err)
@@ -133,5 +157,18 @@ func TestAggregateIsDeterministic(t *testing.T) {
 	second, _ := os.ReadFile(filepath.Join(root, RegistryDir, "clusters", "spoke-a", PublicHostsFile))
 	if string(first) != string(second) {
 		t.Error("re-running the aggregation changed the file; it would show as a diff on every run")
+	}
+}
+
+func TestAggregateRefusesACellServingAnotherEnvironment(t *testing.T) {
+	// The listener would be written into a cluster that is not the stage the
+	// application belongs to: a staging hostname published on development
+	// capacity, with both halves correct in isolation.
+	root := t.TempDir()
+	spokeDirIn(t, root, "spoke-dev", "dev")
+	writeApp(t, root, "stg", "waypoint", "tenantId: nutgraf\nappId: waypoint\nclusterName: spoke-dev\npublic:\n  hosts: [w.example.test]\n")
+
+	if _, err := AggregatePublicHosts(root); err == nil || !strings.Contains(err.Error(), "environmentSlug") {
+		t.Fatalf("expected a refusal naming the disagreeing slug, got: %v", err)
 	}
 }

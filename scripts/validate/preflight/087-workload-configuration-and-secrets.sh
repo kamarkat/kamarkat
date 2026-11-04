@@ -138,7 +138,7 @@ validate_adr087_secrets_are_grouped_per_workload() {
 
     local out
     out="$(helm template ut "$chart" \
-        --set deployXR=false --set tenantId=t --set appId=a --set cellId=c \
+        --set deployXR=false --set tenantId=t --set appId=a --set clusterName=c \
         --set oidcIssuer=https://x --set oidcJwksUrl=https://x/k \
         --set 'secrets[0].name=A' --set 'secrets[0].capability=cap-a' --set 'secrets[0].workloads[0]=one' \
         --set 'secrets[1].name=B' --set 'secrets[1].capability=cap-b' --set 'secrets[1].workloads[0]=two' \

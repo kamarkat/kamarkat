@@ -134,7 +134,7 @@ if wants static; then
         "$PLATFORM_DIR/scripts/validate-shipped-artifacts.sh"
         "$PLATFORM_DIR/scripts/validate-argocd-seed-parity.sh"
         "$PLATFORM_DIR/scripts/validate-component-descriptors.sh"
-        "$PLATFORM_DIR/scripts/validate-cell-id-contract.sh"
+        "$PLATFORM_DIR/scripts/validate-cluster-name-contract.sh"
         "$PLATFORM_DIR/scripts/validate-spokepool-compositions.sh"
         "$PLATFORM_DIR/scripts/lint-helm-values-yaml.sh"
     )

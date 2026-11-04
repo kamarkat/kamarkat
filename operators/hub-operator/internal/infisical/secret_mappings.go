@@ -437,8 +437,8 @@ type ApplicationSecretDefinition struct {
 	//                   what the value protected.
 	EscrowArtifact string
 
-	// CellScopedKey, when non-empty, ALSO produces this secret once per SpokePool at
-	// /spoke-pool/<cellId>/shared under this key name, with an independently
+	// ClusterScopedKey, when non-empty, ALSO produces this secret once per SpokePool at
+	// /spoke-pool/<clusterName>/shared under this key name, with an independently
 	// generated value. The root entry is still uploaded — it is not diverted.
 	//
 	// Both halves are load-bearing and they are not the same secret. A spoke's
@@ -454,7 +454,7 @@ type ApplicationSecretDefinition struct {
 	//
 	// Note the two spellings are deliberate, matching each consumer's ExternalSecret:
 	// kebab-case at the root, SCREAMING_SNAKE in the cell path.
-	CellScopedKey string
+	ClusterScopedKey string
 }
 
 // ApplicationSecretMappings defines all application secrets to create in Infisical
@@ -591,7 +591,7 @@ var ApplicationSecretMappings = []ApplicationSecretDefinition{
 		HexBytes: 32,
 		// agentgateway runs on the hub AND on every spoke. The hub reads the root key
 		// above; each spoke reads its own cell copy under the name below.
-		CellScopedKey: "AGENTGATEWAY_OIDC_COOKIE_SECRET",
-		Description:   "AgentGateway OIDC session cookie encryption secret (32-byte AES-256-GCM key, hex)",
+		ClusterScopedKey: "AGENTGATEWAY_OIDC_COOKIE_SECRET",
+		Description:      "AgentGateway OIDC session cookie encryption secret (32-byte AES-256-GCM key, hex)",
 	},
 }

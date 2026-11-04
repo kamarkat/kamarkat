@@ -31,7 +31,7 @@ import json, subprocess, tempfile, yaml
 UT = "manifests/tenants/charts/universal-tenant"
 TLS = "manifests/tenants/charts/tenant-public-tls"
 FIXTURE = {
-    "tenantId": "acme", "appId": "shop", "cellId": "cell-1",
+    "tenantId": "acme", "appId": "shop", "clusterName": "spoke-1",
     "oidcIssuer": "https://id.example.test",
     "issuer": "letsencrypt-staging", "externalDnsTarget": "192.0.2.10",
     "public": {"hosts": ["shop.example.test"]},

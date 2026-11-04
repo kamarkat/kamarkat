@@ -24,7 +24,7 @@ import subprocess, tempfile, yaml
 FIXTURE = {
     "tenantId": "test-tenant",
     "appId": "test-app",
-    "cellId": "cell-1",
+    "clusterName": "spoke-1",
     "oidcIssuer": "https://id.example.test",
     "gateway": {
         "enabled": True,

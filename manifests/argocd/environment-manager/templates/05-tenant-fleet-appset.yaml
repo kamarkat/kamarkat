@@ -89,7 +89,30 @@ spec:
           - clusters:
               selector:
                 matchLabels:
-                  cell-id: '{{"{{"}} .cellId {{"}}"}}'
+                  # The cluster the application names, and a WORKLOAD cluster only.
+                  #
+                  # spoke-type pins the second half. cluster-name alone would
+                  # also match the hub if anything published that label onto it,
+                  # and a tenant's workloads generated onto the control plane is
+                  # not a failure that announces itself. The platform's own
+                  # catalogue selects on spoke-type for the same reason.
+                  #
+                  # The key was `cell-id`, which has always been patched from
+                  # the cluster's own name, so placement was already by cluster
+                  # identity in the vocabulary of policy groups. A cell is the
+                  # policy group of ADR-064 and groups nothing here; both labels
+                  # are published from the same claim name, so this selector
+                  # moved without a window in which it matched nothing.
+                  #
+                  # Placement stays the application's declaration. Selecting on
+                  # `environment` instead was tried and reverted: several
+                  # clusters may serve one environment (ADR-082), and a
+                  # replacement cluster exists beside the one it replaces for as
+                  # long as the restore takes to verify (ADR-111) -- so an
+                  # environment-keyed selector would deploy every staging
+                  # application to both at once.
+                  spoke-type: pool
+                  cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
 
   template:
     metadata:
@@ -240,7 +263,10 @@ spec:
           - clusters:
               selector:
                 matchLabels:
-                  cell-id: '{{"{{"}} .cellId {{"}}"}}'
+                  # The named cluster, on a workload cluster only: see the
+                  # note in 05-tenant-fleet-appset.
+                  spoke-type: pool
+                  cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
 
   template:
     metadata:
@@ -434,7 +460,10 @@ spec:
           - clusters:
               selector:
                 matchLabels:
-                  cell-id: '{{"{{"}} .cellId {{"}}"}}'
+                  # The named cluster, on a workload cluster only: see the
+                  # note in 05-tenant-fleet-appset.
+                  spoke-type: pool
+                  cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
 
   template:
     metadata:

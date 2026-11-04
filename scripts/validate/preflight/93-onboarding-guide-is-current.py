@@ -90,7 +90,7 @@ def real_value_keys() -> set:
 
       the chart's values.yaml   what has a default
       the XRD                   what is REQUIRED and therefore has none
-                                (appId, cellId, scopeId)
+                                (appId, clusterName, scopeId)
       real fleet declarations   what a tenant repository actually writes, which
                                 is a different schema from the chart's -- `public`
                                 lives only here, and checking the chart alone

@@ -2,7 +2,7 @@
 {{- $t := include "universal-tenant.tenantId" . }}
 {{- $a := include "universal-tenant.appId" . }}
 {{- $ns := include "universal-tenant.namespace" . }}
-{{- $base := printf "/spoke-pool/%s/tenants/%s" (required "cellId must be supplied" .Values.cellId) $a }}
+{{- $base := printf "/spoke-pool/%s/tenants/%s" (required "clusterName must be supplied" .Values.clusterName) $a }}
 {{- $consumers := (.Values.identity).allowedConsumers | default list }}
 {{- $deps := (.Values.identity).backendDependencies | default list }}
 {{- /* The Credit Authority, when this application declares it (ADR-109): its

@@ -123,7 +123,7 @@ for a in json.load(sys.stdin)["items"]:
     conds = {c["type"]: c["status"] for c in a.get("status", {}).get("conditions", [])}
     if conds.get("CreditAuthorityOwner") == "True":
         s = a["spec"]
-        print(s["tenantId"], s["appId"], s["cellId"], a.get("status", {}).get("identity", {}).get("zitadelOrgId", "")); break
+        print(s["tenantId"], s["appId"], s["clusterName"], a.get("status", {}).get("identity", {}).get("zitadelOrgId", "")); break
 ')
     read -r tenant app cell declared_org <<< "$owner"
     admitted=$(kc -n "$ns" get secret credit-authority-caller -o jsonpath='{.data.CREDITS_CALLER_CLIENT_ID}' | base64 -d)

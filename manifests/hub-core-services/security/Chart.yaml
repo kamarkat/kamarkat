@@ -1,6 +1,6 @@
 apiVersion: v2
 name: platform-security-infra
-description: Infisical PKI issuers, the cert-manager approval RBAC they need, and the spoke cell-id audit policy
+description: Infisical PKI issuers, the cert-manager approval RBAC they need, and the spoke cluster-name audit policy
 type: application
 version: 0.0.0-dev
 appVersion: "0.0.0-dev"
