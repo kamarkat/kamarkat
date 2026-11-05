@@ -8,7 +8,7 @@ spec:
     ref:
       apiVersion: controlplane.cluster.x-k8s.io/v1beta1
       kind: KubeadmControlPlaneTemplate
-      name: hetzner-mgmt-control-plane-v5
+      name: hetzner-mgmt-control-plane
     machineInfrastructure:
       ref:
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -27,7 +27,7 @@ spec:
           ref:
             apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
             kind: KubeadmConfigTemplate
-            name: hetzner-mgmt-worker-bootstrap-v2
+            name: hetzner-mgmt-worker-bootstrap
         infrastructure:
           ref:
             apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -386,7 +386,7 @@ apiVersion: controlplane.cluster.x-k8s.io/v1beta1
 # material live: see docs/runbooks/encrypt-secrets-at-rest.md.
 kind: KubeadmControlPlaneTemplate
 metadata:
-  name: hetzner-mgmt-control-plane-v5
+  name: hetzner-mgmt-control-plane
   namespace: platform-capi
 spec:
   template:
@@ -735,7 +735,7 @@ spec:
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
 kind: KubeadmConfigTemplate
 metadata:
-  name: hetzner-mgmt-worker-bootstrap-v2
+  name: hetzner-mgmt-worker-bootstrap
   namespace: platform-capi
 spec:
   template:
