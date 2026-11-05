@@ -239,10 +239,14 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// The bootstrap cluster the CR declares, not a literal. These secrets carry
 		// Infisical's own database connection, so the cluster is Infisical's
 		// (Spec.Database.ClusterRef, ADR-112) and no other application's.
+		// PoolerHost, not PrimaryHost: this is Infisical's own application connection
+		// and it goes through the cluster's PgBouncer (infisical-db-pooler). The
+		// operator's role management and migrations still use PrimaryHost -- see
+		// database.Endpoint -- because those are writes that must not be pooled.
 		dbHost := database.Endpoint{
 			Cluster:   hubEnv.Spec.Database.ClusterRef,
 			Namespace: dataNamespace,
-		}.PrimaryHost()
+		}.PoolerHost()
 
 		// Create owner reference.
 		//

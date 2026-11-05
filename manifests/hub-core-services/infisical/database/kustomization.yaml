@@ -9,3 +9,4 @@ kind: Kustomization
 
 resources:
   - infisical-db.yaml
+  - infisical-db-pooler.yaml

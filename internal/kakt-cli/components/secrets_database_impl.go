@@ -314,14 +314,21 @@ func (i *Installer) InstallPostgresConnectionSecret(ctx context.Context) (bool, 
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
 			// The secret store's own cluster (ADR-112 §1, §4), declared in
-			// hub-core-services/infisical/infisical-db.yaml beside Infisical itself.
+			// hub-core-services/infisical/database/ beside Infisical itself.
 			//
-			// The PRIMARY service, not a pooler: platform-db had one and infisical-db
-			// does not. A Pooler is provisioned per cluster only where the application
-			// needs one (ADR-112 §2), and nothing has shown that Infisical does --
-			// adding one to mirror the old topology would be copying a shape rather
-			// than meeting a need.
-			"DB_HOST":     infisicalDBCluster + "-rw." + constants.NamespaceData + ".svc",
+			// The POOLER service. This comment previously said the primary, on the
+			// grounds that infisical-db had no Pooler and adding one would be copying
+			// the old topology's shape rather than meeting a need. What that reasoning
+			// missed is that the box already had a connection secret naming a pooler:
+			// written in September against the shared platform-db, never rewritten when
+			// the split landed on 2026-11-04, and still resolving a name the split had
+			// deleted. Infisical spent eight hours returning 500 on ENOTFOUND, both
+			// ClusterSecretStores reported "unable to create client", and 34 of 36
+			// ExternalSecrets failed behind them.
+			//
+			// infisical-db-pooler is declared, and this is what names it. Must match
+			// Endpoint.PoolerHost() in the hub operator, which writes this same secret.
+			"DB_HOST":     infisicalDBCluster + "-pooler." + constants.NamespaceData + ".svc",
 			"DB_PORT":     "5432",
 			"DB_USER":     "infisical",
 			"DB_PASSWORD": infPassword,

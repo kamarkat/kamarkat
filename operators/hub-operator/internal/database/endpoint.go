@@ -34,6 +34,24 @@ func (e Endpoint) PrimaryHost() string {
 	return fmt.Sprintf("%s-rw.%s.svc", e.Cluster, e.Namespace)
 }
 
+// PoolerHost is the cluster's PgBouncer service, for an APPLICATION's own connections.
+//
+// Derived from the Pooler object's name, which is <cluster>-pooler by convention --
+// infisical-db-pooler is declared in
+// manifests/hub-core-services/infisical/database/infisical-db-pooler.yaml, and CNPG
+// names the service after the object. Rename one and this breaks.
+//
+// Separate from PrimaryHost deliberately: role management and migrations above must
+// not go through PgBouncer, while a long-lived application connection benefits from
+// it. A caller choosing between them is choosing which of those it is.
+//
+// A cluster with no Pooler has no such service, and a connection to it fails as DNS
+// ENOTFOUND -- which is how Infisical failed for eight hours on 2026-11-05, pointed
+// at a pooler that the per-application split had removed.
+func (e Endpoint) PoolerHost() string {
+	return fmt.Sprintf("%s-pooler.%s.svc", e.Cluster, e.Namespace)
+}
+
 // Validate refuses an incomplete endpoint.
 //
 // Both halves are required and neither has a safe default. Defaulting the cluster would

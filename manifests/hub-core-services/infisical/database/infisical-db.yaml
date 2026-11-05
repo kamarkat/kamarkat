@@ -231,6 +231,20 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform-security
+        # infisical-db-pooler, which runs HERE in platform-data rather than in a
+        # client namespace. The pre-split platform-db-access rule admitted
+        # platform-data for exactly this reason (4a086204^,
+        # database/network-policy.yaml); the per-application policy that replaced
+        # it dropped the allowance along with the pooler, so restoring the pooler
+        # without this leaves it unable to reach the primary -- and Infisical
+        # failing behind it, with the pooler itself looking healthy.
+        #
+        # This admits any pod in platform-data on 5432, which is what the old rule
+        # did. It can be narrowed to the pooler's own pod label once those labels
+        # are confirmed on a box; nothing in this repository records them.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-data
       ports:
         - protocol: TCP
           port: 5432

@@ -1,0 +1,42 @@
+# The secret store's PgBouncer pooler.
+#
+# Restored from manifests/hub-core-services/database/platform-db-pooler.yaml as it
+# stood at 4a086204^ -- the commit that split the shared platform-db cluster into
+# one cluster per application (ADR-112) and deleted the whole database/ directory
+# with it. The pgbouncer settings below are that file's, unchanged.
+#
+# TWO FIELDS DIFFER from that copy, and both follow from the split:
+#
+#   spec.cluster.name  was platform-db, which the same commit deleted. The secret
+#                      store's database is infisical-db, declared beside this file.
+#   metadata.name      was platform-db-pooler, named for a shared cluster that no
+#                      longer exists. Every sibling is named for the cluster it
+#                      belongs to -- infisical-db-rw, zitadel-db-rw -- and all four
+#                      clusters share this namespace, so a pooler named for the
+#                      platform would occupy the one name per namespace that any
+#                      other application's pooler would also want.
+#
+# Endpoint.PoolerHost() derives the host from this name, so renaming the object
+# renames the service the connection secret points at. The two must move together.
+#
+# APPLICATION TRAFFIC ONLY. The operator's own role management and migrations keep
+# going to PrimaryHost(): they are writes, and must not be routed through PgBouncer.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: infisical-db-pooler
+  namespace: platform-data
+spec:
+  cluster:
+    name: infisical-db
+
+  instances: 1
+  type: rw
+
+  pgbouncer:
+    poolMode: session
+    parameters:
+      max_client_conn: "100"
+      default_pool_size: "25"
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "5"

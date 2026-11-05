@@ -75,7 +75,7 @@ func (c *CNPGClusterHealth) Check(ctx context.Context, kubeconfig string) error 
 // deployment that fronts the cluster's primary instance.
 //
 // External services connect to the pooler's service (e.g.,
-// platform-db-pooler.<namespace>.svc) to talk to PostgreSQL. If the
+// infisical-db-pooler.<namespace>.svc) to talk to PostgreSQL. If the
 // pooler deployment isn't available, those connections fail with
 // DNS resolution errors.
 type PgBouncerPoolerHealth struct {
