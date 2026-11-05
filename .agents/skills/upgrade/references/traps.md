@@ -22,6 +22,9 @@ happens, and what to do instead.
 - [Upgrading a component on one side only](#upgrading-a-component-on-one-side-only)
 - [Sweeping only the components that have descriptors](#sweeping-only-the-components-that-have-descriptors)
 - [Editing a constant nothing reads](#editing-a-constant-nothing-reads)
+- [Changing a Kubernetes version by editing a ClusterClass](#changing-a-kubernetes-version-by-editing-a-clusterclass)
+- [Raising a cluster's version by more than one minor](#raising-a-clusters-version-by-more-than-one-minor)
+- [A template change that only one kind rejects](#a-template-change-that-only-one-kind-rejects)
 - [A test that pins the version it should be guarding](#a-test-that-pins-the-version-it-should-be-guarding)
 - [Breaking a parity pair "temporarily"](#breaking-a-parity-pair-temporarily)
 - [Supplying a partial value for a replace-only key](#supplying-a-partial-value-for-a-replace-only-key)
@@ -234,6 +237,78 @@ caller means the real pin is elsewhere; find it, change that, and delete the
 copy rather than wiring it up — a constant with an invented consumer is a second
 authority waiting to drift. The inventory generator is a good tiebreaker: what
 it reads is what is real.
+
+## Changing a Kubernetes version by editing a ClusterClass
+
+**Looks like:** the obvious edit. The class's cloud-init is where kubelet and
+kubeadm are installed, so the version appears to live there.
+
+**Why it fails:** it is not the authority and never was. CAPI reconciles to
+`spec.topology.version`, and that is the version kubeadm is told to join as. A
+literal in the class is a second declaration of the same fact, and the two drift
+without anything noticing — on 2026-11-05 the templates said 1.35.10 while the
+cluster was still v1.31.6, because the composition's matching bump was rejected
+and nothing compared the two. The replacement control-plane node installed
+kubelet 1.35.10, could not join a 1.31.6 control plane, and never registered.
+
+The signature is quiet and misleading: `BootstrapReady=True`,
+`InfrastructureReady=True`, `NodeHealthy=False` with reason `NodeProvisioning`
+and "Waiting for a node with matching ProviderID to exist", no Node object on
+the workload cluster at all, and a release script that reports a roll in
+progress and advises waiting. It will never converge.
+
+**Instead:** change the declaration — `versions.KubernetesVersion` for the
+management cluster, the provider composition's `spec.topology.version` for a
+workload cluster. The classes derive the package version from
+`builtin.controlPlane.version` and `builtin.machineDeployment.version`. If you
+find yourself typing a Kubernetes version into a ClusterClass, that is the
+defect, not the fix.
+
+## Raising a cluster's version by more than one minor
+
+**Looks like:** one edit to `spec.topology.version`, straight to the target.
+
+**Why it fails:** the Cluster webhook refuses it outright — `spec.topology.version:
+Invalid value: "v1.35.10": version cannot be increased from "1.31.6" to
+"1.35.10"`. Worse, the refusal lands on whatever applies it rather than on the
+release: a composition carrying an impossible version applies cleanly, the
+Application goes **Synced**, and Crossplane then fails to patch the Cluster. The
+cluster simply never upgrades, while every status is green.
+
+**Instead:** check the live `spec.topology.version` before choosing the target,
+and dry-run the bump:
+
+```bash
+kubectl -n platform-capi patch cluster <name> --type merge \
+  -p '{"spec":{"topology":{"version":"vX.Y.Z"}}}' --dry-run=server
+```
+
+Then either ladder one minor at a time — each step a full control-plane and
+worker roll — or recreate the cluster, which has no skew constraint because
+creation is not an increase. For an empty or disposable cluster, recreating is
+much the smaller change; say so rather than designing a ladder nobody asked for.
+
+## A template change that only one kind rejects
+
+**Looks like:** a consistent edit across the control-plane and worker templates
+of a class, so it will land consistently.
+
+**Why it fails:** immutability is per kind. `KubeadmControlPlaneTemplate` and
+`HetznerClusterTemplate` reject any `spec.template.spec` change once they exist;
+`KubeadmConfigTemplate` accepts it. So the change lands *partially* — the config
+templates update, the control-plane template is denied, and the Application
+cannot be diffed at all. That is `ComparisonError`, not a failed sync: the
+Application never reaches Synced, every other resource in it stops converging
+too, and waiting does not help.
+
+**Instead:** dry-run each object the way ArgoCD does before releasing, and plan
+the one manual step a denial implies — the object has to be deleted so ArgoCD
+recreates it, with anything referencing the class gone first.
+
+```bash
+kustomize build <dir> | kubectl -n platform-capi apply --server-side \
+  --force-conflicts --field-manager=argocd-controller --dry-run=server -f -
+```
 
 ## A test that pins the version it should be guarding
 

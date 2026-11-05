@@ -317,6 +317,53 @@ spec:
                 }
               }
             }
+  # Kubernetes package versions are DERIVED, never declared.
+  #
+  # versions.KubernetesVersion is the one declaration. provisioner.go renders it
+  # into spec.topology.version, CAPI carries it to the control plane and to each
+  # MachineDeployment, and these patches write it onto the node that installs the
+  # packages. Control plane and workers come from DIFFERENT builtins because CAPI
+  # rolls them in sequence and their effective versions differ during an upgrade.
+  - name: controlPlaneKubernetesVersion
+    description: Write the Kubernetes version the control plane is reconciled to.
+    definitions:
+    - selector:
+        apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+        kind: KubeadmControlPlaneTemplate
+        matchResources:
+          controlPlane: true
+      jsonPatches:
+      - op: add
+        path: /spec/template/spec/kubeadmConfigSpec/files/-
+        valueFrom:
+          template: |
+            {
+              "path": "/etc/kubernetes/k8s-version",
+              "owner": "root",
+              "permissions": "0644",
+              "content": "{{ .builtin.controlPlane.version }}"
+            }
+  - name: workerKubernetesVersion
+    description: Write the Kubernetes version each MachineDeployment is reconciled to.
+    definitions:
+    - selector:
+        apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+        kind: KubeadmConfigTemplate
+        matchResources:
+          machineDeploymentClass:
+            names:
+            - default-worker
+      jsonPatches:
+      - op: add
+        path: /spec/template/spec/files/-
+        valueFrom:
+          template: |
+            {
+              "path": "/etc/kubernetes/k8s-version",
+              "owner": "root",
+              "permissions": "0644",
+              "content": "{{ .builtin.machineDeployment.version }}"
+            }
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: HetznerClusterTemplate
@@ -655,8 +702,29 @@ spec:
           - export CONTAINERD=2.4.2
           - export RUNC=1.5.2
           - export TAILSCALE=1.104.4
-          - export KUBERNETES_VERSION=1.35.10
-          - export TRIMMED_KUBERNETES_VERSION=1.35
+          # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
+          # /etc/kubernetes/k8s-version, which the controlPlaneKubernetesVersion patch on
+          # the ClusterClass writes from builtin.controlPlane.version.
+          #
+          # versions.KubernetesVersion is rendered into spec.topology.version by
+          # cluster/provisioner.go, CAPI hands that to the control plane, and the patch
+          # writes it here -- one declaration, carried to the node that installs it.
+          # A literal here was a SECOND declaration kept in step only by a test, and on
+          # 2026-11-05 the spoke copy of this arrangement drifted: templates at 1.35.10,
+          # cluster at v1.31.6, a node that installed kubelet 1.35.10 and never joined.
+          #
+          # The version arrives as a FILE, not as a patched command. CAPI rejects a
+          # jsonPatch that addresses an array element ("elements in arrays can not be
+          # accessed in a replace operation"), and appending to preKubeadmCommands would
+          # land after the apt install that needs it. cloud-init writes every file before
+          # it runs any command, so an appended file is read wherever it sits in the list.
+          #
+          # A missing file is fatal rather than defaulted. A node that guesses its own
+          # Kubernetes version is the failure this replaced.
+          - 'test -s /etc/kubernetes/k8s-version || { echo "FATAL: k8s version not injected"; exit 1; }'
+          - 'export KUBERNETES_VERSION_RAW="$(cat /etc/kubernetes/k8s-version)"'
+          - 'export KUBERNETES_VERSION="${KUBERNETES_VERSION_RAW#v}"'
+          - 'export TRIMMED_KUBERNETES_VERSION="${KUBERNETES_VERSION%.*}"'
           - ARCH="$(dpkg --print-architecture)"
           - localectl set-locale LANG=en_US.UTF-8
           - localectl set-locale LANGUAGE=en_US.UTF-8
@@ -824,8 +892,27 @@ spec:
         - set -x
         - export CONTAINERD=2.4.2
         - export RUNC=1.5.2
-        - export KUBERNETES_VERSION=1.35.10
-        - export TRIMMED_KUBERNETES_VERSION=1.35
+        # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
+        # /etc/kubernetes/k8s-version, which the workerKubernetesVersion patch on
+        # the ClusterClass writes from builtin.machineDeployment.version.
+        #
+        # builtin.machineDeployment.version, not the cluster's: CAPI rolls the control
+        # plane before the MachineDeployments, so during an upgrade the two
+        # legitimately differ and the cluster-wide value would be wrong for whichever
+        # has not moved yet.
+        #
+        # The version arrives as a FILE, not as a patched command. CAPI rejects a
+        # jsonPatch that addresses an array element ("elements in arrays can not be
+        # accessed in a replace operation"), and appending to preKubeadmCommands would
+        # land after the apt install that needs it. cloud-init writes every file before
+        # it runs any command, so an appended file is read wherever it sits in the list.
+        #
+        # A missing file is fatal rather than defaulted. A node that guesses its own
+        # Kubernetes version is the failure this replaced.
+        - 'test -s /etc/kubernetes/k8s-version || { echo "FATAL: k8s version not injected"; exit 1; }'
+        - 'export KUBERNETES_VERSION_RAW="$(cat /etc/kubernetes/k8s-version)"'
+        - 'export KUBERNETES_VERSION="${KUBERNETES_VERSION_RAW#v}"'
+        - 'export TRIMMED_KUBERNETES_VERSION="${KUBERNETES_VERSION%.*}"'
         - ARCH="$(dpkg --print-architecture)"
         - localectl set-locale LANG=en_US.UTF-8
         - localectl set-locale LANGUAGE=en_US.UTF-8

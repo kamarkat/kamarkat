@@ -81,24 +81,38 @@ last.
 
 ## The Kubernetes version chain
 
-One logical value, no owning declaration. Find every spelling before changing
-any, and re-grep afterwards:
+**There is an owning declaration now, and the node derives from it.** Until
+2026-11-05 there was not, and this section said to find every spelling and change
+them all; that is what failed. Read the chain before changing anything in it.
 
-```bash
-grep -rln "<the version>" manifests internal scripts | grep -v embedded
-```
+One declaration per cluster kind:
 
-It currently reaches: the managed ClusterClass and the management class asset
-(`KUBERNETES_VERSION` plus a trimmed `major.minor` companion, many occurrences
-each), both provider compositions, the hybrid and spoke Cilium addon payloads
-(the `kubectl` image), `node-labeler.yaml`, the flatcar provisioning script, the
-Kyverno re-vendor script's arguments, `versions.KubernetesVersion`, the Kind node
-image, a topology test, the catalog, and the `--kube-version` recorded in every
-vendored render's header.
+| Cluster | Declared in |
+| :- | :- |
+| Management | `versions.KubernetesVersion`, rendered into `spec.topology.version` by `cluster/provisioner.go` |
+| Workload | each provider composition's `spec.topology.version` (`hetzner`, `hybrid` — both move together) |
 
-A missed copy of the trimmed value sends nodes to the wrong package repository,
-which fails late and reads as unrelated. `TestKubernetesVersionParity` guards the
-constant against the class; nothing guards the rest.
+From there CAPI carries it. The ClusterClasses **derive** it: a patch writes
+`/etc/kubernetes/k8s-version` from `builtin.controlPlane.version` for the control
+plane and `builtin.machineDeployment.version` for each MachineDeployment, and
+cloud-init reads that file and strips the `v` and the patch level in shell. So
+the package version a node installs cannot disagree with the version kubeadm is
+told to join as, and the trimmed `major.minor` companion no longer exists as a
+value anyone can leave behind.
+
+**If you are editing a ClusterClass template to change a Kubernetes version,
+stop.** That is the defect being removed, not the way to do it. Change the
+declaration.
+
+What still needs sweeping, because these are genuinely independent of CAPI: the
+hybrid and spoke Cilium addon payloads (the `kubectl` image), `node-labeler.yaml`,
+the flatcar provisioning script, the Kyverno re-vendor script's arguments, the
+Kind node image, the catalog, and the `--kube-version` recorded in every vendored
+render's header.
+
+`TestKubernetesVersionHasOneDeclaration` guards the management class against a
+literal reappearing, and against either builtin stopping being referenced.
+Nothing guards the independent copies above.
 
 ## kubeadm-derived images
 
@@ -183,6 +197,6 @@ the source:
 | `scan_bundle` | every image the platform's own charts render |
 | `scan_operated` / `operated_images` | instances an operator turns into pods, against the `OPERATED` table |
 | `scan_capi_providers` | the provider CRs' `spec.version` |
-| `kubernetes_version` / `kubeadm_images` / `scan_nodes` | the ClusterClass and kubeadm's constants |
+| `declared_kubernetes_version` / `kubeadm_images` / `scan_nodes` | `versions.KubernetesVersion` and the compositions' `spec.topology.version`, then kubeadm's constants |
 | `scan_bootstrap` | `internal/*/binaries/<tool>.go` for downloaded binaries |
 | `check_seed_parity` | the Day-0 constants against what the bundle reconciles |

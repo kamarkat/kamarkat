@@ -55,11 +55,12 @@ that downloads it. Both must move, and the checksums with them.
 Some logical values are spelled in many files, with no declaration that owns
 them. These are where upgrades leak.
 
-The **Kubernetes version** is the worst: the ClusterClass and the
-management-class asset (as `KUBERNETES_VERSION` and a trimmed `major.minor`
-companion), the provider compositions, the node provisioning scripts, a CLI
-bootstrap constant, a topology test, the Kind node image, the re-vendor script
-arguments, and the `--kube-version` recorded in the header of every vendored
+The **Kubernetes version** used to be the worst of these and is no longer one of
+them: it has an owning declaration (see "Kubernetes itself" below), and the
+ClusterClasses derive it. What is still spelled independently of that
+declaration, and still leaks: the node provisioning scripts, the Kind node
+image, the re-vendor script arguments, the Cilium addon payloads' `kubectl`
+image, and the `--kube-version` recorded in the header of every vendored
 render.
 
 **Utility and sidecar images** are duplicated per provider and per side —
@@ -121,17 +122,50 @@ where the running version actually came from before proceeding.
 
 ## Kubernetes itself
 
-Set in the ClusterClass and management-class assets as shell exports in
-cloud-init (`KUBERNETES_VERSION` and a trimmed `major.minor` companion), and in
-the provider composition that names the control-plane version.
+**Declared once per cluster kind, and derived everywhere else.**
 
-Both halves move together. The trimmed value feeds package repository paths, so
-leaving it behind produces a node that installs from the wrong repository.
+| Cluster | Declaration |
+| :- | :- |
+| Management | `versions.KubernetesVersion`, which `cluster/provisioner.go` renders into `spec.topology.version` |
+| Workload | each provider composition's `spec.topology.version` (hetzner and hybrid, which must agree) |
 
-`HetznerClusterTemplate.spec` and ClusterClass templates are **immutable** once
-a cluster exists. For a new environment, editing in place is correct — it is
-rendered fresh. For an existing one, an in-place edit wedges reconciliation and
-the change has to arrive as a new-named class.
+CAPI carries that version to the control plane and to each MachineDeployment.
+The ClusterClasses patch it onto the node as `/etc/kubernetes/k8s-version`, from
+`builtin.controlPlane.version` and `builtin.machineDeployment.version`, and
+cloud-init strips the `v` and the patch level in shell. **Do not add a
+`KUBERNETES_VERSION` literal to a class.** That was the old arrangement: two
+declarations, compared to each other by a test and to nothing that CAPI acts on.
+There is no trimmed companion to leave behind any more, because it is computed.
+
+`scripts/package/inventory.py` reads the declaration, not the class, for the
+same reason. If you move a declaration, move `VERSIONS_GO` /
+`TOPOLOGY_COMPOSITIONS` with it.
+
+**The path is capped at one minor.** The Cluster webhook refuses a bigger step
+outright — `spec.topology.version: Invalid value: "v1.35.10": version cannot be
+increased from "1.31.6" to "1.35.10"` — so a multi-minor move is a ladder of
+releases, each with its own full control-plane and worker roll, or a recreated
+cluster. Decide which before editing: for an empty or disposable cluster,
+recreating is far smaller, and a fresh cluster accepts any version because
+creation is not an increase.
+
+**Template immutability binds asymmetrically, and it decides your rollout.**
+`KubeadmControlPlaneTemplate` and `HetznerClusterTemplate` reject any
+`spec.template.spec` change once the object exists; `KubeadmConfigTemplate` does
+not and takes edits in place. So a change touching both lands partially: the
+config templates update, the control-plane template is denied, and ArgoCD cannot
+diff that Application at all — `ComparisonError`, not a failed sync, and waiting
+does not help. The control-plane template has to be deleted once so ArgoCD
+recreates it, and anything referencing the class has to be gone first. Verify
+which way it will go with a dry-run before releasing:
+
+```bash
+kustomize build <dir> | kubectl -n platform-capi apply --server-side \
+  --force-conflicts --field-manager=argocd-controller --dry-run=server -f -
+```
+
+That is the exact operation ArgoCD performs to compute its diff, so an
+acceptance there is an acceptance in the sync.
 
 ## kubeadm-derived images
 
@@ -148,7 +182,10 @@ takeable.
 
 The Kubernetes node packages, the operating system and the container runtime are
 installed by cloud-init in the ClusterClass, not deployed as workloads. The OS
-image is a provider image plus whatever the node build installs.
+image is a provider image plus whatever the node build installs. The class
+*installs* the Kubernetes packages but no longer *chooses* their version — see
+"Kubernetes itself". The containerd, runc and tailscale pins are still literals
+there, and are still changed by editing the class.
 
 An OS major move is a node-image rebuild with changed package sources, not a
 version bump. Scope it separately from a component upgrade.

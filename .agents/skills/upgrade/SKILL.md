@@ -62,6 +62,12 @@ Two ceilings exist in every upgrade and they are different questions:
 "Upgrade directly" answers the path question and says nothing about the
 destination. Establish the destination first or the path is irrelevant.
 
+For the clusters themselves the path cap is one minor, and it is enforced: the
+Cluster webhook refuses a `spec.topology.version` increase that skips a minor.
+Read the live value before choosing a target, and expect either a ladder of
+releases or a recreated cluster — `references/traps.md` has both, and which is
+smaller.
+
 ## 2. Resolve real versions yourself
 
 You have `crane`, `helm`, `curl` and network access. Use them. Resolving a
@@ -117,12 +123,20 @@ be a second source of truth that drifts. Read
 it lives, and who may change it.
 
 What *is* worth knowing up front: one logical value is often spelled in many
-files. The Kubernetes version is the extreme case, appearing in the
-ClusterClass, the management-class asset, the provider compositions, node
-provisioning scripts, CLI constants, a Kind pin, re-vendor script arguments and
-the header of every vendored render. Find all of its spellings before changing
-any of them, and re-grep afterwards — a missed copy produces a node pool that
-installs from the wrong package repository, which fails late and looks unrelated.
+files. Find all of its spellings before changing any of them, and re-grep
+afterwards — a missed copy produces a node pool that installs from the wrong
+package repository, which fails late and looks unrelated.
+
+The Kubernetes version is the exception, and only since 2026-11-05: it now has
+an owning declaration and the ClusterClasses derive from it. Change
+`versions.KubernetesVersion` for the management cluster, or the provider
+composition's `spec.topology.version` for a workload cluster, and **never type a
+Kubernetes version into a ClusterClass** — a literal there is the second
+declaration that drifted and left a node which installed kubelet 1.35.10 and
+could not join a 1.31.6 control plane. Copies genuinely independent of CAPI
+remain and still need the sweep: node provisioning scripts, the Kind pin,
+re-vendor arguments, the Cilium addons' `kubectl` image, and every vendored
+render's `--kube-version` header.
 
 The short form:
 
@@ -131,7 +145,8 @@ The short form:
 | Remote chart descriptor | editing `targetRevision` |
 | Vendored chart render | re-rendering only, never by hand |
 | kubeadm-derived image | not a choice; follows the Kubernetes version |
-| Node-level package | the ClusterClass cloud-init |
+| Node-level package (containerd, runc, tailscale) | the ClusterClass cloud-init |
+| Node-level Kubernetes packages | `spec.topology.version`; the class derives them |
 | CAPI provider | its provider CR **and** the matching Go constant |
 | Crossplane package | its `Provider`/`Function` package reference |
 | Operator CR field | the CR (database image, instance image) |
@@ -216,6 +231,20 @@ is believed.
 
 ## Traps
 
+`references/traps.md` lists the failure modes that have actually cost time here
+— the ones invisible until late, the ones that report green while broken, and
+the ones that look like a finding and are not. Read it before the first edit,
+not after the first surprise.
+
+The four that have cost the most:
+
+- taking the inventory's `latest` as the target;
+- changing a Kubernetes version by editing a ClusterClass;
+- raising a cluster's version by more than one minor, which applies cleanly and
+  then silently never happens;
+- a template change that only one kind rejects, which wedges an Application's
+  diff rather than failing its sync.
+
 ## References
 
 Each covers one thing; read the one the step you are on needs.
@@ -228,11 +257,6 @@ Each covers one thing; read the one the step you are on needs.
 | `databases.md` | PostgreSQL, which is chosen per application rather than once |
 | `release-gates.md` | the gates a version change trips, and the order to fix them |
 | `traps.md` | the failure modes that have cost time here |
-
-`references/traps.md` lists the failure modes that have actually cost time here
-— the ones that are invisible until late, produce green status while being
-broken, or look like a finding and are not. Read it before the first edit, not
-after the first surprise.
 
 ## Standards
 

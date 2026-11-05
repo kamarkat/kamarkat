@@ -114,52 +114,43 @@ func TestProviderVersionsAreWellFormed(t *testing.T) {
 	}
 }
 
-// managementClassKubernetesVersion returns the KUBERNETES_VERSION and
-// TRIMMED_KUBERNETES_VERSION the management ClusterClass installs on its nodes.
-func managementClassKubernetesVersion(t *testing.T) (full, trimmed string) {
-	t.Helper()
+// TestKubernetesVersionHasOneDeclaration replaces a parity test, and inverts it.
+//
+// The management ClusterClass used to export a literal KUBERNETES_VERSION, and
+// the old test asserted it equalled versions.KubernetesVersion: two declarations
+// held level by a check. The spoke ClusterClass had the same arrangement and
+// drifted anyway, because nothing compared either copy to spec.topology.version
+// -- which is what CAPI actually tells kubeadm to join as. On 2026-11-05 the
+// templates said 1.35.10 while the cluster was v1.31.6, and the replacement
+// control-plane node installed kubelet 1.35.10, could not join a 1.31.6 control
+// plane, and never registered.
+//
+// There is one declaration now. provisioner.go renders versions.KubernetesVersion
+// into spec.topology.version, and the class derives the package version from
+// builtin.controlPlane.version and builtin.machineDeployment.version. What needs
+// guarding is therefore not equality but the absence of a second declaration.
+func TestKubernetesVersionHasOneDeclaration(t *testing.T) {
 	raw, err := assets.ReadManifest(managementClassPath)
 	if err != nil {
 		t.Fatalf("reading %s: %v", managementClassPath, err)
 	}
-	for _, m := range regexp.MustCompile(`export KUBERNETES_VERSION=(\S+)`).FindAllStringSubmatch(string(raw), -1) {
-		if full != "" && full != m[1] {
-			t.Fatalf("%s exports two different KUBERNETES_VERSION values: %q and %q",
-				managementClassPath, full, m[1])
+	class := string(raw)
+
+	// A literal is an export whose value starts with a digit, optionally v-prefixed.
+	// The derivations the class does keep -- "${KUBERNETES_VERSION_RAW#v}" and
+	// "${KUBERNETES_VERSION%.*}" -- are not literals and must stay.
+	if m := regexp.MustCompile(`export (?:TRIMMED_)?KUBERNETES_VERSION=v?[0-9]`).FindAllString(class, -1); len(m) > 0 {
+		t.Fatalf("%s declares a literal Kubernetes version (%v): the version reaches a node "+
+			"from spec.topology.version through builtin.controlPlane.version and "+
+			"builtin.machineDeployment.version, and a literal here is the second "+
+			"declaration that drift lives in", managementClassPath, m)
+	}
+
+	for _, builtin := range []string{"builtin.controlPlane.version", "builtin.machineDeployment.version"} {
+		if !strings.Contains(class, builtin) {
+			t.Fatalf("%s does not inject the Kubernetes version from %s: without it a node "+
+				"installs no kubelet at all, which is the intended failure, but it also means "+
+				"the version authority is gone", managementClassPath, builtin)
 		}
-		full = m[1]
-	}
-	for _, m := range regexp.MustCompile(`export TRIMMED_KUBERNETES_VERSION=(\S+)`).FindAllStringSubmatch(string(raw), -1) {
-		if trimmed != "" && trimmed != m[1] {
-			t.Fatalf("%s exports two different TRIMMED_KUBERNETES_VERSION values: %q and %q",
-				managementClassPath, trimmed, m[1])
-		}
-		trimmed = m[1]
-	}
-	if full == "" || trimmed == "" {
-		t.Fatalf("%s exports no KUBERNETES_VERSION or TRIMMED_KUBERNETES_VERSION", managementClassPath)
-	}
-	return full, trimmed
-}
-
-// TestKubernetesVersionParity guards the one version with no single home: the
-// constant below is rendered into the Cluster's spec.topology.version, while the
-// ClusterClass cloud-init installs kubelet and kubeadm from the apt repository
-// its own exports name. If they disagree, CAPI asks for one version and the
-// nodes come up on another -- version skew on a control plane that is being
-// created, which is both the worst time for it and the hardest place to see it.
-func TestKubernetesVersionParity(t *testing.T) {
-	full, trimmed := managementClassKubernetesVersion(t)
-
-	if got, want := KubernetesVersion, "v"+full; got != want {
-		t.Fatalf("divergence between %s and versions.go: the class installs %s, versions.go declares %s",
-			managementClassPath, want, got)
-	}
-
-	// The trimmed value builds the package repository URL, so a stale copy sends
-	// nodes to the wrong apt repository rather than failing outright.
-	if want := strings.Join(strings.Split(full, ".")[:2], "."); trimmed != want {
-		t.Fatalf("%s exports TRIMMED_KUBERNETES_VERSION=%s, which is not the major.minor of %s (%s)",
-			managementClassPath, trimmed, full, want)
 	}
 }

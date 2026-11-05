@@ -254,6 +254,65 @@ spec:
                 }
               }
             }
+  # Kubernetes package versions are DERIVED, never declared.
+  #
+  # CAPI owns the version. Cluster.spec.topology.version flows to the control
+  # plane and to each MachineDeployment, and kubeadm is told to join as that
+  # version -- so the apt packages a node installs have to come from the same
+  # authority. They were literals in the templates until 2026-11-05, drifted to
+  # 1.35.10 against a v1.31.6 cluster, and produced a control-plane node that
+  # installed kubelet 1.35.10 and could never join.
+  #
+  # Control plane and workers are patched SEPARATELY, from DIFFERENT builtins.
+  # builtin.cluster.topology.version is deliberately used for neither: CAPI rolls
+  # the control plane before the MachineDeployments, so during an upgrade the
+  # effective versions differ by design, and the cluster-wide value is wrong for
+  # whichever has not moved yet.
+  #
+  # Only the raw version is written. The templates strip the leading v and trim
+  # the minor in shell, so this needs nothing from the template engine but
+  # substitution.
+  - name: controlPlaneKubernetesVersion
+    description: Write the Kubernetes version the control plane is reconciled to.
+    definitions:
+    - selector:
+        apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+        kind: KubeadmControlPlaneTemplate
+        matchResources:
+          controlPlane: true
+      jsonPatches:
+      - op: add
+        path: /spec/template/spec/kubeadmConfigSpec/files/-
+        valueFrom:
+          template: |
+            {
+              "path": "/etc/kubernetes/k8s-version",
+              "owner": "root",
+              "permissions": "0644",
+              "content": "{{ .builtin.controlPlane.version }}"
+            }
+  - name: workerKubernetesVersion
+    description: Write the Kubernetes version each MachineDeployment is reconciled to.
+    definitions:
+    - selector:
+        apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+        kind: KubeadmConfigTemplate
+        matchResources:
+          machineDeploymentClass:
+            names:
+            - default-worker
+            - burst-worker
+      jsonPatches:
+      - op: add
+        path: /spec/template/spec/files/-
+        valueFrom:
+          template: |
+            {
+              "path": "/etc/kubernetes/k8s-version",
+              "owner": "root",
+              "permissions": "0644",
+              "content": "{{ .builtin.machineDeployment.version }}"
+            }
   variables:
   - name: region
     required: true
@@ -512,8 +571,32 @@ spec:
         - export CONTAINERD=2.4.2
         - export RUNC=1.5.2
         - export TAILSCALE=1.104.4
-        - export KUBERNETES_VERSION=1.35.10
-        - export TRIMMED_KUBERNETES_VERSION=1.35
+        # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
+        # /etc/kubernetes/k8s-version, which the controlPlaneKubernetesVersion patch on the
+        # ClusterClass writes from builtin.controlPlane.version -- the version CAPI
+        # actually tells kubeadm to join as.
+        #
+        # A literal here was a second source of truth, and on 2026-11-05 the two
+        # disagreed: the templates said 1.35.10 while Cluster.spec.topology.version was
+        # still v1.31.6 (the composition's bump is rejected outright -- "version cannot
+        # be increased from 1.31.6 to 1.35.10", four minors in one step). The node
+        # installed kubelet 1.35.10, could not join a 1.31.6 control plane, never
+        # registered, and the KCP roll stalled on NodeHealthy=False / NodeProvisioning
+        # with nothing naming the cause.
+        #
+        # The version arrives as a FILE, not as a patched command. CAPI rejects a
+        # jsonPatch that addresses an array element ("elements in arrays can not be
+        # accessed in a replace operation"), and appending to preKubeadmCommands would
+        # land after the apt install that needs it. cloud-init writes every file before
+        # it runs any command, so an appended file is read correctly wherever it sits in
+        # the list -- the same mechanism secretEncryptionConfig uses for enc.yaml.
+        #
+        # A missing file is fatal rather than defaulted. A node that guesses its own
+        # Kubernetes version is the failure this replaced.
+        - 'test -s /etc/kubernetes/k8s-version || { echo "FATAL: k8s version not injected"; exit 1; }'
+        - 'export KUBERNETES_VERSION_RAW="$(cat /etc/kubernetes/k8s-version)"'
+        - 'export KUBERNETES_VERSION="${KUBERNETES_VERSION_RAW#v}"'
+        - 'export TRIMMED_KUBERNETES_VERSION="${KUBERNETES_VERSION%.*}"'
         - ARCH="$(dpkg --print-architecture)"
         - localectl set-locale LANG=en_US.UTF-8
         - localectl set-locale LANGUAGE=en_US.UTF-8
@@ -730,8 +813,30 @@ spec:
       - export CONTAINERD=2.4.2
       - export RUNC=1.5.2
       - export TAILSCALE=1.104.4
-      - export KUBERNETES_VERSION=1.35.10
-      - export TRIMMED_KUBERNETES_VERSION=1.35
+      # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
+      # /etc/kubernetes/k8s-version, which the workerKubernetesVersion patch on the
+      # ClusterClass writes from builtin.machineDeployment.version -- the version CAPI
+      # actually tells kubeadm to join as.
+      #
+      # This is THIS MachineDeployment's version, not the cluster's. CAPI rolls the
+      # control plane before the MachineDeployments, so during an upgrade the two
+      # legitimately differ; the cluster-wide value would hand a worker a version its
+      # own MachineDeployment has not moved to yet. See spokepool-control-plane for
+      # the incident that produced this rule.
+      #
+      # The version arrives as a FILE, not as a patched command. CAPI rejects a
+      # jsonPatch that addresses an array element ("elements in arrays can not be
+      # accessed in a replace operation"), and appending to preKubeadmCommands would
+      # land after the apt install that needs it. cloud-init writes every file before
+      # it runs any command, so an appended file is read correctly wherever it sits in
+      # the list -- the same mechanism secretEncryptionConfig uses for enc.yaml.
+      #
+      # A missing file is fatal rather than defaulted. A node that guesses its own
+      # Kubernetes version is the failure this replaced.
+      - 'test -s /etc/kubernetes/k8s-version || { echo "FATAL: k8s version not injected"; exit 1; }'
+      - 'export KUBERNETES_VERSION_RAW="$(cat /etc/kubernetes/k8s-version)"'
+      - 'export KUBERNETES_VERSION="${KUBERNETES_VERSION_RAW#v}"'
+      - 'export TRIMMED_KUBERNETES_VERSION="${KUBERNETES_VERSION%.*}"'
       - ARCH="$(dpkg --print-architecture)"
       - localectl set-locale LANG=en_US.UTF-8
       - localectl set-locale LANGUAGE=en_US.UTF-8
@@ -946,8 +1051,30 @@ spec:
       - export CONTAINERD=2.4.2
       - export RUNC=1.5.2
       - export TAILSCALE=1.104.4
-      - export KUBERNETES_VERSION=1.35.10
-      - export TRIMMED_KUBERNETES_VERSION=1.35
+      # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
+      # /etc/kubernetes/k8s-version, which the workerKubernetesVersion patch on the
+      # ClusterClass writes from builtin.machineDeployment.version -- the version CAPI
+      # actually tells kubeadm to join as.
+      #
+      # This is THIS MachineDeployment's version, not the cluster's. CAPI rolls the
+      # control plane before the MachineDeployments, so during an upgrade the two
+      # legitimately differ; the cluster-wide value would hand a worker a version its
+      # own MachineDeployment has not moved to yet. See spokepool-control-plane for
+      # the incident that produced this rule.
+      #
+      # The version arrives as a FILE, not as a patched command. CAPI rejects a
+      # jsonPatch that addresses an array element ("elements in arrays can not be
+      # accessed in a replace operation"), and appending to preKubeadmCommands would
+      # land after the apt install that needs it. cloud-init writes every file before
+      # it runs any command, so an appended file is read correctly wherever it sits in
+      # the list -- the same mechanism secretEncryptionConfig uses for enc.yaml.
+      #
+      # A missing file is fatal rather than defaulted. A node that guesses its own
+      # Kubernetes version is the failure this replaced.
+      - 'test -s /etc/kubernetes/k8s-version || { echo "FATAL: k8s version not injected"; exit 1; }'
+      - 'export KUBERNETES_VERSION_RAW="$(cat /etc/kubernetes/k8s-version)"'
+      - 'export KUBERNETES_VERSION="${KUBERNETES_VERSION_RAW#v}"'
+      - 'export TRIMMED_KUBERNETES_VERSION="${KUBERNETES_VERSION%.*}"'
       - ARCH="$(dpkg --print-architecture)"
       - localectl set-locale LANG=en_US.UTF-8
       - localectl set-locale LANGUAGE=en_US.UTF-8

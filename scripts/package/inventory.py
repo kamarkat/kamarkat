@@ -75,6 +75,20 @@ APPSETS = "manifests/argocd/environment-manager/templates/0*-*.yaml"
 MANAGEMENT_CLASS = "internal/assets/manifests/classes/hetzner-mgmt-ubuntu-v1.yaml"
 MANAGED_CLASS = "manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml"
 
+# Where the Kubernetes version is DECLARED, per cluster kind.
+#
+# Until 2026-11-05 the ClusterClasses exported it in cloud-init and this module
+# read it from there. They now derive it from spec.topology.version through
+# builtin.controlPlane.version and builtin.machineDeployment.version, so a class
+# carries no version to read -- reading the derivation yields the string
+# "${KUBERNETES_VERSION_RAW#v}", which this module would have taken to
+# raw.githubusercontent.com as a Kubernetes tag.
+VERSIONS_GO = "internal/kakt-cli/versions/versions.go"
+TOPOLOGY_COMPOSITIONS = (
+    "manifests/providers/hetzner/k8s/spokepool-hetzner-composition.yaml",
+    "manifests/providers/hybrid/k8s/spokepool-hybrid-composition.yaml",
+)
+
 # What the CLI applies to the hetzner management cluster itself, outside GitOps
 # (internal/kakt-cli/bootstrap/driver_hetzner.go: CiliumAddonPath, the CCM
 # addon, the CSI catalog entry, and the Cluster API operator).
@@ -483,7 +497,7 @@ def scan_upstream_charts(inv: Inventory, repo: Path, cache: Path, helm: str) -> 
     Rendered against the management cluster's Kubernetes version: helm otherwise
     checks a chart's kubeVersion against its own built-in default, which is older
     than any cluster the platform creates."""
-    kube = kubernetes_version(repo / MANAGEMENT_CLASS)
+    kube = declared_kubernetes_version(repo, "management")
     versions = {}
     for c in upstream_charts(repo):
         versions[c["chart"]] = c["version"]
@@ -586,10 +600,19 @@ def node_commands(cfg: dict) -> list[str]:
             if isinstance(c, str)]
 
 
-def scan_node_packages(inv: Inventory, cluster: str, commands: list[str], nodes: set[str], where: str) -> None:
+def scan_node_packages(inv: Inventory, cluster: str, commands: list[str], nodes: set[str],
+                       where: str, kube: str) -> None:
     """Every package a node installs: versioned downloads, apt packages, and
     downloads with no version, which are listed as unpinned."""
     env = dict(re.findall(r"export ([A-Z_]+)=(\S+)", "\n".join(commands)))
+    # The Kubernetes version is injected by a ClusterClass patch at topology
+    # reconcile, so the exports above resolve it only to the shell that reads the
+    # injected file. Seed the declared value: the apt line pins kubelet, kubeadm
+    # and kubectl to "$KUBERNETES_VERSION-*", and the repository path to the
+    # trimmed major.minor.
+    env["KUBERNETES_VERSION_RAW"] = "v" + kube
+    env["KUBERNETES_VERSION"] = kube
+    env["TRIMMED_KUBERNETES_VERSION"] = ".".join(kube.split(".")[:2])
     for cmd in commands:
         for url in re.findall(r"https?://[^\s'\"|>]+", cmd):
             if "169.254.169.254" in url or url.endswith((".key", "sha256sum")) or ".sha256" in url:
@@ -620,14 +643,35 @@ def scan_node_packages(inv: Inventory, cluster: str, commands: list[str], nodes:
                         cluster=cluster, nodes=nodes, where=where)
 
 
-def kubernetes_version(class_path: Path) -> str:
-    """The Kubernetes version a ClusterClass's control plane nodes install."""
-    cp, _, _ = class_templates(class_path)
-    env = dict(re.findall(r"export ([A-Z_]+)=(\S+)",
-                          "\n".join(node_commands(cp["spec"]["template"]["spec"]["kubeadmConfigSpec"]))))
-    if "KUBERNETES_VERSION" not in env:
-        sys.exit(f"inventory: {class_path} sets no KUBERNETES_VERSION for its control plane")
-    return env["KUBERNETES_VERSION"]
+def declared_kubernetes_version(repo: Path, cluster: str) -> str:
+    """The Kubernetes version a cluster kind declares, without its leading v.
+
+    The management cluster declares it as a Go constant, which provisioner.go
+    renders into spec.topology.version. A workload cluster declares it in its
+    provider composition's spec.topology.version. Either way it is the version
+    CAPI reconciles to -- which is what kubeadm joins as, and therefore what the
+    node packages have to be. The ClusterClass derives it and declares nothing.
+    """
+    if cluster == "management":
+        m = re.search(r'KubernetesVersion\s*=\s*"v?([0-9]+\.[0-9]+\.[0-9]+)"',
+                      (repo / VERSIONS_GO).read_text())
+        if not m:
+            sys.exit(f"inventory: {VERSIONS_GO} declares no KubernetesVersion")
+        return m.group(1)
+
+    # Each composition carries exactly one `version:` key, its topology version.
+    found = {}
+    for rel in TOPOLOGY_COMPOSITIONS:
+        versions = re.findall(r"^\s*version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)\s*$",
+                              (repo / rel).read_text(), re.M)
+        if len(versions) != 1:
+            sys.exit(f"inventory: {rel} sets {len(versions)} spec.topology.version "
+                     f"values; expected exactly one")
+        found[rel] = versions[0]
+    if len(set(found.values())) != 1:
+        sys.exit("inventory: provider compositions declare different Kubernetes versions: "
+                 + ", ".join(f"{r}={v}" for r, v in sorted(found.items())))
+    return next(iter(found.values()))
 
 
 def kubeadm_images(version: str, cache: Path) -> list[str]:
@@ -666,12 +710,14 @@ def kubeadm_images(version: str, cache: Path) -> list[str]:
 
 def scan_nodes(inv: Inventory, repo: Path, cache: Path) -> None:
     for cluster, rel in (("management", MANAGEMENT_CLASS), ("managed", MANAGED_CLASS)):
+        version = declared_kubernetes_version(repo, cluster)
         cp, cp_machine, workers = class_templates(repo / rel)
         cp_cmds = node_commands(cp["spec"]["template"]["spec"]["kubeadmConfigSpec"])
-        scan_node_packages(inv, cluster, cp_cmds, {CP}, "control plane")
+        scan_node_packages(inv, cluster, cp_cmds, {CP}, "control plane", version)
         machines = [(cp_machine, {CP}, "control plane")]
         for cls, tpl, machine in workers:
-            scan_node_packages(inv, cluster, node_commands(tpl["spec"]["template"]["spec"]), {WORKER}, cls)
+            scan_node_packages(inv, cluster, node_commands(tpl["spec"]["template"]["spec"]), {WORKER}, cls,
+                               version)
             machines.append((machine, {WORKER}, cls))
         for machine, nodes, where in machines:
             image = machine["spec"]["template"]["spec"]["imageName"]
@@ -679,7 +725,6 @@ def scan_nodes(inv: Inventory, repo: Path, cache: Path) -> None:
             inv.add(kind="os", key=f"os:{os_name}", name=os_name, version=os_version or image,
                     cluster=cluster, nodes=nodes, where=where)
 
-        version = kubernetes_version(repo / rel)
         no_proxy = any("delete daemonset -n kube-system kube-proxy" in c for c in cp_cmds)
         for ref in kubeadm_images(version, cache):
             name = split_ref(ref)[0].rsplit("/", 1)[-1]

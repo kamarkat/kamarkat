@@ -6,18 +6,23 @@ const (
 
 	// Kubernetes
 	//
-	// Rendered into spec.topology.version of the management cluster's Cluster
-	// object (cluster/provisioner.go), which asks CAPI for a control plane at
-	// this version.
+	// THIS IS THE DECLARATION, for the management cluster. cluster/provisioner.go
+	// renders it into spec.topology.version of the Cluster object, CAPI hands that
+	// version to the control plane and to each MachineDeployment, and the
+	// ClusterClass writes it onto the node from builtin.controlPlane.version and
+	// builtin.machineDeployment.version -- which is the apt version kubelet and
+	// kubeadm are installed at. One declaration, carried to the thing that acts on
+	// it. (A workload cluster declares its own in the provider composition's
+	// spec.topology.version; the same derivation carries it from there.)
 	//
-	// The AUTHORITY is the management ClusterClass, whose cloud-init exports
-	// KUBERNETES_VERSION and a trimmed major.minor companion -- those install
-	// kubelet and kubeadm from the matching apt repository. This constant must
-	// equal them, because a mismatch creates a cluster whose topology declares
-	// one version while its nodes install another: skew on a brand-new control
-	// plane, at Day-0, on the cluster everything else is built from.
+	// The class used to export KUBERNETES_VERSION itself, with this constant held
+	// equal to it by a test. That is the arrangement the spoke class still had when
+	// it drifted on 2026-11-05: templates at 1.35.10, cluster at v1.31.6, and a
+	// replacement control-plane node that installed kubelet 1.35.10, could not join
+	// a 1.31.6 control plane, and never registered. Two literals compared to each
+	// other, and neither compared to the version CAPI was reconciling to.
 	//
-	// TestKubernetesVersionParity asserts the equality.
+	// TestKubernetesVersionHasOneDeclaration asserts the class declares none.
 	KubernetesVersion = "v1.35.10"
 
 	// CAPI Core
