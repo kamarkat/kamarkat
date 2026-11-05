@@ -138,6 +138,7 @@ through the normal path, then release again.
 
 | Message says | State | Do |
 | :- | :- | :- |
+| `these clusters do not pull the bundle from ghcr.io/<owner>/charts` | A tenant `bundle.yaml` names another registry; nothing published | Fix its environment-manager `repoURL` in `GITOPS_DIR`, push, run again |
 | `publish failed — nothing has been promoted` | Version possibly partly pushed | Fix the cause; release the **next** version |
 | `version … is already published` | Consumed | Release the next version |
 | `<v> IS PUBLISHED but not promoted` | Registry has it, git does not | Resolve in `GITOPS_DIR`, push. Do not re-publish |

@@ -145,6 +145,23 @@ $(grep -H '^environmentRevision:' registry/clusters/*/values.yaml)
   fi
   note "tenant runs: $RUNNING"
 
+  # Every cluster must pull the bundle from the registry this release publishes
+  # to. Promotion rewrites the version and nothing else, so a bundle.yaml still
+  # naming another registry is promoted to a version that registry does not hold:
+  # ArgoCD cannot pull it and every Application stays on the old version. That
+  # shipped twice (rc.189, rc.190) after the platform's registry moved.
+  WANT_REGISTRY="ghcr.io/${OWNER}/charts"
+  WRONG=""
+  for f in registry/clusters/*/bundle.yaml; do
+    got="$(awk '/repoURL:/ {u=$NF} /chart: environment-manager/ {print u; exit}' "$f")"
+    [ "$got" = "$WANT_REGISTRY" ] || WRONG="$WRONG
+     $f: ${got:-no environment-manager chart source}"
+  done
+  [ -z "$WRONG" ] || die "these clusters do not pull the bundle from $WANT_REGISTRY, where $VERSION is published:$WRONG
+   Set their environment-manager repoURL to $WANT_REGISTRY, commit and push, then re-run.
+   Nothing has been published."
+  note "every cluster pulls from $WANT_REGISTRY"
+
   # Refuse to reuse a version. A republished tag with different content is the one
   # failure GitOps cannot diagnose: every reference still resolves, and the box
   # runs something other than what the reference names.
