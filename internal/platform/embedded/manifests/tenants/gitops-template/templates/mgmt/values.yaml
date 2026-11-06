@@ -103,10 +103,11 @@ subdomain: <SUBDOMAIN>
 # it made on-prem hardware a precondition for the simplest box the platform can
 # build. Set 0 to run on on-prem capacity alone, or raise it for more cloud.
 #
-# Changing this here is the supported way to scale. Nothing does it for you: a
-# node briefly unreachable should not answer with a bill. Day-0 records the full
-# topology at clusters/<name>/generated/hub-cluster.yaml and your own control
-# plane reconciles it.
+# Day-0 reads this once, to size the cluster it creates, and records the full
+# topology at clusters/<name>/generated/hub-cluster.yaml. After that, changing
+# this value changes nothing. To scale, edit the worker replicas in that file and
+# commit: your own control plane reconciles it. Nothing scales it for you, so a
+# node briefly unreachable does not answer with a bill.
 workers: <WORKER_COUNT>
 
 

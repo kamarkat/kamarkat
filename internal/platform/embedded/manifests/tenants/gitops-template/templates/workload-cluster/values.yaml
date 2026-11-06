@@ -1,7 +1,15 @@
-# Configuration for the spoke cluster <CLUSTER_NAME>.
+# What this cluster was declared as -- the RECORD of it, not its controls.
 #
-# Copy this directory to clusters/<name>/, replace the tokens, and commit. Your
-# control plane provisions the cluster and reconciles what runs on it.
+# Nothing renders from this file. The chart reads the management cluster's
+# values.yaml, applications declare themselves in environments/<env>/<app>/, and
+# what this cluster actually runs is its claim, infrastructure/spokepool.yaml. So
+# every value here is read by people and by the CLI, and editing one changes
+# nothing on the cluster by itself; the per-value notes below say where the
+# control is.
+#
+# It is kept because a cluster that is only a claim cannot say who owns it, which
+# stage it serves, or what it was sized as -- and `kakt tenant add-cluster` has
+# all three at declaration time.
 # The tenant that owns this cluster (ADR-064). Written here rather than inferred
 # from the repository name because a cluster instance names exactly one owning
 # tenant, and a validator cannot assert that about a fact it has to guess.
@@ -39,33 +47,28 @@ environmentSlug: <ENVIRONMENT>
 provider: <CLOUD_PROVIDER>
 region: <CLOUD_REGION>
 environmentRevision: <BUNDLE_VERSION>
-# The ACME issuer this environment's public certificates come from.
+# The ACME issuer this cluster's public certificates come from, as declared.
 #
-# Written by scaffolding rather than defaulted by the chart: an empty issuer
-# yields an ApplicationSet that applies cleanly and a child Application that
-# cannot render, which ArgoCD reports as Healthy while managing nothing.
+# The issuer in force is the box's: boundary 06 reads the management cluster's
+# `publicTlsIssuer`, because one ArgoCD serves every cluster in the repository.
 publicTlsIssuer: <PUBLIC_TLS_ISSUER>
-# Cloud worker nodes this cluster runs.
+# Cloud worker nodes this cluster was declared with, as `kakt tenant add-cluster
+# --workers` set them.
 #
-# Zero in development by default: that environment's capacity is meant to come
-# from nodes on your own premises (ADR-075). Raise it if you have none, or to add
-# cloud capacity when an on-prem node leaves.
-#
-# Changing this here is the supported way to scale. Nothing does it for you: a
-# node briefly unreachable should not answer with a bill. Day-0 records the full
-# topology at clusters/<name>/generated/hub-cluster.yaml and your own control
-# plane reconciles it.
+# A record, not the control. The count the cluster runs is nodePool.count in
+# infrastructure/spokepool.yaml; to scale, edit that and commit.
+# Nothing scales it for you, so a node briefly unreachable does not answer with
+# a bill. A hybrid cluster buys no cloud workers: its capacity is the machines
+# listed in that same file.
 workers: <WORKER_COUNT>
 
 
 
 platformRepoURL: <PLATFORM_REPO_URL>
 
-# This repository. It holds this box's cluster declarations and its per-tenant
-# values under environments/<env>/values.yaml, and boundaries 05 and 06 read
-# it (ADR-062). Written here because it is a fact true of this box and no other;
-# the chart carries no default, so a box that omits it refuses to render rather
-# than silently reading someone else's repository.
+# This repository, recorded for the same reason as the rest of this file. It is
+# the management cluster's own values.yaml that boundaries 05 and 06 read it from
+# (ADR-062), and the chart refuses to render without it there.
 instanceRepoURL: <GITOPS_REPO_URL>
 
 # Cells group this tenant's clusters for policy (ADR-064). A cell is a label:

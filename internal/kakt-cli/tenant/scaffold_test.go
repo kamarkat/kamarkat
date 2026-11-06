@@ -49,8 +49,14 @@ func TestRender_RetainedTemplateKeepsPerClusterTokens(t *testing.T) {
 	// Asserted per file, because the two carry different cluster facts: the
 	// Application names the cluster, and the values file describes where it runs.
 	for f, tokens := range map[string][]string{
-		"bundle.yaml": {"<CLUSTER_NAME>", "<BUNDLE_VERSION>"},
-		"values.yaml": {"<ENVIRONMENT>", "<CLOUD_PROVIDER>", "<CLOUD_REGION>"},
+		// bundle.yaml is gone from this template: a managed cluster's platform
+		// comes from the hub's boundary ApplicationSets, and the Application that
+		// used to be here pulled a chart whose ApplicationSets a managed cluster
+		// has no controller for. The two Applications that remain are the ones the
+		// management cluster holds for it.
+		"infrastructure-app.yaml": {"<CLUSTER_NAME>"},
+		"generated-app.yaml":      {"<CLUSTER_NAME>"},
+		"values.yaml":             {"<ENVIRONMENT>", "<CLOUD_PROVIDER>", "<CLOUD_REGION>", "<BUNDLE_VERSION>"},
 	} {
 		got := read(t, dst, "templates", "workload-cluster", f)
 		for _, token := range tokens {
@@ -68,7 +74,7 @@ func TestRender_RetainedTemplateKeepsPerClusterTokens(t *testing.T) {
 // tenant should never have to supply its own repository URL to add one.
 func TestRender_RetainedTemplateHasTenantFactsFilled(t *testing.T) {
 	dst := render(t, testSpec())
-	got := read(t, dst, "templates", "workload-cluster", "bundle.yaml")
+	got := read(t, dst, "templates", "workload-cluster", "generated-app.yaml")
 	if !strings.Contains(got, "https://github.com/acme-inc/acme-gitops") {
 		t.Error("retained template does not name the tenant's own repository")
 	}

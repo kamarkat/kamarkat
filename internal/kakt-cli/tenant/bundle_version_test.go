@@ -11,71 +11,72 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A cluster's declaration must tell the chart which version it is, not only which
-// version to pull.
+// A managed cluster's template declares no platform chart, and must not start
+// declaring one again.
 //
-// targetRevision selects the chart; bundleVersion tells that chart what it is. The
-// chart cannot infer it -- its own Chart.version is rewritten at package time and
-// its default is "development" -- so a declaration that omits it leaves a released
-// cluster in development mode, sourcing every boundary from the platform's git
-// repository instead of the distribution it was published in. The failure is not
-// loud: the ApplicationSets render, their git generator cannot resolve, and the
-// bootstrap stops at "0 of 3 Applications generated".
-func TestClusterDeclarationTellsTheChartItsVersion(t *testing.T) {
+// It used to: templates/workload-cluster/bundle.yaml was an Application named
+// <cluster>-platform that pulled the environment-manager chart with the managed
+// cluster as its destination. Two things were wrong with it, and the second is
+// why this test asserts absence rather than correctness.
+//
+// Nothing ever applied it. It was hydrated into registry/clusters/<cluster>/, and
+// no Application covers that path -- the management cluster's root applies its
+// OWN directory with recurse: false -- so the object was in git on every box and
+// on no cluster.
+//
+// And it could not have worked where it was aimed. environment-manager renders
+// ApplicationSets; a managed cluster runs Argo CD core, which is repo-server and
+// application-controller with no ApplicationSet controller, so the objects would
+// have landed somewhere nothing expands them. What installs the platform on a
+// managed cluster is the hub's own boundary ApplicationSets, selecting it by the
+// `spoke-type: pool` label the SpokePool composition writes onto its Argo CD
+// cluster Secret.
+//
+// The management cluster's own bundleVersion contract is asserted by
+// TestDevelopmentModeLeavesTheReleasedDeclarationIntact below.
+func TestWorkloadClusterTemplateDeclaresNoPlatformChart(t *testing.T) {
 	root := repoRootForTest(t)
-	base := filepath.Join(root, "manifests", "tenants", "gitops-template", "templates")
+	dir := filepath.Join(root, "manifests", "tenants", "gitops-template", "templates", "workload-cluster")
 
-	// The control plane's chart source is rendered by scaffolding rather than
-	// written literally, so its declaration is asserted against the rendered
-	// output by TestDevelopmentModeLeavesTheReleasedDeclarationIntact. This checks
-	// the template a tenant hydrates by hand, which must stay literal.
-	for _, kind := range []string{"workload-cluster"} {
-		path := filepath.Join(base, kind, "bundle.yaml")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("%s: %v", kind, err)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
 		var app struct {
+			Kind string `yaml:"kind"`
 			Spec struct {
 				Sources []struct {
-					Chart          string `yaml:"chart"`
-					TargetRevision string `yaml:"targetRevision"`
-					Helm           struct {
-						Parameters []struct {
-							Name  string `yaml:"name"`
-							Value string `yaml:"value"`
-						} `yaml:"parameters"`
-					} `yaml:"helm"`
+					Chart string `yaml:"chart"`
 				} `yaml:"sources"`
+				Source struct {
+					Chart string `yaml:"chart"`
+				} `yaml:"source"`
 			} `yaml:"spec"`
 		}
 		if err := yaml.Unmarshal(raw, &app); err != nil {
-			t.Errorf("%s: parse: %v", kind, err)
+			t.Fatalf("%s: parse: %v", e.Name(), err)
+		}
+		if app.Kind != "Application" {
 			continue
 		}
-
-		var found bool
+		charts := []string{app.Spec.Source.Chart}
 		for _, src := range app.Spec.Sources {
-			if src.Chart != "environment-manager" {
-				continue
-			}
-			for _, p := range src.Helm.Parameters {
-				if p.Name != "bundleVersion" {
-					continue
-				}
-				found = true
-				// The two must be the same token, or a promotion that moves one
-				// leaves the cluster claiming a version it is not running.
-				if p.Value != src.TargetRevision {
-					t.Errorf("%s: bundleVersion is %q but targetRevision is %q; "+
-						"they must be the same value", kind, p.Value, src.TargetRevision)
-				}
-			}
+			charts = append(charts, src.Chart)
 		}
-		if !found {
-			t.Errorf("%s/bundle.yaml does not pass bundleVersion to the chart, so a "+
-				"released cluster would render in development mode", kind)
+		for _, chart := range charts {
+			if chart != "" {
+				t.Errorf("%s declares chart %q: a managed cluster has no ApplicationSet "+
+					"controller to render it, and nothing applies an Application left in "+
+					"the cluster's own directory", e.Name(), chart)
+			}
 		}
 	}
 }

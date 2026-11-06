@@ -46,6 +46,7 @@ func newTenantCmd() *cobra.Command {
 	cmd.AddCommand(newTenantScaffoldCmd())
 	cmd.AddCommand(newTenantSetGitopsTokenCmd())
 	cmd.AddCommand(newAddWorkloadClusterCmd())
+	cmd.AddCommand(newRemoveWorkloadClusterCmd())
 	cmd.AddCommand(newAddAppCmd())
 	return cmd
 }
@@ -295,7 +296,7 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--workers %d is not applicable on hybrid: a hybrid cluster runs on "+
 			"the nodes on your own premises and buys none (ADR-075).\n\n"+
 			"Its capacity is the home-workers list in "+
-			"registry/clusters/%s/infrastructure/spokepool-hybrid.yaml, which you fill in with "+
+			"registry/clusters/%s/infrastructure/spokepool.yaml, which you fill in with "+
 			"your own hardware and provision with scripts/hybrid/provision-flatcar-worker.sh.\n\n"+
 			"Re-run without --workers, then edit that list", workloadClusterWorkers, workloadCluster.Name)
 	case workloadCluster.Provider == "hybrid":
@@ -320,7 +321,7 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		fmt.Println("  home-workers: '[]'. Until you name real hardware there, its only node is")
 		fmt.Println("  a tainted control plane: every workload pends, ArgoCD's sync waves never")
 		fmt.Println("  go Healthy, and bootstrap fails much later reporting a missing database.")
-		fmt.Printf("  Edit registry/clusters/%s/infrastructure/spokepool-hybrid.yaml, then run\n",
+		fmt.Printf("  Edit registry/clusters/%s/infrastructure/spokepool.yaml, then run\n",
 			workloadCluster.Name)
 		fmt.Println("  scripts/hybrid/provision-flatcar-worker.sh for each node.")
 	}

@@ -88,15 +88,10 @@ func runSpokeTeardown(cmd *cobra.Command, args []string) error {
 		Debug:       debug,
 	}
 
-	if err := orchestrator.Run(ctx); err != nil {
-		return fmt.Errorf("spoke teardown failed: %w", err)
-	}
-
-	if spokeClusterName != "" {
-		fmt.Printf("\n✓ Spoke Cluster '%s' successfully torn down\n", spokeClusterName)
-	} else {
-		fmt.Println("\n✓ All Spoke Clusters successfully torn down")
-	}
-
-	return nil
+	// The orchestrator reports the outcome, because it is the only thing that
+	// knows which one happened. This printed "✓ successfully torn down" on every
+	// nil error -- including a cluster that was never found and a delete that
+	// failed -- so the one line the operator reads said the servers were gone
+	// whether or not they were.
+	return orchestrator.Run(ctx)
 }

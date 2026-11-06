@@ -46,7 +46,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 // gracefulDelete attempts to delete spoke clusters via Kubernetes API first
 func (o *Orchestrator) gracefulDelete(ctx context.Context) error {
 	fmt.Println("\n[spoke-teardown] Starting graceful deletion of spoke clusters...")
-	
+
 	// For graceful deletion, we would need access to the hub cluster
 	// Since hub might already be deleted, we'll fall back to force deletion
 	fmt.Println("[spoke-teardown] Hub cluster not accessible, falling back to force deletion")
@@ -71,28 +71,63 @@ func (o *Orchestrator) forceDelete(ctx context.Context) error {
 		return fmt.Errorf("failed to discover spoke clusters: %w", err)
 	}
 
+	// THREE OUTCOMES, AND THEY ARE NOT THE SAME. A teardown that deleted
+	// something, one that found the cluster already gone, and one that tried and
+	// failed were all reported as "✓ successfully torn down" -- the caller printed
+	// it on any nil error, and a failed delete only printed a warning on its way
+	// to returning nil. Someone tearing a box down before rebuilding it was told
+	// the servers were gone while they were still running, and still billing.
+	//
+	// Absence is only ever reported when it was observed: discovery above reads
+	// every server and load balancer in the project, so "not found" means this
+	// project carries nothing labelled for that cluster. It does not mean the
+	// cluster cannot exist elsewhere, which is why the message says which project
+	// was searched rather than declaring the cluster gone.
 	if len(spokeClusters) == 0 {
-		fmt.Println("[spoke-teardown] No spoke clusters found")
+		if o.ClusterName != "" {
+			fmt.Printf("[spoke-teardown] ✓ %s is already absent: no server or load balancer in "+
+				"this Hetzner project carries its CAPH ownership label\n", o.ClusterName)
+			return nil
+		}
+		fmt.Println("[spoke-teardown] ✓ already absent: this Hetzner project holds no workload cluster")
 		return nil
 	}
 
-	fmt.Printf("[spoke-teardown] Found %d spoke cluster(s) to delete\n", len(spokeClusters))
+	fmt.Printf("[spoke-teardown] Found %d spoke cluster(s)\n", len(spokeClusters))
 
-	// Delete each spoke cluster
+	var deleted, failed []string
 	for _, spokeName := range spokeClusters {
 		if o.ClusterName != "" && spokeName != o.ClusterName {
 			continue // Skip if specific cluster name requested but doesn't match
 		}
-		
+
 		fmt.Printf("[spoke-teardown] Deleting spoke cluster: %s\n", spokeName)
 		if err := o.deleteSpokeCluster(ctx, client, spokeName); err != nil {
 			fmt.Printf("[spoke-teardown] ⚠️  Failed to delete spoke cluster %s: %v\n", spokeName, err)
-		} else {
-			fmt.Printf("[spoke-teardown] ✓ Deleted spoke cluster: %s\n", spokeName)
+			failed = append(failed, fmt.Sprintf("%s: %v", spokeName, err))
+			continue
 		}
+		fmt.Printf("[spoke-teardown] ✓ Deleted spoke cluster: %s\n", spokeName)
+		deleted = append(deleted, spokeName)
 	}
 
-	fmt.Println("[spoke-teardown] ✓ Spoke cluster deletion complete")
+	// Returned, not printed. A teardown is run to make resources stop existing
+	// and stop costing; a warning on a terminal that exits 0 is indistinguishable
+	// from success to anything reading the exit status, including the scripts that
+	// run this before a rebuild.
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d spoke cluster(s) were not deleted and their servers are "+
+			"still running:\n  %s\n\nRe-run once the cause is cleared; deleting what is already "+
+			"gone is not an error",
+			len(failed), len(failed)+len(deleted), strings.Join(failed, "\n  "))
+	}
+	if len(deleted) == 0 {
+		fmt.Printf("[spoke-teardown] ✓ %s is already absent: this Hetzner project holds %d "+
+			"workload cluster(s), none of them that one\n", o.ClusterName, len(spokeClusters))
+		return nil
+	}
+
+	fmt.Printf("[spoke-teardown] ✓ %d spoke cluster(s) deleted\n", len(deleted))
 	return nil
 }
 

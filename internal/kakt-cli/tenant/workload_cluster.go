@@ -64,6 +64,48 @@ type WorkloadCluster struct {
 	BundleRegistry  string
 }
 
+// workloadClusterApp is one of the Applications the MANAGEMENT cluster holds for
+// a workload cluster: the template file it is hydrated from, and the suffix it is
+// named and filed under.
+type workloadClusterApp struct {
+	// template is the file in templates/workload-cluster/.
+	template string
+	// suffix completes both names: the file
+	// registry/clusters/<mgmt>/<cluster>-<suffix>.yaml, and the Application
+	// <cluster>-<suffix> that file declares.
+	suffix string
+}
+
+// workloadClusterApps is the one inventory of those Applications, read by the
+// code that creates them (Add) and by the code that destroys them
+// (ClusterRemoval). ONE list, because two drifted: remove-cluster deleted
+// <cluster>-platform and <cluster>-generated, and nothing had ever created
+// either -- so `--destroy` reported them "not present" on every box while its
+// own help text named them as what it deletes.
+//
+// <cluster>-platform is not here and no longer ships. It pulled the
+// environment-manager chart with the workload cluster as its destination, and
+// that chart renders ApplicationSets: a managed cluster runs Argo CD core
+// (repo-server and application-controller, no ApplicationSet controller), so the
+// objects would have landed on a cluster with nothing to expand them. What
+// installs the platform on a managed cluster is the hub's own boundary
+// ApplicationSets, which select it by the `spoke-type: pool` label the SpokePool
+// composition puts on its Argo CD cluster Secret.
+//
+// In DELETE order: what runs on the cluster first, the cluster itself last.
+// Deleting the infrastructure Application destroys the cluster, after which the
+// other has nowhere to delete from.
+var workloadClusterApps = []workloadClusterApp{
+	{template: "generated-app.yaml", suffix: "generated"},
+	{template: "infrastructure-app.yaml", suffix: "infrastructure"},
+}
+
+// appFile is where one of them is filed in the management cluster's directory,
+// relative to the repository.
+func (a workloadClusterApp) appFile(mgmtCluster, cluster string) string {
+	return filepath.Join(RegistryDir, "clusters", mgmtCluster, cluster+"-"+a.suffix+".yaml")
+}
+
 // dnsLabel is what a cluster name has to be: it becomes a Kubernetes namespace,
 // a CAPI Cluster, an ArgoCD Application and a DNS-addressable cell id.
 var dnsLabel = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
@@ -148,15 +190,46 @@ func (w WorkloadCluster) Add() ([]string, error) {
 		return nil, fmt.Errorf("hydrate workload cluster: %w", err)
 	}
 
-	// The Application that creates it belongs to the MANAGEMENT cluster, whose
-	// root Application applies registry/clusters/<mgmt>/ with recurse: false. Moved rather
-	// than copied: left in place it would also be applied by the workload
-	// cluster's own directory, and an Application that creates a cluster,
-	// reconciled by that cluster, is a loop.
-	appSrc := filepath.Join(dst, "infrastructure-app.yaml")
-	appDst := filepath.Join(mgmtDir, w.Name+"-infrastructure.yaml")
-	if err := os.Rename(appSrc, appDst); err != nil {
-		return nil, fmt.Errorf("place the infrastructure Application: %w", err)
+	// The directory the generated Application owns, carried by git from the moment
+	// that Application exists.
+	//
+	// An Application over an empty directory syncs nothing and reports healthy --
+	// the state ADR-045 artifacts arrive into. An Application over a path the
+	// repository does not carry is a ComparisonError instead, and for a managed
+	// cluster nothing writes here until the first app declares a public host, so
+	// the gap is the normal case rather than a moment.
+	//
+	// Created HERE and not shipped in the template, because the embed set deletes
+	// every directory named `generated` from a released binary: they hold one
+	// cluster's instance data, and 0.1.2 published this hub's Infisical project ids
+	// to every tenant that way. A template directory would therefore exist in a
+	// development build and be missing from every release, which is the worst
+	// place for this difference to live.
+	generatedDir := filepath.Join(dst, "generated")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create %s: %w", generatedDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(generatedDir, ".gitkeep"), nil, 0o644); err != nil {
+		return nil, fmt.Errorf("keep %s in git: %w", generatedDir, err)
+	}
+
+	// This cluster's Applications belong to the MANAGEMENT cluster's directory,
+	// whose root Application applies registry/clusters/<mgmt>/ with
+	// recurse: false. Moved rather than copied: nothing applies
+	// registry/clusters/<cluster>/ at all, so a file left there is a declaration
+	// no box ever reads -- which is what happened to the generated Application
+	// until it was moved here.
+	//
+	// Both come from workloadClusterApps, the same list ClusterRemoval deletes
+	// from, so what is created and what is destroyed cannot disagree.
+	appDsts := make([]string, 0, len(workloadClusterApps))
+	for _, app := range workloadClusterApps {
+		appSrc := filepath.Join(dst, app.template)
+		appDst := filepath.Join(w.GitopsDir, app.appFile(w.MgmtCluster, w.Name))
+		if err := os.Rename(appSrc, appDst); err != nil {
+			return nil, fmt.Errorf("place the %s Application: %w", app.suffix, err)
+		}
+		appDsts = append(appDsts, appDst)
 	}
 
 	// One provider's claim, and the other removed -- the way kubefirst's
@@ -192,14 +265,17 @@ func (w WorkloadCluster) Add() ([]string, error) {
 	if err := substitute(dst, w.tokens(), true); err != nil {
 		return nil, err
 	}
-	if err := substituteFile(appDst, w.tokens()); err != nil {
-		return nil, err
+	for _, appDst := range appDsts {
+		if err := substituteFile(appDst, w.tokens()); err != nil {
+			return nil, err
+		}
 	}
 
-	return []string{
-		filepath.Join(RegistryDir, "clusters", w.Name),
-		filepath.Join(RegistryDir, "clusters", w.MgmtCluster, w.Name+"-infrastructure.yaml"),
-	}, nil
+	written := []string{filepath.Join(RegistryDir, "clusters", w.Name)}
+	for _, app := range workloadClusterApps {
+		written = append(written, app.appFile(w.MgmtCluster, w.Name))
+	}
+	return written, nil
 }
 
 // tokens are the same set scaffolding substitutes into a cluster, so a workload
