@@ -135,6 +135,14 @@ type Access interface {
 	// when the command is finished is the command.
 	Kubernetes(ctx context.Context, id Identity) (cfg *rest.Config, kubeconfigPath string, cleanup func(), err error)
 
+	// Kubeconfig returns the escrowed kubeconfig itself, for the caller that
+	// hands it to a person rather than using it (`kakt kubeconfig`, break-glass).
+	//
+	// Separate from Kubernetes because the lifetimes differ: that one writes a
+	// temporary file it expects to be deleted when the command ends, and this one
+	// is deliberately handed over to be used and then removed by whoever asked.
+	Kubeconfig(ctx context.Context, id Identity) (string, error)
+
 	// Provider returns the cloud credential the box was built with.
 	Provider(ctx context.Context, id Identity, provider string) (string, error)
 }
@@ -186,17 +194,26 @@ func Open(ctx context.Context, c Coordinates) (Access, error) {
 	return &escrowAccess{store: store, who: s.Email}, nil
 }
 
-func (a *escrowAccess) Kubernetes(ctx context.Context, id Identity) (*rest.Config, string, func(), error) {
+// Kubeconfig reads the escrowed admin kubeconfig, as whoever is authenticated.
+func (a *escrowAccess) Kubeconfig(ctx context.Context, id Identity) (string, error) {
 	payload, err := a.store.RestoreArtifact(ctx, escrow.ForCluster(id.BoxID, id.ClusterName), escrow.ArtifactKubeconfig)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("%s could not read the escrowed kubeconfig for %s: %w",
+		return "", fmt.Errorf("%s could not read the escrowed kubeconfig for %s: %w",
 			a.who, id.ClusterName, err)
 	}
 	if payload == "" {
-		return nil, "", nil, fmt.Errorf("the escrow holds no kubeconfig for %s under box %s.\n\n"+
+		return "", fmt.Errorf("the escrow holds no kubeconfig for %s under box %s.\n\n"+
 			"hub-operator escrows it on reconcile, so a cluster that never finished "+
 			"bootstrapping has none. For that case pass --kubeconfig explicitly; there is no "+
 			"credential to fall back to", id.ClusterName, id.BoxID)
+	}
+	return payload, nil
+}
+
+func (a *escrowAccess) Kubernetes(ctx context.Context, id Identity) (*rest.Config, string, func(), error) {
+	payload, err := a.Kubeconfig(ctx, id)
+	if err != nil {
+		return nil, "", nil, err
 	}
 
 	// 0600, in the OS temp directory, removed by the caller. The alternative --

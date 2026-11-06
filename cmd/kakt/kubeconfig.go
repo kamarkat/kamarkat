@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
+
 	"github.com/spf13/cobra"
 
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
@@ -25,6 +27,7 @@ func newKubeconfigCmd() *cobra.Command {
 	var clusterName string
 	var boxID string
 	var out string
+	var gitopsDir string
 
 	cmd := &cobra.Command{
 		Use:   "kubeconfig",
@@ -50,24 +53,54 @@ something to use and discard.`,
 			if strings.TrimSpace(clusterName) == "" {
 				return fmt.Errorf("--cluster is required: the escrow holds one kubeconfig per cluster")
 			}
-			if strings.TrimSpace(boxID) == "" {
-				return fmt.Errorf("--box is required: a cluster's artefacts live under the box " +
-					"that owns it, so the box cannot be inferred from the cluster name (ADR-111)")
-			}
 
-			// An in-cluster URL is not passed: there is no cluster to compare
-			// against here, and the guard that refuses one exists to stop a box
-			// escrowing into itself, which is a write-side mistake.
-			store, err := escrow.NewEscrowClient(cmd.Context(), "")
-			if err != nil {
-				return fmt.Errorf("%w.\n\n"+
-					"Set the four INFISICAL_ESCROW_* values for the Infisical this box\n"+
-					"escrows to. They are the same ones on the cluster's repository.", err)
-			}
-
-			payload, err := store.RestoreArtifact(cmd.Context(), escrow.ForCluster(boxID, clusterName), escrow.ArtifactKubeconfig)
-			if err != nil {
-				return fmt.Errorf("could not read the escrow: %w", err)
+			// Two ways in, both explicit, and the first is the one a developer on a
+			// fresh workstation has: the box's repository declares its escrow, and
+			// the read is performed with whoever is authenticated -- `kakt login`,
+			// or the machine identity when this is automation. The second is the
+			// original: the four INFISICAL_ESCROW_* values in the environment, for
+			// a caller that has them and no checkout.
+			//
+			// An in-cluster URL is not passed in either: there is no cluster to
+			// compare against here, and the guard that refuses one exists to stop a
+			// box escrowing into itself, which is a write-side mistake.
+			var payload string
+			if strings.TrimSpace(gitopsDir) != "" {
+				coords, err := hubaccess.Declaration(gitopsDir, clusterName)
+				if err != nil {
+					return err
+				}
+				// --box overrides the declaration, because a successor hub reads a
+				// predecessor's artefacts under the box they share and the
+				// declaration names only the current one.
+				if strings.TrimSpace(boxID) != "" {
+					coords.BoxID = boxID
+				}
+				access, err := hubaccess.Open(cmd.Context(), coords)
+				if err != nil {
+					return err
+				}
+				payload, err = access.Kubeconfig(cmd.Context(),
+					hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName})
+				if err != nil {
+					return err
+				}
+			} else {
+				if strings.TrimSpace(boxID) == "" {
+					return fmt.Errorf("--box is required: a cluster's artefacts live under the box " +
+						"that owns it, so the box cannot be inferred from the cluster name (ADR-111).\n\n" +
+						"Or pass --gitops-dir, and the box's own declaration supplies it")
+				}
+				store, err := escrow.NewEscrowClient(cmd.Context(), "")
+				if err != nil {
+					return fmt.Errorf("%w.\n\n"+
+						"Either pass --gitops-dir, so the box's declaration names its escrow and\n"+
+						"your own `kakt login` reads it, or set the four INFISICAL_ESCROW_* values.", err)
+				}
+				payload, err = store.RestoreArtifact(cmd.Context(), escrow.ForCluster(boxID, clusterName), escrow.ArtifactKubeconfig)
+				if err != nil {
+					return fmt.Errorf("could not read the escrow: %w", err)
+				}
 			}
 			if payload == "" {
 				return fmt.Errorf("the escrow holds no kubeconfig for %q.\n\n"+
@@ -93,7 +126,10 @@ something to use and discard.`,
 	}
 
 	cmd.Flags().StringVar(&clusterName, "cluster", "", "the cluster whose kubeconfig to retrieve (required)")
-	cmd.Flags().StringVar(&boxID, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
+	cmd.Flags().StringVar(&boxID, "box", "",
+		"the logical hub the escrow is keyed by; required unless --gitops-dir declares it")
+	cmd.Flags().StringVar(&gitopsDir, "gitops-dir", "",
+		"the box's repository, which declares its escrow -- then your own `kakt login` reads it")
 	cmd.Flags().StringVar(&out, "out", "", "write to this file instead of stdout")
 	return cmd
 }
