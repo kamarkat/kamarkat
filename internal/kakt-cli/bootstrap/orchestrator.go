@@ -84,8 +84,20 @@ type Orchestrator struct {
 	KeepBootstrap    bool
 	MergeKubeconfig  bool
 	Debug            bool
-	EnvironmentSlug  string
-	Topology         string
+	// ManagementScope is the Infisical environment holding THIS HUB's own
+	// credentials (ADR-111 Revision 7 §2). Read from the box's own declaration,
+	// `management.infisicalEnvironmentSlug`, never from a flag.
+	//
+	// It was EnvironmentSlug, set from `--environment`, and it was doing three
+	// unrelated jobs: this scope, the overlay directory ADR-045 artifacts are
+	// written to, and the TLS issuer mapping. The first two are now separate
+	// values and the third reads the box's declaration, because a hub has no
+	// workload environment to derive any of them from.
+	//
+	// It is ONLY the secret scope. Nothing about sizing, topology validation or
+	// DNS may be derived from it.
+	ManagementScope string
+	Topology        string
 	// Gating selects how the cluster is created (ADR-055). Empty means
 	// sequenced: converged creation is requested by name or it does not occur.
 	Gating GatingMode
@@ -488,7 +500,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseGenerateLocalSecrets, "generate-local-secrets",
 		"Generating local bootstrap secrets...",
 		func() error {
-			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 			if err := ci.GenerateLocalSecrets(ctx); err != nil {
 				return err
 			}
@@ -526,7 +538,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseInjectCACert, "inject-ca-cert",
 		"Injecting CNPG CA certificate into infisical-secrets...",
 		func() error {
-			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 			return ci.UpdateInfisicalSecretsWithCNPGCert(ctx)
 		},
 		func() { fmt.Println("[inject-ca-cert] ✓ CNPG CA certificate injected") },
@@ -557,7 +569,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseBootstrapInfisicalAPI, "bootstrap-infisical-api",
 		"Bootstrapping Infisical API...",
 		func() error {
-			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 			return ci.BootstrapInfisicalAPI(ctx)
 		},
 		func() { fmt.Println("[bootstrap-infisical-api] ✓ Infisical API bootstrapped") },
@@ -1058,15 +1070,14 @@ func (o *Orchestrator) checkPlacementCapacityRequested() error {
 		return nil
 	}
 	return fmt.Errorf(
-		"this box would have no worker capacity: %s in %s provisions no cloud\n"+
+		"this box would have no worker capacity: %s provisions no cloud\n"+
 			"workers, and on-prem nodes were not requested.\n\n"+
 			"Every platform workload pins node-role.kubernetes.io/worker, which a\n"+
 			"control-plane node does not carry, so the cluster would come up with its\n"+
 			"control plane Ready and everything else Pending -- roughly ninety minutes\n"+
 			"in, at a CNPG cluster that never finishes setting up its primary.\n\n"+
-			"Re-run with --on-prem --tailnet-name=<tailnet>, or use an environment\n"+
-			"that provisions cloud workers (stg, prod).",
-		o.providerName(), o.EnvironmentSlug)
+			"Re-run with --on-prem --tailnet-name=<tailnet>, or with --workers >= 1.",
+		o.providerName())
 }
 
 func (o *Orchestrator) joinHomeWorkers(ctx context.Context, kubeconfig string) error {
@@ -1457,7 +1468,7 @@ func (o *Orchestrator) installArgoCDAndSeed(ctx context.Context, kubeconfig stri
 			"read. The lines above name which one failed and why", o.ClusterName)
 	}
 
-	ci := &components.Installer{Kubeconfig: kubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+	ci := &components.Installer{Kubeconfig: kubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 	if err := ci.InstallArgoCD(ctx); err != nil {
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
@@ -1494,7 +1505,7 @@ func (o *Orchestrator) installArgoCDAndSeed(ctx context.Context, kubeconfig stri
 	// these from a Secret at startup, and a Secret that appears later means every
 	// backup until then was skipped -- including the first, which is the one
 	// covering the window where the box is least recoverable.
-	escrow := &components.Installer{Kubeconfig: kubeconfig, EnvironmentSlug: o.EnvironmentSlug,
+	escrow := &components.Installer{Kubeconfig: kubeconfig, OverlayDir: HubOverlayDir,
 		GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 	if err := escrow.InstallEscrowCredentials(ctx); err != nil {
 		return err
@@ -1998,36 +2009,24 @@ func (o *Orchestrator) zitadelHookFailure(ctx context.Context, kubeconfig string
 	return ""
 }
 
-// publicTlsIssuerFor returns the ACME ClusterIssuer for this environment — the
-// issuer half of ADR-051's public-TLS policy. The mapping lives HERE because
-// the bootstrap is the environment boundary: it already owns environmentSlug,
-// and no chart or ApplicationSet may re-derive policy (ADR-047). There is no
-// default: an unknown or empty slug fails the bootstrap rather than silently
-// inheriting a throwaway value — staging is an explicit ephemeral policy, never
-// an accidental default.
+// publicTlsIssuerFor returns the ACME ClusterIssuer this box declares -- the
+// issuer half of ADR-051's public-TLS policy.
+//
+// READ, not derived (ADR-111 Revision 7 §3). It was a switch over the bootstrap's
+// environment slug, which made this the second authority for a policy the
+// environment-manager chart already requires as a value: `publicTlsIssuer`,
+// written into the box's own values.yaml by scaffolding. Two mappings had to agree
+// and only one of them shipped to the cluster.
+//
+// Still no default, for the reason the switch gave: a staging certificate is an
+// explicit choice for a throwaway box, never something a long-lived one inherits.
+// readBoxValues refuses an empty value.
 func (o *Orchestrator) publicTlsIssuerFor() (string, error) {
-	switch o.EnvironmentSlug {
-	case "ephemeral":
-		// Ephemeral clusters are created and destroyed continuously, so they are
-		// the only environment whose certificate churn can realistically exhaust
-		// Let's Encrypt's per-domain weekly quota. That risk is what staging is
-		// for, and it is confined to where the risk actually exists.
-		return "letsencrypt-staging", nil
-	case "dev", "stg", "prod":
-		// dev is browser-facing: people sign in through it, and the OAuth2 flow
-		// redirects between hub and tenant hostnames. A staging certificate makes
-		// the browser refuse the tenant host outright, so the redirect chain
-		// breaks rather than merely warning — the login looks broken for a reason
-		// that has nothing to do with identity. The hub's own dev hostnames
-		// already issue from letsencrypt-prod, so staging here bought no quota
-		// protection on a long-lived cluster and only left tenant hosts untrusted
-		// by the browser that had just trusted the hub they authenticate against.
-		return "letsencrypt-prod", nil
-	default:
-		return "", fmt.Errorf(
-			"publicTlsIssuer: no issuer mapping for environment slug %q (expected dev|ephemeral|stg|prod) — refusing to guess TLS policy",
-			o.EnvironmentSlug)
+	v, err := ReadBoxValues(o.GitopsDir, o.ClusterName)
+	if err != nil {
+		return "", fmt.Errorf("public TLS issuer: %w", err)
 	}
+	return v.PublicTlsIssuer, nil
 }
 
 // hubIngressAddress returns the public IPv4 that fronts :80/:443 for this hub —
@@ -2250,7 +2249,7 @@ func pinKubeconfig(kubeconfig, kubeContext string) (string, error) {
 }
 
 func (o *Orchestrator) getArgoCDPassword(ctx context.Context, kubeconfig string) string {
-	ci := &components.Installer{Kubeconfig: kubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+	ci := &components.Installer{Kubeconfig: kubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 	pwd, err := ci.GetArgoCDPassword(ctx)
 	if err != nil {
 		return "<check secret manually>"
@@ -2349,7 +2348,7 @@ func (o *Orchestrator) ensureArgoCDGitHubAuth(ctx context.Context, kubeconfig, o
 		return fmt.Errorf("GITHUB_TOKEN is empty — ArgoCD cannot read this box's own gitops repository")
 	}
 
-	ci := &components.Installer{Kubeconfig: kubeconfig, EnvironmentSlug: o.EnvironmentSlug, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+	ci := &components.Installer{Kubeconfig: kubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
 	if err := ci.FixArgoCDGitHubAuth(ctx, githubToken, orgURL); err != nil {
 		return err
 	}
@@ -2457,22 +2456,25 @@ func (o *Orchestrator) readADR045Registry() (adr045Registry, error) {
 		return reg, fmt.Errorf("parse ADR-045 registry: %w", err)
 	}
 
-	// {env} is the environment being bootstrapped. The registry writes it
-	// because these artifacts live per environment (ADR-045) -- one shared file
-	// under base/ meant prod rendered dev's Infisical project -- and the
-	// placeholder is expanded here so no caller can forget: the validator, the
-	// commit paths and the wait list all read the registry through this.
+	// {env} is the HUB OVERLAY DIRECTORY these artifacts are written to, which is
+	// `management` and nothing else (ADR-111 Revision 7). The placeholder is
+	// expanded here so no caller can forget: the validator, the commit paths and
+	// the wait list all read the registry through this.
+	//
+	// It took the bootstrap's environment slug, because the platform's own tree
+	// held one overlay per environment -- "one shared file under base/ meant prod
+	// rendered dev's Infisical project" (ADR-045). There is now one hub overlay,
+	// so there is one directory, and it is NOT the management secret scope:
+	// deriving the path from that scope would re-couple an artifact location to a
+	// credential location, and activating the scope would silently move the
+	// artifacts.
 	//
 	// Declared and never expanded, the validator looked for a directory called
 	// "{env}" and reported the artifact missing, naming a path no step had ever
 	// written.
-	if o.EnvironmentSlug == "" {
-		return reg, fmt.Errorf("ADR-045 registry declares per-environment " +
-			"artifacts but no environment is set; the paths cannot be resolved")
-	}
 	for i := range reg.Artifacts {
 		reg.Artifacts[i].File = strings.ReplaceAll(
-			reg.Artifacts[i].File, "{env}", o.EnvironmentSlug)
+			reg.Artifacts[i].File, "{env}", HubOverlayDir)
 	}
 
 	// A tenant's repository holds these under the cluster they belong to, not

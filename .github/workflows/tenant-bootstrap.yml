@@ -24,9 +24,6 @@ on:
       region:
         required: true
         type: string
-      environment:
-        required: true
-        type: string
       bundle-version:
         description: The platform version to bootstrap on. Must match the pin in the cluster's bundle.yaml.
         required: true
@@ -38,9 +35,9 @@ on:
         default: sequenced
       workers:
         description: >-
-          Cloud worker nodes to provision. A development box defaults to none,
-          because that environment's capacity is meant to come from nodes on the
-          tenant's own premises (ADR-075); pass a count where there are none.
+          Cloud worker nodes to provision. Defaults to this cluster's values.yaml;
+          a box whose capacity comes from nodes on the tenant's own premises
+          (ADR-075) passes 0.
         required: false
         type: string
         default: ''
@@ -303,30 +300,47 @@ jobs:
           # workload step below already sources this script for two of its
           # functions, which made the asymmetry easy to miss.
           #
-          # --spoke is required by the script and is read from the tenant's own
-          # declaration, because the claim arrives through boundary 03 from this
-          # repository and the cluster is the only thing that knows which pools
-          # this box has.
-          # The SpokePool this box declares, read from the platform manifests --
-          # the same source the developer path uses, and the only one available
-          # before the cluster exists to be asked.
-          pooldir=".platform-validators/manifests/spoke/spoke-pools/${{ inputs.environment }}/${{ inputs.provider }}"
-          pool=$(grep -h -A3 '^kind: SpokePool' "$pooldir"/*.yaml 2>/dev/null \
-                 | grep -m1 '  name:' | awk '{print $2}')
-          if [ -z "$pool" ]; then
-            echo "::error::no SpokePool is declared for ${{ inputs.environment }}/${{ inputs.provider }}"
-            exit 1
+          # The SpokePool this box declares, read from THIS REPOSITORY -- the
+          # tenant's own declaration, which ADR-082 makes the only authority for
+          # which clusters a box has. `kakt tenant add-cluster` keeps the chosen
+          # provider's claim and renames it to spokepool.yaml, so that exact path
+          # is what exists; it is also what the developer path reads
+          # (workload_clusters in scripts/dev/local-e2e.sh), which is what the
+          # comment below this one always claimed and no longer did.
+          #
+          # IT READ THE PLATFORM'S MANIFESTS, at
+          # manifests/spoke/spoke-pools/<env>/<provider>, and that directory was
+          # deleted the same day by the ADR-082 commit that moved the claim here.
+          # The read outlived it: validators are checked out at the same version as
+          # this workflow, so from that merge onward every tenant bootstrap exited 1
+          # on "no SpokePool is declared" -- a path no version contains.
+          #
+          # A box with no workload cluster declared is not an error. Scaffolding
+          # creates the management cluster; add-cluster adds workload clusters, and
+          # a box may legitimately have none yet. The spoke gates are skipped in
+          # that case, which is what the workload step further down already does.
+          # `|| true` is load-bearing. This step runs under `set -euo pipefail`, and
+          # on a box with no workload cluster the glob matches nothing: bash passes
+          # the pattern through literally, grep exits 2, and pipefail turns that
+          # into an aborted bootstrap -- failing the box for the one case this is
+          # written to tolerate. Verified: exit 2 without it.
+          pool=$(grep -l '^kind: SpokePool' registry/clusters/*/infrastructure/spokepool.yaml 2>/dev/null \
+                 | head -1 | xargs -r grep -m1 '^  name:' | awk '{print $2}' || true)
+          spoke=()
+          if [ -n "$pool" ]; then
+            spoke=(--spoke "$pool")
+            echo "workload cluster declared: $pool"
+          else
+            echo "no workload cluster declared in this repository; the hub's spoke gates are skipped"
           fi
-          echo "spoke pool: $pool"
 
           ZERO_OPS_DIR="$PWD" \
           KAKT_BINARY="$PWD/kakt" \
           bash .platform-validators/scripts/hub-bootstrap.sh \
-            --spoke "$pool" \
+            "${spoke[@]}" \
             --name "${{ inputs.cluster }}" \
             --provider "${{ inputs.provider }}" \
             --region "${{ inputs.region }}" \
-            --environment "${{ inputs.environment }}" \
             --gating "${{ inputs.gating }}" \
             "${onprem[@]}" \
             "${workers[@]}" \
@@ -413,7 +427,6 @@ jobs:
 
           CLUSTER_NAME="${{ inputs.cluster }}" \
           PROVIDER="${{ inputs.provider }}" \
-          ENVIRONMENT="${{ inputs.environment }}" \
           SPOKEPOOL_NAME="$pool" \
           ZERO_OPS_DIR="$PWD" \
           KAKT_BINARY="$PWD/kakt" \
@@ -445,8 +458,6 @@ jobs:
         id: validate
         if: steps.verify.outcome == 'success'
         continue-on-error: true
-        env:
-          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           set -euo pipefail
           kc="$PWD/k8-secrets/kubeconfig/${{ inputs.cluster }}.kubeconfig"
@@ -476,7 +487,6 @@ jobs:
 
           KUBECONFIG="$kc" \
           HUB_DOMAIN="$HUB_DOMAIN" \
-          ENVIRONMENT="${{ inputs.environment }}" \
           SPOKEPOOL_NAME="$pool" \
           ZERO_OPS_DIR="$PWD" \
           CLUSTER_NAME="${{ inputs.cluster }}" \

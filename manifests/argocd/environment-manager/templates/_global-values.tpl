@@ -29,7 +29,18 @@ The cluster this chart is rendering for. Used as the default external-dns TXT
 owner id, which must be unique per box.
 */}}
 {{- define "environment-manager.clusterName" -}}
-{{- .Values.clusterName | default (printf "%s-%s" .Values.environmentSlug .Values.provider) -}}
+{{- /*
+  Falls back to boxId, the box's canonical identity (ADR-111 §1), which takes the
+  first incarnation's cluster name -- so the default is this box's own name rather
+  than a category.
+
+  It was `<environmentSlug>-<provider>`, which is identical on every box built from
+  the same pair: not a name. With the hub's environmentSlug gone (Revision 7) it
+  would have rendered `-hetzner` on every box, silently, and three things key on
+  this value -- the external-dns TXT owner id among them, where a shared id means
+  two boxes each believe the other's records are theirs to delete.
+*/ -}}
+{{- .Values.clusterName | default (required "clusterName or boxId is required: this value keys the external-dns TXT owner id, which must be unique per box" .Values.boxId) -}}
 {{- end -}}
 
 {{- define "environment-manager.gitOrgURL" -}}
@@ -94,10 +105,18 @@ global:
     rejects with `unexpected "\\" in operand`, generating 0 applications while
     the ApplicationSet itself looks correct.
   */}}
+  {{- /*
+    EMITTED ONLY FOR A MANAGED CLUSTER (ADR-111 Revision 7). The caller passes that
+    cluster's own `environment` label; the hub has no environmentSlug to fall back
+    to, so when nothing is passed the key is absent rather than empty.
+
+    It used to fall back to $root.Values.environmentSlug -- the HUB's -- which is
+    the borrowing this separation removes. Nothing on the hub reads this key now:
+    the hub's secret scope is global.management.infisicalEnvironmentSlug, and its
+    sizing is declared outright.
+  */}}
   {{- if .environmentSlug }}
   environmentSlug: {{ .environmentSlug }}
-  {{- else }}
-  environmentSlug: {{ $root.Values.environmentSlug | quote }}
   {{- end }}
   {{- /*
     The provider, overridable for the same reason environmentSlug is.
@@ -140,6 +159,18 @@ global:
     choice; hub-operator refuses the same value for the same reason.
   */}}
   boxId: {{ required "boxId is required (ADR-111): it keys everything in the escrow that outlives a cluster, and there is no safe value to assume for it" $root.Values.boxId | quote }}
+  {{- /*
+    The management plane's own configuration (ADR-111 Revision 7). Propagated so a
+    hub component can read the hub's secret scope WITHOUT reading an environment:
+    `global.management.infisicalEnvironmentSlug`, never `global.environmentSlug`.
+
+    Not overridable per cluster, unlike environmentSlug and provider above. A
+    managed cluster has no management scope -- it has its own environment label --
+    so there is no per-cluster value this could take, and emitting one would
+    re-create the borrowing this separation removes.
+  */}}
+  management:
+    infisicalEnvironmentSlug: {{ required "management.infisicalEnvironmentSlug is required (ADR-111 Revision 7): it is the Infisical environment holding THIS HUB's own credentials, set per box in clusters/<mgmt>/values.yaml. There is no safe default -- the only possible one is a guess at which environment someone else's secrets are in, and guessing wrong is silent: the secrets resolve, from the wrong scope." (($root.Values.management).infisicalEnvironmentSlug) | quote }}
   clusterName: {{ include "environment-manager.clusterName" $root | quote }}
   {{- /*
     The box's own tenant id, for ADR-078 add.1 §7: Alloy stamps `cluster` AND

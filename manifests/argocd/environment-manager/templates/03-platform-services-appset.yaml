@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 ---
 {{- /* ADR-068: an uninjected build is unreleased and sources from the working
      tree; a build carrying a version sources from the bundle published under
@@ -405,7 +404,7 @@ spec:
             isPlatformOwned: 'true'
             repoURL: ''
             targetRevision: ''
-            path: 'manifests/environments/{{ .Values.environmentSlug }}'
+            path: 'manifests/environments/management'
             chart: ''
             directoryRecurse: ''
             directoryInclude: ''
@@ -966,18 +965,25 @@ spec:
             # Environment isolation (ADR-037). The spoke ClusterSecretStore ships
             # with environmentSlug hardcoded to "dev"
             # (manifests/spoke/spoke-catalog/infra/cluster-secret-store.yaml), so a
-            # stg or prod spoke would read DEV secrets out of Infisical. The Hub's
-            # environmentSlug is the authority and is a Helm value resolved at
-            # bootstrap. spoke-catalog is KUSTOMIZE-rendered, not Helm, so
-            # `{{ .Values.x }}` cannot be written into the manifest itself — the
-            # substitution has to happen here.
+            # spoke reading it unchanged would read DEV secrets out of Infisical.
+            # spoke-catalog is KUSTOMIZE-rendered, not Helm, so `{{ .Values.x }}`
+            # cannot be written into the manifest itself -- the substitution has to
+            # happen here.
+            #
+            # THE SPOKE'S OWN LABEL, not the hub's value (ADR-111 Revision 7). This
+            # read .Values.environmentSlug -- the HUB's -- which is the hazard the
+            # globalValues comment above this generator already names: a prod spoke
+            # under a dev hub took the environment of the cluster that PROVISIONED
+            # it. The label is written by the SpokePool composition from the claim
+            # the tenant wrote, and is expanded per Application by ArgoCD, exactly
+            # as globalValues does it.
             - target:
                 kind: ClusterSecretStore
                 name: infisical-backend
               patch: |
                 - op: replace
                   path: /spec/provider/infisical/secretsScope/environmentSlug
-                  value: '{{ .Values.environmentSlug }}'
+                  value: '{{"{{"}} index .metadata.labels "environment" {{"}}"}}'
 
 {{- end }}
       destination:

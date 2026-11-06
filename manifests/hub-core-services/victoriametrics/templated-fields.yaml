@@ -1,3 +1,12 @@
+# Hub sizing is management-plane policy, not a workload environment's (ADR-111
+# Revision 7 §3). The values below were conditional on the hub's environmentSlug,
+# which made the management plane's capacity a function of a workload stage it does
+# not have. They are now declared outright.
+#
+# They carry this box's CURRENT EFFECTIVE values deliberately: de-conditionalising
+# is not the moment to change capacity. Raising them is a capacity decision made on
+# measurements -- an unsatisfiable constraint does not fail loudly, it pends, and
+# the service it governs silently never returns.
 # Per-box and per-environment values for the hub's observability stores
 # (ADR-078 addendum 5 §9). Replica counts are the only difference between
 # environments: development runs one of each replicated component and prefers,
@@ -10,7 +19,7 @@
     - path: [spec, storage, storageClassName]
       value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
 
 - kind: VMSingle
   name: platform-b
@@ -20,43 +29,43 @@
     - path: [spec, storage, storageClassName]
       value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
 
 - kind: VMAuth
   name: platform
   fields:
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
     - path: [spec, replicaCount]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+      value: '1'
 
 - kind: VMAlert
   name: platform
   fields:
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
     - path: [spec, replicaCount]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+      value: '1'
 
 - kind: VMAlert
   name: tenant
   fields:
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
     - path: [spec, replicaCount]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+      value: '1'
 
 - kind: VMAlertmanager
   name: platform
   fields:
     - path: [spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
     - path: [spec, replicaCount]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+      value: '1'
     - path: [spec, configRawYaml]
       replace:
         from: PLACEHOLDER_ALERT_EMAIL_FROM

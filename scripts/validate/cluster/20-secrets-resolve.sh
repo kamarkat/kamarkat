@@ -145,12 +145,22 @@ _validate_s3_backup_credentials() {
     else
         # Before the ExternalSecret exists there is nothing to resolve from, so
         # fall back to the coordinates the manifest ships with.
-        note "Seed in Infisical: project=hub-secrets env=${ENVIRONMENT} path=/ keys=S3_ACCESS_KEY_ID,S3_SECRET_ACCESS_KEY"
+        # The management scope as the box DECLARES it (ADR-111 Revision 7), read
+        # from the same ConfigMap the hub-operator reads. It printed $ENVIRONMENT,
+        # which told an operator to seed the secret into a workload environment --
+        # a place nothing on this hub reads.
+        local scope
+        scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
+            -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}')
+        note "Seed in Infisical: project=hub-secrets env=${scope:-<undeclared>} path=/ keys=S3_ACCESS_KEY_ID,S3_SECRET_ACCESS_KEY"
     fi
 
     local host
     host=$(kc get clustersecretstore infisical-backend -o jsonpath='{.spec.provider.infisical.hostAPI}')
     note "Infisical API: ${host:-http://infisical-standalone-infisical.platform-security.svc:8080}"
-    note "Console path:  Projects -> hub-secrets -> ${ENVIRONMENT} -> Secrets, at the root path '/'"
+    local console_scope
+    console_scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
+        -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}')
+    note "Console path:  Projects -> hub-secrets -> ${console_scope:-<undeclared>} -> Secrets, at the root path '/'"
     note "Use Hetzner Object Storage keys (these start 0A…), NOT the hcloud API token (HT…)."
 }

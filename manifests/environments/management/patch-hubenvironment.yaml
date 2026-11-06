@@ -1,0 +1,44 @@
+apiVersion: ops.nutgraf.in/v1alpha1
+kind: HubEnvironment
+metadata:
+  name: hub-environment
+spec:
+  # NOTE: spec.domain and spec.tls have NO Go consumers today -- these values are
+  # declarative only. Making them load-bearing is WS4.
+  #
+  # spec.environment is gone (ADR-111 Revision 7). The domain keeps its leftmost
+  # label because that label is a DECLARED subdomain (ADR-051 Amendment
+  # 2026-09-18), not this box's environment: it publishes exactly what it
+  # published before.
+  domain: dev.nutgraf.in
+  tls:
+    issuer: letsencrypt-prod
+    email: platform@nutgraf.in
+  oauth:
+    clients:
+    - clientId: mcp-server
+      clientName: "MCP Server"
+      redirectUris:
+      - "http://localhost:8080/callback"
+      grantTypes:
+      - authorization_code
+      - refresh_token
+      responseTypes:
+      - code
+  secrets:
+    infisical:
+      # The management secret scope (ADR-111 Revision 7 §2). Load-bearing: it forms
+      # the Infisical API path in the hub-operator (internal/client/infisical.go:144),
+      # and the operator reads the same value from hub-bootstrap-config's
+      # INFISICAL_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
+      #
+      # Overwritten at render from `management.infisicalEnvironmentSlug`, the one
+      # declared input; the literal below is what this box declares.
+      #
+      # `management`, not a workload environment. Infisical supplies a project with
+      # its own defaults -- dev, staging, prod -- and this scope is not among them,
+      # so Day-0 creates it (ensureManagementScope in
+      # internal/kakt-cli/infisical/bootstrap.go) before writing the hub's secrets
+      # into it. That is what makes the declaration self-sufficient: the scope a box
+      # declares is the scope that exists.
+      environmentSlug: management

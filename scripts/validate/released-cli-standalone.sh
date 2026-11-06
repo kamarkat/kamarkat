@@ -37,7 +37,7 @@ trap 'rm -rf "$sandbox"' EXIT
 # provisioning anything or needing a cloud credential.
 if ! out=$(cd "$sandbox" && "$BIN" tenant scaffold --dry-run \
         --tenant probe --org probe-org --domain probe.example \
-        --cluster probe-hub --environment dev --provider hetzner \
+        --cluster probe-hub --provider hetzner \
         --bundle-version "$VERSION" --out "$sandbox/render" 2>&1); then
     echo "released-cli-standalone: scaffolding failed outside a checkout, so the" >&2
     echo "release does not carry the content it needs (ADR-063):" >&2

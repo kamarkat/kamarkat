@@ -79,50 +79,27 @@ _print_inventory() {
 }
 
 # ─── Resolve which cluster we are tearing down ───────────────────────────────
-# Derived from on-disk state so `hub-bootstrap.sh dev --teardown` needs no other
-# flags, while --name / --spoke still override.
+# NAMED, never derived (ADR-111 Revision 7).
+#
+# This resolved the target from the environment: a .state file matching
+# *-<env>.json, then a Hetzner server matching ^hub-<provider>-<env>-, then the
+# literal guess `hub-<provider>-<env>`. All three encode a naming scheme the
+# platform no longer uses -- a cluster is named by the tenant that declares it
+# (boxId and clusterName, §1) -- and the hub has no environment to key any of them
+# on.
+#
+# The guess is the part that mattered. This function decides what gets DELETED, and
+# its last resort was a plausible-looking name nothing had confirmed: on a box whose
+# cluster is named anything else, teardown would either find nothing or find
+# somebody else's hub. Refusing is the only safe end to that chain.
 _resolve_teardown_targets() {
     if [[ -z "$CLUSTER_NAME" || "$CLUSTER_NAME" == "hub" ]]; then
-        # .state, where the CLI writes it. This read .zero-ops/state,
-        # which nothing has written since the move, so the lookup always missed
-        # and teardown fell through to guessing the name from a kubeconfig
-        # filename -- naming a cluster from a file that outlives the cluster.
-        local state
-        state=$(ls "$ZERO_OPS_DIR/.state/"*"-${ENVIRONMENT}.json" 2>/dev/null | head -1 || true)
-        if [[ -n "$state" ]]; then
-            CLUSTER_NAME="$(basename "$state" .json)"
-        fi
-    fi
-    if [[ -z "$CLUSTER_NAME" || "$CLUSTER_NAME" == "hub" ]]; then
-        # No local state left. Discover the real hub from the cloud, so a repeat
-        # run still targets the right names instead of a plausible-looking guess.
-        local discovered
-        discovered=$(_hcloud_api "servers?per_page=100" | python3 -c "
-import json, sys, re
-env = sys.argv[1]
-try:
-    payload = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for item in payload.get('servers', []) or []:
-    m = re.match(r'^(hub-[a-z0-9]+-%s)-' % re.escape(env), item.get('name') or '')
-    if m:
-        print(m.group(1)); break
-" "$ENVIRONMENT" 2>/dev/null || true)
-        if [[ -n "$discovered" ]]; then
-            CLUSTER_NAME="$discovered"
-            log "  hub discovered from Hetzner: $CLUSTER_NAME"
-        else
-            CLUSTER_NAME="hub-${PROVIDER}-${ENVIRONMENT}"
-        fi
-    fi
+        error_exit "teardown needs the cluster to tear down, by name: pass --name <cluster>.
 
-    # `hub-bootstrap.sh dev --teardown` passes no --provider, and PROVIDER defaults
-    # to hetzner — which would send the spoke lookup to spoke-pools/dev/hetzner/
-    # for a hybrid environment and silently find nothing. The hub name that was
-    # just resolved from on-disk state carries the real provider.
-    if [[ "$CLUSTER_NAME" =~ ^hub-([a-z0-9]+)-${ENVIRONMENT}$ ]]; then
-        PROVIDER="${BASH_REMATCH[1]}"
+It used to work this out from the environment -- a .state file, then a Hetzner
+server matching hub-<provider>-<env>, then that name as a literal guess. A cluster
+is named by the tenant that declares it now, so there is nothing to derive it from,
+and this function decides what gets deleted: a guess here is somebody else's hub."
     fi
 
     log "  provider: $PROVIDER"
@@ -278,14 +255,20 @@ _teardown_home_workers() {
     nodes=$(set +u; . "$envfile" >/dev/null 2>&1; printf '%s\n' "${HOME_WORKER_NODES:-}")
     registry_spoke=$(set +u; . "$envfile" >/dev/null 2>&1; printf '%s\n' "${HYBRID_SPOKE_NAME:-}")
 
-    # The registry carries no environment field, so its spoke name is what ties it
-    # to an environment. If it points somewhere else, these are not our VMs.
-    if [[ -n "$registry_spoke" && "$registry_spoke" != *"-${ENVIRONMENT}-"* ]]; then
-        log "  ⚠️  home-lab.env targets '$registry_spoke', which is not environment '${ENVIRONMENT}'"
+    # The registry carries no cluster field, so its spoke name is what ties it to
+    # this box. If it names a different spoke, these are not our VMs.
+    #
+    # Matched against SPOKEPOOL_NAME, the spoke being torn down. It was matched
+    # against the environment as an infix -- "-<env>-" -- which is the
+    # hub-<provider>-<env> naming scheme (ADR-111 Revision 7), and it both passed
+    # any spoke that merely had the word in it and failed every correctly named
+    # one that did not.
+    if [[ -n "$registry_spoke" && -n "$SPOKEPOOL_NAME" && "$registry_spoke" != "$SPOKEPOOL_NAME" ]]; then
+        log "  ⚠️  home-lab.env targets '$registry_spoke', not '$SPOKEPOOL_NAME'"
         log "      — leaving its VMs alone"
         return 0
     fi
-    [[ -n "$registry_spoke" ]] && log "  registry '$registry_spoke' belongs to '$ENVIRONMENT' — proceeding"
+    [[ -n "$registry_spoke" ]] && log "  registry '$registry_spoke' is this box's spoke — proceeding"
 
     local any=0 line host ssh_target rest
     while IFS= read -r line; do
@@ -442,7 +425,7 @@ run_full_teardown() {
 
 
     log "═══════════════════════════════════════════════════════════"
-    log " FULL TEARDOWN — environment: $ENVIRONMENT"
+    log " FULL TEARDOWN"
     log "   hub:   $CLUSTER_NAME"
     log "   spoke: $SPOKEPOOL_NAME"
     log "═══════════════════════════════════════════════════════════"
@@ -460,20 +443,23 @@ run_full_teardown() {
     foreign=$(grep $'\tother$' <<< "$inv" | awk -F'\t' '{print $3}' | sort -u || true)
     if [[ -n "$foreign" ]]; then
         log ""
-        log "⚠️  Spoke resources NOT belonging to '$ENVIRONMENT' are present in this Hetzner project:"
+        log "⚠️  Spoke resources NOT belonging to '$SPOKEPOOL_NAME' are present in this Hetzner project:"
         while IFS= read -r n; do log "     $n"; done <<< "$foreign"
         log "   'hub spoke teardown' cannot be scoped by name (its --name filter is a no-op),"
         log "   so running it would delete these too."
         SKIP_CLI_SPOKE_TEARDOWN=1
-        log "   Skipping the CLI spoke teardown; this environment's spoke will be removed by the"
+        log "   Skipping the CLI spoke teardown; this box's spoke will be removed by the"
         log "   scoped sweep instead, which deletes only names matching $SPOKEPOOL_NAME."
     fi
 
     if [[ "${TEARDOWN_YES:-0}" != "1" ]]; then
         log ""
         log "This permanently deletes the resources listed above, plus local state."
-        read -r -p "Type the environment name ('$ENVIRONMENT') to confirm: " reply
-        [[ "$reply" == "$ENVIRONMENT" ]] || error_exit "Teardown aborted (got '$reply')"
+        # The CLUSTER's name, not an environment's. Typing "dev" confirmed the
+        # deletion of whichever box the resolution above happened to pick; typing
+        # the cluster name confirms the one actually being deleted.
+        read -r -p "Type the cluster name ('$CLUSTER_NAME') to confirm: " reply
+        [[ "$reply" == "$CLUSTER_NAME" ]] || error_exit "Teardown aborted (got '$reply')"
     fi
 
     log ""
@@ -511,7 +497,7 @@ run_full_teardown() {
     local remaining
     remaining=$(_hcloud_inventory "$CLUSTER_NAME" "$SPOKEPOOL_NAME" | grep -v $'\tother$' || true)
     if [[ -z "$remaining" ]]; then
-        log "✅ No Hetzner resources remain for environment '$ENVIRONMENT'."
+        log "✅ No Hetzner resources remain for '$CLUSTER_NAME'."
     else
         log "❌ Resources still present after teardown:"
         _print_inventory "$remaining" "remaining"

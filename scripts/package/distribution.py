@@ -38,9 +38,11 @@ import sys
 # Listed rather than inferred: platform-cert-manager would otherwise read as
 # component "platform-cert" with variant "manager", and the result would be a
 # component that renders nothing rather than an error.
+# "platform-spoke-pools" is deliberately absent: the per-combination spoke-pool
+# charts are no longer packaged (see inline-charts.sh), so a prefix for them would
+# describe a variant no release contains.
 VARIANT_PREFIXES = (
     "platform-spoke-catalog",
-    "platform-spoke-pools",
     "hub-environment",
     "infrastructure-provider",
 )
@@ -223,8 +225,11 @@ def main() -> int:
                         body = handle.read()
                     # A variant is not always environment-and-provider. The
                     # spoke catalogue varies by both and its variants read
-                    # "dev-hetzner"; hub-environment varies by environment alone
-                    # and reads "dev"; a provider overlay reads "hetzner". Tested
+                    # "dev-hetzner"; a provider overlay reads "hetzner". (hub-environment
+                    # used to vary by environment and read "dev"; since ADR-111
+                    # Revision 7 the hub has no environment, so it ships as one
+                    # unsuffixed component and reaches split_variant with no
+                    # variant at all.) Tested
                     # against the env-provider pair only, the second and third
                     # never matched, so the object was carried into the
                     # distribution and emitted by nothing -- the component

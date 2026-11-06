@@ -60,12 +60,19 @@ func platformCredentials() []platformCredential {
 	// deliberately not in-cluster object storage, which would remove the
 	// credential by removing the property that makes the backup worth having.
 	//
-	// Not in development or ephemeral environments: those boxes are created to
-	// be destroyed, and requiring durable object storage for one is asking a
-	// tenant to provision real infrastructure to run a test.
-	backupsWanted := func(s Spec, _ Secrets) bool {
-		return s.Environment != "dev" && s.Environment != "ephemeral"
-	}
+	// Wanted on every box (ADR-111 Revision 7 §3). It was skipped for "dev" and
+	// "ephemeral" on the reasoning that those boxes are created to be destroyed --
+	// but the hub declares no environment to be one of them, and backups are a
+	// management-plane concern: this ADR's backup classes are already independent
+	// of any workload environment.
+	//
+	// It also closed a gap rather than opening one. The hub's PostgreSQL clusters
+	// declare a barmanObjectStore unconditionally, keyed by cluster name, so a box
+	// that was never asked for these credentials had every CNPG cluster archiving
+	// to a destination it could not authenticate against -- the shape of failure
+	// that already cost this platform every backup on every box for as long as it
+	// shipped.
+	backupsWanted := func(Spec, Secrets) bool { return true }
 	// Only when the tenant runs images the platform cannot pull anonymously.
 	// ADR-066 makes workloads theirs, so this credential is irreducibly theirs
 	// too -- and equally, a tenant running public images should never be asked.

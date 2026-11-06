@@ -39,7 +39,6 @@ type Spec struct {
 	Domain      string
 	Provider    string
 	Region      string
-	Environment string
 	// Subdomain is the DNS label every hostname on this box sits under, or empty
 	// for the apex. Declared, never derived: see hubDomain.
 	Subdomain string
@@ -97,7 +96,7 @@ func (s Spec) validate() error {
 	missing := []string{}
 	for name, v := range map[string]string{
 		"tenant": s.TenantID, "org": s.GitOrg, "domain": s.Domain,
-		"provider": s.Provider, "environment": s.Environment,
+		"provider": s.Provider,
 		"cluster": s.ClusterName, "bundle-version": s.BundleVersion,
 		"platform-repo": s.PlatformRepoURL, "bundle-registry": s.BundleRegistry,
 	} {
@@ -128,7 +127,11 @@ func (s Spec) validate() error {
 		}
 		return fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
-	return supportedCombination(s.Environment, s.Provider)
+	// No topology check here. The supported matrix is keyed by a WORKLOAD
+	// environment (ADR-111 Revision 7 §4) and the management cluster has none, so
+	// there is nothing to look up: `kakt tenant add-cluster` asks it of each
+	// workload cluster's own declaration instead.
+	return nil
 }
 
 // RequireEscrow refuses a box that would have nowhere to keep its master keys.
@@ -217,9 +220,9 @@ func setEnvFor(key, value string) (func(), error) {
 	}, nil
 }
 
-// supportedMatrix is the environment/provider combinations the platform ships a
-// spoke-pool source for. It mirrors `supportedMatrix` in the environment-manager
-// chart's values.yaml, which is the authority.
+// supportedMatrix is the environment/provider combinations a workload cluster may
+// declare. It mirrors `supportedMatrix` in the environment-manager chart's
+// values.yaml, which is the authority.
 //
 // Duplicated deliberately rather than read from the chart: this runs before any
 // repository exists, on a CLI that may be released and carrying an embedded chart
@@ -234,19 +237,20 @@ var supportedMatrix = map[string][]string{
 	"prod": {"hetzner"},
 }
 
-// supportedCombination refuses a combination the chart will refuse later.
+// supportedCombination refuses a combination the platform supports no topology
+// for, at the moment the cluster is declared.
 //
-// Later is the problem. The chart's own assertSupported fails at render time,
-// inside ArgoCD, after scaffolding has created a repository, set two secrets,
-// dispatched a workflow and provisioned three servers -- and it surfaces as a
-// boundary whose ApplicationSets never appear, which the bootstrap waits ten
-// minutes for before timing out. Every input needed to answer the question was
-// present before any of that existed.
+// It is asked HERE because this is the first and only place the whole combination
+// is known before anything is built. The chart's own assertSupported used to ask
+// it at render time, inside ArgoCD, against the HUB's environment -- which stopped
+// answering the question when the hub stopped having one (ADR-111 Revision 7), and
+// surfaced as a boundary whose ApplicationSets never appear, ten minutes into a
+// bootstrap and after the servers exist.
 func supportedCombination(environment, provider string) error {
 	providers, ok := supportedMatrix[environment]
 	if !ok {
-		return fmt.Errorf("unsupported environment %q. The platform ships spoke-pool "+
-			"sources for: %s", environment, strings.Join(sortedEnvironments(), ", "))
+		return fmt.Errorf("unsupported environment %q. A workload cluster may declare: %s",
+			environment, strings.Join(sortedEnvironments(), ", "))
 	}
 	for _, p := range providers {
 		if p == provider {
@@ -254,9 +258,9 @@ func supportedCombination(environment, provider string) error {
 		}
 	}
 	return fmt.Errorf("%s on %s is not a supported combination.\n\n"+
-		"The platform ships no spoke-pool source for it, so the bundle chart refuses\n"+
-		"to render and the cluster's boundaries never appear -- ten minutes into a\n"+
-		"bootstrap, after the servers exist.\n\n"+
+		"The platform supports no topology for it, so the cluster would be built from\n"+
+		"sources nobody maintains -- and ArgoCD reports an Application that manages\n"+
+		"nothing as Healthy.\n\n"+
 		"Supported: %s\n\n"+
 		"Pass --environment or --provider to choose one.",
 		environment, provider, strings.Join(supportedCombinations(), ", "))
@@ -330,7 +334,7 @@ const RegistryDir = "registry"
 func (s Spec) clusterTokens() map[string]string {
 	return map[string]string{
 		"<BUNDLE_VERSION>":    s.BundleVersion,
-		"<PUBLIC_TLS_ISSUER>": publicTLSIssuer(s.Environment),
+		"<PUBLIC_TLS_ISSUER>": publicTLSIssuer(),
 		"<HUB_DOMAIN>":        hubDomain(s.Subdomain, s.Domain),
 		// The parts as well as the join: the chart composes from these, and a
 		// person edits them rather than a pre-joined string (kubefirst stores
@@ -341,7 +345,6 @@ func (s Spec) clusterTokens() map[string]string {
 		"<WORKER_COUNT>":   strconv.Itoa(s.workerCount()),
 		"<BOX_ID>":         s.BoxID,
 		"<CLUSTER_NAME>":   s.ClusterName,
-		"<ENVIRONMENT>":    s.Environment,
 		"<CLOUD_PROVIDER>": s.Provider,
 		"<CLOUD_REGION>":   s.Region,
 	}
@@ -385,7 +388,7 @@ func (s Spec) CapacityWarning() string {
 			"  Or give it cloud workers instead: re-scaffold with --workers 2,\n"+
 			"                                    or edit workers in registry/clusters/%s/values.yaml\n\n"+
 			"Without one of those the bootstrap is refused before anything is built.",
-		s.Environment, s.ClusterName)
+		s.Provider, s.ClusterName)
 }
 
 // chartSource renders where this cluster's platform content comes from.
@@ -517,14 +520,16 @@ func (s Spec) developmentRevision() string {
 // the chart requires and scaffolding does not write is a value nothing supplies.
 // That gap stalled a real bootstrap at boundary-01 for ten minutes with the seed
 // rendering no ApplicationSets at all.
-func publicTLSIssuer(environment string) string {
-	if environment == "ephemeral" {
-		// Ephemeral environments are created and destroyed per pull request, and
-		// Let's Encrypt rate-limits issuance per registered domain. Staging is
-		// untrusted by browsers and unlimited, which is the correct trade for a
-		// certificate that outlives its cluster by minutes.
-		return "letsencrypt-staging"
-	}
+// The hub's certificate policy, which is the hub's own and not a workload
+// environment's (ADR-111 Revision 7 §3).
+//
+// It took an environment and returned letsencrypt-staging for "ephemeral",
+// trading browser trust for Let's Encrypt's per-registered-domain rate limit on
+// a certificate that outlives its cluster by minutes. That branch was already
+// unreachable from here -- "ephemeral" is not a key in supportedMatrix, so
+// scaffolding refused it before this was called -- and with the hub declaring no
+// environment there is no input left to branch on.
+func publicTLSIssuer() string {
 	return "letsencrypt-prod"
 }
 

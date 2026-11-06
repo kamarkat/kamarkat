@@ -15,7 +15,7 @@ in this template's history. A renderer that is handed one should refuse it.
 | `<PLATFORM_REPO_URL>` | where the platform bundle is sourced from |
 | `<BUNDLE_VERSION>` | the bundle version this cluster runs |
 | `<CLUSTER_NAME>` | the cluster this directory describes |
-| `<ENVIRONMENT>` | the environment slug |
+| `<ENVIRONMENT>` | a workload cluster's environment, and the Day-0 bootstrap workflow's `environment` input. NOT the hub's: the management cluster declares none (ADR-111 Revision 7) |
 | `<CLOUD_PROVIDER>` | provider the cluster is provisioned on |
 | `<CLOUD_REGION>` | region the cluster runs in |
 | `<DOMAIN_NAME>` | the tenant's base domain |

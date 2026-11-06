@@ -1,3 +1,12 @@
+# Hub sizing is management-plane policy, not a workload environment's (ADR-111
+# Revision 7 §3). The values below were conditional on the hub's environmentSlug,
+# which made the management plane's capacity a function of a workload stage it does
+# not have. They are now declared outright.
+#
+# They carry this box's CURRENT EFFECTIVE values deliberately: de-conditionalising
+# is not the moment to change capacity. Raising them is a capacity decision made on
+# measurements -- an unsatisfiable constraint does not fail loudly, it pends, and
+# the service it governs silently never returns.
 # Per-box values for Grafana's PostgreSQL cluster (ADR-112 §§2-3).
 #
 # Read only when this directory is packaged as a component, so it is inert until a
@@ -9,7 +18,7 @@
       value: 's3://hub-db-backups/{{ .Values.global.clusterName }}/'
     - path: [spec, instances]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "prod" }}3{{ else }}2{{ end }}'
+      value: '1'
     # The placement-class fields (ADR-046 §11).
     # global.provider is the RESOLVED placement class when the boundary passes
     # placementGlobalValues (environment-manager.placementClass); a descriptor for this

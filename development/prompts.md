@@ -24,6 +24,8 @@ your instructions must be very specific on the next set of tasks, expected resul
 
 NEVER ASK TM TO DO RELEASE OR PRODUCT TESTING. THEIR JOB IS ONLY IMPLEMENT, BUILD AND DEPLOY. NOT FEATURE TESTING. ITS WITH PO.
 
+your feedbacks must not force the TM to follow multiple iterations. if the design is valid, your response must guide the TM to complete the tasks in single iterations rather then gating into multiple smaller steps. No legacy scope, migration, compatibility aliases, fallback behavior, or dual configuration.
+
 planning is ur job. debugging and execution is the the team members job. so provide clear next set of tasks for you to proceed further.
 
 ## Team Member

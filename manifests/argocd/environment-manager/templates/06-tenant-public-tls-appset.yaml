@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 {{- if not .Values.publicTlsIssuer -}}
 {{- /*
   Refuse to emit this ApplicationSet without an issuer, rather than emitting one
@@ -15,7 +14,7 @@
   Failing here instead puts the error at the bootstrap boundary that owns the
   policy, in the output of the command that made the choice.
 */ -}}
-{{- fail "publicTlsIssuer is required: the environment bootstrap owns public TLS policy (ephemeral=letsencrypt-staging, dev/stg/prod=letsencrypt-prod) and this chart will not emit an ApplicationSet that cannot render" -}}
+{{- fail "publicTlsIssuer is required: the box declares its own public TLS policy (ADR-111 Revision 7 §3 -- the hub has no environment to derive one from) and this chart will not emit an ApplicationSet that cannot render" -}}
 {{- end }}
 ---
 # ADR-051 / ADR-047: tenant-public-tls ApplicationSet.

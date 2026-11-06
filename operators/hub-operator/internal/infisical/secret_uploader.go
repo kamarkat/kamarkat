@@ -185,8 +185,8 @@ func resolveInfisicalPath(p, tenantID string) (string, error) {
 // all of which are read from a hub namespace and consumed by a hub component.
 //
 // Read from the same variable the readers use, so writer and reader cannot
-// disagree: hub-bootstrap-config carries INFISICAL_ENVIRONMENT_SLUG, patched by
-// the manifests/environments/<slug> overlay. It is required, with no default,
+// disagree: hub-bootstrap-config carries INFISICAL_ENVIRONMENT_SLUG, rendered from
+// the box's declared `management.infisicalEnvironmentSlug`. It is required, with no default,
 // because the only possible default is a guess at which environment someone
 // else's secrets are in -- and guessing wrong is silent, as the comment in
 // constants.go records.
@@ -200,8 +200,8 @@ func managementEnvironmentSlug() (string, error) {
 	if slug == "" {
 		return "", fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is not set: the hub's own " +
 			"secrets have no environment to be written to, and defaulting would write them " +
-			"where their ExternalSecrets do not read (hub-bootstrap-config, patched by " +
-			"manifests/environments/<slug>)")
+			"where their ExternalSecrets do not read (hub-bootstrap-config's " +
+			"INFISICAL_ENVIRONMENT_SLUG, rendered from management.infisicalEnvironmentSlug)")
 	}
 	return slug, nil
 }

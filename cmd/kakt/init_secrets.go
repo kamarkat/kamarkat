@@ -1,18 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/bootstrap"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/components"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/infisical"
 	"github.com/spf13/cobra"
 )
 
 var (
-	initSecretsKubeconfig  string
-	initSecretsEnvironment string
+	initSecretsKubeconfig string
 )
 
 func newInitSecretsCmd() *cobra.Command {
@@ -24,12 +23,13 @@ func newInitSecretsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&initSecretsKubeconfig, "kubeconfig", "", "Path to kubeconfig (default: ~/.kube/config)")
-	// This phase writes the ADR-045 bootstrap config into
-	// manifests/environments/<slug>/generated/. Without a slug it has no
-	// directory to write to, and the shared one it used to write to was
-	// inherited by every overlay -- so whichever cluster bootstrapped last
-	// decided which Infisical project every environment rendered.
-	cmd.Flags().StringVar(&initSecretsEnvironment, "environment", "", "Environment slug the generated artifacts belong to (required)")
+	// No --environment. This phase writes the ADR-045 bootstrap config into the
+	// hub overlay's generated/ directory, and since ADR-111 Revision 7 there is
+	// exactly one hub overlay -- so there is nothing for a caller to choose and
+	// nothing to get wrong. The shared directory it used to write to was
+	// inherited by every overlay, so whichever cluster bootstrapped last decided
+	// which Infisical project every environment rendered; one overlay removes
+	// that by removing the second overlay, not by naming the right one.
 
 	return cmd
 }
@@ -42,14 +42,9 @@ func runInitSecrets(cmd *cobra.Command, args []string) error {
 		initSecretsKubeconfig = filepath.Join(home, ".kube", "config")
 	}
 
-	if initSecretsEnvironment == "" {
-		return fmt.Errorf("--environment is required: this phase writes generated artifacts into " +
-			"manifests/environments/<slug>/generated/ and cannot choose the slug for you")
-	}
-
 	installer := &components.Installer{
-		Kubeconfig:      initSecretsKubeconfig,
-		EnvironmentSlug: initSecretsEnvironment,
+		Kubeconfig: initSecretsKubeconfig,
+		OverlayDir: bootstrap.HubOverlayDir,
 	}
 
 	accessInfo := infisical.GetAccessInfo(ctx)

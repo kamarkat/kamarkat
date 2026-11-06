@@ -409,7 +409,7 @@ func GetInfisicalConfig(ctx context.Context, clientset *kubernetes.Clientset) (*
 	}
 	if environmentSlug == "" {
 		return nil, fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG " +
-			"(patched by manifests/environments/<slug>/patch-config.yaml)")
+			"(rendered from the box's declared management.infisicalEnvironmentSlug)")
 	}
 
 	return &Config{

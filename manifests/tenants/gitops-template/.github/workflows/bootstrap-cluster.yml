@@ -55,9 +55,6 @@ on:
       region:
         required: true
         default: <CLOUD_REGION>
-      environment:
-        required: true
-        default: <ENVIRONMENT>
       workers:
         description: Cloud worker nodes to provision. Defaults to this cluster's values.yaml.
         required: false
@@ -95,7 +92,6 @@ jobs:
       cluster: ${{ inputs.cluster }}
       provider: ${{ inputs.provider }}
       region: ${{ inputs.region }}
-      environment: ${{ inputs.environment }}
       bundle-version: <BUNDLE_VERSION>
       workers: ${{ inputs.workers }}
       on-prem: ${{ inputs.on-prem }}

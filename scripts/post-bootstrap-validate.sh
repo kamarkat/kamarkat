@@ -48,7 +48,7 @@ mkdir -p "$LOG_DIR"
 
 # The environment this hub belongs to. Passed through by hub-bootstrap.sh;
 # defaults to dev for manual runs.
-ENVIRONMENT="${ENVIRONMENT:-dev}"
+# No ENVIRONMENT (ADR-111 Revision 7): see scripts/validate/common.sh.
 
 # ─── Counters ─────────────────────────────────────────────────────────────────
 PASS=0
@@ -1018,7 +1018,7 @@ main() {
     log ""
     log "Running ADR-050/051 validation modules (strict)..."
     local adr_rc=0
-    HUB_KUBECONFIG="$KUBECONFIG" ENVIRONMENT="$ENVIRONMENT" SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
+    HUB_KUBECONFIG="$KUBECONFIG" SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
         HUB_DOMAIN="${HUB_DOMAIN:-}" \
         bash "$(dirname "${BASH_SOURCE[0]}")/validate/run.sh" cluster --mode=final \
         2>&1 | tee -a "$LOG_FILE" || adr_rc=1

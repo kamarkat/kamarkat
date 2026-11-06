@@ -18,6 +18,17 @@ const (
 	PathAuthUniversalAuthClientSecrets = "/api/v1/auth/universal-auth/identities/%s/client-secrets"
 	PathProjectMembershipsIdentities   = "/api/v1/projects/%s/memberships/identities/%s"
 	PathOrgIdentityMemberships         = "/api/v1/organization/identity-memberships/%s"
+	// The box's management secret scope, as an Infisical environment. A project is
+	// created with Infisical's OWN defaults (dev, staging, prod) and the hub's scope
+	// is not among them (ADR-111 Revision 7 §2), so Day-0 creates it: writing a
+	// secret into an environment that does not exist is not a loud failure, it is a
+	// hub whose ClusterSecretStores resolve nothing while reporting Healthy.
+	//
+	// /projects, not the /workspace spelling the same routes also answer to: the
+	// project routes under /workspace are registered as deprecated upstream, and
+	// createProject and the membership grants here already use /projects.
+	PathProjectEnvironments      = "/api/v1/projects/%s/environments"
+	PathProjectEnvironmentBySlug = "/api/v1/projects/%s/environments/slug/%s"
 	PathCertificateProfilesBySlug      = "/api/v1/cert-manager/certificate-profiles/slug/%s?projectId=%s"
 	PathCertificateAuthorities         = "/api/v1/cert-manager/ca"
 	PathCertificatePolicies            = "/api/v1/cert-manager/certificate-policies"

@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 ---
 {{- /* ADR-068: an uninjected build is unreleased and sources from the working
      tree; a build carrying a version sources from the bundle published under

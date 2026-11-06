@@ -147,10 +147,13 @@ SPOKEPOOL_NAME="${SPOKEPOOL_NAME:-}"
 SPOKEPOOL_NAMESPACE="${SPOKEPOOL_NAMESPACE:-platform-ops}"
 SPOKEPOOL_TIMEOUT="${SPOKEPOOL_TIMEOUT:-1800}"  # 30 minutes in seconds
 
-# Environment slug for matrix topology (ADR 037). MUST be explicitly set
-# via --environment flag. The Go bootstrap CLI defaults to prod for hetzner,
-# hybrid if omitted.
-ENVIRONMENT="${ENVIRONMENT:-}"
+# No ENVIRONMENT. The hub has no workload environment (ADR-111 Revision 7).
+#
+# It was required here, with the refusal naming the reason: cmd/kakt/bootstrap.go
+# coerced an empty --environment to "prod", so a hub given none silently became a
+# production one. That coercion is gone -- the CLI reads the box's own declaration
+# in registry/clusters/<cluster>/values.yaml -- so there is nothing left to pass
+# and nothing left to defend against.
 # Hybrid provider cell (ADR-046): passed through to `hub bootstrap --provider=hybrid`.
 # HOME_WORKER_ENABLED=1 activates the home-worker join flow; TAILNET_NAME sets
 # the Tailscale MagicDNS tailnet for the spoke control-plane endpoint.
@@ -889,19 +892,15 @@ step1_bootstrap_hub() {
     fi
 
     require_credential HCLOUD_TOKEN "k8-secrets/hetzner/token" "the Hetzner API token"
-    local env_flag=""
-    if [[ -n "${ENVIRONMENT:-}" ]]; then
-        env_flag="--environment=${ENVIRONMENT}"
-    else
-        env_flag="--environment=prod"
-    fi
     local gating_flag="--gating=${GATING}"
     local gitops_flag=""
     [[ -n "$GITOPS_DIR" ]] && gitops_flag="--gitops-dir=${GITOPS_DIR}"
     local topo_flag=""
-    # Topology is a matrix dimension (ADR-037) but hybrid claims live flat under
-    # spoke-pools/{env}/{provider}. Pass an explicit empty topology so the Go CLI
-    # default of "single" does not append a /single segment to the claim path.
+    # Hybrid passes an explicit empty topology so the Go CLI default of "single"
+    # is not sent. Nothing branches on the value any more -- it modified the
+    # spoke-pool lookup path, and ADR-082 moved that claim into the tenant's own
+    # repository -- so this now only keeps the hybrid flow passing what it always
+    # passed.
     if [[ "$PROVIDER" == "hybrid" ]]; then
         topo_flag="--topology="
     elif [[ -n "${TOPOLOGY:-}" ]]; then
@@ -1950,7 +1949,7 @@ run_gate() {
         # a wrong one -- both worse than saying the authority is unreadable.
         error_exit "Gate '$label': the box declares no domain (HubEnvironment.spec.domain is empty), so there is nothing to validate its hostnames against."
     fi
-    if ! HUB_KUBECONFIG="$KUBECONFIG_PATH" ENVIRONMENT="$ENVIRONMENT" \
+    if ! HUB_KUBECONFIG="$KUBECONFIG_PATH" \
          SPOKEPOOL_NAME="$SPOKEPOOL_NAME" HUB_DOMAIN="$hub_domain" \
          bash "$SCRIPT_DIR/validate/run.sh" cluster --only="$modules" --mode=gate; then
         error_exit "Gate '$label' failed — see above. Continuing would build the rest of the platform on a broken foundation."
@@ -1975,14 +1974,6 @@ main() {
                 ;;
             --provider)
                 PROVIDER="$2"
-                shift 2
-                ;;
-            --environment=*)
-                ENVIRONMENT="${1#*=}"
-                shift
-                ;;
-            --environment)
-                ENVIRONMENT="$2"
                 shift 2
                 ;;
             --spoke=*)
@@ -2068,11 +2059,6 @@ main() {
                 TEARDOWN_YES="1"
                 shift
                 ;;
-            dev|stg|prod|ephemeral)
-                # Positional environment: `hub-bootstrap.sh dev --teardown`.
-                ENVIRONMENT="$1"
-                shift
-                ;;
             *)
                 # A typo in a flag used to be logged and ignored, which meant the
                 # run continued with a silently wrong configuration.
@@ -2084,18 +2070,6 @@ main() {
     if [[ "$PROVIDER" != "hetzner" && "$PROVIDER" != "hybrid" ]]; then
         error_exit "Invalid provider: $PROVIDER (must be 'hetzner' or 'hybrid')"
     fi
-
-    # An empty --environment is not a no-op: cmd/kakt/bootstrap.go coerces "" to
-    # "prod", which makes the spoke AppSet path spoke-pools/prod/... — a path that
-    # does not exist — so the spoke silently never provisions. Refuse it here,
-    # where the message can say so, rather than debugging a missing spoke later.
-    if [[ -z "$ENVIRONMENT" ]]; then
-        error_exit "--environment is required (the CLI coerces an empty value to 'prod', and the spoke then never provisions)"
-    fi
-    case "$ENVIRONMENT" in
-        dev|stg|prod|ephemeral) ;;
-        *) error_exit "Invalid environment: $ENVIRONMENT (expected dev, stg, prod or ephemeral)" ;;
-    esac
 
     case "$GATING" in
         sequenced|converged) ;;
@@ -2156,7 +2130,7 @@ main() {
         log "Static repo validation skipped (checkpointed — Go state shows preflight completed via .state/${CLUSTER_NAME}.json)"
     else
         log "Running static repo validation (59 checks) — Go infra-preflight is checkpointed via .state/${CLUSTER_NAME}.json..."
-        if ! ENVIRONMENT="$ENVIRONMENT" bash "$SCRIPT_DIR/validate/run.sh" preflight; then
+        if ! bash "$SCRIPT_DIR/validate/run.sh" preflight; then
             error_exit "Pre-bootstrap validation failed — nothing was created. Fix the reported invariants and re-run (SKIP_PREFLIGHT=1 overrides)."
         fi
     fi
@@ -2303,7 +2277,6 @@ main() {
     if ! KUBECONFIG="$KUBECONFIG_PATH" \
          ZERO_OPS_DIR="$ZERO_OPS_DIR" \
          SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
-         ENVIRONMENT="$ENVIRONMENT" \
          CLUSTER_NAME="$CLUSTER_NAME" \
          bash "$validate_script" --only=platform; then
         error_exit "Post-bootstrap validation FAILED — see the summary above."
@@ -2320,7 +2293,7 @@ trap 'log "Script interrupted"; report_elapsed "interrupted"; exit 1' INT TERM
 # Sourcing is how a single step gets exercised against a box whose other steps
 # already passed:
 #
-#   CLUSTER_NAME=... PROVIDER=... ENVIRONMENT=... SPOKEPOOL_NAME=... \
+#   CLUSTER_NAME=... PROVIDER=... SPOKEPOOL_NAME=... \
 #   ZERO_OPS_DIR=... bash -c 'source scripts/hub-bootstrap.sh
 #                             read_kubeconfig_from_state
 #                             export KUBECONFIG="$KUBECONFIG_PATH"

@@ -331,8 +331,8 @@ func main() {
 	if mgmtEnvironmentSlug == "" {
 		setupLog.Error(fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is empty"),
 			"the hub's own secrets have no environment; every Infisical write will be "+
-				"refused until hub-bootstrap-config carries it (patched by "+
-				"manifests/environments/<slug>/patch-config.yaml)")
+				"refused until hub-bootstrap-config carries it (rendered from the box's "+
+				"declared management.infisicalEnvironmentSlug)")
 	}
 	pkiInfisicalClient.EnvironmentSlug = mgmtEnvironmentSlug
 

@@ -34,7 +34,11 @@ spec:
       hostAPI: "http://infisical-standalone-infisical.platform-security.svc:8080"
       secretsScope:
         projectSlug: "hub-secrets"
-        environmentSlug: "dev"
+        # The MANAGEMENT scope, not a workload environment: the folder below holds
+        # what hub-operator writes for the box's owner, and hub-operator writes
+        # through the box's declared management.infisicalEnvironmentSlug. Templated
+        # per box beside the folder name (templated-fields.yaml).
+        environmentSlug: "management"
         secretsPath: "/nutgraf-mgmt"
       auth:
         universalAuthCredentials:

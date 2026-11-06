@@ -5,8 +5,11 @@
 #
 # Patterns are recursive (trailing /) rather than /*, which in CODEOWNERS matches
 # only files directly in the directory and silently skips any subdirectory added later.
-/manifests/environments/prod/ @kamarkat/platform-admins
-/manifests/spoke/spoke-pools/prod/ @kamarkat/platform-admins
+# The hub overlay. There is one (ADR-111 Revision 7): the management plane's, which
+# every box's own configuration is rendered from. manifests/environments/prod/ was
+# listed here, and manifests/spoke/spoke-pools/prod/ beside it -- a directory
+# deleted when ADR-082 moved the SpokePool claim into the tenant's repository.
+/manifests/environments/management/ @kamarkat/platform-admins
 # The catalogue no longer has an environment axis (ADR-051 amendment 2026-09-18):
 # platform content splits by provider and nothing else, so there is no prod/
 # directory to guard. The whole catalogue is guarded instead -- it reaches every

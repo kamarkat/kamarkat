@@ -37,7 +37,6 @@ var (
 	sshKey            string
 	buildFlatcarImage bool
 	debug             bool
-	environment       string
 	topology          string
 	gating            string
 
@@ -215,10 +214,9 @@ sixteen hours behind a run that reported success.`,
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH key name for Hetzner Rescue Mode emergencies only")
 	cmd.Flags().BoolVar(&buildFlatcarImage, "build-flatcar-image", false, "Trigger Packer build for Flatcar image")
 	cmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging")
-	cmd.Flags().StringVar(&environment, "environment", "", "Environment slug (dev, stg, prod, ephemeral). Defaults to prod for hetzner, hybrid")
 	cmd.Flags().IntVar(&workerReplicas, "workers", -1,
-		"cloud worker nodes to provision (default: 2, every environment). Pass 0 to run "+
-			"on on-prem capacity alone, which then has to be there (ADR-075)")
+		"cloud worker nodes to provision (default: 2). Pass 0 to run on on-prem "+
+			"capacity alone, which then has to be there (ADR-075)")
 	cmd.Flags().StringVar(&topology, "topology", "single", "Topology mode: single (default) or multi (bridged)")
 	cmd.Flags().StringVar(&bootstrapEncryption, "encryption-mode", string(cluster.EncryptionSecretbox),
 		"how this box encrypts Secrets at rest: secretbox (ADR-003 §6, default)")
@@ -356,7 +354,6 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 			SSHKey:            sshKey,
 			Debug:             debug,
 			BuildFlatcarImage: buildFlatcarImage,
-			Environment:       environment,
 			OnPremEnabled:     onPremEnabled,
 			WorkerReplicas:    workerReplicasOverride(),
 			ClusterName:       clusterName,
@@ -372,7 +369,6 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 			SSHKey:            sshKey,
 			Debug:             debug,
 			BuildFlatcarImage: buildFlatcarImage,
-			Environment:       environment,
 			OnPremEnabled:     onPremEnabled,
 			WorkerReplicas:    workerReplicasOverride(),
 			ClusterName:       clusterName,
@@ -405,10 +401,18 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Derive environment slug
-	envSlug := environment
-	if envSlug == "" {
-		envSlug = "prod"
+	// The management secret scope, READ from the box's own declaration (ADR-111
+	// Revision 7 §2). There is no --environment flag and no default.
+	//
+	// It was `envSlug := environment; if envSlug == "" { envSlug = "prod" }`: a
+	// hub with no environment given silently became a production one, which is
+	// why hub-bootstrap.sh had to make its own --environment mandatory to defend
+	// against this coercion. Reading the declaration removes the flag, the
+	// default and the guard together, and makes activating a new scope an edit to
+	// clusters/<mgmt>/values.yaml rather than a code change.
+	box, err := bootstrap.ReadBoxValues(gitopsDir, clusterName)
+	if err != nil {
+		return err
 	}
 
 	// ADR-055: mode and environment are independent inputs. Every environment
@@ -427,7 +431,7 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		KeepBootstrap:    keepBootstrap,
 		MergeKubeconfig:  mergeKubeconfig,
 		Debug:            debug,
-		EnvironmentSlug:  envSlug,
+		ManagementScope:  box.ManagementScope(),
 		Topology:         topology,
 		Gating:           gatingMode,
 		GitopsDir:        gitopsDir,

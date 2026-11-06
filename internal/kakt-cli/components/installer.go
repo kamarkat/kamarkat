@@ -27,13 +27,20 @@ import (
 // ArgoCD restarts itself mid-bootstrap.
 type Installer struct {
 	Kubeconfig string
-	// EnvironmentSlug scopes the ADR-045 artifacts this installer writes.
+	// OverlayDir is the hub overlay directory the ADR-045 artifacts this installer
+	// writes are placed in, within the PLATFORM's own tree.
 	//
 	// They were written to manifests/environments/base/generated/, which every
 	// overlay inherits, so one file held whichever cluster bootstrapped last and
-	// prod rendered dev's Infisical project. ADR-037 isolates environments by
-	// directory; the artifact now sits in the environment's own.
-	EnvironmentSlug string
+	// prod rendered dev's Infisical project. The artifact now sits in the hub
+	// overlay's own directory.
+	//
+	// It was EnvironmentSlug, which read as a workload environment and as the
+	// Infisical scope -- neither of which it is. It is a path component, and
+	// since ADR-111 Revision 7 there is exactly one value for it. A tenant's
+	// repository addresses the same artifact by cluster instead (ADR-072), so
+	// this is unused whenever GitopsDir is set.
+	OverlayDir string
 
 	// GitopsDir is a checkout of the tenant's own repository.
 	//

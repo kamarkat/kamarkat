@@ -732,7 +732,11 @@ spec:
                   hostAPI: "https://infisical.dev.nutgraf.in"
                   secretsScope:
                     projectSlug: "hub-secrets"
-                    environmentSlug: "dev"
+                    # The MANAGEMENT scope (ADR-111 Revision 7 §2), templated per box.
+                    # This store reads /spoke-pool/<cell>/tenants/<tenant>/... , which
+                    # hub-operator writes through the box's declared management scope,
+                    # so it follows that scope and not the cell's environment.
+                    environmentSlug: "management"
                   auth:
                     universalAuthCredentials:
                       clientId:

@@ -18,8 +18,7 @@
     # account: rate limits, expiry notices and revocation authority all follow it.
     - path: [spec, acme, email]
       value: 'platform@{{ .Values.global.hubDomain }}'
-    # The zones the DNS-01 solver may write. Listed per environment by the
-    # platform; a box has exactly one.
+    # The zones the DNS-01 solver may write. A box has exactly one -- its own.
     - path: [spec, acme, solvers, 0, selector, dnsZones]
       value:
         - '{{ .Values.global.hubDomain }}'

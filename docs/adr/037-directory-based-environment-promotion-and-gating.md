@@ -3,6 +3,12 @@
 ## Status
 Accepted
 
+*Revised 2026-11-06: clause 2 is superseded. The management hub is environment-independent
+(ADR-111 Revision 7): one shared hub manages workload clusters in every environment, and a
+workload environment is declared by the managed cluster, never by the hub. Clauses 1 and 3-8
+are unchanged -- the promotion gates were always enforced in the repository, not by which hub
+could reach which directory.*
+
 ## Context
 The platform requires a structured mechanism to promote infrastructure changes and tenant configurations through isolated lifecycle stages (ephemeral preview, dev, staging, production). Relying on a flat manifest structure or branch-based promotion risks configuration drift, obscures cross-environment visibility, and allows unverified changes to impact production workloads.
 
@@ -11,7 +17,13 @@ We will enforce environment progression and access gating using a Directory-Base
 
 1. **Directory-Based Overlays:** Environments will be defined by strictly segregated Kustomize overlay directories (e.g., `manifests/environments/dev`, `stg`, `prod`). We explicitly reject branch-based promotion; all environment states will reside in the `main` branch to maintain a single, auditable source of truth.
 
-2. **Environment-Bound Hubs:** Each environment maps to a physically isolated Hub cluster. Each Hub cluster SHALL be configured with an immutable environment-specific ArgoCD Application definition that reconciles only its designated overlay path. A production Hub physically cannot reconcile non-production manifests.
+2. **Environment-Independent Management Hub** *(revised 2026-11-06; supersedes "Environment-Bound Hubs")*
+
+   The platform runs one shared management hub. It does not declare an environment, and no environment-scoped value is derived from it. A workload environment is a property of the managed cluster: each declares its own `environmentSlug` and provider, written by the SpokePool composition from the claim the tenant wrote, and every environment-scoped read -- overlay path, secret scope, supported-topology check -- resolves from the cluster's own declaration.
+
+   The original clause bought isolation physically: a prod hub could not reach a dev directory because it had no Application pointing at one. That is replaced by declaration, not by a second mechanism. The hazard it was guarding against is real and is recorded where it was found -- a workload cluster that read the hub's slug instead of its own would read another environment's secrets out of Infisical -- and the fix is that nothing reads the hub's slug, because the hub does not have one.
+
+   What this clause no longer provides is stated in Consequences rather than hidden: one hub reconciling every environment's overlay is one ArgoCD that can, in principle, apply any of them.
 
 3. **Automated Promotion Workflow:** Promotion between environments SHALL be performed through automated repository workflows that create promotion pull requests. Direct manual duplication of configuration between environment overlay directories is discouraged. This prevents configuration drift caused by human error during file copying.
 
@@ -37,8 +49,9 @@ See ADR-039 for the complete ownership matrix.
 ### Positive
 - Cross-environment differences and configuration drift are explicitly visible within a single repository commit history.
 - Production modifications are securely gated by mandatory reviews and deployment approvals without requiring complex Git branching strategies.
-- Blast radius is mathematically isolated; a malformed commit in the `dev` directory cannot be applied by the `prod` Hub cluster.
+- Blast radius is isolated by declaration: a manifest reaches a cluster only if that cluster declares the environment it belongs to, so a malformed commit in the `dev` overlay is applied to clusters that declared `dev` and to no others.
 - Rollbacks are fully auditable through Git history rather than imperative cluster operations.
 
 ### Negative
 - Promotion depends on automated workflow coordination across environment overlays, introducing additional pipeline complexity and operational ownership requirements.
+- A single management hub reconciles every environment, so the physical impossibility clause 2 originally asserted is gone. One ArgoCD holds credentials for, and can apply to, dev and prod alike. The remaining controls are the repository gates (clauses 4-6) and per-cluster declaration -- both of which were already load-bearing, and neither of which is a physical boundary. Accepted deliberately: environment-bound hubs required a production-grade hub per environment, which is three times the management-plane cost to defend a boundary that the repository gates were already defending.

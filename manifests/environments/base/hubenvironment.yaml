@@ -3,12 +3,10 @@ kind: HubEnvironment
 metadata:
   name: hub-environment
 spec:
-  # Platform environment identity — the single authority for every
-  # environment-scoped value (ADR-051 addendum, ADR-043). Base carries the
-  # production value, mirroring spec.domain: non-production overlays patch both,
-  # prod deliberately patches neither. A forgotten patch is now rejected by the
-  # env-as-zone rules rather than silently claiming the production zone.
-  environment: prod
+  # spec.environment is GONE (ADR-111 Revision 7): the hub has no workload
+  # environment, so there was no value for it to carry and no rule left for it to
+  # key. What it used to gate -- the env-as-zone domain rules -- was already
+  # replaced by a declared subdomain in ADR-051's Amendment 2026-09-18.
   # Domain is sourced from hub-bootstrap-config ConfigMap
   domain: nutgraf.in
   # The logical hub: this box, for as long as it exists (ADR-111 ss1). Templated
@@ -126,6 +124,13 @@ spec:
       - code
   secrets:
     infisical:
-      # ProjectSlug and EnvironmentSlug are sourced from hub-bootstrap-config ConfigMap
+      # ProjectSlug is sourced from hub-bootstrap-config ConfigMap.
       projectSlug: hub-platform
-      environmentSlug: dev
+      # The MANAGEMENT secret scope (ADR-111 Revision 7): the Infisical environment
+      # holding this hub's own credentials, not a workload environment.
+      #
+      # A placeholder, like boxId and clusterName above: templated per box from the
+      # one declared input, `management.infisicalEnvironmentSlug`. It read `dev`
+      # while a CEL rule pinned it equal to spec.environment, which is what made the
+      # hub's secret scope a workload environment by construction.
+      environmentSlug: PLACEHOLDER_MANAGEMENT_SCOPE

@@ -7,14 +7,18 @@ ADR-082 (tenant repository layout and cluster naming), ADR-092 (recovery is exce
 ADR-100 (deprecated; secretbox remains the at-rest mechanism), ADR-105 (encryption of Kubernetes
 Secrets at rest, Accepted), ADR-104 (no key material in node bootstrap material — **Proposed**,
 not in force), ADR-003 §6 (ESO/Infisical, at-rest encryption), ADR-112 (each platform application
-owns its PostgreSQL cluster)
+owns its PostgreSQL cluster), ADR-037 (environment promotion; its clause 2 is superseded by
+Revision 7 below), ADR-046 §11 (placement classes), ADR-051 (environment DNS naming; its
+Amendment 2026-09-18 decided the DNS half of Revision 7)
 
 *Revised 2026-11-02 (Revision 5): Class B is per application (ADR-112); Velero is Class M's
 mechanism. Revision 6: Class M splits into credentials, resources and activation streams, and
 activation is a one-way GitOps transition — the ACM cluster-backup pattern applied with our own
 mechanisms. Sequencing, rehearsals and their evidence live in
 `docs/plans/k8s-cnpg-upgrade-and-restore-drill.md`; this ADR sets no acceptance or release
-condition.*
+condition. Revision 7 (2026-11-06): the hub is environment-independent -- management identity,
+management secret scope, management availability and workload environment are four separate
+concerns, and the hub declares no `environmentSlug`.*
 
 ## Context
 
@@ -1042,3 +1046,137 @@ Kubernetes v1.31.6, CAPI v1.10.0, kubeadm providers v1.8.5, CAPH v1.0.7 at contr
 with the target combination recorded there when the upgrade track selects it. ADR-112 continues
 to own per-application clusters, their sizing and their Barman archives. No release workflow
 changes, and no gate is added.
+
+
+## Revision 7 (2026-11-06): the hub is environment-independent
+
+A hub that declares an environment is a hub that belongs to one. ADR-037 clause 2 said so
+explicitly -- each environment maps to a physically isolated hub -- and the configuration
+followed: the hub's registry entry carries `environmentSlug`, and nine separate things read it.
+
+That model costs a production-grade management plane per environment, and it buys an isolation
+guarantee the repository gates were already providing. One shared management hub replaces it.
+
+**This completes a decision already taken.** ADR-051's Amendment 2026-09-18 removed the
+environment from the box's DNS, on exactly this reasoning: a domain of the form
+`<environment>.<domain>` made the box's hostnames a function of its environment "and therefore
+made the MANAGEMENT cluster have an environment, because it has hostnames". It named what
+followed from that -- the box's Infisical slug, nine packaged chart variants, and a spoke
+inheriting its hub's environment rather than declaring its own -- and fixed the first of them by
+declaring a `subdomain` instead. Revision 7 finishes the list. The configuration half outlived
+the DNS half by seven weeks because nothing forced them to move together; that is the finding,
+not the decision.
+
+What follows records what environment-independence means for the hub's own configuration,
+because removing the field is the smallest part of it.
+
+### 1. Four concerns, four declarations
+
+`environmentSlug` on the hub was answering four questions at once. Separating them is the whole
+decision; everything below follows from it.
+
+| Concern | Declared by | Authority |
+|---|---|---|
+| Management identity | `boxId` | §1 of this ADR, unchanged |
+| Management secret scope | `management.infisicalEnvironmentSlug` | this revision |
+| Management availability and capacity | the hub's own management-plane configuration | this revision, §3 |
+| Workload environment | the managed cluster's own `environmentSlug` | ADR-037 clauses 1, 3-8 |
+
+**No new identity field.** `boxId` already is the hub's stable identity and already keys the
+escrow path and DNS record ownership (§1). A management-plane concern that needs to name the hub
+names `boxId`.
+
+**The hub does not declare `environmentSlug`.** Not as an empty value, and not as
+`environmentSlug: management`. Reusing the key with a management value would leave one field
+answering two questions -- a secret scope and a workload environment -- which is the defect this
+revision exists to remove, and it would be re-conflated by the next reader who sees a slug and
+assumes it names an environment. The field is absent from the hub's configuration, so a reader
+that needs an environment has to say whose.
+
+### 2. The management secret scope
+
+The hub reads its own credentials from a dedicated Infisical environment, declared as
+`management.infisicalEnvironmentSlug` and set to `management`. It is the hub's scope and nothing
+else's: it is not a fourth workload environment, nothing is promoted into or out of it, and no
+managed cluster reads it.
+
+Every site that resolved it from the hub's `environmentSlug`, or from a literal of its own, now
+resolves it from this field: the `ClusterSecretStore` patch in the environment-manager
+boundaries, the `cluster-secret-store` component's templated field, the `infisical-tenant-mgmt`
+store that reads the folder the hub-operator writes the owner's credentials to, and the tenant
+`SecretStore` the tenant-platform Composition plants on a cell, which reads
+`/spoke-pool/<cell>/tenants/<tenant>/...` -- also hub-operator's writes. The last two carried
+`dev` as a literal, which was correct only while the hub's scope happened to be `dev`.
+
+A managed cluster's store continues to resolve from that cluster's own `environment` label, which
+is already correct and already carries the recorded reason: a cluster reading the hub's slug
+would read the environment of whatever provisioned it.
+
+**Day-0 creates the scope; there is no migration.** Infisical supplies a project with its own
+default environments -- `dev`, `staging`, `prod` -- and `management` is not among them, so a box
+that declares it would otherwise declare a destination that does not exist. That failure is
+silent in the direction that matters: the write succeeds against nothing an `ExternalSecret` can
+read, every store resolves empty, and the box reports Healthy while holding no credentials.
+
+So the bootstrap creates the environment before it writes a secret into it
+(`ensureManagementScope`, `internal/kakt-cli/infisical/bootstrap.go`), reading the scope from
+`hub-bootstrap-config` -- the same key the writers read, so the creator and the writers cannot
+disagree. It asks before it writes, so a re-run against a box that already has the environment
+performs no write at all, and it runs on the cached path too: a box bootstrapped before the scope
+was declared reaches that path with the environment still absent.
+
+That is what makes the declaration self-sufficient: **the scope a box declares is the scope that
+exists.** A new box bootstraps directly into `management`; no earlier scope is read, aliased or
+kept.
+
+Nothing is copied. The hub's credentials are not data the platform holds for someone else -- they
+are written by the hub, and changing the declaration changes the HubEnvironment's spec, which
+bumps its generation, which makes `SecretsBackedUp` stale and re-runs the upload phase against
+the declared scope. The secrets a box needs are therefore re-written where its readers look, by
+the same writer that put them in the old scope, with no compatibility path and no rotation
+performed inside a migration.
+
+### 3. Management availability is its own policy
+
+The hub's footprint does **not** become the `prod` branch of the old environment conditionals.
+Those branches encode workload-environment assumptions -- replica counts, pod spread and resource
+reservations chosen for what a dev or prod *workload* cluster needs -- and inheriting one of them
+is the same mistake as declaring an environment, arrived at by a different route.
+
+The hub's sizing is declared explicitly, as management-plane policy:
+
+* **Replicas** follow the management-plane availability design, not a workload environment's.
+* **Scheduling constraints** follow this box's measured node capacity and failure domains. A
+  constraint that cannot be satisfied does not fail loudly; it pends, and the service it governs
+  silently never comes back.
+* **Backup configuration** follows this ADR's backup classes (Revision 6 §1), which are already
+  independent of any workload environment.
+* **TLS issuer** follows the hub's own domain and certificate policy.
+* **Resource reservations** follow measured capacity.
+
+This is stated because the obvious reading of "one shared production-grade hub" is "set
+everything to three", and on the current box that is unsafe: its worker node sits at 98% of
+memory requests with the control-plane node tainted, so moving five CNPG clusters and the
+observability components to three replicas yields pending pods, not availability. A hub intended
+to manage production must reach suitable availability and capacity -- by a capacity decision made
+on measurements, not as a side effect of deleting a field.
+
+### 4. Workload topology is validated per cluster
+
+The supported-topology check stops being keyed by the hub. `supportedMatrix` and
+`assertSupported` validate each managed cluster against that cluster's own declared environment
+and provider; neither is inferred from the hub. The duplicated matrix in the CLI and the chart
+(and the parity test asserting they agree) is unaffected -- what changes is whose environment is
+looked up in it.
+
+`kakt tenant add-cluster --environment` remains the entry point for a workload environment.
+Hub scaffolding no longer takes one.
+
+### 5. What this revision does not change
+
+Planned succession and disaster reconstruction remain separate paths (§4, §5), and both continue
+to key on `boxId` and `clusterName` exactly as §1 defines them. The hub's domain and identity
+configuration are unchanged and are not derived from any environment. The supported version
+combination stands as §9 records it. ADR-112 continues to own per-application clusters and their
+archives. No new operator, control plane, reconciler or release gate is introduced, and no
+release workflow changes.

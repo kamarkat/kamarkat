@@ -141,18 +141,6 @@ spec:
                   nutgraf.in)
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
-              environment:
-                description: |-
-                  Environment is the platform environment identity for this Hub and the single
-                  authority for it. Every environment-scoped value — the public DNS zone, the
-                  secret store's project environment, and anything added later — derives from
-                  this field rather than declaring its own copy.
-                enum:
-                - dev
-                - stg
-                - prod
-                - ephemeral
-                type: string
               oauth:
                 description: OAuth configuration for Hydra clients
                 properties:
@@ -221,14 +209,34 @@ spec:
                     description: Infisical configuration for secret backup
                     properties:
                       environmentSlug:
-                        default: prod
-                        description: EnvironmentSlug is the Infisical environment
-                          identifier
+                        description: |-
+                          EnvironmentSlug is the Infisical environment holding THIS HUB's credentials
+                          -- the management secret scope (ADR-111 Revision 7).
+
+                          Rendered from the box's declared `management.infisicalEnvironmentSlug`. This
+                          field is the operator-facing representation of that one input, not a second
+                          source of truth, and the hub-operator reads the same value from
+                          hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG so reader and writer
+                          cannot disagree.
+
+                          Required and non-empty, with NO DEFAULT. It defaulted to "prod" while a
+                          cross-field rule simultaneously pinned it equal to spec.environment, so the
+                          default was unreachable wherever it mattered and misleading everywhere else.
+                          The only possible default is a guess at which environment someone else's
+                          secrets are in, and guessing wrong is silent: the secrets resolve, from the
+                          wrong scope.
+
+                          Not constrained to an environment set. A management scope is not a workload
+                          environment -- nothing is promoted into or out of it, and no managed cluster
+                          reads it.
+                        minLength: 1
                         type: string
                       projectSlug:
                         default: hub-platform
                         description: ProjectSlug is the Infisical project identifier
                         type: string
+                    required:
+                    - environmentSlug
                     type: object
                 type: object
               tls:
@@ -248,24 +256,7 @@ spec:
             required:
             - database
             - domain
-            - environment
             type: object
-            x-kubernetes-validations:
-            - message: 'domain must be the environment''s own zone: for a non-production
-                environment, domain must begin with that environment as its leftmost
-                label (ADR-051 env-as-zone)'
-              rule: self.environment == 'prod' || self.domain.startsWith(self.environment
-                + '.')
-            - message: 'production must use the apex domain unlabelled: domain must
-                not begin with a non-production environment label (ADR-051 env-as-zone)'
-              rule: self.environment != 'prod' || !(['dev.','stg.','ephemeral.'].exists(p,
-                self.domain.startsWith(p)))
-            - message: 'secrets.infisical.environmentSlug must equal spec.environment:
-                environment identity has a single authority and services consume it
-                (ADR-043 single authority per domain)'
-              rule: '!has(self.secrets) || !has(self.secrets.infisical) || !has(self.secrets.infisical.environmentSlug)
-                || size(self.secrets.infisical.environmentSlug) == 0 || self.secrets.infisical.environmentSlug
-                == self.environment'
           status:
             description: status defines the observed state of HubEnvironment
             properties:

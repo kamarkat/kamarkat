@@ -73,7 +73,7 @@ cd local-gitops
 export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/k8-secrets/hetzner/token)
 
 /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/kakt bootstrap --name local-hub --provider hetzner --region hel1 \
-  --environment dev --gitops-dir .
+  --gitops-dir .
 
 ## Cluster Teardown
 
@@ -84,7 +84,6 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
 ./kakt bootstrap \
   --name devbox \
   --provider hetzner \
-  --environment dev \
   --region hel1 \
   --on-prem \
   --tailnet-name taila4c44b.ts.net \

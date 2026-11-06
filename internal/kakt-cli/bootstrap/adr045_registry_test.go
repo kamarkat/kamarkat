@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,14 +38,19 @@ func fromRepoRoot(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(wd) })
 }
 
-// The registry declares per-environment artifacts with an {env} placeholder,
-// because these live per environment (ADR-045): one shared file under base/
-// meant prod rendered dev's Infisical project. Declaring the placeholder and
+// The registry declares its artifacts under an {env} placeholder, which is the
+// HUB OVERLAY DIRECTORY (ADR-111 Revision 7) -- one shared file under base/ meant
+// prod rendered dev's Infisical project (ADR-045). Declaring the placeholder and
 // never expanding it made the validator look for a directory literally called
 // "{env}" and report the artifact missing, naming a path no step had written.
-func TestADR045RegistryResolvesTheEnvironmentPlaceholder(t *testing.T) {
+//
+// It took the bootstrap's environment slug and the Orchestrator had to be given
+// one; there is now one hub overlay, so it resolves with nothing supplied. Every
+// consumer reads the registry through this function, which is what keeps an
+// unresolvable path from reaching one.
+func TestADR045RegistryResolvesTheOverlayPlaceholder(t *testing.T) {
 	fromRepoRoot(t)
-	o := &Orchestrator{EnvironmentSlug: "dev"}
+	o := &Orchestrator{}
 
 	reg, err := o.readADR045Registry()
 	if err != nil {
@@ -54,22 +60,45 @@ func TestADR045RegistryResolvesTheEnvironmentPlaceholder(t *testing.T) {
 		t.Fatal("the registry declares no artifacts; this test would prove nothing")
 	}
 
+	resolved := 0
 	for _, a := range reg.Artifacts {
 		if strings.Contains(a.File, "{env}") {
 			t.Errorf("unexpanded placeholder in %q", a.File)
 		}
+		if strings.Contains(a.File, filepath.Join("environments", HubOverlayDir)) {
+			resolved++
+		}
+	}
+	if resolved == 0 {
+		t.Errorf("no artifact resolved into environments/%s: the placeholder expanded "+
+			"to something, but not to the hub overlay these artifacts are written to",
+			HubOverlayDir)
 	}
 }
 
-// Every consumer of the registry reads it through this function, so refusing
-// here is what stops an unresolvable path reaching one of them. Returning the
-// raw paths instead would restore the failure this prevents.
-func TestADR045RegistryRefusesWithoutAnEnvironment(t *testing.T) {
+// The scope and the directory are both the word "management" and are different
+// things: one is an Infisical environment, the other a path in this repository.
+// Deriving the path from the scope would mean activating a new scope silently
+// moved the artifacts, so the resolution must not read it.
+func TestADR045RegistryIgnoresTheManagementScope(t *testing.T) {
 	fromRepoRoot(t)
-	o := &Orchestrator{}
 
-	if _, err := o.readADR045Registry(); err == nil {
-		t.Error("a registry with per-environment paths and no environment must " +
-			"fail rather than hand back paths that cannot resolve")
+	bare, err := (&Orchestrator{}).readADR045Registry()
+	if err != nil {
+		t.Fatalf("reading the registry: %v", err)
+	}
+	scoped, err := (&Orchestrator{ManagementScope: "somewhere-else"}).readADR045Registry()
+	if err != nil {
+		t.Fatalf("reading the registry with a scope set: %v", err)
+	}
+	if len(bare.Artifacts) != len(scoped.Artifacts) {
+		t.Fatalf("artifact count changed with the scope set: %d then %d",
+			len(bare.Artifacts), len(scoped.Artifacts))
+	}
+	for i := range bare.Artifacts {
+		if bare.Artifacts[i].File != scoped.Artifacts[i].File {
+			t.Errorf("the management scope moved an artifact path: %q became %q",
+				bare.Artifacts[i].File, scoped.Artifacts[i].File)
+		}
 	}
 }

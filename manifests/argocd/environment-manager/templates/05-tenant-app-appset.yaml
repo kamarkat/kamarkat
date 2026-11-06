@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 ---
 # ADR-047: tenant application provisioning ApplicationSets.
 #

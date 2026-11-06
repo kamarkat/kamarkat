@@ -39,9 +39,15 @@ spec:
     # and its cert-manager/hetzner-dns secret ship in
     # cert-manager-webhook-hetzner.yaml beside this file.
     - selector:
+        # The platform's own zones. Overwritten at render with the box's single
+        # hubDomain (templated-fields.yaml), so this list is the un-templated
+        # default only.
+        #
+        # stg.nutgraf.in is gone with the stg hub overlay: one shared management
+        # hub serves every environment (ADR-111 Revision 7), so a zone per
+        # environment no longer describes anything that exists.
         dnsZones:
           - dev.nutgraf.in
-          - stg.nutgraf.in
           - nutgraf.in
       dns01:
         webhook:

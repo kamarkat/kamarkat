@@ -87,14 +87,21 @@ if [[ -n "${TENANT_OVERRIDE:-}" && "$TENANT_OVERRIDE" != "$TENANT" ]]; then
     exit 1
 fi
 CLUSTER="$TENANT-hub"
+# The stage the WORKLOAD cluster this run declares will serve. Not the hub's: the
+# management cluster declares no environment (ADR-111 Revision 7), so this reaches
+# `tenant add-cluster` and nothing else.
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 # The DNS label this box sits under, declared rather than derived (ADR-051
-# amendment 2026-09-18). It defaults to ENVIRONMENT because that is what every
-# run has published on -- dev.nutgraf.in -- and a scaffold that quietly moved to
-# the apex would take every hostname, certificate and DNS record with it.
+# amendment 2026-09-18). "dev" because that is what every run has published on --
+# dev.nutgraf.in -- and a scaffold that quietly moved to the apex would take every
+# hostname, certificate and DNS record with it.
+#
+# A LITERAL, not $ENVIRONMENT. Defaulting it to the workload environment is the
+# derivation ADR-051's amendment removed, and it would have moved the hub's whole
+# hostname set the first time someone ran this with ENVIRONMENT=stg.
 #
 # Pass SUBDOMAIN= explicitly to publish on the apex.
-SUBDOMAIN="${SUBDOMAIN-$ENVIRONMENT}"
+SUBDOMAIN="${SUBDOMAIN-dev}"
 PROVIDER="${PROVIDER:-hetzner}"
 REGION="${REGION:-hel1}"
 # The GHCR namespace. kamarkat rather than a personal one because visibility is a
@@ -533,7 +540,7 @@ do_scaffold() {
     say "scaffolding $GIT_ORG/$repo against $VERSION"
     ( cd "$WORKSPACE" && "$ROOT/bin/kakt" tenant scaffold --local \
         --tenant "$TENANT" --org "$GIT_ORG" --domain "$DOMAIN" \
-        --cluster "$CLUSTER" --environment "$ENVIRONMENT" --provider "$PROVIDER" \
+        --cluster "$CLUSTER" --provider "$PROVIDER" \
         --subdomain "$SUBDOMAIN" \
         --region "$REGION" \
         --bundle-version "$VERSION" \
@@ -684,7 +691,7 @@ do_bootstrap() {
       && ZERO_OPS_DIR="$WORKSPACE/$repo" KAKT_BINARY="$ROOT/bin/kakt" \
          bash "$ROOT/scripts/hub-bootstrap.sh" \
            --name "$CLUSTER" --provider "$PROVIDER" --region "$REGION" \
-           --environment "$ENVIRONMENT" --gitops-dir . \
+           --gitops-dir . \
            --spoke "$pool" \
            $on_prem_flag )
 }
@@ -719,7 +726,6 @@ do_workload() {
     say "workload cluster: $pool"
     CLUSTER_NAME="$CLUSTER" \
     PROVIDER="$PROVIDER" \
-    ENVIRONMENT="$ENVIRONMENT" \
     SPOKEPOOL_NAME="$pool" \
     ZERO_OPS_DIR="$ws" \
     KAKT_BINARY="$ROOT/bin/kakt" \
@@ -794,7 +800,6 @@ do_verify() {
     # about it -- writing them into the platform repository put one box's record
     # in a tree shared by every run.
     ZERO_OPS_DIR="$WORKSPACE/$repo" KUBECONFIG="$kc" \
-        ENVIRONMENT="$ENVIRONMENT" \
         CLUSTER_NAME="$CLUSTER" \
         SPOKEPOOL_NAME="$(spoke_pool_for)" \
         bash "$validator" --only=platform

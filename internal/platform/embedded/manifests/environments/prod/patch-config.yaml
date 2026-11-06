@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: hub-bootstrap-config
-  namespace: platform-ops
-data:
-  CLUSTER_ID: "hub-production"
-  INFISICAL_ENVIRONMENT_SLUG: "prod"

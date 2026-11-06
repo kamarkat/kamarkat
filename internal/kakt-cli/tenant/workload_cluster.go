@@ -86,6 +86,24 @@ func (w WorkloadCluster) Add() ([]string, error) {
 			"a name", w.Name)
 	}
 
+	// The supported topology, against THIS cluster's declaration (ADR-111
+	// Revision 7 §4).
+	//
+	// It used to be asked of the hub, at scaffold time, about the hub's own
+	// environment and provider -- which answered the question only while a hub
+	// belonged to one environment. A hub managing dev, stg and prod has no value
+	// to look up, and the combination that matters is the one declared HERE: this
+	// cluster's environment and provider are what decide whether a spoke-pool
+	// source exists for it.
+	//
+	// Asked at declaration for the reason the old call gave: the chart's refusal
+	// lands inside ArgoCD, as a boundary whose ApplicationSets never appear, ten
+	// minutes into a bootstrap and after the servers exist. Every input needed to
+	// answer it is present before any of that.
+	if err := supportedCombination(w.Environment, w.Provider); err != nil {
+		return nil, err
+	}
+
 	// Capacity is refused at declaration, and what counts as capacity differs by
 	// provider -- so this asks the right question of each rather than one
 	// question of both.

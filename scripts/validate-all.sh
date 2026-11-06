@@ -44,7 +44,9 @@ LOG_DIR="$ZERO_OPS_DIR/.state/logs"
 REPORT="$ZERO_OPS_DIR/.state/validation.json"
 mkdir -p "$LOG_DIR"
 
-ENVIRONMENT="${ENVIRONMENT:-dev}"
+# No ENVIRONMENT (ADR-111 Revision 7). It defaulted to "dev", so a validator that
+# read it judged every box as a dev one. The checks read the box's own
+# declarations instead.
 CLUSTER_NAME="${CLUSTER_NAME:-${CLUSTER:-}}"
 ONLY=""
 
@@ -161,7 +163,7 @@ if wants preflight; then
         skip preflight "HCLOUD_TOKEN is not set; the preflight checks query the cloud account"
     else
         run_phase preflight "$LOG_DIR/validation-preflight.log" \
-            env ENVIRONMENT="$ENVIRONMENT" bash "$PLATFORM_DIR/scripts/validate/run.sh" preflight
+            bash "$PLATFORM_DIR/scripts/validate/run.sh" preflight
     fi
 fi
 
@@ -197,7 +199,7 @@ if wants platform; then
         else
             run_phase platform "$LOG_DIR/validation-platform.log" \
                 env KUBECONFIG="$kubeconfig" ZERO_OPS_DIR="$ZERO_OPS_DIR" \
-                    ENVIRONMENT="$ENVIRONMENT" SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
+                    SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
                     HUB_DOMAIN="$hub_domain" \
                     bash "$PLATFORM_DIR/scripts/post-bootstrap-validate.sh"
         fi
@@ -237,16 +239,15 @@ fi
 # ─── the report ──────────────────────────────────────────────────────────────
 # Written whatever happened, including when nothing ran: a run that produced no
 # report is indistinguishable from one that was never started.
-python3 - "$REPORT" "$CLUSTER_NAME" "$ENVIRONMENT" "$ANY_FAILED" "${PHASES_JSON[@]:-}" <<'PY'
+python3 - "$REPORT" "$CLUSTER_NAME" "$ANY_FAILED" "${PHASES_JSON[@]:-}" <<'PY'
 import json, os, sys, datetime
-report, cluster, env, any_failed = sys.argv[1:5]
-phases = [json.loads(p) for p in sys.argv[5:] if p.strip()]
+report, cluster, any_failed = sys.argv[1:4]
+phases = [json.loads(p) for p in sys.argv[4:] if p.strip()]
 doc = {
     "schemaVersion": 1,
     "generatedAt": datetime.datetime.now(datetime.timezone.utc)
                    .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     "cluster": cluster or None,
-    "environment": env,
     # "passed" only when something actually ran and nothing failed. A run whose
     # every phase was skipped is "incomplete", not "passed" -- that distinction
     # is the whole reason this file exists.

@@ -9,4 +9,15 @@
 # environment prefix that the group names never do.
 - kind: Composition
   name: ainativesaas-starter-hetzner
-  fields: [{replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}}]
+  fields:
+    - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
+    # The tenant SecretStore's scope, addressed rather than substituted: the
+    # literal is the bare word `management`, and replaceAll would rewrite it
+    # wherever it appeared in a 900-line Composition.
+    #
+    # The index is checked at packaging -- assign() refuses a path that is not
+    # there -- so a resource inserted above it fails the release rather than
+    # publishing a store that reads an unrelated scope.
+    - path: [spec, resources, 8, base, spec, forProvider, manifest, spec, provider,
+             infisical, secretsScope, environmentSlug]
+      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'

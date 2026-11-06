@@ -1,12 +1,18 @@
-# The field of the ClusterSecretStore that depends on the environment.
+# The scope the HUB's own ClusterSecretStore reads.
 #
-# The manifest hardcodes "dev", and a stg or prod hub reading it unchanged would
-# resolve DEV secrets out of Infisical (ADR-037). As a Kustomize source that was
-# a patch on the Application; a published bundle makes the source a Helm chart,
-# and ArgoCD permits one source type per source, so the patch has nowhere to
-# live and the field becomes a chart value.
+# The manifest hardcodes "dev", and a hub reading it unchanged would resolve that
+# environment's secrets out of Infisical. As a Kustomize source that was a patch on
+# the Application; a published bundle makes the source a Helm chart, and ArgoCD
+# permits one source type per source, so the patch has nowhere to live and the
+# field becomes a chart value.
+#
+# This is the MANAGEMENT scope (ADR-111 Revision 7 §2), not an environment. It read
+# global.environmentSlug -- the hub's -- which only answered the question while a
+# hub belonged to one environment, and put the management plane's own credentials in
+# a workload environment. A managed cluster's store is patched separately, from that
+# cluster's own label.
 - kind: ClusterSecretStore
   name: infisical-backend
   fields:
     - path: [spec, provider, infisical, secretsScope, environmentSlug]
-      value: '{{ .Values.global.environmentSlug }}'
+      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'

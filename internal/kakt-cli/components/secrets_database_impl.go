@@ -172,11 +172,11 @@ func (i *Installer) InstallInfisicalAuthFromInfisical(ctx context.Context) (bool
 	// internal/kakt-cli/bootstrap/seed.go), so nothing is generated into the tree.
 
 	// Write hub-bootstrap-config-patch.yaml into environments/base kustomization's generated/ dir
-	env := i.EnvironmentSlug
+	env := i.OverlayDir
 	if env == "" {
-		return false, fmt.Errorf("cannot write the ADR-045 bootstrap config: no environment slug.\n" +
-			"It would land in a directory shared by every overlay, where the last cluster\n" +
-			"bootstrapped wins and an environment renders another's Infisical project")
+		return false, fmt.Errorf("cannot write the ADR-045 bootstrap config: no hub overlay\n" +
+			"directory. It would land in a directory shared by every overlay, where the\n" +
+			"last cluster bootstrapped wins and one hub renders another's Infisical project")
 	}
 	// A tenant's repository holds its artifacts under the cluster they belong to;
 	// the platform's own tree holds them under the environment overlay that

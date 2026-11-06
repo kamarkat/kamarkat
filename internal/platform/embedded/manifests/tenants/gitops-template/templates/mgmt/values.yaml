@@ -12,8 +12,27 @@
 # tenant, and a validator cannot assert that about a fact it has to guess.
 tenantId: <TENANT_ID>
 
-environmentSlug: <ENVIRONMENT>
+# environmentSlug is NOT declared here. The hub has no workload environment
+# (ADR-111 Revision 7): workload environments belong to the managed clusters, each
+# of which declares its own in registry/clusters/<name>/values.yaml. The hub's own
+# secret scope is management.infisicalEnvironmentSlug below.
 provider: <CLOUD_PROVIDER>
+
+# The management plane's own configuration (ADR-111 Revision 7).
+#
+# Management identity, management secret scope, management availability and
+# workload environment are four separate concerns. This block holds the second;
+# `boxId` above is the first; the third is this cluster's own sizing policy; the
+# fourth belongs to the managed clusters, each of which declares its own
+# environmentSlug and provider.
+management:
+  # The Infisical environment holding THIS HUB's credentials.
+  #
+  # Not a workload environment: nothing is promoted into or out of it, and no
+  # managed cluster reads it. A managed cluster's secret scope resolves from that
+  # cluster's own environment label -- reading the hub's would give it the
+  # environment of whatever provisioned it (ADR-037 clause 2).
+  infisicalEnvironmentSlug: management
 
 # This cluster's name, pinned at scaffolding for the same reason dns.ownerId is
 # (see below) and never changed afterwards.

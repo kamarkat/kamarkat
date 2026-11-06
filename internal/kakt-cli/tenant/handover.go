@@ -563,8 +563,7 @@ func Dispatch(ctx context.Context, spec Spec) error {
 		"--repo", repo,
 		"-f", "cluster="+spec.ClusterName,
 		"-f", "provider="+spec.Provider,
-		"-f", "region="+spec.Region,
-		"-f", "environment="+spec.Environment)
+		"-f", "region="+spec.Region)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("dispatching the bootstrap workflow on %s: %w\n%s", repo, err, out)
 	}
@@ -711,7 +710,6 @@ func LocalHandover(ctx context.Context, s Spec, secrets Secrets, w io.Writer) er
 	fmt.Fprintf(w, "    --name %s \\\n", s.ClusterName)
 	fmt.Fprintf(w, "    --provider %s \\\n", s.Provider)
 	fmt.Fprintf(w, "    --region %s \\\n", s.Region)
-	fmt.Fprintf(w, "    --environment %s \\\n", s.Environment)
 	fmt.Fprintf(w, "    --gitops-dir .\n\n")
 
 	if s.BundleVersion == versions.DevelopmentBundle {

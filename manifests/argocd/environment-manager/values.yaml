@@ -144,7 +144,7 @@ placement:
 # other's records.
 #
 # Scaffolding pins this per box (see the tenant template's values.yaml). Left
-# empty it falls back to `clusterName | default "<environmentSlug>-<provider>"`,
+# empty it falls back to `clusterName | default boxId` (ADR-111 §1),
 # and an earlier version of this comment called that "the cluster name, which is
 # unique per box". It is neither: on the platform's own box the fallback yields
 # `dev-hybrid` while the cluster is named `acme-hub`, and every dev+hybrid box
@@ -261,9 +261,42 @@ hubIngressAddress: ""
 # These MUST be set via `helm template --set` by the hub CLI bootstrap. No
 # default is provided — every bootstrap run explicitly passes the combination.
 # ──────────────────────────────────────────────────────────────────────────────
-# environmentSlug: "dev"        # dev | stg | prod | ephemeral
 # provider: "hetzner"           # hetzner | hybrid | aws
-# topology: "single"            # single | multi (optional, modifies spoke pool lookup path)
+# topology: "single"            # single | multi
+#
+# topology is PASSED and no longer read: the only thing it modified was the
+# spoke-pool lookup path, and ADR-082 moved that claim into the tenant's own
+# repository. It is left as a parameter rather than removed here because the CLI
+# flag is a published surface; nothing in this chart branches on it.
+#
+# environmentSlug is NOT one of them (ADR-111 Revision 7). The hub is one shared
+# management cluster and declares no workload environment; the clusters it manages
+# each declare their own, and the hub's secret scope is `management` below.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Management plane (ADR-111 Revision 7)
+# ──────────────────────────────────────────────────────────────────────────────
+# The hub's own configuration. Management identity, management secret scope,
+# management availability and workload environment are four separate concerns:
+# `boxId` is the first, this block the second, the hub's declared sizing the
+# third, and the fourth belongs to the managed clusters, which each declare
+# their own environmentSlug and provider.
+#
+# No default, for the reason the hub-operator already gives for the same value:
+# the only possible default is a guess at which environment someone else's
+# secrets are in, and guessing wrong is silent.
+management:
+  # The Infisical environment holding THIS HUB's credentials. Set per box.
+  #
+  # Reaches components as `global.management.infisicalEnvironmentSlug`, and the
+  # hub-operator reads the same value from hub-bootstrap-config's
+  # INFISICAL_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
+  #
+  # NOT a workload environment: nothing is promoted into or out of it, and no
+  # managed cluster reads it -- a managed cluster's store resolves from that
+  # cluster's own `environment` label, because reading the hub's would give it
+  # the environment of whatever provisioned it.
+  infisicalEnvironmentSlug: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Boundary content is complete at all times (ADR-055)
@@ -426,11 +459,40 @@ infisical:
 # empty, which is what a home-lab box genuinely has.
 burstSpokePool: ""
 
+# The environment/provider combinations a workload cluster may declare. This is the
+# authority; `supportedMatrix` in internal/kakt-cli/tenant mirrors it and
+# TestScaffoldMatrixMatchesTheChart asserts the two agree.
+#
+# It read "the combinations the platform ships a spoke-pool source for", and that
+# is no longer what makes a combination supported: ADR-082 moved the SpokePool
+# claim into the tenant's own repository, hydrated per cluster from
+# templates/workload-cluster/, so no spoke-pool directory ships at all. The list
+# is a declared support policy for a workload topology -- which is what the
+# per-entry reasons below actually describe.
+#
+# WHO CHECKS IT (changed 2026-11-06, ADR-111 Revision 7). `kakt tenant add-cluster`
+# does, against the environment and provider THAT CLUSTER declares. Every boundary
+# template used to assert it at render time instead, against the hub's own
+# environmentSlug -- which only answered the question while a hub belonged to one
+# environment. A hub managing dev, stg and prod workload clusters has no value to
+# look up here, and a workload cluster's declaration is not visible to Helm: the
+# boundaries read it as `{{ index .metadata.labels "environment" }}`, which ArgoCD
+# expands per generated Application, long after Helm has finished. So the check
+# moved to the only place that holds a cluster's declaration before anything is
+# built, which is also the earliest place it can be made.
+#
+# Absence is still the contract. A combination is unsupported because no supported
+# topology was built for it, and the refusal has to be named: before any check
+# existed, an unsupported combination produced a cluster whose Applications pointed
+# at sources nobody maintains, and ArgoCD reported them Synced and Healthy while
+# they managed nothing -- indistinguishable from a boundary with nothing to do.
+# What changed is when that refusal happens, not whether it does. add-cluster
+# refuses before a repository, a secret or a server exists; the render-time check
+# refused ten minutes into a bootstrap, after the servers were already running.
 supportedMatrix:
   dev:
-    # hetzner is listed because a spoke-pool source now exists for it
-    # (manifests/spoke/spoke-pools/dev/hetzner). Its absence meant a dev
-    # environment could not run on the provider ADR-075 expects to survive, and
+    # hetzner is listed because a dev environment must be able to run on the
+    # provider ADR-075 expects to survive. Its absence meant it could not, and
     # the CLI's own scaffold defaults produced exactly that combination.
     - hetzner
     - hybrid
@@ -441,11 +503,6 @@ supportedMatrix:
     # storage. Staging exists to rehearse production, and production is hetzner --
     # a staging environment on hybrid was exercising failure modes no tenant has
     # and missing the ones they do.
-    #
-    # The spoke-pool source for this was created with the change
-    # (manifests/spoke/spoke-pools/stg/hetzner); the spoke-catalog already had
-    # environments/stg/hetzner. Listing a combination before its sources exist is
-    # what the comment above this block refuses, so the order matters.
     - hetzner
   prod:
     - hetzner

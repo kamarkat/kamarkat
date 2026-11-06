@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 ---
 {{- $released := ne .Values.bundleVersion "development" }}
 # ADR-096: the spoke's shared public TLS Gateway, with exactly one owner.

@@ -1,3 +1,12 @@
+# Hub sizing is management-plane policy, not a workload environment's (ADR-111
+# Revision 7 §3). The values below were conditional on the hub's environmentSlug,
+# which made the management plane's capacity a function of a workload stage it does
+# not have. They are now declared outright.
+#
+# They carry this box's CURRENT EFFECTIVE values deliberately: de-conditionalising
+# is not the moment to change capacity. Raising them is a capacity decision made on
+# measurements -- an unsatisfiable constraint does not fail loudly, it pends, and
+# the service it governs silently never returns.
 # Per-box and per-environment values for the hub Grafana (ADR-078 addendum 5 §6).
 - kind: Grafana
   name: platform
@@ -6,9 +15,9 @@
       value: 'https://grafana.{{ .Values.global.hubDomain }}'
     - path: [spec, deployment, spec, replicas]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "prod" }}3{{ else }}2{{ end }}'
+      value: '1'
     - path: [spec, deployment, spec, template, spec, topologySpreadConstraints, 0, whenUnsatisfiable]
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}ScheduleAnyway{{ else }}DoNotSchedule{{ end }}'
+      value: 'ScheduleAnyway'
     # The box's issuer (§7), from the ONE global every reader of it uses -- the
     # spoke's VMAuth validates a viewer's token against the same value, and an
     # issuer those two disagree about refuses the token as signed by somebody

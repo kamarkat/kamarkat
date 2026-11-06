@@ -34,32 +34,32 @@ import (
 // (This comment is deliberately worded to avoid such a pair itself.)
 // HubEnvironmentSpec defines the desired state of HubEnvironment
 //
-// ADR-051 (2026-08-24 addendum): spec.domain is the sole authoritative base-domain
-// value for hub public endpoints, and spec.environment is the sole authoritative
-// environment identity. The env-as-zone scheme requires a non-production
-// environment to own a labelled zone and production to use the apex unlabelled.
+// spec.domain is the sole authoritative base-domain value for hub public
+// endpoints (ADR-051, 2026-08-24 addendum). It is validated on its own shape and
+// nothing else: the hub has no environment for a domain rule to key off.
 //
-// These rules key off spec.environment, never off a service's own environment
-// field. Environment identity is a platform concept: deriving it from, say, the
-// secret store's project environment would couple the public DNS contract to one
-// vendor, break if that vendor were replaced, and silently no-op wherever that
-// optional block is absent. Services consume spec.environment; they do not define it.
+// spec.environment IS GONE (ADR-111 Revision 7). It declared "the platform
+// environment identity for this Hub", which is a property only a hub belonging to
+// one environment can have. One shared management hub manages workload clusters in
+// dev, stg and prod, so there is no value it could hold, and three validation
+// rules keyed off it:
 //
-// The list of non-production labels below is the single place the environment set is
-// enumerated. Adding an environment touches that one line.
+//   - two tied spec.domain to it, enforcing env-as-zone (a non-production
+//     environment owns a labelled zone, production uses the apex). ADR-051's own
+//     Amendment 2026-09-18 had already replaced that scheme with a DECLARED
+//     subdomain -- every public host is <service>.<subdomain>.<domain>, and a box
+//     that declared environment dev and now declares subdomain dev publishes
+//     exactly what it published before. The rules outlived the scheme they
+//     enforced.
+//   - one pinned secrets.infisical.environmentSlug equal to it, which made the
+//     hub's own secret scope a workload environment by construction. That is the
+//     coupling Revision 7 removes; the slug is now the management scope, declared
+//     rather than derived.
 //
-// +kubebuilder:validation:XValidation:rule="self.environment == 'prod' || self.domain.startsWith(self.environment + '.')",message="domain must be the environment's own zone: for a non-production environment, domain must begin with that environment as its leftmost label (ADR-051 env-as-zone)"
-// +kubebuilder:validation:XValidation:rule="self.environment != 'prod' || !(['dev.','stg.','ephemeral.'].exists(p, self.domain.startsWith(p)))",message="production must use the apex domain unlabelled: domain must not begin with a non-production environment label (ADR-051 env-as-zone)"
-// +kubebuilder:validation:XValidation:rule="!has(self.secrets) || !has(self.secrets.infisical) || !has(self.secrets.infisical.environmentSlug) || size(self.secrets.infisical.environmentSlug) == 0 || self.secrets.infisical.environmentSlug == self.environment",message="secrets.infisical.environmentSlug must equal spec.environment: environment identity has a single authority and services consume it (ADR-043 single authority per domain)"
+// The field had no Go consumer -- those three rules were its only effect -- so
+// removing it changes no behaviour beyond lifting the coupling.
+//
 type HubEnvironmentSpec struct {
-	// Environment is the platform environment identity for this Hub and the single
-	// authority for it. Every environment-scoped value — the public DNS zone, the
-	// secret store's project environment, and anything added later — derives from
-	// this field rather than declaring its own copy.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=dev;stg;prod;ephemeral
-	Environment string `json:"environment"`
-
 	// BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
 	//
 	// Separate from ClusterName because one field was carrying two lifetimes. The
@@ -263,10 +263,28 @@ type InfisicalConfig struct {
 	// +optional
 	ProjectSlug string `json:"projectSlug,omitempty"`
 
-	// EnvironmentSlug is the Infisical environment identifier
-	// +kubebuilder:default="prod"
-	// +optional
-	EnvironmentSlug string `json:"environmentSlug,omitempty"`
+	// EnvironmentSlug is the Infisical environment holding THIS HUB's credentials
+	// -- the management secret scope (ADR-111 Revision 7).
+	//
+	// Rendered from the box's declared `management.infisicalEnvironmentSlug`. This
+	// field is the operator-facing representation of that one input, not a second
+	// source of truth, and the hub-operator reads the same value from
+	// hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG so reader and writer
+	// cannot disagree.
+	//
+	// Required and non-empty, with NO DEFAULT. It defaulted to "prod" while a
+	// cross-field rule simultaneously pinned it equal to spec.environment, so the
+	// default was unreachable wherever it mattered and misleading everywhere else.
+	// The only possible default is a guess at which environment someone else's
+	// secrets are in, and guessing wrong is silent: the secrets resolve, from the
+	// wrong scope.
+	//
+	// Not constrained to an environment set. A management scope is not a workload
+	// environment -- nothing is promoted into or out of it, and no managed cluster
+	// reads it.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	EnvironmentSlug string `json:"environmentSlug"`
 }
 
 // HubEnvironmentStatus defines the observed state of HubEnvironment.

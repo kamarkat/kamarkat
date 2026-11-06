@@ -68,30 +68,39 @@ PY
 # environment is a separate cluster, so the service DNS name is identical in all
 # of them. Only public hostnames are checked.
 validate_hostname_zoning() {
-    section "Public hostnames carry the environment label"
+    section "Public hostnames carry the box's subdomain once"
 
-    [[ "$ENVIRONMENT" == "prod" ]] && { pass "prod uses the un-prefixed zone — nothing to check"; return 0; }
-
-    # HUB_DOMAIN minus its environment prefix, i.e. the apex the box publishes
-    # under. Without it there is no zone to look for a doubling of.
-    # `:-` first: under `set -u` a bare ${HUB_DOMAIN#...} aborts the run before
-    # the warning below can say why the check did not run.
+    # Derived from HUB_DOMAIN alone (ADR-111 Revision 7). It read $ENVIRONMENT and
+    # returned early for prod, because the leftmost label WAS the environment under
+    # the env-as-zone scheme. ADR-051's Amendment 2026-09-18 replaced that with a
+    # declared subdomain, so the label is whatever the box declares -- and a box
+    # that declares none publishes on the apex, which is the case the prod
+    # early-return was really describing.
+    #
+    # `:-` first: under `set -u` a bare ${HUB_DOMAIN#...} aborts the run before the
+    # warning below can say why the check did not run.
     local hub_domain="${HUB_DOMAIN:-}"
-    local zone_suffix="${hub_domain#"$ENVIRONMENT".}"
-    if [[ -z "$zone_suffix" ]]; then
+    if [[ -z "$hub_domain" ]]; then
         warn "HUB_DOMAIN is not set, so doubled hostnames cannot be looked for (preflight has no cluster to read the box's domain from)"
+        return 0
+    fi
+
+    local subdomain="${hub_domain%%.*}"
+    local zone_suffix="${hub_domain#*.}"
+    if [[ "$subdomain" == "$hub_domain" || "$zone_suffix" == "$hub_domain" ]]; then
+        pass "this box publishes on the apex ($hub_domain) — there is no label to double"
         return 0
     fi
 
     local double
     # The pattern is derived, not written out. It was "<env>.<env>.nutgraf.in",
-    # which finds a doubled zone only on the PLATFORM's own domain -- a tenant box
+    # which finds a doubled label only on the PLATFORM's own domain -- a tenant box
     # doubling its own would have passed. Preflight has no cluster to read
     # HubEnvironment from, so a literal zone is supplied or the check says it
     # could not run.
-    double=$(cd "$VALIDATE_ROOT" && grep -rn "${ENVIRONMENT}\.${ENVIRONMENT}\.${zone_suffix}" manifests/ 2>/dev/null || true)
+    double=$(cd "$VALIDATE_ROOT" && grep -rn "${subdomain}\.${subdomain}\.${zone_suffix}" manifests/ 2>/dev/null || true)
     if [[ -z "$double" ]]; then
-        pass "no double-zoned hostnames (${ENVIRONMENT}.${ENVIRONMENT}.${zone_suffix})"
+        pass "no double-zoned hostnames (${subdomain}.${subdomain}.${zone_suffix})"
     else
         while IFS= read -r line; do hard_fail "double-zoned hostname — $line"; done <<< "$double"
     fi

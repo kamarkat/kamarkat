@@ -1197,6 +1197,140 @@ func WaitForCertificateProfile(ctx context.Context, podName, adminJWT, projectID
 	return fmt.Errorf("timeout after %v waiting for certificate profile '%s' — create it in the Infisical UI, then re-run 'hub init-secrets'", timeout, slug)
 }
 
+// declaredManagementScope returns the Infisical environment this box declares for
+// its OWN credentials, read from hub-bootstrap-config (ADR-111 Revision 7 §2).
+//
+// The same key GetInfisicalConfig reads, deliberately: the writer that creates the
+// environment and the writers that put secrets in it must agree, and they agree by
+// reading one declaration rather than by being passed the same argument twice. The
+// ConfigMap is rendered by hub-environment from `management.infisicalEnvironmentSlug`,
+// so this is the box's declaration as it reached the cluster -- which is also why
+// this is read here rather than threaded down from the bootstrap flags: there are
+// no flags for it, and `kakt init-secrets` has no gitops checkout to read.
+//
+// No default. The only possible default is a guess at which environment someone
+// else's secrets are in, and guessing wrong is silent: the secrets resolve, from
+// the wrong scope.
+func declaredManagementScope(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	out, err := hostKubectl(ctx,
+		"get", "configmap", "-n", constants.NamespaceOps, "hub-bootstrap-config",
+		"-o", "jsonpath={.data.INFISICAL_ENVIRONMENT_SLUG}",
+	)
+	if err != nil {
+		return "", fmt.Errorf("read the declared management scope from hub-bootstrap-config "+
+			"in %s: %w\n\nIt is rendered by the hub-environment Application from the box's "+
+			"management.infisicalEnvironmentSlug, so an absent ConfigMap means boundary 01 has "+
+			"not synced yet -- the hub's secrets have nowhere to go until it has",
+			constants.NamespaceOps, err)
+	}
+	scope := strings.TrimSpace(out)
+	if scope == "" {
+		return "", fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG: it is "+
+			"the Infisical environment holding THIS HUB's own credentials (ADR-111 Revision 7 §2), "+
+			"rendered from the box's declared management.infisicalEnvironmentSlug. Day-0 creates "+
+			"that environment and writes the hub's secrets into it, so there is no value to assume")
+	}
+	return scope, nil
+}
+
+// ensureEnvironment makes one Infisical environment exist in one project.
+//
+// Infisical supplies a new project with its own default environments and nothing
+// here asks for others, so before this existed a box could declare a scope that
+// was never created -- and the failure is silent in the direction that matters:
+// the write succeeds against nothing an ExternalSecret can read, every
+// ClusterSecretStore resolves empty, and the hub reports Healthy while holding no
+// credentials.
+//
+// Asks before writing, the way ensureCertificateProfiles does, so a re-run on a
+// box that already has the environment performs no write at all.
+func ensureEnvironment(ctx context.Context, podName, adminJWT, projectID, slug string) error {
+	op := fmt.Sprintf("environment %q in project %s", slug, projectID)
+
+	checkURL := "http://localhost:" + infisicalPort + fmt.Sprintf(PathProjectEnvironmentBySlug, projectID, slug)
+	output, status, err := curlAPI(ctx, podName,
+		checkURL,
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return fmt.Errorf("check %s: %w", op, err)
+	}
+	switch {
+	case status >= 200 && status < 300:
+		fmt.Printf("[infisical-bootstrap] Environment present: %s (project %s)\n", slug, projectID)
+		return nil
+	case status == 404:
+		// Absent: created below.
+	default:
+		// Deliberately NOT the 403-means-present reading CheckCertificateProfile
+		// takes. A certificate profile is a manual UI step with a wait loop behind
+		// it, so assuming presence there costs a retry; assuming it here would skip
+		// creating the one object that makes every secret on the box resolvable,
+		// and nothing downstream reports that.
+		return apiError("check "+op, status, output)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		// Infisical names an environment and slugs it separately. The scope is
+		// declared as a slug, and a name that is not the slug would leave the UI
+		// describing the hub's scope as something the declaration never said.
+		"name": slug,
+		"slug": slug,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal create %s: %w", op, err)
+	}
+	createURL := "http://localhost:" + infisicalPort + fmt.Sprintf(PathProjectEnvironments, projectID)
+	output, status, err = curlAPI(ctx, podName,
+		"-X", "POST",
+		createURL,
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", string(payload),
+	)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", op, err)
+	}
+	if status >= 200 && status < 300 {
+		fmt.Printf("[infisical-bootstrap] Environment created: %s (project %s)\n", slug, projectID)
+		return nil
+	}
+	// Reconciled rather than reported, for the reason createProject reconciles a
+	// 409: the check above and this call are two round trips, and a concurrent
+	// bootstrap of the same box can win the race between them. Upstream answers a
+	// duplicate slug with 400 "Environment with slug already exists" -- matched on
+	// the message because 400 also carries the pending-deletion case, which is a
+	// real refusal: a slug held by an environment awaiting deletion has to be
+	// resolved in Infisical, not worked around here.
+	if strings.Contains(output, "already exists") {
+		fmt.Printf("[infisical-bootstrap] Environment present: %s (project %s)\n", slug, projectID)
+		return nil
+	}
+	return apiError("create "+op, status, output)
+}
+
+// ensureManagementScope creates the box's declared management scope in both
+// projects a hub addresses as a secret scope.
+//
+// Both, because both are read as one: the hub's secrets live in hub-secrets, and
+// GetInfisicalConfig falls back to INFISICAL_PROJECT_SLUG for a box that carries
+// only the cert project's slug. An environment missing from either project is a
+// reader resolving nothing, so neither is left to chance.
+func ensureManagementScope(ctx context.Context, podName, adminJWT, certProjectID, secretsProjectID string) error {
+	scope, err := declaredManagementScope(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("[infisical-bootstrap] Declared management scope: %s\n", scope)
+	if err := ensureEnvironment(ctx, podName, adminJWT, secretsProjectID, scope); err != nil {
+		return err
+	}
+	return ensureEnvironment(ctx, podName, adminJWT, certProjectID, scope)
+}
+
 func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 	fmt.Println("[infisical-bootstrap] Starting Infisical Day-0 bootstrap...")
 
@@ -1233,6 +1367,15 @@ func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 	if state, err := loadBootstrapState(); err == nil {
 		if state.OrgID == orgID {
 			fmt.Printf("[infisical-bootstrap] Using cached state from %s (re-run)\n", stateFilePath())
+			// The management scope is ensured on this path too. The cache short-circuits
+			// the API calls that CREATE things, and the scope is one of them: a box
+			// bootstrapped before the scope was declared, or whose declaration changed,
+			// reaches this return with the environment still absent. Asking is one GET per
+			// project when it is already there.
+			if err := ensureManagementScope(ctx, podName, boot.Identity.Credentials.Token,
+				state.ProjectID, state.SecretsProjectID); err != nil {
+				return nil, err
+			}
 			return &BootstrapResult{
 				OrgID:              state.OrgID,
 				ProjectID:          state.ProjectID,
@@ -1267,6 +1410,18 @@ func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 	}
 	if err := grantProjectAdminRole(ctx, podName, boot.Identity.Credentials.Token, secretsProjectID, boot.Identity.ID); err != nil {
 		return nil, fmt.Errorf("grant project admin to instance admin identity (secrets): %w", err)
+	}
+
+	// The declared management scope, BEFORE anything writes a secret. Infisical
+	// created both projects above with its own default environments, and the hub's
+	// scope is not one of them (ADR-111 Revision 7 §2).
+	//
+	// Placed after the grants rather than beside createProject because creating an
+	// environment is a project-scoped permission, and the grants are what the token
+	// used here holds it by.
+	if err := ensureManagementScope(ctx, podName, boot.Identity.Credentials.Token,
+		certProjectID, secretsProjectID); err != nil {
+		return nil, err
 	}
 
 	clientID, clientSecret, identityID, err := createMachineIdentity(ctx, podName, boot.Identity.Credentials.Token, orgID, certProjectID)

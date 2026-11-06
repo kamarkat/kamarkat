@@ -182,7 +182,14 @@ for d in manifests/environments/*/; do
         echo "skip hub-environment-${env}: a base other overlays build on, not an environment"
         continue
     fi
-    package_path "hub-environment-${env}" "$d"
+    # Unsuffixed, deliberately (ADR-111 Revision 7). There is one hub overlay --
+    # the management plane's -- because the hub has no workload environment to
+    # vary by. A suffix would make distribution.py read "management" as a VARIANT
+    # and guard the component on `global.environmentSlug == "management"`, a value
+    # the hub no longer declares: the guard would never match, the component would
+    # emit nothing, and ArgoCD would prune the HubEnvironment that every
+    # environment-scoped value derives from.
+    package_path "hub-environment" "$d"
 done
 
 for d in manifests/providers/*/; do
@@ -191,8 +198,14 @@ for d in manifests/providers/*/; do
     package_path "infrastructure-provider-${prov}" "$d"
 done
 
-for d in manifests/spoke/spoke-pools/*/*/; do
-    compgen -G "$d*.yaml" >/dev/null || continue
-    prov=$(basename "$d"); env=$(basename "$(dirname "$d")")
-    package_path "platform-spoke-pools-${env}-${prov}" "$d"
-done
+# manifests/spoke/spoke-pools/<env>/<provider> is NOT packaged, because it no
+# longer exists: ADR-082 (02f9b01e) made a tenant declare its own workload
+# clusters, so the claim is hydrated into registry/clusters/<name>/infrastructure/
+# from the repository's own template and carries the tenant's chosen name.
+#
+# The loop that packaged it survived that commit and matched nothing, which is
+# how the environment ever reached packaging in the first place: a chart named
+# platform-spoke-pools-<env>-<provider> per combination, published once per
+# environment the platform recognised. Nothing asks for those charts -- boundary
+# 03 dropped platform-spoke-pools as a component -- so they are not produced and
+# the environment has no remaining role in what a release contains.

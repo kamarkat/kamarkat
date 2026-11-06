@@ -25,6 +25,13 @@
     - replaceAll:
         from: /nutgraf-mgmt
         with: '/{{ .Values.global.tenantId }}-mgmt'
+    # The scope that folder is in. hub-operator writes the owner's credentials
+    # through the box's declared management scope, so a store reading them with a
+    # literal of its own is a reader and a writer that can disagree -- which is
+    # silent in the direction that matters: the secret exists, in another scope,
+    # and the ExternalSecret reports only that it could not get secret data.
+    - path: [spec, provider, infisical, secretsScope, environmentSlug]
+      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'
 
 # zitadel-smtp-config is deliberately ABSENT here. It interpolates the password
 # with ESO's `{{ .smtpPassword }}`, so it must be packaged verbatim; naming it

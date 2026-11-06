@@ -71,8 +71,7 @@ var _ = Describe("HubEnvironment Controller", func() {
 					// environment. An empty spec is rejected by the API server, so the
 					// fixture has to carry a valid one for the reconcile to be reached.
 					Spec: opsv1alpha1.HubEnvironmentSpec{
-						Domain:      "dev.example.com",
-						Environment: "dev",
+						Domain: "dev.example.com",
 						// The cluster this box is, which is what keys the escrow. Not
 						// metadata.name: that is the singleton "hub-environment" on every
 						// box, and using it put the master keys at one constant escrow

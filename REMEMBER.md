@@ -111,11 +111,15 @@ happened and reported success while broken.
 
 ## CLI traps
 
-- `--environment ""` is coerced to **`prod`**, sending the spoke AppSet to a path
-  that does not exist; the spoke then never provisions. Always pass it.
-- `hub spoke teardown --name=X` is a **silent no-op** (it rebuilds the name from
-  label parts and never matches). Run it without `--name`, which deletes *every*
-  spoke — take an inventory first.
+- No hub command takes `--environment`. The hub is environment-independent
+  (ADR-111 Revision 7): its secret scope is the box's declared
+  `management.infisicalEnvironmentSlug`, read from
+  `registry/clusters/<cluster>/values.yaml`, and a managed cluster's environment
+  is declared by that cluster. `kakt tenant add-cluster --environment` is the one
+  place the flag remains, and it names the stage *that* cluster serves.
+- `kakt spoke teardown` **requires** `--name`: it refuses rather than guessing a
+  target. It used to rebuild the name from label parts and silently match
+  nothing, and running it without a name deleted every spoke.
 - `hub teardown` does **not** delete the spoke. Tear the spoke down first, or the
   CAPI controllers that would unwind it are gone.
 - `hub configure-eso` always returns an error. Do not call it.

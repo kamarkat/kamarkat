@@ -24,6 +24,13 @@
     # them under its own name and find nothing.
     - path: [spec, boxId]
       value: '{{ .Values.global.boxId }}'
+    # The management secret scope (ADR-111 Revision 7 §2). Rendered here and into
+    # hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG below from the SAME declared
+    # input, because the operator reads one and ExternalSecrets resolve through the
+    # other: two literals would be two sources of truth for one scope, and a writer
+    # on one with a reader on the other is a secret that exists and is never updated.
+    - path: [spec, secrets, infisical, environmentSlug]
+      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'
     - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
     - replaceAll: {from: nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
 
@@ -62,3 +69,9 @@
       value: '{{ .Values.global.tenantId }}'
     - path: [data, INFISICAL_SECRETS_PROJECT_ID]
       value: '{{ (.Values.global.infisical | default dict).secretsProjectId }}'
+    # The same management scope the HubEnvironment above declares. managementEnvironmentSlug()
+    # in the hub-operator reads it from here and refuses an empty value rather than
+    # defaulting -- the only possible default is a guess at which environment someone
+    # else's secrets are in.
+    - path: [data, INFISICAL_ENVIRONMENT_SLUG]
+      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'

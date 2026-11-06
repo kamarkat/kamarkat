@@ -26,13 +26,6 @@ type HetznerDriver struct {
 	Debug             bool
 	BuildFlatcarImage bool
 
-	// Environment decides whether this box provisions cloud workers at all
-	// (ADR-075). Development runs none: non-production capacity is the clearest
-	// case for hardware the tenant already owns, and idle cloud workers in an
-	// environment built to be thrown away are the easiest cost in ADR-070's
-	// budget to stop paying.
-	Environment string
-
 	// OnPremEnabled reports whether this box accepts nodes on the tenant's own
 	// premises. Read here only to decide worker capacity: a development box runs
 	// no cloud workers, so its on-prem nodes are the only capacity it has.
@@ -54,12 +47,17 @@ type HetznerDriver struct {
 
 // PlannedWorkerReplicas is how many cloud workers this box starts with.
 //
-// Two in every environment, development included. Development briefly defaulted to
-// zero on the reasoning that its capacity should come from the tenant's own
-// hardware (ADR-075) -- which is the right end state and the wrong default to reach
-// it by: it made on-prem hardware a precondition for the simplest box the platform
-// can build, and `kakt tenant scaffold` with no arguments produced a repository
-// whose bootstrap was refused for having nowhere to schedule.
+// Two, and the count is declared rather than derived. An `Environment` field stood
+// here claiming to decide it, and had already stopped being read: development
+// briefly defaulted to zero on the reasoning that its capacity should come from the
+// tenant's own hardware (ADR-075) -- which is the right end state and the wrong
+// default to reach it by: it made on-prem hardware a precondition for the simplest
+// box the platform can build, and `kakt tenant scaffold` with no arguments produced
+// a repository whose bootstrap was refused for having nowhere to schedule.
+//
+// The field outlived that default as write-only state with a comment describing
+// behaviour the code no longer had. Management capacity is management policy
+// (ADR-111 Revision 7 §3) and arrives through WorkerReplicas below.
 //
 // A tenant who wants that arrangement asks for it with --workers 0, which is why
 // the override below distinguishes an explicit zero from an absent flag.

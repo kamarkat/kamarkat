@@ -1,4 +1,3 @@
-{{- include "environment-manager.assertSupported" . -}}
 ---
 {{- /* ADR-068: unreleased builds source from the working tree, released builds
      from the published bundle. Known at render time. */}}

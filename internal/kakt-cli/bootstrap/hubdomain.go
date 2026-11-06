@@ -87,16 +87,21 @@ type hubEnvironmentOverlay struct {
 	} `json:"spec"`
 }
 
-// ReadHubZone returns the base domain declared by an environment overlay.
+// ReadHubZone returns the base domain the hub declares.
 //
 // The overlay is the system of record (ADR-051), so the zone is read from Git
 // rather than from a running cluster: the derivation must produce the same result
 // before the cluster exists as after, or bootstrap and steady state disagree.
 //
-// A production overlay deliberately does not patch spec.domain — prod uses the
-// apex, which the base layer already carries — so an absent domain in the overlay
-// falls back to the base object rather than being an error.
-func ReadHubZone(projectRoot, environmentSlug string) (string, error) {
+// ONE OVERLAY, not one per environment (ADR-111 Revision 7). It took an
+// environmentSlug and read manifests/environments/<slug>/, which is how a box got
+// a zone per environment -- the arrangement ADR-051's Amendment 2026-09-18 already
+// replaced with a declared subdomain. The hub has one zone because it is one
+// cluster; the label in it is a subdomain, not a stage.
+//
+// An absent domain in the overlay falls back to the base object rather than being
+// an error, because the base already carries the apex.
+func ReadHubZone(projectRoot string) (string, error) {
 	// Repository-relative, resolved by the platform package: a released build
 	// reads what it carries, an unreleased one the working tree (ADR-063,
 	// ADR-068). projectRoot is retained for callers that pass one, and ignored
@@ -109,7 +114,7 @@ func ReadHubZone(projectRoot, environmentSlug string) (string, error) {
 		return p
 	}
 	candidates := []string{
-		rel("manifests", "environments", environmentSlug, "patch-hubenvironment.yaml"),
+		rel("manifests", "environments", "management", "patch-hubenvironment.yaml"),
 		rel("manifests", "environments", "base", "hubenvironment.yaml"),
 	}
 	for _, path := range candidates {
@@ -128,9 +133,9 @@ func ReadHubZone(projectRoot, environmentSlug string) (string, error) {
 			return d, nil
 		}
 	}
-	return "", fmt.Errorf("no spec.domain declared for environment %q in any overlay; "+
-		"the environment overlay is the system of record for the base domain (ADR-051).\n"+
+	return "", fmt.Errorf("no spec.domain declared in any hub overlay; the overlay is "+
+		"the system of record for the base domain (ADR-051).\n"+
 		"  Looked in: %s\n"+
 		"  Source: %s",
-		environmentSlug, strings.Join(candidates, ", "), platform.Origin())
+		strings.Join(candidates, ", "), platform.Origin())
 }

@@ -14,7 +14,7 @@ import (
 func testSpec() Spec {
 	return Spec{
 		TenantID: "acme", GitOrg: "acme-inc", Domain: "acme.example",
-		Provider: "hetzner", Region: "hel1", Environment: "dev",
+		Provider: "hetzner", Region: "hel1",
 		ClusterName: "acme-hub", BundleVersion: "v1.2.3",
 		PlatformRepoURL: "https://github.com/kamarkat/kamarkat",
 		BundleRegistry:  "ghcr.io/kamarkat/charts",
@@ -330,7 +330,7 @@ func TestBundleToleratesTheGeneratedValuesFileNotExistingYet(t *testing.T) {
 		t.Run(version, func(t *testing.T) {
 			spec := Spec{
 				TenantID: "acme", GitOrg: "acme-io", Domain: "nutgraf.in",
-				ClusterName: "acme-hub", Environment: "dev", Provider: "hetzner",
+				ClusterName: "acme-hub", Provider: "hetzner",
 				BundleVersion: version, BundleRegistry: "ghcr.io/kamarkat/charts",
 				PlatformRepoURL: "https://github.com/kamarkat/kamarkat",
 			}

@@ -14,7 +14,7 @@ import (
 func TestADR045ArtifactsBelongToTheTenantRepository(t *testing.T) {
 	fromRepoRoot(t)
 
-	platform := &Orchestrator{EnvironmentSlug: "dev"}
+	platform := &Orchestrator{}
 	reg, err := platform.readADR045Registry()
 	if err != nil {
 		t.Fatalf("reading the registry: %v", err)
@@ -26,7 +26,7 @@ func TestADR045ArtifactsBelongToTheTenantRepository(t *testing.T) {
 		}
 	}
 
-	tenant := &Orchestrator{EnvironmentSlug: "dev", GitopsDir: "/somewhere", ClusterName: "acme-hub"}
+	tenant := &Orchestrator{GitopsDir: "/somewhere", ClusterName: "acme-hub"}
 	treg, err := tenant.readADR045Registry()
 	if err != nil {
 		t.Fatalf("reading the registry for a tenant: %v", err)
@@ -61,7 +61,7 @@ func TestADR045ArtifactsBelongToTheTenantRepository(t *testing.T) {
 // reads them.
 func TestADR045TenantArtifactsNeedAClusterName(t *testing.T) {
 	fromRepoRoot(t)
-	o := &Orchestrator{EnvironmentSlug: "dev", GitopsDir: "/somewhere"}
+	o := &Orchestrator{GitopsDir: "/somewhere"}
 
 	if _, err := o.readADR045Registry(); err == nil {
 		t.Error("a tenant repository with no cluster name must be refused")

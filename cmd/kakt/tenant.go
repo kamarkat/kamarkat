@@ -255,7 +255,12 @@ path and its backup prefix for their whole lives.`,
 	f.StringVar(&workloadCluster.Name, "name", "", "the workload cluster's name, and what applications target (required)")
 	f.StringVar(&workloadCluster.Provider, "provider", "hetzner", "cloud provider")
 	f.StringVar(&workloadCluster.Region, "region", "hel1", "cloud region")
-	f.StringVar(&workloadCluster.Environment, "environment", "dev", "environment slug")
+	// This cluster's, not the hub's (ADR-111 Revision 7). The management cluster
+	// declares no environment; a workload cluster declares the stage it serves,
+	// and it is this value the supported-topology check is asked about.
+	f.StringVar(&workloadCluster.Environment, "environment", "dev",
+		"the stage THIS workload cluster serves: dev (default), stg or prod. Not a "+
+			"destination -- applications name the cluster they run on")
 	f.StringVar(&workloadCluster.BundleVersion, "bundle-version", "", "platform version this cluster starts on (required)")
 	f.StringVar(&workloadCluster.TenantID, "tenant", "", "the tenant that owns it (required)")
 	f.StringVar(&workloadCluster.GitopsRepoURL, "gitops-repo-url", "", "this repository's URL (required)")
@@ -348,7 +353,6 @@ what a tenant would receive before any repository exists.`,
 	f.StringVar(&scaffoldSpec.Domain, "domain", "", "the tenant's base domain (required)")
 	f.StringVar(&scaffoldSpec.Provider, "provider", "hetzner", "cloud provider")
 	f.StringVar(&scaffoldSpec.Region, "region", "hel1", "cloud region")
-	f.StringVar(&scaffoldSpec.Environment, "environment", "dev", "environment slug")
 	// The DNS label this box sits under, declared rather than derived from the
 	// environment (ADR-051 amendment 2026-09-18). Empty publishes on the apex.
 	// kubefirst's SubdomainName, and the reason its management cluster needs no

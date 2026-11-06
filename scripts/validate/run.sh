@@ -61,7 +61,7 @@ fi
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Zero-Ops validation — phase=$PHASE mode=$VALIDATE_MODE"
-echo "  environment=$ENVIRONMENT zone=$ENV_ZONE (${ENV_ZONE_SOURCE:-unknown})"
+echo "  zone=$ENV_ZONE (${ENV_ZONE_SOURCE:-unknown})"
 echo "═══════════════════════════════════════════════════════════"
 
 for m in "${MODULES[@]}"; do

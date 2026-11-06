@@ -38,14 +38,13 @@ func TestDeriveHubEndpointsFromZone(t *testing.T) {
 // there rather than from a constant that would become a fifty-first literal.
 func TestReadHubZoneFromEnvironmentOverlay(t *testing.T) {
 	root := repoRoot(t)
-	for env, want := range map[string]string{"dev": "dev.nutgraf.in", "stg": "stg.nutgraf.in"} {
-		got, err := ReadHubZone(root, env)
-		if err != nil {
-			t.Fatalf("ReadHubZone(%q): %v", env, err)
-		}
-		if got != want {
-			t.Errorf("ReadHubZone(%q) = %q, want %q", env, got, want)
-		}
+	const want = "dev.nutgraf.in"
+	got, err := ReadHubZone(root)
+	if err != nil {
+		t.Fatalf("ReadHubZone: %v", err)
+	}
+	if got != want {
+		t.Errorf("ReadHubZone() = %q, want %q", got, want)
 	}
 }
 
@@ -55,15 +54,20 @@ func TestReadHubZoneFromEnvironmentOverlay(t *testing.T) {
 func TestDerivationCoversEveryHubHostnameLiteral(t *testing.T) {
 	root := repoRoot(t)
 
-	// Each environment is checked against its OWN zone. Checking every overlay
-	// against dev's would report stg's and prod's correct hostnames as defects.
+	// One zone, because there is one hub overlay (ADR-111 Revision 7). This
+	// iterated dev, stg and prod and checked each overlay against its OWN zone,
+	// which was necessary while a box had a zone per environment.
+	//
+	// The apex is derived too: the base object carries it, prod published there,
+	// and a literal under it in the manifests is still a hub hostname this
+	// derivation has to account for.
 	derived := map[string]bool{}
-	for _, env := range []string{"dev", "stg", "prod"} {
-		zone, err := ReadHubZone(root, env)
-		if err != nil {
-			t.Fatalf("ReadHubZone(%q): %v", env, err)
-		}
-		e := DeriveHubEndpoints(zone)
+	zone, err := ReadHubZone(root)
+	if err != nil {
+		t.Fatalf("ReadHubZone: %v", err)
+	}
+	for _, z := range []string{zone, "nutgraf.in"} {
+		e := DeriveHubEndpoints(z)
 		for _, h := range []string{e.API, e.Auth, e.ID, e.Console, e.ArgoCD, e.Infisical,
 			e.MCP, e.Dashboard, e.ZitadelOrg, e.Zone} {
 			derived[h] = true

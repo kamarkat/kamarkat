@@ -48,4 +48,6 @@ spec:
   secrets:
     infisical:
       projectSlug: hub-platform
-      environmentSlug: dev
+      # The management secret scope (ADR-111 Revision 7 §2), not a workload
+      # environment: this is where the hub's OWN credentials live.
+      environmentSlug: management

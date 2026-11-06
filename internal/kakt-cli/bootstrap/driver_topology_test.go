@@ -143,27 +143,29 @@ func TestScaleCiliumOperatorNoOpOnZero(t *testing.T) {
 // tenant's own hardware (ADR-075). That is the right end state and the wrong
 // default to reach it by: it made on-prem hardware a precondition for the simplest
 // box the platform can build. A tenant who wants it asks with --workers 0.
-func TestHetznerWorkerReplicasByEnvironment(t *testing.T) {
-	for env, want := range map[string]int{
-		"dev":  2,
-		"stg":  2,
-		"prod": 2,
-		"":     2,
-	} {
-		d := &HetznerDriver{Environment: env}
-		if got := d.PlannedWorkerReplicas(); got != want {
-			t.Errorf("environment %q: PlannedWorkerReplicas() = %d, want %d", env, got, want)
-		}
+// Two, declared, with no environment in the question (ADR-111 Revision 7 §3).
+// This iterated dev, stg, prod and "" to assert the count never varied -- which
+// documented that the driver's Environment field changed nothing, so the field
+// is gone and the dimension with it.
+func TestHetznerWorkerReplicasIsDeclaredNotDerived(t *testing.T) {
+	d := &HetznerDriver{}
+	if got := d.PlannedWorkerReplicas(); got != 2 {
+		t.Errorf("PlannedWorkerReplicas() = %d, want 2", got)
+	}
+	zero := 0
+	d = &HetznerDriver{WorkerReplicas: &zero}
+	if got := d.PlannedWorkerReplicas(); got != 0 {
+		t.Errorf("an explicit zero must survive: PlannedWorkerReplicas() = %d, want 0", got)
 	}
 }
 
-// Hybrid provisions none in every environment: the cell exists so capacity comes
-// from the tenant's own hardware.
+// Hybrid provisions none at all: the cell exists so capacity comes from the
+// tenant's own hardware.
 func TestHybridWorkerReplicasAlwaysZero(t *testing.T) {
-	for _, env := range []string{"dev", "stg", "prod", ""} {
-		d := &HybridDriver{Driver: &HetznerDriver{Environment: env}}
+	{
+		d := &HybridDriver{Driver: &HetznerDriver{}}
 		if got := d.PlannedWorkerReplicas(); got != 0 {
-			t.Errorf("environment %q: hybrid PlannedWorkerReplicas() = %d, want 0", env, got)
+			t.Errorf("hybrid PlannedWorkerReplicas() = %d, want 0", got)
 		}
 	}
 }
@@ -180,47 +182,36 @@ func TestBootstrapRefusesABoxWithNoWorkerCapacity(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider Provider
-		env      string
 		wantErr  bool
 	}{
 		{
 			// Explicitly asked for no cloud workers, and no on-prem to replace them.
 			name: "no cloud workers and no on-prem has nothing to schedule on",
 			provider: NewCloudProvider(
-				&HetznerDriver{Environment: "dev", WorkerReplicas: intPtr(0)}, "c", false),
-			env:     "dev",
+				&HetznerDriver{WorkerReplicas: intPtr(0)}, "c", false),
 			wantErr: true,
 		},
 		{
-			name:     "dev hetzner provisions cloud workers by default",
-			provider: NewCloudProvider(&HetznerDriver{Environment: "dev"}, "c", false),
-			env:      "dev",
-			wantErr:  false,
-		},
-		{
-			name:     "prod hetzner provisions cloud workers",
-			provider: NewCloudProvider(&HetznerDriver{Environment: "prod"}, "c", false),
-			env:      "prod",
+			name:     "hetzner provisions cloud workers by default",
+			provider: NewCloudProvider(&HetznerDriver{}, "c", false),
 			wantErr:  false,
 		},
 		{
 			name: "on-prem alone is capacity, with no cloud workers",
 			provider: NewCloudProvider(
-				&HybridDriver{Driver: &HetznerDriver{Environment: "dev"}, OnPremEnabled: true}, "c", false),
-			env:     "dev",
+				&HybridDriver{Driver: &HetznerDriver{}, OnPremEnabled: true}, "c", false),
 			wantErr: false,
 		},
 		{
 			name: "hybrid without on-prem has nothing at all",
 			provider: NewCloudProvider(
-				&HybridDriver{Driver: &HetznerDriver{Environment: "dev"}}, "c", false),
-			env:     "dev",
+				&HybridDriver{Driver: &HetznerDriver{}}, "c", false),
 			wantErr: true,
 		},
 	}
 
 	for _, tc := range cases {
-		o := &Orchestrator{Provider: tc.provider, EnvironmentSlug: tc.env}
+		o := &Orchestrator{Provider: tc.provider}
 		err := o.checkPlacementCapacityRequested()
 		if tc.wantErr && err == nil {
 			t.Errorf("%s: expected a refusal, got none", tc.name)
@@ -231,21 +222,21 @@ func TestBootstrapRefusesABoxWithNoWorkerCapacity(t *testing.T) {
 	}
 }
 
-// An explicit count wins over the environment's default, including an explicit
-// zero. This is what lets a tenant with no hardware run a dev box on cloud
-// capacity, and a tenant with plenty run staging on none.
-func TestExplicitWorkerCountOverridesTheEnvironment(t *testing.T) {
+// An explicit count wins over the declared default, including an explicit zero.
+// This is what lets a tenant with no hardware run a box on cloud capacity, and a
+// tenant with plenty run one on none.
+func TestExplicitWorkerCountOverridesTheDefault(t *testing.T) {
 	zero, four := 0, 4
-	if got := (&HetznerDriver{Environment: "prod", WorkerReplicas: &zero}).PlannedWorkerReplicas(); got != 0 {
-		t.Errorf("explicit zero in prod = %d, want 0", got)
+	if got := (&HetznerDriver{WorkerReplicas: &zero}).PlannedWorkerReplicas(); got != 0 {
+		t.Errorf("explicit zero = %d, want 0", got)
 	}
-	if got := (&HetznerDriver{Environment: "dev", WorkerReplicas: &four}).PlannedWorkerReplicas(); got != 4 {
-		t.Errorf("explicit four in dev = %d, want 4", got)
+	if got := (&HetznerDriver{WorkerReplicas: &four}).PlannedWorkerReplicas(); got != 4 {
+		t.Errorf("explicit four = %d, want 4", got)
 	}
-	// And a driver that never had the field set still gets the environment's own
-	// answer. An int sentinel got this wrong: Go's zero value read as an explicit
-	// zero, so every environment silently provisioned nothing.
-	if got := (&HetznerDriver{Environment: "prod"}).PlannedWorkerReplicas(); got != 2 {
+	// And a driver that never had the field set still gets the declared default.
+	// An int sentinel got this wrong: Go's zero value read as an explicit zero, so
+	// every box silently provisioned nothing.
+	if got := (&HetznerDriver{}).PlannedWorkerReplicas(); got != 2 {
 		t.Errorf("unset override in prod = %d, want 2", got)
 	}
 }

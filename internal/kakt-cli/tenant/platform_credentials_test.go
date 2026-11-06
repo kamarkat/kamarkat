@@ -6,7 +6,7 @@ import (
 )
 
 func prodSpec() Spec {
-	return Spec{Provider: "hetzner", Environment: "prod", PrivateRegistry: true}
+	return Spec{Provider: "hetzner", PrivateRegistry: true}
 }
 
 func withEverything(spec Spec) Secrets {
@@ -84,19 +84,24 @@ func TestObservabilityDestinationIsNeverRequired(t *testing.T) {
 	}
 }
 
-// A development box is created to be destroyed. Requiring durable object
-// storage for one asks a tenant to provision real infrastructure to run a test.
-func TestBackupCredentialsAreNotAskedOfThrowawayBoxes(t *testing.T) {
-	for _, env := range []string{"dev", "ephemeral"} {
-		t.Run(env, func(t *testing.T) {
-			spec := Spec{Provider: "hetzner", Environment: env}
-			s := Secrets{ProviderToken: "p", GitopsToken: "g"}
-			for _, c := range s.missingInTier(spec, tierCapability) {
-				if strings.HasPrefix(c.Secret, "S3_") {
-					t.Errorf("%s asked of a %s box", c.Secret, env)
-				}
-			}
-		})
+// Every box is asked for them (ADR-111 Revision 7 §3).
+//
+// This asserted the opposite -- that a "dev" or "ephemeral" box is not asked --
+// on the reasoning that such a box is created to be destroyed. The hub declares no
+// environment to be one of those, and the hub's PostgreSQL clusters declare a
+// barmanObjectStore unconditionally, so a box that was never asked archived to a
+// destination it could not authenticate against.
+func TestBackupCredentialsAreAskedOfEveryBox(t *testing.T) {
+	spec := Spec{Provider: "hetzner"}
+	s := Secrets{ProviderToken: "p", GitopsToken: "g"}
+	var asked []string
+	for _, c := range s.missingInTier(spec, tierCapability) {
+		if strings.HasPrefix(c.Secret, "S3_") {
+			asked = append(asked, c.Secret)
+		}
+	}
+	if len(asked) != 2 {
+		t.Errorf("expected both S3 credentials to be asked for, got %v", asked)
 	}
 }
 
@@ -104,7 +109,7 @@ func TestBackupCredentialsAreNotAskedOfThrowawayBoxes(t *testing.T) {
 // ADR-066 makes workloads theirs, and the platform cannot tell from outside
 // which kind they run. Declared, not inferred.
 func TestRegistryCredentialFollowsTheDeclaration(t *testing.T) {
-	public := Spec{Provider: "hetzner", Environment: "prod", PrivateRegistry: false}
+	public := Spec{Provider: "hetzner", PrivateRegistry: false}
 	s := Secrets{ProviderToken: "p", GitopsToken: "g"}
 	for _, c := range s.missingInTier(public, tierCapability) {
 		if strings.HasPrefix(c.Secret, "GHCR_") {

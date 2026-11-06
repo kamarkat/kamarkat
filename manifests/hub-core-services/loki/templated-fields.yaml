@@ -1,3 +1,12 @@
+# Hub sizing is management-plane policy, not a workload environment's (ADR-111
+# Revision 7 §3). The values below were conditional on the hub's environmentSlug,
+# which made the management plane's capacity a function of a workload stage it does
+# not have. They are now declared outright.
+#
+# They carry this box's CURRENT EFFECTIVE values deliberately: de-conditionalising
+# is not the moment to change capacity. Raising them is a capacity decision made on
+# measurements -- an unsatisfiable constraint does not fail loudly, it pends, and
+# the service it governs silently never returns.
 # Per-box and per-environment values for the hub's Loki (ADR-078 addendum 5 §4,
 # §9): the bucket is this cluster's own; development runs one replica, which needs
 # a replication factor of 1.
@@ -11,7 +20,7 @@
     - path: [data, config.yaml]
       replace:
         from: 'replication_factor: 3'
-        with: 'replication_factor: {{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+        with: 'replication_factor: 1'
 
 - kind: StatefulSet
   name: loki
@@ -20,6 +29,6 @@
       value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
     - path: [spec, replicas]
       type: int
-      value: '{{ if eq .Values.global.environmentSlug "dev" }}1{{ else if eq .Values.global.environmentSlug "stg" }}2{{ else }}3{{ end }}'
+      value: '1'
     - path: [spec, volumeClaimTemplates, 0, spec, storageClassName]
       value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'

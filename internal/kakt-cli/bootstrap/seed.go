@@ -211,7 +211,7 @@ func readSeedBundleVersion(ctx context.Context, kubeconfig string) string {
 // registry it fetched from; the chart should not have to guess.
 const bundleRegistry = "ghcr.io/kamarkat/charts"
 
-func renderSeedApplication(envRevision, envSlug, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, infisicalProjectID, infisicalClientID, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
+func renderSeedApplication(envRevision, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, infisicalProjectID, infisicalClientID, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
 	scopes := ""
 	for _, sc := range oidcScopes {
 		scopes += fmt.Sprintf("\n        - %q", sc)
@@ -255,7 +255,7 @@ spec:
           value: %q
         - name: hubDomain
           value: %q
-        - name: environmentSlug
+        - name: management.infisicalEnvironmentSlug
           value: %q
         - name: provider
           value: %q
@@ -284,7 +284,7 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
-`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, envSlug, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
+`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
 		infisicalProjectID, infisicalClientID, scopes)
 }
 
@@ -338,7 +338,7 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 	// Ory keeps serving auth.<zone> and is not removed here. Rolling back is
 	// pointing this line at .Auth again, which is why the endpoint set carries
 	// both rather than renaming one.
-	zone, err := ReadHubZone(".", o.EnvironmentSlug)
+	zone, err := ReadHubZone(".")
 	if err != nil {
 		return fmt.Errorf("failed to read hub zone for the OIDC issuer: %w", err)
 	}
@@ -462,7 +462,7 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 	// platform's own box takes it from there; a tenant box takes it from the
 	// values file its repository holds, which is why this path is the only one
 	// that has to name it.
-	seed := renderSeedApplication(envRevision, o.EnvironmentSlug, o.providerName(),
+	seed := renderSeedApplication(envRevision, o.ManagementScope, o.providerName(),
 		o.Topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
 		infisicalProjectID, infisicalClientID, bundleVersion, instanceRepo, zone, oidcScopes)
 	if err := kubectlApplyStdin(ctx, kubeconfig, seed); err != nil {
@@ -570,7 +570,7 @@ func (o *Orchestrator) ReapplySeed(ctx context.Context, kubeconfig string) error
 // pool ApplicationSet at a directory that does not exist, and the Applications
 // generated from it go missing rather than erroring. Reading them back from the
 // cluster removes the opportunity.
-func ReadSeedIdentity(ctx context.Context, kubeconfig string) (envSlug, provider, topology string, err error) {
+func ReadSeedIdentity(ctx context.Context, kubeconfig string) (managementScope, provider, topology string, err error) {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
 		"-n", "platform-ops", "get", "application", seedAppName,
 		"-o", `jsonpath={range .spec.source.helm.parameters[*]}{.name}={.value}{"\n"}{end}`)
@@ -590,14 +590,17 @@ func ReadSeedIdentity(ctx context.Context, kubeconfig string) (envSlug, provider
 		}
 	}
 
-	envSlug, provider = values["environmentSlug"], values["provider"]
-	if envSlug == "" || provider == "" {
+	// management.infisicalEnvironmentSlug, not environmentSlug (ADR-111 Revision
+	// 7). The seed carries the hub's own secret scope; the hub declares no
+	// environment, so there is no environmentSlug parameter to read back.
+	managementScope, provider = values["management.infisicalEnvironmentSlug"], values["provider"]
+	if managementScope == "" || provider == "" {
 		return "", "", "", fmt.Errorf(
-			"the seed Application %q records no environmentSlug or provider — refusing to guess the cluster's identity", seedAppName)
+			"the seed Application %q records no management.infisicalEnvironmentSlug or provider — refusing to guess the cluster's identity", seedAppName)
 	}
 	// topology is legitimately empty on a single-topology cluster, so its
 	// absence is not an error and must not be defaulted.
-	return envSlug, provider, values["topology"], nil
+	return managementScope, provider, values["topology"], nil
 }
 
 // activateBoundary opens boundary n by removing its deny sync window.
