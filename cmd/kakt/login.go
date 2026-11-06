@@ -102,7 +102,9 @@ command prefers when present:
 	f.StringVar(&token, "token", "",
 		"the token Infisical shows when it could not push the login to this terminal; skips "+
 			"the browser step (also read from INFISICAL_TOKEN)")
-	f.StringVar(&org, "org", "", "the organization to scope the session to, by id, slug or name")
+	f.StringVar(&org, "org", "",
+		"check the session can see this organization, by id, slug or name, and record it. The "+
+			"browser login is what scopes the token")
 	f.DurationVar(&timeout, "timeout", 3*time.Minute, "how long to wait for the browser login")
 	if env := strings.TrimSpace(os.Getenv("INFISICAL_TOKEN")); env != "" && token == "" {
 		token = env
@@ -243,11 +245,20 @@ func openBrowser(url string) error {
 // verifySession proves the token is a usable session and returns who it belongs
 // to.
 //
-// /api/v1/organization is the endpoint the platform's own Infisical bootstrap
-// already calls with a user session (getExistingOrgData), so this is the same
-// authentication mode on the same route rather than a new assumption about the
-// API.
+// Two reads, both on routes whose verifyAuth lists AuthMode.JWT -- a user session
+// -- so neither is an assumption about the API:
+//
+//	GET /api/v2/users/me      who this is (user-router.ts:496)
+//	GET /api/v1/organization  which organizations it can see, and the id to record
+//
+// The first exists because the second does not return an address, and "logged in
+// as session on <org slug>" is not an answer to "as whom".
 func verifySession(ctx context.Context, domain, token, wantOrg string) (email, orgID string, err error) {
+	email, err = currentUserEmail(ctx, domain, token)
+	if err != nil {
+		return "", "", err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, domain+"/api/v1/organization", nil)
 	if err != nil {
 		return "", "", err
@@ -297,10 +308,53 @@ func verifySession(ctx context.Context, domain, token, wantOrg string) (email, o
 				wantOrg, strings.Join(names, ", "))
 		}
 	}
-	// The identity is the session's, and the API does not return the address on
-	// this route, so the organization stands in for "as whom" until a command
-	// performs a read and Infisical attributes it.
-	return "session on " + chosen.Slug, chosen.ID, nil
+	return email, chosen.ID, nil
+}
+
+// currentUserEmail asks who the session belongs to, and is also the proof that
+// the token is a session at all.
+//
+// A 401 here is the one failure worth distinguishing: everything else this
+// command does afterwards would report it as an authorization problem against a
+// box, which sends the operator to ask for permissions they already have.
+func currentUserEmail(ctx context.Context, domain, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, domain+"/api/v2/users/me", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("could not reach %s: %w", domain, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "", fmt.Errorf("%s refused the token: it is not a valid session.\n\n"+
+			"If you pasted it, check it is the whole token; if the browser posted it, log in again", domain)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("%s answered %d when asked whose session this is", domain, resp.StatusCode)
+	}
+	var body struct {
+		User struct {
+			Email     string `json:"email"`
+			FirstName string `json:"firstName"`
+			LastName  string `json:"lastName"`
+		} `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("could not read the identity response: %w", err)
+	}
+	if e := strings.TrimSpace(body.User.Email); e != "" {
+		return e, nil
+	}
+	// An account with no address on it is unusual rather than broken -- an SSO
+	// identity can carry a name and no mail -- and refusing the login for it
+	// would be refusing a session the server accepts.
+	if name := strings.TrimSpace(body.User.FirstName + " " + body.User.LastName); name != "" {
+		return name, nil
+	}
+	return "this session", nil
 }
 
 // newWhoamiCmd says which identity this machine would use, and where it is kept.
@@ -330,7 +384,24 @@ func newWhoamiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s at %s\n", s.Email, s.Domain)
+			// Asked of the server, not of the store. "What did I save" is not the
+			// question anyone has; "can I still use this, and as whom" is -- and the
+			// brief's four outcomes (logged in, authorized, credential retrieved,
+			// cluster reachable) start with this one. It also means a session whose
+			// stored identity predates a change still reports the truth.
+			live, liveErr := currentUserEmail(cmd.Context(), s.Domain, s.Token)
+			switch {
+			case liveErr == nil:
+				fmt.Printf("%s at %s\n", live, s.Domain)
+			case strings.Contains(liveErr.Error(), "not a valid session"):
+				return fmt.Errorf("%s no longer accepts this session.\n\nRun: kakt login --domain %s",
+					s.Domain, s.Domain)
+			default:
+				// Unreachable is not invalid, and saying so is the difference
+				// between "log in again" and "check your network".
+				fmt.Printf("%s at %s (stored; could not reach %s to confirm)\n",
+					s.Email, s.Domain, s.Domain)
+			}
 			if s.OrgID != "" {
 				fmt.Printf("  organization  %s\n", s.OrgID)
 			}
