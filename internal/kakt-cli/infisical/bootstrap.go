@@ -1228,9 +1228,9 @@ func declaredManagementScope(ctx context.Context) (string, error) {
 	}
 	scope := strings.TrimSpace(out)
 	if scope == "" {
-		return "", fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG: it is "+
-			"the Infisical environment holding THIS HUB's own credentials (ADR-111 Revision 7 §2), "+
-			"rendered from the box's declared management.infisicalEnvironmentSlug. Day-0 creates "+
+		return "", fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG: it is " +
+			"the Infisical environment holding THIS HUB's own credentials (ADR-111 Revision 7 §2), " +
+			"rendered from the box's declared management.infisicalEnvironmentSlug. Day-0 creates " +
 			"that environment and writes the hub's secrets into it, so there is no value to assume")
 	}
 	return scope, nil

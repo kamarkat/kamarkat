@@ -58,7 +58,6 @@ import (
 //
 // The field had no Go consumer -- those three rules were its only effect -- so
 // removing it changes no behaviour beyond lifting the coupling.
-//
 type HubEnvironmentSpec struct {
 	// BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
 	//

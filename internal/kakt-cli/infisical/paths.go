@@ -27,16 +27,16 @@ const (
 	// /projects, not the /workspace spelling the same routes also answer to: the
 	// project routes under /workspace are registered as deprecated upstream, and
 	// createProject and the membership grants here already use /projects.
-	PathProjectEnvironments      = "/api/v1/projects/%s/environments"
-	PathProjectEnvironmentBySlug = "/api/v1/projects/%s/environments/slug/%s"
-	PathCertificateProfilesBySlug      = "/api/v1/cert-manager/certificate-profiles/slug/%s?projectId=%s"
-	PathCertificateAuthorities         = "/api/v1/cert-manager/ca"
-	PathCertificatePolicies            = "/api/v1/cert-manager/certificate-policies"
-	PathCertificateProfiles            = "/api/v1/cert-manager/certificate-profiles"
-	PathPKITemplates                   = "/api/v2/pki/certificate-templates"
-	PathCertificateAuthoritiesCreate   = "/api/v1/cert-manager/ca/internal"
-	PathCACertificate                  = "/api/v1/cert-manager/ca/internal/%s/certificate"
-	PathSecretsRaw                     = "/api/v3/secrets/raw/%s"
+	PathProjectEnvironments          = "/api/v1/projects/%s/environments"
+	PathProjectEnvironmentBySlug     = "/api/v1/projects/%s/environments/slug/%s"
+	PathCertificateProfilesBySlug    = "/api/v1/cert-manager/certificate-profiles/slug/%s?projectId=%s"
+	PathCertificateAuthorities       = "/api/v1/cert-manager/ca"
+	PathCertificatePolicies          = "/api/v1/cert-manager/certificate-policies"
+	PathCertificateProfiles          = "/api/v1/cert-manager/certificate-profiles"
+	PathPKITemplates                 = "/api/v2/pki/certificate-templates"
+	PathCertificateAuthoritiesCreate = "/api/v1/cert-manager/ca/internal"
+	PathCACertificate                = "/api/v1/cert-manager/ca/internal/%s/certificate"
+	PathSecretsRaw                   = "/api/v3/secrets/raw/%s"
 	// PathSecretsRawList lists a folder. Unlike PathSecretsRaw it names no key,
 	// so it answers "what is here" rather than "is this here" -- which is the
 	// question `kakt fleet secrets status` asks.
