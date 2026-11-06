@@ -133,6 +133,19 @@ func statePathFor(root, clusterName string) string {
 	return filepath.Join(root, TenantStateDir, clusterName+".json")
 }
 
+// TenantStatePath is that same path, for the code that has to REMOVE a state
+// file rather than write one.
+//
+// Exported so teardown cannot spell it differently from the writer. It did: it
+// removed `.state/<cluster>.json` relative to the working directory while this
+// package had written it under the repository root it was given, so a teardown
+// run from anywhere but the repository left the file behind -- and a state file
+// that says a cluster exists makes the next bootstrap resume against
+// infrastructure that is gone, skipping phases rather than failing.
+func TenantStatePath(root, clusterName string) string {
+	return statePathFor(root, clusterName)
+}
+
 // NewTenantStateManager keeps a cluster's bootstrap state in the tenant's own
 // repository.
 //

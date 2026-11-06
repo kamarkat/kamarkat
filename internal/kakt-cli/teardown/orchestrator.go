@@ -697,6 +697,69 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	return nil
 }
 
+// roots are the directories this box's local artifacts can be under: the working
+// directory Day-0 wrote them relative to, and the repository it was pointed at.
+//
+// Both, because the two halves of the platform disagree about which one is
+// authoritative and each is right about its own file: the bootstrap orchestrator
+// writes the kubeconfig relative to the working directory, while the state package
+// writes a cluster's state file under the repository root it is handed. A teardown
+// that assumed either answer left the other file behind.
+func (o *Orchestrator) roots() []string {
+	roots := []string{"."}
+	if o.GitopsDir != "" && o.GitopsDir != "." {
+		roots = append(roots, o.GitopsDir)
+	}
+	return roots
+}
+
+// localArtifacts are this cluster's kubeconfigs, at every root.
+func (o *Orchestrator) localArtifacts() []string {
+	var paths []string
+	for _, root := range o.roots() {
+		paths = append(paths,
+			filepath.Join(root, "k8-secrets", "kubeconfig", o.ClusterName+".kubeconfig"),
+			filepath.Join(root, o.ClusterName+".kubeconfig"),
+		)
+	}
+	return paths
+}
+
+// stateArtifacts are the state files that must not outlive the cluster, at every
+// root.
+//
+// A state file left behind is not inert: it says a cluster exists, and the next
+// bootstrap resumes against it rather than starting -- so phases are skipped for
+// infrastructure that is no longer there, and the failure surfaces much later as
+// a missing dependency rather than as a stale file.
+//
+// The tenant file's path comes from state.TenantStatePath, the function that
+// wrote it, so the two cannot be spelled differently. The rest are listed in both
+// layouts: state moved from .zero-ops to .state, and teardown must clean whichever
+// a box actually has.
+func (o *Orchestrator) stateArtifacts() []string {
+	var paths []string
+	for _, root := range o.roots() {
+		paths = append(paths,
+			state.TenantStatePath(root, o.ClusterName),
+			filepath.Join(root, ".state", "bootstrap-mgmt.json"),
+			filepath.Join(root, ".state", "bootstrap-workload.json"),
+			// The name those two replaced. Still removed, because teardown deleting
+			// a stale file is cleanup rather than acting on it.
+			filepath.Join(root, ".state", "bootstrap-state.json"),
+			filepath.Join(root, ".state", "infisical-bootstrap.json"),
+			filepath.Join(root, ".state", "kind", "kind-config-generated.yaml"),
+
+			// The layout these replaced.
+			filepath.Join(root, ".zero-ops", "state", o.ClusterName+".json"),
+			filepath.Join(root, ".zero-ops", "bootstrap-state.json"),
+			filepath.Join(root, ".zero-ops", "infisical-bootstrap.json"),
+			filepath.Join(root, ".zero-ops", "kind", "kind-config-generated.yaml"),
+		)
+	}
+	return paths
+}
+
 // localCleanup deletes Kind cluster, prunes Docker artifacts, and removes local state/kubeconfig files.
 func (o *Orchestrator) localCleanup(ctx context.Context) error {
 	fmt.Println("\n[teardown] Cleaning up local files and Docker/Kind resources...")
@@ -735,12 +798,18 @@ func (o *Orchestrator) localCleanup(ctx context.Context) error {
 	exec.CommandContext(cmdCtx, "docker", "builder", "prune", "-f").Run()
 	exec.CommandContext(cmdCtx, "docker", "network", "rm", "kind").Run()
 
-	// Remove kubeconfigs
-	kubeconfigPaths := []string{
-		fmt.Sprintf("k8-secrets/kubeconfig/%s.kubeconfig", o.ClusterName),
-		fmt.Sprintf("%s.kubeconfig", o.ClusterName),
-	}
-	for _, p := range kubeconfigPaths {
+	// Remove kubeconfigs, AT BOTH ROOTS.
+	//
+	// Day-0 writes k8-secrets/kubeconfig/<cluster>.kubeconfig relative to the
+	// working directory it runs in, and resolveKubectlBaseArgs above is willing to
+	// read it under --gitops-dir as well. Teardown removed only the working
+	// directory's, so a teardown run from anywhere but the repository left the
+	// admin kubeconfig of a destroyed cluster on disk -- still named for a cluster
+	// whose API server is gone, and still the first thing a later command picks up.
+	//
+	// os.Remove on an absent path reports nothing here, so naming both roots costs
+	// nothing on a box where they are the same directory, which is the normal case.
+	for _, p := range o.localArtifacts() {
 		if err := os.Remove(p); err == nil {
 			fmt.Printf("[teardown] ✓ Removed %s\n", p)
 		}
@@ -756,23 +825,7 @@ func (o *Orchestrator) localCleanup(ctx context.Context) error {
 	//
 	// os.Remove on an absent path is reported as nothing by the loop below, so
 	// listing both costs nothing on a box that has only one.
-	stateFiles := []string{
-		filepath.Join(state.TenantStateDir, fmt.Sprintf("%s.json", o.ClusterName)),
-		filepath.Join(".state", "bootstrap-mgmt.json"),
-		filepath.Join(".state", "bootstrap-workload.json"),
-		// The name these two replaced. Still removed, because teardown deleting a
-		// stale file is cleanup rather than acting on it.
-		filepath.Join(".state", "bootstrap-state.json"),
-		filepath.Join(".state", "infisical-bootstrap.json"),
-		filepath.Join(".state", "kind", "kind-config-generated.yaml"),
-
-		// The layout these replaced.
-		filepath.Join(".zero-ops", "state", fmt.Sprintf("%s.json", o.ClusterName)),
-		filepath.Join(".zero-ops", "bootstrap-state.json"),
-		filepath.Join(".zero-ops", "infisical-bootstrap.json"),
-		filepath.Join(".zero-ops", "kind", "kind-config-generated.yaml"),
-	}
-	for _, p := range stateFiles {
+	for _, p := range o.stateArtifacts() {
 		if err := os.Remove(p); err == nil {
 			fmt.Printf("[teardown] ✓ Removed %s\n", p)
 		}
