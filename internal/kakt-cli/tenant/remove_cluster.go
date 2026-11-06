@@ -94,25 +94,38 @@ func (r ClusterRemoval) RemoveDeclaration() ([]string, error) {
 			"definition and is not removed this way. To delete the whole box, use kakt teardown",
 			r.Name)
 	}
-	// What identifies a management cluster: its platform declaration.
+	// What identifies a management cluster: nothing in this repository creates it.
 	//
-	// bundle.yaml is the cluster's declaration of the platform it runs (ADR-064)
-	// -- the file Day-0 requires before it will bootstrap anything, and the one
-	// `kakt propose` reads a version out of. A workload cluster has none, because
-	// the platform reaches it through the management cluster's own boundaries, so
-	// in a tenant repository this file IS the management cluster.
+	// A workload cluster exists because a SpokePool claim in its own directory
+	// says so, and the management cluster's ArgoCD reconciles that claim. The
+	// management cluster has no claim -- Day-0 brought it into being -- so the
+	// absence of one is the fact that tells them apart, and it is true in every
+	// layout this platform has shipped.
 	//
-	// It was root.yaml, which Day-0 treats as optional and says so: "root.yaml
-	// postdates the repositories scaffolded before it. A box without one still
-	// reconciles what it has". So a repository scaffolded before root.yaml existed
-	// was told it had "no management cluster" -- naming the wrong cause, and
-	// leaving the only supported way to remove a cluster unusable on exactly the
-	// boxes that have been running longest.
+	// Two readings were tried and both were wrong. root.yaml is optional, and Day-0
+	// says so: "root.yaml postdates the repositories scaffolded before it. A box
+	// without one still reconciles what it has" -- so requiring it told the oldest
+	// boxes they had "no management cluster". bundle.yaml does not discriminate: the
+	// workload-cluster template shipped one until the platform Application was
+	// removed from it, so every cluster added before that carries a bundle.yaml too,
+	// and a repository with workload clusters would accept any of them as its
+	// management cluster.
 	mgmtDir := filepath.Join(r.GitopsDir, RegistryDir, "clusters", r.MgmtCluster)
-	if _, err := os.Stat(filepath.Join(mgmtDir, "bundle.yaml")); err != nil {
-		return nil, fmt.Errorf("%s declares no platform: --mgmt-cluster names the management "+
-			"cluster of this repository, whose directory carries bundle.yaml (ADR-064). A "+
-			"workload cluster has none", mgmtDir)
+	if _, err := os.Stat(mgmtDir); err != nil {
+		return nil, fmt.Errorf("no cluster at %s: --mgmt-cluster names the management cluster "+
+			"of this repository, the one holding the other clusters' "+
+			"<name>-infrastructure.yaml", mgmtDir)
+	}
+	mgmtClaims, err := filepath.Glob(filepath.Join(mgmtDir, "infrastructure", "spokepool*.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", mgmtDir, err)
+	}
+	if len(mgmtClaims) > 0 {
+		return nil, fmt.Errorf("%q is a workload cluster, not the management cluster: it "+
+			"declares its own SpokePool claim at %s/clusters/%s/infrastructure.\n\n"+
+			"The management cluster is the one with no claim of its own -- it holds the other "+
+			"clusters' <name>-infrastructure.yaml instead",
+			r.MgmtCluster, RegistryDir, r.MgmtCluster)
 	}
 
 	dir, appFiles := r.declaration()

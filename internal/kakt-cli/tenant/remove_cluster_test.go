@@ -27,6 +27,10 @@ func box(t *testing.T, mgmt, cluster string) string {
 	}
 	write(filepath.Join(mgmtDir, "bundle.yaml"), "kind: Application\n")
 	write(filepath.Join(clusterDir, "spokepool.yaml"), "kind: SpokePool\n")
+	// A workload cluster added before the platform Application was removed from
+	// the template carries a bundle.yaml of its own, which is why its presence
+	// cannot be what identifies the management cluster. nutgraf-gitops has two.
+	write(filepath.Join(filepath.Dir(clusterDir), "bundle.yaml"), "kind: Application\n")
 	for _, app := range workloadClusterApps {
 		write(filepath.Join(dir, app.appFile(mgmt, cluster)), "kind: Application\n")
 	}
@@ -98,15 +102,24 @@ func TestRemoveDeclarationWorksWithoutRootApplication(t *testing.T) {
 	}
 }
 
-// A directory with no platform declaration is not the management cluster.
+// A cluster that declares its own claim is a workload cluster, whatever else its
+// directory carries.
+//
+// It carries a bundle.yaml in any repository that predates this change, so
+// accepting it as the management cluster would let a removal be addressed to the
+// wrong directory entirely -- and in a repository with workload clusters, that is
+// every one of them.
 func TestRemoveDeclarationRefusesAClusterThatIsNotTheManagementOne(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
 	dir := box(t, mgmt, cluster)
+	if _, err := os.Stat(filepath.Join(dir, RegistryDir, "clusters", cluster, "bundle.yaml")); err != nil {
+		t.Fatal("the workload cluster has no bundle.yaml, so this asserts nothing")
+	}
 	_, err := (ClusterRemoval{GitopsDir: dir, MgmtCluster: cluster, Name: mgmt}).RemoveDeclaration()
 	if err == nil {
 		t.Fatal("a workload cluster was accepted as the management cluster")
 	}
-	if !strings.Contains(err.Error(), "declares no platform") {
+	if !strings.Contains(err.Error(), "is a workload cluster") {
 		t.Errorf("error does not name the cause: %v", err)
 	}
 }
