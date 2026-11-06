@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -100,7 +99,9 @@ command prefers when present:
 	}
 	f := cmd.Flags()
 	f.StringVar(&domain, "domain", defaultEscrowDomain, "the Infisical your boxes escrow to")
-	f.StringVar(&token, "token", "", "a session token, instead of opening a browser (also honoured from INFISICAL_TOKEN)")
+	f.StringVar(&token, "token", "",
+		"the token Infisical shows when it could not push the login to this terminal; skips "+
+			"the browser step (also read from INFISICAL_TOKEN)")
 	f.StringVar(&org, "org", "", "the organization to scope the session to, by id, slug or name")
 	f.DurationVar(&timeout, "timeout", 3*time.Minute, "how long to wait for the browser login")
 	if env := strings.TrimSpace(os.Getenv("INFISICAL_TOKEN")); env != "" && token == "" {
@@ -109,16 +110,34 @@ command prefers when present:
 	return cmd
 }
 
-// browserLogin runs the loopback flow: a local listener, a browser at the
-// provider's login page, and the session posted back to us.
+// browserLogin runs the loopback flow Infisical's web app implements.
 //
-// THIS IS THE VENDOR'S OWN MECHANISM, and it is worth saying that it is not a
-// registered OAuth client. Infisical's web app posts the session to
-// http://127.0.0.1:<port> when its login URL carries ?callback_port=<port>, which
-// is how their CLI authenticates; there is no client registration and no PKCE, so
-// the contract is theirs to change. That is why a pasted token is accepted
-// alongside it -- their own CLI offers the same escape -- and why automation uses
-// a machine identity rather than this.
+// THE PROTOCOL, read from their source rather than assumed
+// (frontend/src/pages/auth/SelectOrgPage/SelectOrgPage.tsx:300 and
+// frontend/src/pages/auth/CliRedirectPage/route.tsx):
+//
+//  1. We listen on 127.0.0.1 and open <domain>/login?callback_port=<port>.
+//  2. On successful login their SelectOrgPage stores, in sessionStorage,
+//     {expiry: now+30s, data: base64({JTWToken, email, privateKey}), callbackPort}
+//     and navigates to /cli-redirect.
+//  3. That route's beforeLoad decodes it and does
+//     axios.post("http://127.0.0.1:<callbackPort>/", payload). On success it
+//     clears sessionStorage, so the page renders "You've successfully logged in
+//     to the Infisical CLI". On any failure the entry stays and the page renders
+//     the token with a Copy button.
+//
+// THE THIRTY SECONDS MATTER. If that window lapses before beforeLoad runs, the
+// entry is removed and NO POST IS ATTEMPTED -- and because the entry is gone the
+// page shows the same cheerful success screen with no token on it. So "the
+// browser said success and the CLI got nothing" is not necessarily a transport
+// failure, and there is nothing to paste in that case: the remedy is to run this
+// again and complete the browser steps promptly.
+//
+// It is not a registered OAuth client -- no client id, no state parameter, no
+// PKCE -- so there is nothing in the payload to bind it to this attempt. What
+// binds it is the port, which this process opened and nothing else is listening
+// on, and the Origin of the request, which must be the login domain. The listener
+// closes on the first credential it accepts.
 func browserLogin(ctx context.Context, domain string, timeout time.Duration) (string, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -126,15 +145,15 @@ func browserLogin(ctx context.Context, domain string, timeout time.Duration) (st
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	url := fmt.Sprintf("%s/login?callback_port=%d", domain, port)
+	loginURL := fmt.Sprintf("%s/login?callback_port=%d", domain, port)
 
 	received := make(chan string, 1)
-	failed := make(chan error, 1)
+	rejected := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// The browser's origin is the login page, so the preflight has to be
-		// answered or the POST never arrives.
+		// Their post is axios with a JSON body, which the browser preflights, so
+		// the OPTIONS has to be answered or the POST never leaves the page.
 		w.Header().Set("Access-Control-Allow-Origin", domain)
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -147,54 +166,63 @@ func browserLogin(ctx context.Context, domain string, timeout time.Duration) (st
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		// `JTWToken` is spelled exactly as the provider spells it, typo included:
-		// it is their field name, and a corrected spelling decodes to nothing.
+		// The only binding available: this credential must come from the page we
+		// sent the operator to. A POST from anywhere else is answered and dropped,
+		// so a stray local process cannot plant a session in this store.
+		if origin := r.Header.Get("Origin"); origin != "" && origin != domain {
+			w.WriteHeader(http.StatusForbidden)
+			rejected <- fmt.Errorf("a login arrived from %q rather than %s, and was refused",
+				origin, domain)
+			return
+		}
+		// `JTWToken` is spelled as they spell it, typo included: it is their field
+		// name, and a corrected spelling decodes to nothing.
 		var body struct {
 			Email    string `json:"email"`
 			JTWToken string `json:"JTWToken"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			failed <- fmt.Errorf("the browser sent something unreadable: %w", err)
+			rejected <- fmt.Errorf("the browser posted something unreadable: %w", err)
+			return
+		}
+		if strings.TrimSpace(body.JTWToken) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			rejected <- fmt.Errorf("the browser completed the login but posted no token")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		if strings.TrimSpace(body.JTWToken) == "" {
-			failed <- fmt.Errorf("the browser completed the login but sent no token")
-			return
-		}
 		received <- body.JTWToken
 	})
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(listener) }()
 	defer srv.Close()
 
-	fmt.Printf("Opening %s\n", url)
-	if err := openBrowser(url); err != nil {
-		fmt.Printf("Could not open a browser (%v).\n", err)
+	fmt.Printf("Opening %s\n", loginURL)
+	if err := openBrowser(loginURL); err != nil {
+		fmt.Printf("Could not open a browser (%v). Open that address yourself.\n", err)
 	}
-	fmt.Println("\nIf the browser cannot reach this terminal, copy the token it shows and paste it here.")
-	go func() {
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil {
-			return
-		}
-		if t := strings.TrimSpace(line); t != "" {
-			received <- t
-		}
-	}()
+	fmt.Printf("Waiting for the browser to finish, up to %s. Ctrl-C cancels.\n", timeout)
 
 	select {
-	case t := <-received:
-		return t, nil
-	case err := <-failed:
+	case token := <-received:
+		fmt.Println("Login received.")
+		return token, nil
+	case err := <-rejected:
 		return "", err
 	case <-time.After(timeout):
+		// Worded from their code, because the usual cause is not a transport
+		// failure and telling someone to paste a token they were never shown is
+		// worse than saying nothing.
 		return "", fmt.Errorf("no login arrived within %s.\n\n"+
-			"Re-run, or pass the token directly: kakt login --domain %s --token <token>",
-			timeout, domain)
+			"Infisical pushes the session to this terminal only within 30 seconds of the "+
+			"login completing. If that window lapsed it drops the token and still shows "+
+			"\"You've successfully logged in to the Infisical CLI\" -- with nothing to copy.\n\n"+
+			"Run this again and complete the browser steps without pausing. If the page DID "+
+			"show a token with a Copy button, pass it directly:\n\n"+
+			"  kakt login --domain %s --token <token>", timeout, domain)
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", fmt.Errorf("login cancelled")
 	}
 }
 
