@@ -9,5 +9,6 @@ kind: Kustomization
 
 resources:
   - credits-db.yaml
+  - credits-db-pooler.yaml
   # The role credential RoleManager derives by name, not by reference.
   - hub-credits-db-credentials-es.yaml

@@ -6,4 +6,5 @@ kind: Kustomization
 
 resources:
   - billing-db.yaml
+  - billing-db-pooler.yaml
   - hub-billing-db-credentials-es.yaml

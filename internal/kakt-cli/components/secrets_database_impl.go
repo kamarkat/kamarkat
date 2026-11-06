@@ -326,9 +326,10 @@ func (i *Installer) InstallPostgresConnectionSecret(ctx context.Context) (bool, 
 			// ClusterSecretStores reported "unable to create client", and 34 of 36
 			// ExternalSecrets failed behind them.
 			//
-			// infisical-db-pooler is declared, and this is what names it. Must match
-			// Endpoint.PoolerHost() in the hub operator, which writes this same secret.
-			"DB_HOST":     infisicalDBCluster + "-pooler." + constants.NamespaceData + ".svc",
+			// infisical-db-pooler is declared, and this is what names it. The constant
+			// carries the contract with Endpoint.PoolerHost() in the hub operator,
+			// which writes this same secret from its own copy of the derivation.
+			"DB_HOST":     constants.BootstrapDBPooler + "." + constants.NamespaceData + ".svc",
 			"DB_PORT":     "5432",
 			"DB_USER":     "infisical",
 			"DB_PASSWORD": infPassword,
@@ -489,9 +490,17 @@ func (i *Installer) WaitForInfisicalHealth(ctx context.Context) error {
 			// appearing to guard against it.
 			//
 			// Named once, at infisicalDBCluster, so the gate and the connection cannot
-			// diverge. No Pooler is named because infisical-db has none (ADR-112 §2).
+			// diverge.
+			//
+			// THE POOLER IS PART OF THE GATE. Infisical connects through
+			// infisical-db-pooler (ADR-112 §9), so waiting only for the Cluster leaves
+			// exactly the race this gate exists to close: Infisical starts, resolves
+			// nothing for the pooler's service, and crash-loops on ENOTFOUND. That is
+			// not hypothetical -- it is the 2026-11-05 outage, and health/phases.go
+			// records the same shape from Day-0 choreography before it.
 			(&health.DataLayerReadiness{
 				CNPGClusterName:  infisicalDBCluster,
+				PoolerName:       constants.BootstrapDBPooler,
 				OwnerApplication: constants.BootstrapDBOwnerApplication,
 			}).Checkers(),
 			(&health.InfisicalReadiness{}).Checkers()...,

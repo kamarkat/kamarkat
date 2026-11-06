@@ -9,3 +9,4 @@ kind: Kustomization
 
 resources:
   - zitadel-db.yaml
+  - zitadel-db-pooler.yaml

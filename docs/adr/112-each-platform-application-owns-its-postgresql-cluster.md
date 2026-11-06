@@ -89,6 +89,12 @@ application's cluster:
   `backup-health-<application>`). CloudNativePG creates no such Service itself;
 * its recovery configuration and runbook, under ADR-092.
 
+> **§9 (2026-11-05) revises two of these bullets, which are left as decided.** Every
+> cluster now gets a `Pooler`, not only one whose application has shown a need. And its
+> NetworkPolicy admits `platform-data` as well as the three sources named above, because
+> the pooler runs in the database namespace rather than in the application's -- so "and
+> nothing else" no longer describes any of them.
+
 ### 3. Replicas and placement
 
 The replica ladder is the platform's: one instance in development, two in staging, three in
@@ -298,6 +304,84 @@ A credential named this way appears in no manifest that references it: `hub_graf
 becomes `hub-grafana-db-credentials` by that rule alone, which is why two of these
 ExternalSecrets were briefly deleted as unreferenced during this work. A grep could not
 see the reference because the reference is a convention in code.
+
+### 9. Every application's cluster gets a Pooler (2026-11-05)
+
+This revises two bullets of §2, which is left as written: the sixth, "a `Pooler` only
+where the application needs one", and the seventh, whose "and nothing else" no longer
+describes the NetworkPolicy -- every one of them now also admits `platform-data`, for
+the reason given under *What this requires of each cluster* below.
+
+**Every hub application that owns a database owns a `Pooler` in front of it.** Not only
+where a need has been demonstrated.
+
+The reasoning §2 was missing is the hub's position in the product. These applications
+are not sized by the hub's own workload -- they serve every spoke and every tenant on
+the box, so their connection counts grow with the fleet rather than with the control
+plane. Provisioning a pooler per application only after one of them is observed to
+struggle makes the first symptom a connection-exhaustion incident on a shared
+PostgreSQL primary, which is both the worst place to discover it and the hardest to
+roll back under load. Declaring one per cluster from the start costs a single pgbouncer
+pod per application and removes that class of incident from the fleet's growth path.
+
+The 2026-11-05 Infisical outage is a second-order argument for the same conclusion. §2's
+rule left `infisical-db` without a pooler while the connection secret written against
+the retired shared cluster still named one, so the host resolved to nothing: Infisical
+returned 500 on ENOTFOUND, both `ClusterSecretStore`s reported "unable to create
+client", and 34 of 36 `ExternalSecret`s failed behind them. A per-cluster rule with no
+exceptions leaves no gap between what a connection string can name and what exists.
+
+#### What this requires of each cluster
+
+* **A `Pooler` named `<cluster>-pooler`**, declared in that application's own
+  `database/` directory beside its `Cluster`. The name is not cosmetic: CloudNativePG
+  names the pooler's Service after the object, so the object, the service and every
+  connection string derived from it move together or not at all. (That naming is
+  CloudNativePG's behaviour rather than something this platform configures; the evidence
+  here is the retired `platform-db-pooler.platform-data.svc` host, which resolved for as
+  long as the object of that name existed.)
+
+  **The host is derived in two places, in two Go modules, and they must agree.**
+  `database.Endpoint.PoolerHost()` builds it for the hub operator;
+  `constants.BootstrapDBPooler` does for the CLI, which cannot import the operator's
+  package. Both write the same `infisical-postgres-connection` Secret, so a divergence
+  means the value depends on which of them ran last -- and the symptom is DNS ENOTFOUND
+  inside Infisical, not an error at the point of the mistake. Each names the other.
+* **`poolMode: session`, not `transaction`.** These applications migrate their own
+  schemas as they start: the billing engine has an explicit `migrate` initContainer
+  running `scripts/migrate.sh`, and Zitadel's values carry a `cleanup-stuck-migration`
+  step, which exists because its migrations can wedge. Session pooling holds a dedicated
+  backend for the life of a client session, so DDL, advisory locks and prepared
+  statements behave as they would against the primary. Transaction pooling breaks all three in ways that read as corruption
+  rather than as configuration, and it is the one setting here that must not be changed
+  for throughput without re-examining every application that migrates itself.
+* **`instances: 1` in every environment, deliberately.** §3's replica ladder -- one in
+  development, two in staging, three in production -- is a rule for *stateful* placement,
+  and a pooler holds no state: losing one drops connections that reconnect rather than
+  data that has to be recovered. So the ladder is not applied here, and `instances` is
+  not templated per environment the way the `Cluster`'s is, even though
+  `templated-fields.yaml` would make that a two-line change.
+
+  One is the footprint and a starting point, not a ceiling: the shared cluster's pooler
+  ran `instances: 3` until it was cut to 1 for the hub's resource constraints. Raise
+  `instances` for availability and `default_pool_size` for throughput when an
+  application needs it, per application rather than fleet-wide. Neither is grown
+  pre-emptively on a single-worker hub.
+* **A NetworkPolicy allowance for `platform-data`.** The pooler runs in the database
+  namespace, not in the application's, so a per-application policy admitting only the
+  application's namespace locks the pooler out of its own primary. The pooler then
+  reports Healthy while every connection through it fails -- the pre-split
+  `platform-db-access` admitted `platform-data` for exactly this reason, and the
+  per-application policies that replaced it dropped the allowance along with the pooler.
+
+#### What still goes to the primary
+
+Application traffic is pooled. The operator's role management and migrations are not:
+`database.Endpoint.PrimaryHost()` stays the endpoint for those, because they are writes
+that must not be routed through PgBouncer. A caller choosing between `PoolerHost()` and
+`PrimaryHost()` is choosing which of the two it is, and that choice is the reason both
+methods exist rather than one with a flag.
+
 
 ## Consequences
 

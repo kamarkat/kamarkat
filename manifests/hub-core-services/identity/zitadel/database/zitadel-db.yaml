@@ -167,6 +167,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform-identity
+        # zitadel-db-pooler, which runs in platform-data rather than in the
+        # application's namespace. Without this the pooler cannot reach its own
+        # primary, and it reports Healthy while every connection through it fails.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-data
       ports:
         - protocol: TCP
           port: 5432

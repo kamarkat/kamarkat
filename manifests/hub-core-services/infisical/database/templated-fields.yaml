@@ -19,3 +19,10 @@
       value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
     - path: [spec, storage, storageClass]
       value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'
+- kind: Pooler
+  name: infisical-db-pooler
+  fields:
+    # The placement class (ADR-046 §11), as for the Cluster above: ADR-014 keeps
+    # Poolers on worker nodes, and which workers depends on the box's provider.
+    - path: [spec, template, spec, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'

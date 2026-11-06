@@ -40,9 +40,12 @@ type DataLayerReadiness struct {
 	CNPGClusterName string
 	// PoolerName is the name of the CNPG Pooler CR. Optional.
 	//
-	// Empty means the cluster has no Pooler and none is waited for. ADR-112 §2
-	// provisions one only where an application needs it, and none of the
-	// application-owned clusters does.
+	// Empty means no Pooler is waited for. That was the normal case while ADR-112 §2
+	// provisioned one only where an application needed it; §9 now gives every
+	// application-owned cluster a <cluster>-pooler, and an application that connects
+	// through its pooler must name it here. Waiting only for the Cluster passes while
+	// the service the application actually dials does not exist yet, which is the
+	// boot race this type exists to close.
 	PoolerName string
 	// OwnerApplication is the ArgoCD Application that creates this cluster, in
 	// NamespaceOps. Optional.

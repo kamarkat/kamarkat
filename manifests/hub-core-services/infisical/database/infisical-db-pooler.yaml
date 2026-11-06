@@ -33,6 +33,19 @@ spec:
   instances: 1
   type: rw
 
+  # ADR-014: CNPG Poolers run on worker nodes only, in every cluster -- the same
+  # constraint the Cluster above carries, and for the same reason. PgBouncer is the
+  # path to a stateful workload and does not belong on a control-plane node.
+  #
+  # workload-location is the ADR-046 §11 placement class, rendered per box by
+  # templated-fields.yaml. Left as the placeholder here it matches no node, which is
+  # a pooler that never schedules rather than one placed wrongly.
+  template:
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/worker: ""
+        workload-location: PLACEHOLDER_PLACEMENT
+
   pgbouncer:
     poolMode: session
     parameters:

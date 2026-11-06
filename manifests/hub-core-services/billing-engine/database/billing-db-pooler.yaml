@@ -1,0 +1,52 @@
+# billing-db's PgBouncer pooler.
+#
+# One per cluster, matching the pooler restored for infisical-db. ADR-112 gives each
+# application its own cluster, and a pooler belongs to the cluster it fronts, so it
+# is declared here beside it rather than centrally.
+#
+# THE NAME IS LOAD-BEARING. Endpoint.PoolerHost() builds the host as
+# <cluster>-pooler.<namespace>.svc, so renaming this object points every connection
+# secret derived from it at a name that does not resolve -- which fails as DNS
+# ENOTFOUND, not as a connection error.
+#
+# SMALL ON PURPOSE, AND MEANT TO GROW. instances: 1 and the pool sizes below are the
+# hub's existing pooler settings; the shared cluster's pooler ran instances: 3 until
+# f175a7fa cut it to 1 for hub resource constraints. Raise instances for
+# availability, default_pool_size for throughput, and switch poolMode to transaction
+# if backend connections rather than client connections become the limit. None of
+# those is worth growing pre-emptively on a single-worker hub.
+#
+# APPLICATION TRAFFIC ONLY. The operator's role management and migrations go to
+# PrimaryHost(): they are writes, and must not be routed through PgBouncer.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: billing-db-pooler
+  namespace: platform-data
+spec:
+  cluster:
+    name: billing-db
+
+  instances: 1
+  type: rw
+
+  # ADR-014: CNPG Poolers run on worker nodes only, in every cluster -- the same
+  # constraint the Cluster above carries, and for the same reason. PgBouncer is the
+  # path to a stateful workload and does not belong on a control-plane node.
+  #
+  # workload-location is the ADR-046 §11 placement class, rendered per box by
+  # templated-fields.yaml. Left as the placeholder here it matches no node, which is
+  # a pooler that never schedules rather than one placed wrongly.
+  template:
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/worker: ""
+        workload-location: PLACEHOLDER_PLACEMENT
+
+  pgbouncer:
+    poolMode: session
+    parameters:
+      max_client_conn: "100"
+      default_pool_size: "25"
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "5"

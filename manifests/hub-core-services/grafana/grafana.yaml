@@ -113,8 +113,11 @@ spec:
       root_url: https://grafana.PLACEHOLDER_HUB_DOMAIN
     database:
       type: postgres
-      # Grafana's own cluster (ADR-112 §1), declared in database/grafana-db.yaml.
-      host: grafana-db-rw.platform-data.svc.cluster.local:5432
+      # Grafana's own cluster (ADR-112 §1), declared in database/grafana-db.yaml,
+      # reached through its pooler (database/grafana-db-pooler.yaml). The pooler is
+      # session-pooled, so Grafana's own schema migrations hold a dedicated backend
+      # and behave as they would against the primary.
+      host: grafana-db-pooler.platform-data.svc.cluster.local:5432
       name: grafana
       ssl_mode: require
     users:

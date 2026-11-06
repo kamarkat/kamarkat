@@ -41,6 +41,11 @@ func (e Endpoint) PrimaryHost() string {
 // manifests/hub-core-services/infisical/database/infisical-db-pooler.yaml, and CNPG
 // names the service after the object. Rename one and this breaks.
 //
+// THE SAME DERIVATION EXISTS IN THE CLI, as constants.BootstrapDBPooler, which cannot
+// import this package. Both write the infisical-postgres-connection Secret, so the two
+// must agree; a divergence shows up as DNS ENOTFOUND inside the application rather than
+// as an error in either writer (ADR-112 §9).
+//
 // Separate from PrimaryHost deliberately: role management and migrations above must
 // not go through PgBouncer, while a long-lived application connection benefits from
 // it. A caller choosing between them is choosing which of those it is.

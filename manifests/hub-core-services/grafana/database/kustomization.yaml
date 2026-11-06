@@ -9,5 +9,6 @@ kind: Kustomization
 
 resources:
   - grafana-db.yaml
+  - grafana-db-pooler.yaml
   # The role credential RoleManager derives by name, not by reference.
   - hub-grafana-db-credentials-es.yaml

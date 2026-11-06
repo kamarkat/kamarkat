@@ -55,8 +55,10 @@ spec:
               valueFrom: {secretKeyRef: {name: credit-authority-db, key: password}}
             - name: POSTGRES_URI
               # The ledger's own cluster (ADR-112 §1), declared in
-              # ../database/credits-db.yaml.
-              value: "host=credits-db-rw.platform-data.svc.cluster.local port=5432 user=$(PGUSER) password='$(PGPASSWORD)' dbname=credits sslmode=require"
+              # ../database/credits-db.yaml, reached through its pooler
+              # (../database/credits-db-pooler.yaml). Session-pooled, so migrations
+              # and advisory locks hold a dedicated backend.
+              value: "host=credits-db-pooler.platform-data.svc.cluster.local port=5432 user=$(PGUSER) password='$(PGPASSWORD)' dbname=credits sslmode=require"
           securityContext: {{- toYaml $hardened | nindent 12 }}
           resources:
             requests: {cpu: 50m, memory: 128Mi}

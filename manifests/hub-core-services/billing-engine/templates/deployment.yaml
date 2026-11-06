@@ -89,8 +89,10 @@ spec:
             - name: DB_PASSWORD
               valueFrom: {secretKeyRef: {name: billing-engine-db, key: password}}
             - name: DATABASE_URL
-              # The engine's own cluster (ADR-112 §1), ../database/billing-db.yaml.
-              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@billing-db-rw.platform-data.svc.cluster.local:5432/lago?sslmode=require"
+              # The engine's own cluster (ADR-112 §1), ../database/billing-db.yaml,
+              # reached through ../database/billing-db-pooler.yaml. Session-pooled,
+              # so Lago's boot-time migrations hold a dedicated backend.
+              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@billing-db-pooler.platform-data.svc.cluster.local:5432/lago?sslmode=require"
             - name: REDIS_URL
               value: "redis://127.0.0.1:6379"
             - name: LAGO_REDIS_CACHE_URL
