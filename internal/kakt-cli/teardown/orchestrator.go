@@ -33,6 +33,21 @@ type Orchestrator struct {
 	// caller can report the outcome instead of the intent.
 	ReleasedDNSRecords int
 
+	// InfrastructureOnly destroys the provider resources of a box whose Kubernetes
+	// API cannot be reached, and says so in the result.
+	//
+	// EXPLICIT, never inferred. A missing kubeconfig used to mean "carry on without
+	// the cluster", so an operator who simply ran this from the wrong directory got
+	// the infrastructure-only path and a success line -- the Kubernetes half of the
+	// teardown skipped, the load balancers never drained, the DNS records never
+	// released, and nothing saying so. The two are different operations with
+	// different outcomes, so the caller chooses which one it is asking for.
+	InfrastructureOnly bool
+
+	// Outstanding names the cleanup this run could not perform, so a caller can
+	// report incompleteness rather than success.
+	Outstanding []string
+
 	// Kubeconfig is the hub's admin kubeconfig, RESOLVED BY THE CALLER.
 	//
 	// Supplied rather than searched for. It used to be looked up here, in four
@@ -69,26 +84,11 @@ type Orchestrator struct {
 	// a completed teardown -- the box was reachable the whole time.
 	GitopsDir string
 
-	// TenantPrefix is the box's own name, and everything it owns starts with it.
-	//
-	// A box derives every cluster name from its domain (ADR-082): nutgraf.in
-	// gives nutgraf-hub and nutgraf-01, and CAPH names each server for the
-	// cluster that owns it. So one prefix identifies every server this box
-	// created, without needing the hub alive or the tenant repository present.
-	//
-	// That matters because both of the other sources fail at exactly the moment
-	// teardown runs. spokeClusterNames asks the hub, which is the thing being
-	// destroyed; --spoke comes from the tenant repository, which `clean` removes
-	// in the same breath and which never existed at all if scaffolding failed. On
-	// a run that got as far as provisioning a spoke and no further, neither
-	// source knows the spoke's name, so its servers were left running and
-	// billing -- reported by reportOrphanedSpokes and deleted by nobody.
-	//
-	// It is safe to delete on where the other evidence is not: a caph-cluster
-	// label proves a server belongs to SOME cluster, while this prefix is the
-	// name of THIS box, and a Hetzner project holding two boxes holds two
-	// prefixes.
-	TenantPrefix string
+	// TenantPrefix IS GONE. It named the box's prefix so that servers could be
+	// matched by it, and a box's clusters share that prefix by construction, so it
+	// made a hub teardown sweep its workload clusters' servers too. Ownership is
+	// the CAPH label and the target set is explicit; there is nothing a prefix can
+	// add that is not either already known or a guess.
 
 	// Spokes names the spoke clusters this box declares, for when the hub cannot
 	// be asked for them.
@@ -138,11 +138,37 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// teardown that destroys nothing and says it succeeded is worse than one
 	// that fails, because the servers keep billing and nobody is told.
 	_, reachable := o.resolveKubectlBaseArgs()
-	if !reachable {
-		fmt.Printf("[teardown] ⚠️  No kubeconfig was resolved for '%s'.\n", o.ClusterName)
-		fmt.Println("[teardown]     The cluster cannot be read, so its spokes and its DNS")
-		fmt.Println("[teardown]     ownership are unknown, and neither can be cleaned up.")
-		fmt.Println("[teardown]     Everything that follows is reported as incomplete.")
+	switch {
+	case reachable && o.InfrastructureOnly:
+		// Asked for the recovery path on a box that can be read. Refused, because
+		// the full teardown is available and the recovery path leaves work behind:
+		// load balancers the CCM would have deprovisioned, finalizers, and the DNS
+		// records only the cluster can tell us the owner of.
+		return fmt.Errorf("--infrastructure-only was given, but this box's Kubernetes API " +
+			"IS reachable.\n\nRun the normal teardown so the cluster's own cleanup happens " +
+			"first: drop the flag. The recovery path is for a box whose API cannot be " +
+			"reached, and it leaves DNS records and load balancers behind by construction")
+	case !reachable && !o.InfrastructureOnly:
+		// Refused rather than downgraded. This is the case the brief calls out and
+		// the one that used to pass silently.
+		return fmt.Errorf("no Kubernetes access to '%s', so the cluster's own cleanup "+
+			"cannot run.\n\n"+
+			"That is a different operation from a normal teardown, and this command will "+
+			"not quietly become it: the load balancers the CCM owns, the finalizers and "+
+			"the DNS records this box published all need the API.\n\n"+
+			"Either make the API reachable -- `kakt login` and an escrowed kubeconfig, or "+
+			"--kubeconfig <path> -- or ask for the recovery path explicitly:\n\n"+
+			"  --infrastructure-only %s[,<workload cluster>...]\n\n"+
+			"which destroys provider resources by their CAPH ownership labels and reports "+
+			"the Kubernetes cleanup as not performed", o.ClusterName, o.ClusterName)
+	case !reachable:
+		fmt.Printf("[teardown] Infrastructure-only teardown of '%s'.\n", o.ClusterName)
+		fmt.Println("[teardown] The Kubernetes API is not being used, so none of the cluster's")
+		fmt.Println("[teardown] own cleanup runs. It is reported as outstanding at the end.")
+		o.Outstanding = append(o.Outstanding,
+			"load balancers the in-cluster controller owns were not deprovisioned by it",
+			"Kubernetes finalizers were not stripped",
+			"DNS records were not released: the owner id lives in the cluster")
 	}
 
 	spokes := o.spokeClusterNames(ctx)
@@ -196,6 +222,17 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// Step 5: Local Kind, Docker, and state cleanup
 	if err := o.localCleanup(ctx); err != nil {
 		fmt.Printf("[teardown] ⚠️  Local cleanup encountered warnings: %v\n", err)
+	}
+
+	if len(o.Outstanding) > 0 {
+		fmt.Printf("\n⚠️  Teardown of '%s' is INCOMPLETE. Outstanding:\n", o.ClusterName)
+		for _, item := range o.Outstanding {
+			fmt.Printf("   - %s\n", item)
+		}
+		// Returned as an error so the exit status says so too. A teardown that left
+		// work behind and exited 0 is indistinguishable from one that finished, to
+		// a person skimming and to every script.
+		return fmt.Errorf("%d cleanup operation(s) could not be performed", len(o.Outstanding))
 	}
 
 	fmt.Printf("\n✓ Teardown of cluster '%s' completed\n", o.ClusterName)
@@ -473,40 +510,51 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// is not a special case that someone has to remember.
 	owned := append([]string{o.ClusterName}, spokes...)
 
-	matchesCluster := func(name string, labels map[string]string) bool {
-		// The box's own prefix first: it needs neither the hub nor the tenant
-		// repository, and both are gone or going by the time this runs.
-		if o.TenantPrefix != "" {
-			if strings.HasPrefix(name, o.TenantPrefix+"-") {
-				return true
-			}
-			for k := range labels {
-				if strings.HasPrefix(k, "caph-cluster-"+o.TenantPrefix+"-") {
-					return true
-				}
-			}
-		}
+	// OWNERSHIP IS A LABEL, AND ONLY A LABEL.
+	//
+	// CAPH marks every resource it provisions with caph-cluster-<cluster>, so that
+	// key naming a cluster in the target set is a statement of ownership by the
+	// thing that created it. An exact key, not a prefix of one: caph-cluster-x
+	// must not match a resource belonging to cluster "x-2".
+	//
+	// WHAT THIS REPLACES, because it could have destroyed the wrong cluster. The
+	// previous matcher returned true on any of:
+	//
+	//	strings.HasPrefix(name, tenantPrefix+"-")   // every cluster in the box
+	//	strings.Contains(name, cluster)             // a name containing another name
+	//	strings.Contains(k, cluster)                // a label KEY containing it
+	//	strings.Contains(v, cluster)                // a label VALUE containing it
+	//
+	// On this platform a box's clusters share a prefix by construction (ADR-082:
+	// nutgraf.in gives nutgraf-hub and nutgraf-01), so `--tenant nutgraf` made a
+	// HUB teardown delete the workload cluster's servers as well -- and nothing in
+	// the output distinguished the two. Substring matching on a label value is
+	// worse: any resource whose metadata happens to mention the name was fair game.
+	//
+	// A resource CAPH did not label cannot be attributed this way, and is reported
+	// rather than deleted. The two exceptions are evidence of the same strength
+	// from elsewhere: a load balancer the CCM told us about by IP, and a volume
+	// still attached to a server this run has just deleted.
+	ownedByTarget := func(labels map[string]string) bool {
 		for _, cluster := range owned {
-			if strings.Contains(name, cluster) {
-				return true
+			if cluster == "" {
+				continue
 			}
-			for k, v := range labels {
-				if strings.HasPrefix(k, "caph-cluster-"+cluster) || strings.Contains(k, cluster) {
-					return true
-				}
-				if strings.Contains(v, cluster) {
-					return true
-				}
+			if _, ok := labels["caph-cluster-"+cluster]; ok {
+				return true
 			}
 		}
 		return false
+	}
+	matchesCluster := func(_ string, labels map[string]string) bool {
+		return ownedByTarget(labels)
 	}
 
 	// Whatever CAPH owns and this teardown did not claim. Reported, never
 	// deleted -- see reportOrphanedSpokes.
 	var unclaimed []string
 	noteIfUnclaimed := func(name string, labels map[string]string) {
-		if matchesCluster(name, labels) {
+		if ownedByTarget(labels) {
 			return
 		}
 		for k := range labels {

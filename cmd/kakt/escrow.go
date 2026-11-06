@@ -43,6 +43,7 @@ func newEscrowCmd() *cobra.Command {
 	cmd.AddCommand(newEscrowMigratePathsCmd())
 	cmd.AddCommand(newEscrowDeliverBackupCredentialsCmd())
 	cmd.AddCommand(newEscrowEnrollStoreCredentialCmd())
+	cmd.AddCommand(newEscrowEnrollProviderCredentialCmd())
 	cmd.AddCommand(newEscrowVerifyRecoveryCmd())
 	return cmd
 }

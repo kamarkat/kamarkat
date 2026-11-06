@@ -12,14 +12,14 @@ import (
 )
 
 var (
-	teardownDNSOnly  bool
-	teardownDNSOwner string
-	teardownDNSZone  string
-	teardownForce    bool
-	teardownConfirm  bool
-	teardownSpokes   []string
-	teardownGitops   string
-	teardownTenant   string
+	teardownDNSOnly   bool
+	teardownDNSOwner  string
+	teardownDNSZone   string
+	teardownForce     bool
+	teardownConfirm   bool
+	teardownSpokes    []string
+	teardownGitops    string
+	teardownInfraOnly string
 	// teardownKubeconfig is the explicit override, for a box whose kubeconfig was
 	// never escrowed -- a bootstrap that failed before hub-operator reconciled.
 	teardownKubeconfig string
@@ -67,8 +67,16 @@ Kubernetes CAPI resources, Kind/Docker artifacts, and local state.`,
 	cmd.Flags().StringVar(&teardownKubeconfig, "kubeconfig", "",
 		"use this kubeconfig instead of reading the escrowed one (for a box that never "+
 			"finished bootstrapping; requires HCLOUD_TOKEN)")
-	cmd.Flags().StringVar(&teardownTenant, "tenant", "",
-		"the box's name prefix; every server whose name or caph-cluster label starts with it is this box's")
+	// --tenant IS GONE, deliberately and loudly: an unknown flag is an error, so a
+	// script that passed it stops rather than quietly losing the scope it thought
+	// it had. It named the box's prefix, and because a box's clusters share that
+	// prefix by construction it made a hub teardown sweep its workload clusters'
+	// servers. Ownership is the CAPH label on each resource; the target set is the
+	// hub plus the spokes this run resolves.
+	cmd.Flags().StringVar(&teardownInfraOnly, "infrastructure-only", "",
+		"destroy the provider infrastructure of a box whose Kubernetes API cannot be "+
+			"reached, naming the clusters to destroy (repeatable, comma-separated). "+
+			"Kubernetes cleanup is reported as not performed")
 	cmd.Flags().StringSliceVar(&teardownSpokes, "spoke", nil,
 		"spoke cluster(s) this box declares, used when the hub cannot be reached (repeatable)")
 
@@ -106,9 +114,23 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 	// Skipped for --dns-only, which touches no cluster and no server: it exists for
 	// a box that is already gone, and requiring an escrow read to delete a DNS
 	// record would make the recovery path depend on the thing being recovered from.
+	// The explicit scope of a recovery run: the clusters named on the flag, and
+	// nothing a prefix might also match.
+	var infraOnly bool
+	var declaredScope []string
+	if raw := strings.TrimSpace(teardownInfraOnly); raw != "" {
+		infraOnly = true
+		for _, name := range strings.Split(raw, ",") {
+			if n := strings.TrimSpace(name); n != "" && n != clusterName {
+				declaredScope = append(declaredScope, n)
+			}
+		}
+	}
+
 	var access teardown.Orchestrator
 	if !teardownDNSOnly {
-		kubeconfig, token, cleanup, err := resolveHubAccess(ctx, teardownGitops, clusterName, teardownKubeconfig)
+		kubeconfig, token, cleanup, err := resolveHubAccess(ctx, teardownGitops, clusterName,
+			teardownKubeconfig, infraOnly)
 		if err != nil {
 			return err
 		}
@@ -118,15 +140,16 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 	}
 
 	orchestrator := &teardown.Orchestrator{
-		Kubeconfig:    access.Kubeconfig,
-		ProviderToken: access.ProviderToken,
-		ClusterName:   clusterName,
-		Force:         teardownForce,
-		Debug:         debug,
-		DNSOnly:       teardownDNSOnly,
-		GitopsDir:     teardownGitops,
-		TenantPrefix:  teardownTenant,
-		Spokes:        teardownSpokes,
+		Kubeconfig:         access.Kubeconfig,
+		ProviderToken:      access.ProviderToken,
+		InfrastructureOnly: infraOnly,
+		ClusterName:        clusterName,
+		Force:              teardownForce,
+		Debug:              debug,
+		DNSOnly:            teardownDNSOnly,
+		GitopsDir:          teardownGitops,
+
+		Spokes: teardownSpokes,
 		DNS: teardown.DNSOverride{
 			Owner: teardownDNSOwner,
 			Zone:  teardownDNSZone,
@@ -169,7 +192,7 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 // Nothing is guessed. There is no search of .state, no k8-secrets directory, and
 // no kind context -- the four sources that made a hub operable from exactly one
 // laptop and failed open when it was the wrong one.
-func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubeconfig string) (kubeconfig, providerToken string, cleanup func(), err error) {
+func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubeconfig string, infraOnly bool) (kubeconfig, providerToken string, cleanup func(), err error) {
 	cleanup = func() {}
 
 	// The provider credential is read from the environment first for the same
@@ -177,6 +200,10 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 	// way it always has, and an operator overriding it is being explicit.
 	providerToken = strings.TrimSpace(os.Getenv("HCLOUD_TOKEN"))
 
+	if infraOnly && strings.TrimSpace(explicitKubeconfig) != "" {
+		return "", "", cleanup, fmt.Errorf("--kubeconfig and --infrastructure-only ask for " +
+			"opposite things: one supplies Kubernetes access, the other says there is none")
+	}
 	if strings.TrimSpace(explicitKubeconfig) != "" {
 		if _, statErr := os.Stat(explicitKubeconfig); statErr != nil {
 			return "", "", cleanup, fmt.Errorf("--kubeconfig %s: %w", explicitKubeconfig, statErr)
@@ -199,11 +226,17 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 	}
 	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
 
-	_, path, removeKubeconfig, err := access.Kubernetes(ctx, id)
-	if err != nil {
-		return "", "", cleanup, err
+	// A recovery run asks for no Kubernetes access and must not acquire any: it
+	// has already been told the API cannot be reached, and the orchestrator
+	// refuses the mode if it turns out it can.
+	if !infraOnly {
+		_, path, removeKubeconfig, kubeErr := access.Kubernetes(ctx, id)
+		if kubeErr != nil {
+			return "", "", cleanup, kubeErr
+		}
+		cleanup = removeKubeconfig
+		kubeconfig = path
 	}
-	cleanup = removeKubeconfig
 
 	if providerToken == "" {
 		providerToken, err = access.Provider(ctx, id, "hetzner")
@@ -212,5 +245,5 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 			return "", "", func() {}, err
 		}
 	}
-	return path, providerToken, cleanup, nil
+	return kubeconfig, providerToken, cleanup, nil
 }

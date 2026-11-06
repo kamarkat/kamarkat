@@ -145,6 +145,16 @@ type Access interface {
 
 	// Provider returns the cloud credential the box was built with.
 	Provider(ctx context.Context, id Identity, provider string) (string, error)
+
+	// Artifact reads one of the box's escrowed artefacts, returning "" when the
+	// escrow holds none. PutArtifact writes one.
+	//
+	// The pair exists for enrolment, which has to tell ABSENT from UNREADABLE: a
+	// write that treats an unreadable escrow as empty is how the copy a teardown
+	// depends on gets overwritten. Readers that only need the value use the named
+	// methods above.
+	Artifact(ctx context.Context, id Identity, name string) (string, error)
+	PutArtifact(ctx context.Context, id Identity, name, payload string) error
 }
 
 // escrowAccess derives access from an escrow, however that escrow was
@@ -249,12 +259,26 @@ func (a *escrowAccess) Kubernetes(ctx context.Context, id Identity) (*rest.Confi
 	return cfg, path, cleanup, nil
 }
 
+func (a *escrowAccess) Artifact(ctx context.Context, id Identity, name string) (string, error) {
+	payload, err := a.store.RestoreArtifact(ctx, escrow.ForCluster(id.BoxID, id.ClusterName), name)
+	if err != nil {
+		return "", fmt.Errorf("%s could not read %s for box %s: %w", a.who, name, id.BoxID, err)
+	}
+	return payload, nil
+}
+
+func (a *escrowAccess) PutArtifact(ctx context.Context, id Identity, name, payload string) error {
+	if err := a.store.BackupArtifact(ctx, escrow.ForCluster(id.BoxID, id.ClusterName), name, payload); err != nil {
+		return fmt.Errorf("%s could not write %s for box %s: %w", a.who, name, id.BoxID, err)
+	}
+	return nil
+}
+
 func (a *escrowAccess) Provider(ctx context.Context, id Identity, provider string) (string, error) {
 	artifact := escrow.ProviderCredentialArtifact(provider)
-	payload, err := a.store.RestoreArtifact(ctx, escrow.ForCluster(id.BoxID, id.ClusterName), artifact)
+	payload, err := a.Artifact(ctx, id, artifact)
 	if err != nil {
-		return "", fmt.Errorf("%s could not read the escrowed %s credential for %s: %w",
-			a.who, provider, id.ClusterName, err)
+		return "", err
 	}
 	if payload == "" {
 		return "", fmt.Errorf("the escrow holds no %s credential for box %s.\n\n"+
