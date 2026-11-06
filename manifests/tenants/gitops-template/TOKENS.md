@@ -22,6 +22,8 @@ in this template's history. A renderer that is handed one should refuse it.
 | `<DOMAIN>` | the DNS zone this box publishes under, e.g. `acme.example` |
 | `<SUBDOMAIN>` | the label it sits at within that zone, or empty for the apex (ADR-051 amendment 2026-09-18) |
 | `<HUB_DOMAIN>` | the two joined: `<subdomain>.<domain>`, or `<domain>` when no subdomain is declared |
+| `<ESCROW_URL>` | the Infisical this box escrows to. A name, not a credential: it is what lets any authorized workstation find the box's artefacts |
+| `<ESCROW_PROJECT_ID>` | the escrow project this box was enrolled in. Also a name; the identity that reads it is the operator's own `kakt login`, or a machine identity in CI |
 
 ## Tokens you fill in yourself
 

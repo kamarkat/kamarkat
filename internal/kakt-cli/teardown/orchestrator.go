@@ -33,6 +33,30 @@ type Orchestrator struct {
 	// caller can report the outcome instead of the intent.
 	ReleasedDNSRecords int
 
+	// Kubeconfig is the hub's admin kubeconfig, RESOLVED BY THE CALLER.
+	//
+	// Supplied rather than searched for. It used to be looked up here, in four
+	// places in order -- a path recorded in .state, k8-secrets/kubeconfig/, a
+	// kubeconfig beside the repository, and finally a kind context -- every one of
+	// them an artefact of the machine that ran bootstrap. So a hub could only be
+	// torn down from that laptop, and the last candidate failed OPEN: on a cloud
+	// box `--context=kind-<cluster>` resolves to nothing, every kubectl read came
+	// back empty, and the teardown destroyed the servers while skipping the drain,
+	// the finalizer strip and the DNS release.
+	//
+	// cmd/kakt resolves it through hubaccess, which reads the escrowed kubeconfig
+	// with the operator's own identity and writes it to a temporary file for the
+	// life of the command. An operator who means to use a particular file passes
+	// --kubeconfig, which is a statement rather than a search.
+	Kubeconfig string
+
+	// ProviderToken is the cloud credential, also resolved by the caller.
+	//
+	// Read from the escrow for the same reason: it lived in HCLOUD_TOKEN or in
+	// k8-secrets/hetzner/token, so the one machine that could delete the servers
+	// was the one that created them.
+	ProviderToken string
+
 	// GitopsDir is the tenant repository this box was bootstrapped from, and is
 	// where its state and kubeconfig actually live.
 	//
@@ -115,11 +139,10 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// that fails, because the servers keep billing and nobody is told.
 	_, reachable := o.resolveKubectlBaseArgs()
 	if !reachable {
-		fmt.Printf("[teardown] ⚠️  No kubeconfig for '%s' under %q.\n",
-			o.ClusterName, o.gitopsDirForMessage())
-		fmt.Println("[teardown]     The cluster cannot be read, so its spokes and DNS")
-		fmt.Println("[teardown]     ownership are unknown. Pass --gitops-dir pointing at the")
-		fmt.Println("[teardown]     tenant repository this box was bootstrapped from.")
+		fmt.Printf("[teardown] ⚠️  No kubeconfig was resolved for '%s'.\n", o.ClusterName)
+		fmt.Println("[teardown]     The cluster cannot be read, so its spokes and its DNS")
+		fmt.Println("[teardown]     ownership are unknown, and neither can be cleaned up.")
+		fmt.Println("[teardown]     Everything that follows is reported as incomplete.")
 	}
 
 	spokes := o.spokeClusterNames(ctx)
@@ -200,43 +223,15 @@ func (o *Orchestrator) gitopsDirForMessage() string {
 // different clusters — a teardown that drains load balancers from one cluster and
 // strips finalizers on another would be worse than doing neither.
 func (o *Orchestrator) resolveKubectlBaseArgs() (baseArgs []string, ok bool) {
-	stateMgr := state.NewStateManager(o.ClusterName)
-	if o.GitopsDir != "" {
-		stateMgr = state.NewTenantStateManager(o.GitopsDir, o.ClusterName)
-	}
-	bootstrapState, _ := stateMgr.Load()
-
-	var kubeconfig string
-	if bootstrapState != nil && bootstrapState.MgmtKubeconfig != "" {
-		kubeconfig = bootstrapState.MgmtKubeconfig
-	} else {
-		// Against the tenant repository, not the working directory. These are
-		// where bootstrap puts them, and it puts them under --gitops-dir.
-		possiblePaths := []string{
-			filepath.Join(o.GitopsDir, "k8-secrets", "kubeconfig", o.ClusterName+".kubeconfig"),
-			filepath.Join(o.GitopsDir, o.ClusterName+".kubeconfig"),
-		}
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				kubeconfig = path
-				break
-			}
-		}
-		if kubeconfig == "" {
-			kubeconfig = fmt.Sprintf("--context=kind-%s", o.ClusterName)
-		}
-	}
-
-	if strings.HasPrefix(kubeconfig, "--context=") {
-		return []string{"--context", strings.TrimPrefix(kubeconfig, "--context=")}, true
-	}
-	if kubeconfig == "" {
+	// One source, and it is the one the caller resolved. No search: see the
+	// Kubeconfig field for what the search cost.
+	if strings.TrimSpace(o.Kubeconfig) == "" {
 		return nil, false
 	}
-	if _, err := os.Stat(kubeconfig); err != nil {
-		return nil, false
+	if strings.HasPrefix(o.Kubeconfig, "--context=") {
+		return []string{"--context", strings.TrimPrefix(o.Kubeconfig, "--context=")}, true
 	}
-	return []string{"--kubeconfig", kubeconfig}, true
+	return []string{"--kubeconfig", o.Kubeconfig}, true
 }
 
 // spokeClusterNames returns the CAPI clusters this hub provisioned, other than
@@ -452,16 +447,19 @@ func (o *Orchestrator) stripKubernetesFinalizers(ctx context.Context) {
 func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalancerIPs, spokes []string) error {
 	fmt.Println("\n[teardown] Forcefully deleting Hetzner Cloud infrastructure resources...")
 
-	hcloudToken := os.Getenv("HCLOUD_TOKEN")
+	// Supplied by the caller, which read it from the box's escrow or took it from
+	// the environment. Not read from k8-secrets/hetzner/token: a credential on the
+	// bootstrap machine is why a box could only be destroyed from there.
+	hcloudToken := strings.TrimSpace(o.ProviderToken)
 	if hcloudToken == "" {
-		if tokenBytes, err := os.ReadFile("k8-secrets/hetzner/token"); err == nil {
-			hcloudToken = strings.TrimSpace(string(tokenBytes))
-		}
-	}
-
-	if hcloudToken == "" {
-		fmt.Println("[teardown] ⚠️  HCLOUD_TOKEN not found; skipping Hetzner cloud resource cleanup")
-		return nil
+		// An ERROR, not a warning. This returned nil after printing "skipping
+		// Hetzner cloud resource cleanup", so a teardown with no credential
+		// deleted nothing, exited 0, and reported "Teardown completed" -- while
+		// every server kept running and kept billing.
+		return fmt.Errorf("no provider credential, so no server can be deleted: the box's " +
+			"servers are still running.\n\n" +
+			"kakt reads it from the box's escrow with your own identity. If this box has " +
+			"not escrowed one yet, set HCLOUD_TOKEN for this run")
 	}
 
 	client := hcloud.NewClient(hcloud.WithToken(hcloudToken))

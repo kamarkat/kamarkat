@@ -216,6 +216,22 @@ const ArtifactSpokePKIPrefix = "spoke-pki-"
 // Box-scoped, and declared rather than left to the default below: it must be
 // readable when neither the hub that wrote the backups nor the secret store
 // inside it is running, which is the whole reason it is escrowed at all.
+// ProviderCredentialArtifact names the escrowed copy of the cloud credential a
+// box was built with.
+//
+// Escrowed for the same reason as the kubeconfig: the operations that need it
+// most are the ones where the box cannot be asked. A teardown deletes servers
+// through the provider's API, and the credential for that lived in the cluster
+// (hetzner-credentials) and in the repository's CI secrets -- neither reachable
+// when the cluster is gone, which left it as an environment variable the operator
+// had to already have on the machine that bootstrapped.
+//
+// One artefact per provider, because a box may buy capacity from more than one
+// and a single name would make the second overwrite the first.
+func ProviderCredentialArtifact(provider string) string {
+	return "provider-credential-" + strings.TrimSpace(strings.ToLower(provider))
+}
+
 const ArtifactBackupSSECKey = "backup-ssec-key"
 
 // SpokePKIPurposes are the trust roots Cluster API generates for a cluster, by the
@@ -425,6 +441,61 @@ func NewEscrowClient(ctx context.Context, inClusterURL string) (EscrowClient, er
 	if err := e.authenticate(ctx); err != nil {
 		return nil, err
 	}
+	if err := e.verifyProject(ctx); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// NewEscrowClientForToken builds the same client against an ALREADY AUTHENTICATED
+// identity, for a caller holding a token rather than a machine credential.
+//
+// This is what makes a developer's own login reach the escrow. `kakt login`
+// obtains a user session from the Infisical the box escrows to, and the API
+// accepts a user session on the secret routes the escrow uses -- their
+// verifyAuth lists AuthMode.JWT beside AuthMode.IDENTITY_ACCESS_TOKEN. So the
+// read is performed AS THE DEVELOPER, authorized by that person's permissions on
+// the escrow project and attributed to them in Infisical's audit log, rather than
+// as a shared machine identity whose client secret had to be copied onto their
+// workstation first.
+//
+// The coordinates are passed rather than read from the environment, because a
+// workstation that has never bootstrapped a box has no k8-secrets/infisical
+// directory to walk up to and no reason to acquire one: the box declares its own
+// escrow url and project id, both of which are names rather than credentials.
+//
+// Same four calls, same project verification. The only difference is where the
+// bearer token came from, which is why this is a constructor and not a second
+// client.
+func NewEscrowClientForToken(ctx context.Context, url, projectID, token string) (EscrowClient, error) {
+	url = strings.TrimSpace(url)
+	projectID = strings.TrimSpace(projectID)
+	token = strings.TrimSpace(token)
+
+	var missing []string
+	for _, kv := range []struct{ name, value string }{
+		{"escrow url", url},
+		{"escrow project id", projectID},
+		{"session token", token},
+	} {
+		if kv.value == "" {
+			missing = append(missing, kv.name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("cannot reach the escrow: no %s", strings.Join(missing, ", "))
+	}
+
+	e := &infisicalEscrow{
+		baseURL:   strings.TrimSuffix(url, "/"),
+		projectID: projectID,
+		http:      &http.Client{Timeout: 30 * time.Second},
+		token:     token,
+	}
+	// No authenticate(): the token IS the authentication. verifyProject still
+	// runs, because a session that is valid says nothing about whether the
+	// project it is pointed at can hold an escrow -- the failure a KMS project
+	// produces is identical for a user and for a machine identity.
 	if err := e.verifyProject(ctx); err != nil {
 		return nil, err
 	}

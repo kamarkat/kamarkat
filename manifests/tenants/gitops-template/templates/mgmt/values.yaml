@@ -25,6 +25,23 @@ provider: <CLOUD_PROVIDER>
 # `boxId` above is the first; the third is this cluster's own sizing policy; the
 # fourth belongs to the managed clusters, each of which declares its own
 # environmentSlug and provider.
+# Where this box's artefacts are escrowed (ADR-111).
+#
+# NAMES, NOT CREDENTIALS, and that is why they are committed. The escrow holds
+# what a box cannot be rebuilt without -- its admin kubeconfig, its master keys,
+# its certificate authorities -- and reaching it needs three things: a url, a
+# project, and an identity. The first two identify the box's escrow and grant
+# nothing; the third is the person or machine asking, and is never written here.
+#
+# Declared so the box can be operated from any authorized workstation. They used
+# to exist only in k8-secrets/infisical/ on the machine that ran
+# `kakt escrow init`, so a developer could authenticate as themselves and still
+# not know which Infisical to ask -- which is what made hub access a property of
+# one laptop. `kakt login` supplies the identity; this file supplies the address.
+escrow:
+  url: <ESCROW_URL>
+  projectId: <ESCROW_PROJECT_ID>
+
 management:
   # The Infisical environment holding THIS HUB's credentials.
   #

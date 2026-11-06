@@ -20,6 +20,11 @@ func main() {
 			"bundle version it is pinned to.",
 	}
 
+	// Authentication first, because every command below that reaches a hub now
+	// depends on it rather than on files this machine happens to have.
+	rootCmd.AddCommand(newLoginCmd())
+	rootCmd.AddCommand(newWhoamiCmd())
+	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newTeardownCmd())
 	rootCmd.AddCommand(newSpokeCmd())

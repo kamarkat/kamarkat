@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"strings"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/teardown"
 	"github.com/spf13/cobra"
 )
@@ -16,6 +20,9 @@ var (
 	teardownSpokes   []string
 	teardownGitops   string
 	teardownTenant   string
+	// teardownKubeconfig is the explicit override, for a box whose kubeconfig was
+	// never escrowed -- a bootstrap that failed before hub-operator reconciled.
+	teardownKubeconfig string
 )
 
 func newTeardownCmd() *cobra.Command {
@@ -57,6 +64,9 @@ Kubernetes CAPI resources, Kind/Docker artifacts, and local state.`,
 	// (ADR-082), so one prefix names every server it owns -- and unlike the hub's
 	// spoke list or the tenant repository, it is still available once both are
 	// gone, which is precisely when a teardown needs it.
+	cmd.Flags().StringVar(&teardownKubeconfig, "kubeconfig", "",
+		"use this kubeconfig instead of reading the escrowed one (for a box that never "+
+			"finished bootstrapping; requires HCLOUD_TOKEN)")
 	cmd.Flags().StringVar(&teardownTenant, "tenant", "",
 		"the box's name prefix; every server whose name or caph-cluster label starts with it is this box's")
 	cmd.Flags().StringSliceVar(&teardownSpokes, "spoke", nil,
@@ -90,14 +100,33 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 		fmt.Printf("🗑️  Tearing down Hub Cluster: %s\n", clusterName)
 	}
 
+	// Hub access and the provider credential, resolved BEFORE anything is
+	// destroyed and from the box's own declaration rather than from this machine.
+	//
+	// Skipped for --dns-only, which touches no cluster and no server: it exists for
+	// a box that is already gone, and requiring an escrow read to delete a DNS
+	// record would make the recovery path depend on the thing being recovered from.
+	var access teardown.Orchestrator
+	if !teardownDNSOnly {
+		kubeconfig, token, cleanup, err := resolveHubAccess(ctx, teardownGitops, clusterName, teardownKubeconfig)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		access.Kubeconfig = kubeconfig
+		access.ProviderToken = token
+	}
+
 	orchestrator := &teardown.Orchestrator{
-		ClusterName:  clusterName,
-		Force:        teardownForce,
-		Debug:        debug,
-		DNSOnly:      teardownDNSOnly,
-		GitopsDir:    teardownGitops,
-		TenantPrefix: teardownTenant,
-		Spokes:       teardownSpokes,
+		Kubeconfig:    access.Kubeconfig,
+		ProviderToken: access.ProviderToken,
+		ClusterName:   clusterName,
+		Force:         teardownForce,
+		Debug:         debug,
+		DNSOnly:       teardownDNSOnly,
+		GitopsDir:     teardownGitops,
+		TenantPrefix:  teardownTenant,
+		Spokes:        teardownSpokes,
 		DNS: teardown.DNSOverride{
 			Owner: teardownDNSOwner,
 			Zone:  teardownDNSZone,
@@ -125,4 +154,63 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n✓ Cluster '%s' successfully torn down\n", clusterName)
 	}
 	return nil
+}
+
+// resolveHubAccess gets a hub's admin kubeconfig and its provider credential
+// without either of them having to be on this machine already.
+//
+// The order is deliberate. An explicitly passed --kubeconfig wins, because an
+// operator naming a file is making a statement -- it is the supported way in for
+// a box that never finished bootstrapping and therefore escrowed nothing.
+// Otherwise the box's declaration says which escrow holds its artefacts, and the
+// escrow is read with whoever is authenticated: the developer's own session from
+// `kakt login`, or the machine identity in the environment when this is CI.
+//
+// Nothing is guessed. There is no search of .state, no k8-secrets directory, and
+// no kind context -- the four sources that made a hub operable from exactly one
+// laptop and failed open when it was the wrong one.
+func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubeconfig string) (kubeconfig, providerToken string, cleanup func(), err error) {
+	cleanup = func() {}
+
+	// The provider credential is read from the environment first for the same
+	// reason the machine identity is: a pipeline that exports it must behave the
+	// way it always has, and an operator overriding it is being explicit.
+	providerToken = strings.TrimSpace(os.Getenv("HCLOUD_TOKEN"))
+
+	if strings.TrimSpace(explicitKubeconfig) != "" {
+		if _, statErr := os.Stat(explicitKubeconfig); statErr != nil {
+			return "", "", cleanup, fmt.Errorf("--kubeconfig %s: %w", explicitKubeconfig, statErr)
+		}
+		if providerToken == "" {
+			return "", "", cleanup, fmt.Errorf("--kubeconfig names a file, but there is no provider " +
+				"credential: set HCLOUD_TOKEN for this run, or drop --kubeconfig so both are read " +
+				"from the box's escrow")
+		}
+		return explicitKubeconfig, providerToken, cleanup, nil
+	}
+
+	coords, err := hubaccess.Declaration(gitopsDir, clusterName)
+	if err != nil {
+		return "", "", cleanup, err
+	}
+	access, err := hubaccess.Open(ctx, coords)
+	if err != nil {
+		return "", "", cleanup, err
+	}
+	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
+
+	_, path, removeKubeconfig, err := access.Kubernetes(ctx, id)
+	if err != nil {
+		return "", "", cleanup, err
+	}
+	cleanup = removeKubeconfig
+
+	if providerToken == "" {
+		providerToken, err = access.Provider(ctx, id, "hetzner")
+		if err != nil {
+			cleanup()
+			return "", "", func() {}, err
+		}
+	}
+	return path, providerToken, cleanup, nil
 }

@@ -347,7 +347,45 @@ func (s Spec) clusterTokens() map[string]string {
 		"<CLUSTER_NAME>":   s.ClusterName,
 		"<CLOUD_PROVIDER>": s.Provider,
 		"<CLOUD_REGION>":   s.Region,
+		// The box's escrow, as NAMES. A url and a project id grant nothing, and
+		// writing them here is what lets a second workstation reach this box: a
+		// developer can authenticate as themselves and still not know which
+		// Infisical or which project holds the box's artefacts, and until now the
+		// answer existed only in k8-secrets/infisical/ on the machine that ran
+		// `kakt escrow init`. The credentials stay where they are.
+		"<ESCROW_URL>":        escrowCoordinate("INFISICAL_ESCROW_URL"),
+		"<ESCROW_PROJECT_ID>": escrowCoordinate("INFISICAL_ESCROW_PROJECT_ID"),
 	}
+}
+
+// escrowCoordinate reads one of the box's escrow names from wherever this machine
+// keeps them, the way the escrow client itself reads them.
+//
+// Empty is tolerated here and refused later, by the command that needs it: a box
+// scaffolded before its escrow exists is a supported order of operations (the
+// escrow is enrolled with `kakt escrow init`, and `kakt escrow enroll` fills the
+// rest in), while a scaffold that failed on an absent escrow would make the
+// escrow a precondition for having a repository at all.
+func escrowCoordinate(name string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for i := 0; i < 8; i++ {
+		b, err := os.ReadFile(filepath.Join(dir, "k8-secrets", "infisical", name))
+		if err == nil {
+			return strings.TrimSpace(string(b))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // workerCount is how many cloud workers this box starts with.
