@@ -523,10 +523,16 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	state := Classify(inv, !o.InfrastructureOnly)
 	inv.Render(os.Stdout, state, o.Outstanding)
 
-	if state == StateAbsent {
-		// Idempotent, and established rather than assumed: the inventory was read
-		// and this box owns nothing in it. A repeated teardown lands here.
-		fmt.Printf("\n[teardown] %s owns no provider resources; nothing to delete.\n", o.ClusterName)
+	if state == StateNoOwnedResources {
+		// Idempotent, and said precisely: the inventory was read and nothing in it
+		// carries this operation's ownership label. That is not the same as "the
+		// box is gone" -- anything unlabelled or owned elsewhere was listed above
+		// and is left alone. A repeated teardown lands here.
+		fmt.Printf("\n[teardown] no resources owned by %s were found, so none are deleted.\n",
+			o.ClusterName)
+		if excluded := len(inv.Excluded()); excluded > 0 {
+			fmt.Printf("[teardown] %d resource(s) were found and excluded; see the list above.\n", excluded)
+		}
 		return nil
 	}
 

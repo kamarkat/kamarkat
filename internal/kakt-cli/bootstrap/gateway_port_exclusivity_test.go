@@ -55,62 +55,62 @@ func TestOneGatewayPerHostPortInTheSpokeCatalog(t *testing.T) {
 		filepath.Join(base, "tenants", "charts", "tenant-public-tls", "values.yaml"),
 		"tlsGatewayName")
 
-	claimants := map[int64][]string{}   // port -> gateway names
-	listeners := map[string][]string{}  // gateway -> listener names
+	claimants := map[int64][]string{}  // port -> gateway names
+	listeners := map[string][]string{} // gateway -> listener names
 
 	walk := func(root string) error {
 		return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// probes/ is never built into any overlay -- it holds a DELIBERATE
-		// same-port clash that proved this very behaviour on this spoke's
-		// Cilium version. Walking it would make the gate fail on the
-		// experiment that justifies it.
-		if info.IsDir() {
-			if info.Name() == "probes" {
-				return filepath.SkipDir
+			if err != nil {
+				return err
 			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".yaml") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		dec := yaml.NewDecoder(strings.NewReader(stripTemplating(string(raw))))
-		for {
-			var doc struct {
-				Kind     string `yaml:"kind"`
-				Metadata struct {
-					Name string `yaml:"name"`
-				} `yaml:"metadata"`
-				Spec struct {
-					Listeners []struct {
-						Name string `yaml:"name"`
-						Port int64  `yaml:"port"`
-					} `yaml:"listeners"`
-				} `yaml:"spec"`
-			}
-			if err := dec.Decode(&doc); err != nil {
-				break
-			}
-			if doc.Kind != "Gateway" {
-				continue
-			}
-			name := doc.Metadata.Name
-			if strings.Contains(name, "TEMPLATED") {
-				name = tlsGatewayName
-			}
-			for _, l := range doc.Spec.Listeners {
-				if !gatewayListed(claimants[l.Port], name) {
-					claimants[l.Port] = append(claimants[l.Port], name)
+			// probes/ is never built into any overlay -- it holds a DELIBERATE
+			// same-port clash that proved this very behaviour on this spoke's
+			// Cilium version. Walking it would make the gate fail on the
+			// experiment that justifies it.
+			if info.IsDir() {
+				if info.Name() == "probes" {
+					return filepath.SkipDir
 				}
-				listeners[name] = append(listeners[name], l.Name)
+				return nil
 			}
-		}
+			if !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			dec := yaml.NewDecoder(strings.NewReader(stripTemplating(string(raw))))
+			for {
+				var doc struct {
+					Kind     string `yaml:"kind"`
+					Metadata struct {
+						Name string `yaml:"name"`
+					} `yaml:"metadata"`
+					Spec struct {
+						Listeners []struct {
+							Name string `yaml:"name"`
+							Port int64  `yaml:"port"`
+						} `yaml:"listeners"`
+					} `yaml:"spec"`
+				}
+				if err := dec.Decode(&doc); err != nil {
+					break
+				}
+				if doc.Kind != "Gateway" {
+					continue
+				}
+				name := doc.Metadata.Name
+				if strings.Contains(name, "TEMPLATED") {
+					name = tlsGatewayName
+				}
+				for _, l := range doc.Spec.Listeners {
+					if !gatewayListed(claimants[l.Port], name) {
+						claimants[l.Port] = append(claimants[l.Port], name)
+					}
+					listeners[name] = append(listeners[name], l.Name)
+				}
+			}
 			return nil
 		})
 	}

@@ -124,7 +124,9 @@ func runEnrollProviderCredential(ctx context.Context, o enrollProviderOpts, in i
 	if err != nil {
 		return err
 	}
-	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
+	// The box on both halves: this credential is the box's, not a cluster's, and
+	// a successor hub must find the same one (ADR-111 §1).
+	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.BoxID}
 	artifact := escrow.ProviderCredentialArtifact(provider)
 	boxID = coords.BoxID
 

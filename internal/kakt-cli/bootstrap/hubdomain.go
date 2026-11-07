@@ -48,7 +48,6 @@ type HubEndpoints struct {
 	// address is built from it: changing the zone changes that address, and a
 	// literal would let the two drift into an account nobody can authenticate as.
 	ZitadelOrg string
-
 }
 
 // DeriveHubEndpoints produces the endpoint set for a base domain.
@@ -66,16 +65,16 @@ func DeriveHubEndpoints(zone string) HubEndpoints {
 		return label + "." + zone
 	}
 	return HubEndpoints{
-		Zone:            zone,
-		API:             host("api"),
-		Auth:            host("auth"),
-		ID:              host("id"),
-		Console:         host("console"),
-		ArgoCD:          host("argocd"),
-		Infisical:       host("infisical"),
-		MCP:             host("mcp"),
-		Dashboard:       host("dashboard"),
-		ZitadelOrg:      host("zitadel.id"),
+		Zone:       zone,
+		API:        host("api"),
+		Auth:       host("auth"),
+		ID:         host("id"),
+		Console:    host("console"),
+		ArgoCD:     host("argocd"),
+		Infisical:  host("infisical"),
+		MCP:        host("mcp"),
+		Dashboard:  host("dashboard"),
+		ZitadelOrg: host("zitadel.id"),
 	}
 }
 

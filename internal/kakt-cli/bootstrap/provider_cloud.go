@@ -253,44 +253,16 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 			"to be kept in, and a box is not built without one (ADR-076): %w", err)
 	}
 
-	// The provider credential, escrowed with the credential bootstrap was given.
+	// The provider credential, escrowed before any infrastructure exists.
 	//
-	// Destroying a box's servers is a provider API call, and that credential lived
-	// only in HCLOUD_TOKEN or k8-secrets/hetzner/token on this machine -- so the
-	// one workstation that could delete the servers was the one that created them,
-	// and a teardown from anywhere else deleted nothing. Enrolling it here means it
-	// is in the escrow BEFORE the box exists to be destroyed, which is the only
-	// ordering that helps: the in-cluster copy dies with the cluster.
-	//
-	// Not fatal. A box whose escrow refuses this write is still a box worth
-	// building, and the stdin enrolment command exists for exactly this gap --
-	// whereas failing here would refuse to build a cluster over a credential copy.
-	if token := strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")); token != "" {
-		artifact := escrow.ProviderCredentialArtifact(p.driver.Name())
-		id := escrow.ForCluster(boxID, p.clusterName)
-		switch existing, readErr := escrowClient.RestoreArtifact(ctx, id, artifact); {
-		case readErr != nil:
-			fmt.Printf("[cluster-provision] ⚠️  could not read the escrowed %s credential: %v\n",
-				p.driver.Name(), readErr)
-		case existing == token:
-			// Already the current one; nothing to write.
-		case existing != "":
-			// A different credential is escrowed. Rotating it is a deliberate act
-			// (`kakt escrow enroll-provider-credential --rotate`), not something a
-			// bootstrap does to a copy a teardown may depend on.
-			fmt.Printf("[cluster-provision] a different %s credential is already escrowed for "+
-				"box %s; leaving it. Use `kakt escrow enroll-provider-credential --rotate` to "+
-				"replace it deliberately\n", p.driver.Name(), boxID)
-		default:
-			if writeErr := escrowClient.BackupArtifact(ctx, id, artifact, token); writeErr != nil {
-				fmt.Printf("[cluster-provision] ⚠️  could not escrow the %s credential: %v\n"+
-					"    Lifecycle commands will need it supplied until it is enrolled with\n"+
-					"    `kakt escrow enroll-provider-credential`.\n", p.driver.Name(), writeErr)
-			} else {
-				fmt.Printf("[cluster-provision] %s credential escrowed for box %s\n",
-					p.driver.Name(), boxID)
-			}
-		}
+	// Required, not best-effort: see enrollProviderCredential. A failure here
+	// fails the bootstrap, because a box whose recovery credential is not escrowed
+	// can only ever be destroyed from this machine -- and the servers do not exist
+	// yet, so refusing now costs nothing.
+	if err := enrollProviderCredential(ctx, escrowClient, boxID, p.clusterName,
+		p.driver.Name(), os.Getenv("HCLOUD_TOKEN")); err != nil {
+		return fmt.Errorf("the box's recovery credentials must be escrowed before its "+
+			"infrastructure is created (ADR-076): %w", err)
 	}
 
 	provisioner := &cluster.Provisioner{

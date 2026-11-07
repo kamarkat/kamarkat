@@ -110,7 +110,16 @@ func TestClassify(t *testing.T) {
 		{"provider read, servers present, API silent",
 			Inventory{Queried: true, Items: owned}, false, StateInfrastructureOnly},
 		{"provider read, nothing owned",
-			Inventory{Queried: true}, false, StateAbsent},
+			Inventory{Queried: true}, false, StateNoOwnedResources},
+		{
+			// Resources are present but none is ours: still nothing to delete, and
+			// still not a claim that anything has been removed.
+			"provider read, resources present but none owned",
+			Inventory{Queried: true, Items: []Attribution{{
+				Resource: Resource{Kind: "server", Name: "someone-else"},
+				Reason:   "owned by other",
+			}}}, true, StateNoOwnedResources,
+		},
 		{
 			// The inference that made a teardown destroy nothing and report
 			// success: no kubeconfig read as "already gone". An unread inventory

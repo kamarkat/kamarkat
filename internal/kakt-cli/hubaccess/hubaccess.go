@@ -312,7 +312,11 @@ func (a *escrowAccess) PutArtifact(ctx context.Context, id Identity, name, paylo
 
 func (a *escrowAccess) Provider(ctx context.Context, id Identity, provider string) (string, error) {
 	artifact := escrow.ProviderCredentialArtifact(provider)
-	payload, err := a.Artifact(ctx, id, artifact)
+	// Read from the BOX's identity, which is where it is written: the credential
+	// buys and destroys the box's infrastructure and outlives any cluster in it
+	// (ADR-111 §1), so a successor hub finds the one already escrowed rather than
+	// looking under its own new cluster name and finding nothing.
+	payload, err := a.Artifact(ctx, Identity{BoxID: id.BoxID, ClusterName: id.BoxID}, artifact)
 	if err != nil {
 		return "", err
 	}

@@ -164,8 +164,15 @@ const (
 	StateReachable State = "infrastructure present, Kubernetes reachable"
 	// StateInfrastructureOnly: the infrastructure exists, the API does not answer.
 	StateInfrastructureOnly State = "infrastructure present, Kubernetes unavailable"
-	// StateAbsent: the inventory was read and this box owns nothing.
-	StateAbsent State = "infrastructure already absent"
+	// StateNoOwnedResources: the inventory was read and nothing in it is
+	// positively owned by the clusters in scope.
+	//
+	// WORDED AS A STATEMENT ABOUT OWNERSHIP, not about existence. "Already absent"
+	// claimed more than the query supports: unlabelled and ambiguous resources may
+	// well be sitting there, and they are reported separately rather than
+	// described as gone. What is established is that nothing carries
+	// caph-cluster-<target>=owned.
+	StateNoOwnedResources State = "no owned resources found"
 	// StateUncertain: the inventory could not be read, so nothing is established.
 	StateUncertain State = "infrastructure state unknown"
 )
@@ -181,8 +188,11 @@ func Classify(inv Inventory, kubernetesReachable bool) State {
 	if !inv.Queried {
 		return StateUncertain
 	}
-	if len(inv.Eligible()) == 0 && len(inv.Excluded()) == 0 {
-		return StateAbsent
+	// Nothing positively owned is the same answer whether or not other resources
+	// are present: there is nothing this operation may delete. The excluded ones
+	// are still reported, so an operator can see what was found and decide.
+	if len(inv.Eligible()) == 0 {
+		return StateNoOwnedResources
 	}
 	if kubernetesReachable {
 		return StateReachable
