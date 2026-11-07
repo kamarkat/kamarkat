@@ -2,6 +2,7 @@ package teardown
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,37 @@ func TestOwnershipIsTheLabelNotTheName(t *testing.T) {
 	} {
 		if got := ownedByTarget(c.labels); got != c.want {
 			t.Errorf("%s: owned=%v, want %v (%s)", c.name, got, c.want, c.why)
+		}
+	}
+}
+
+// A run that could not do everything says so, and says so in its exit status.
+//
+// Tested through the verdict rather than by executing a teardown: Run's later
+// steps delete kind clusters and prune Docker, and a test is not entitled to do
+// that to the machine it runs on.
+func TestIncompleteCleanupIsReportedAndFails(t *testing.T) {
+	o := &Orchestrator{ClusterName: "acme-hub", InfrastructureOnly: true}
+
+	if err := o.result(); err != nil {
+		t.Fatalf("a run with nothing outstanding reported failure: %v", err)
+	}
+
+	// What an infrastructure-only run cannot do, and a provider step that failed.
+	o.recordOutstanding("DNS records were not released: the owner id lives in the cluster", nil)
+	o.recordOutstanding("provider infrastructure cleanup", errors.New("403 from the provider"))
+
+	err := o.result()
+	if err == nil {
+		t.Fatal("a run with outstanding work reported success")
+	}
+	for _, want := range []string{
+		"2 cleanup operation(s)",
+		"DNS records were not released",
+		"provider infrastructure cleanup: 403 from the provider",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the verdict does not mention %q: %v", want, err)
 		}
 	}
 }

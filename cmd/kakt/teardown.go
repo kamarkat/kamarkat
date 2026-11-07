@@ -59,7 +59,7 @@ Kubernetes CAPI resources, Kind/Docker artifacts, and local state.`,
 	// directory, so a teardown run from anywhere else read an empty cluster and
 	// tore down nothing while reporting success.
 	cmd.Flags().StringVar(&teardownGitops, "gitops-dir", "",
-		"the tenant repository this box was bootstrapped from (holds its state and kubeconfig)")
+		"the box's repository, which declares its escrow and its box id")
 	// The box's own name. Every cluster it creates derives from the domain
 	// (ADR-082), so one prefix names every server it owns -- and unlike the hub's
 	// spoke list or the tenant repository, it is still available once both are

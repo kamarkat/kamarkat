@@ -203,7 +203,10 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	// Step 3: Delete Hetzner cloud infrastructure directly via Hetzner API
 	if err := o.deleteHetznerResources(ctx, ccmLoadBalancerIPs, spokes); err != nil {
-		fmt.Printf("[teardown] ⚠️  Hetzner cloud resource cleanup encountered warnings: %v\n", err)
+		// Recorded, not merely printed. A warning on a terminal that exits 0 is
+		// indistinguishable from success to anything reading the status, and this
+		// is the step that stops the servers billing.
+		o.recordOutstanding("provider infrastructure cleanup", err)
 	}
 
 	// Step 4: Release the DNS records this box published, now that nothing is
@@ -224,19 +227,43 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		fmt.Printf("[teardown] ⚠️  Local cleanup encountered warnings: %v\n", err)
 	}
 
-	if len(o.Outstanding) > 0 {
-		fmt.Printf("\n⚠️  Teardown of '%s' is INCOMPLETE. Outstanding:\n", o.ClusterName)
-		for _, item := range o.Outstanding {
-			fmt.Printf("   - %s\n", item)
-		}
-		// Returned as an error so the exit status says so too. A teardown that left
-		// work behind and exited 0 is indistinguishable from one that finished, to
-		// a person skimming and to every script.
-		return fmt.Errorf("%d cleanup operation(s) could not be performed", len(o.Outstanding))
+	if err := o.result(); err != nil {
+		return err
 	}
 
 	fmt.Printf("\n✓ Teardown of cluster '%s' completed\n", o.ClusterName)
 	return nil
+}
+
+// recordOutstanding notes a cleanup step that did not happen, with its cause.
+//
+// Every caller of this is somewhere a failure used to be printed and stepped
+// over. The point of recording it is the exit status: a teardown is run to make
+// things stop existing and stop costing, and "it printed a warning" is not an
+// answer a script can read.
+func (o *Orchestrator) recordOutstanding(step string, cause error) {
+	if cause == nil {
+		o.Outstanding = append(o.Outstanding, step)
+		return
+	}
+	o.Outstanding = append(o.Outstanding, fmt.Sprintf("%s: %v", step, cause))
+}
+
+// result is the run's verdict: nil only when nothing was left undone.
+//
+// Separate from Run so the verdict can be asserted without executing a teardown
+// -- the alternative is a test that prunes the developer's Docker and deletes
+// their kind clusters to find out how a report is worded.
+func (o *Orchestrator) result() error {
+	if len(o.Outstanding) == 0 {
+		return nil
+	}
+	fmt.Printf("\n⚠️  Teardown of '%s' is INCOMPLETE. Outstanding:\n", o.ClusterName)
+	for _, item := range o.Outstanding {
+		fmt.Printf("   - %s\n", item)
+	}
+	return fmt.Errorf("%d cleanup operation(s) could not be performed: %s",
+		len(o.Outstanding), strings.Join(o.Outstanding, "; "))
 }
 
 // gitopsDirForMessage names where teardown looked, so the warning is actionable
