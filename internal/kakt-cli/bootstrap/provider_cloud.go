@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/kamarkat/kamarkat/internal/platform"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,15 +13,16 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/kamarkat/kamarkat/internal/assets"
-	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/binaries"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/capi"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/cluster"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/config"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/health"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/pivot"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/preflight"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -116,6 +118,26 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 	// a Hetzner box and a hybrid box encrypt etcd the same way.
 	clusterCfg.Encryption = cfg.Encryption
 	p.encryption = cfg.Encryption
+
+	// THE BOX ID, which nothing set.
+	//
+	// cluster.Config declared it, documented it as "what the escrow keys
+	// box-scoped artefacts by", and the provisioner reads it on both sides of the
+	// at-rest encryption key -- but no code ever assigned it. The escrow validates
+	// the identity and refuses an empty box id, and Provision calls
+	// applyEncryptionConfig unconditionally before the ClusterClass, so every
+	// bootstrap failed there: "the escrow needs the box id". Nothing keyed by the
+	// box has ever been escrowed by a bootstrap, which is why a box can reach this
+	// point with no escrowed kubeconfig and no escrowed credential.
+	//
+	// Read from the box's own declaration (ADR-111 §1), never derived from the
+	// cluster name: a successor hub carries a new cluster name under the same box,
+	// and deriving it would send that successor's artefacts to a path nothing reads.
+	boxID, err := hubaccess.DeclaredBoxID(cfg.GitopsDir, p.clusterName)
+	if err != nil {
+		return fmt.Errorf("the box's identity is required before anything is escrowed: %w", err)
+	}
+	clusterCfg.BoxID = boxID
 
 	// Read the shared cilium addon manifest and recompose it with the config half.
 	//
@@ -229,6 +251,46 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 	if err != nil {
 		return fmt.Errorf("the management cluster's at-rest encryption key needs an escrow "+
 			"to be kept in, and a box is not built without one (ADR-076): %w", err)
+	}
+
+	// The provider credential, escrowed with the credential bootstrap was given.
+	//
+	// Destroying a box's servers is a provider API call, and that credential lived
+	// only in HCLOUD_TOKEN or k8-secrets/hetzner/token on this machine -- so the
+	// one workstation that could delete the servers was the one that created them,
+	// and a teardown from anywhere else deleted nothing. Enrolling it here means it
+	// is in the escrow BEFORE the box exists to be destroyed, which is the only
+	// ordering that helps: the in-cluster copy dies with the cluster.
+	//
+	// Not fatal. A box whose escrow refuses this write is still a box worth
+	// building, and the stdin enrolment command exists for exactly this gap --
+	// whereas failing here would refuse to build a cluster over a credential copy.
+	if token := strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")); token != "" {
+		artifact := escrow.ProviderCredentialArtifact(p.driver.Name())
+		id := escrow.ForCluster(boxID, p.clusterName)
+		switch existing, readErr := escrowClient.RestoreArtifact(ctx, id, artifact); {
+		case readErr != nil:
+			fmt.Printf("[cluster-provision] ⚠️  could not read the escrowed %s credential: %v\n",
+				p.driver.Name(), readErr)
+		case existing == token:
+			// Already the current one; nothing to write.
+		case existing != "":
+			// A different credential is escrowed. Rotating it is a deliberate act
+			// (`kakt escrow enroll-provider-credential --rotate`), not something a
+			// bootstrap does to a copy a teardown may depend on.
+			fmt.Printf("[cluster-provision] a different %s credential is already escrowed for "+
+				"box %s; leaving it. Use `kakt escrow enroll-provider-credential --rotate` to "+
+				"replace it deliberately\n", p.driver.Name(), boxID)
+		default:
+			if writeErr := escrowClient.BackupArtifact(ctx, id, artifact, token); writeErr != nil {
+				fmt.Printf("[cluster-provision] ⚠️  could not escrow the %s credential: %v\n"+
+					"    Lifecycle commands will need it supplied until it is enrolled with\n"+
+					"    `kakt escrow enroll-provider-credential`.\n", p.driver.Name(), writeErr)
+			} else {
+				fmt.Printf("[cluster-provision] %s credential escrowed for box %s\n",
+					p.driver.Name(), boxID)
+			}
+		}
 	}
 
 	provisioner := &cluster.Provisioner{

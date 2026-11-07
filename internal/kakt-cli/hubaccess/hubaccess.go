@@ -66,23 +66,23 @@ type Coordinates struct {
 	EscrowProjectID string
 }
 
-// Declaration reads a box's coordinates from the one file that holds them,
-// registry/clusters/<cluster>/values.yaml.
-//
-// The canonical declaration, read the same way the chart and Day-0 read their own
-// inputs from it. Nothing here is inferred from a cluster name or from the
-// directory layout: a box id that was guessed would address another box's
-// artefacts, and the escrow would answer correctly for the wrong hub.
-func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
+// registry/clusters/<cluster>/values.yaml is where a box declares itself.
+func declarationPath(gitopsDir, clusterName string) string {
+	return filepath.Join(gitopsDir, "registry", "clusters", clusterName, "values.yaml")
+}
+
+// readDeclaration parses the box's declaration without judging what is missing;
+// the callers decide which fields they require.
+func readDeclaration(gitopsDir, clusterName string) (Coordinates, error) {
 	var c Coordinates
 	if strings.TrimSpace(gitopsDir) == "" {
-		return c, fmt.Errorf("no gitops directory: a box's escrow coordinates are declared in " +
+		return c, fmt.Errorf("no gitops directory: a box's declarations live in " +
 			"registry/clusters/<cluster>/values.yaml, and there is nowhere to read them")
 	}
 	if strings.TrimSpace(clusterName) == "" {
 		return c, fmt.Errorf("no cluster name: these declarations belong to one cluster")
 	}
-	path := filepath.Join(gitopsDir, "registry", "clusters", clusterName, "values.yaml")
+	path := declarationPath(gitopsDir, clusterName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return c, fmt.Errorf("read the box's declarations at %s: %w", path, err)
@@ -107,6 +107,22 @@ func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
 	c.EscrowURL = strings.TrimSpace(decl.Escrow.URL)
 	c.EscrowProjectID = strings.TrimSpace(decl.Escrow.ProjectID)
 
+	return c, nil
+}
+
+// Declaration reads a box's coordinates from the one file that holds them,
+// registry/clusters/<cluster>/values.yaml.
+//
+// The canonical declaration, read the same way the chart and Day-0 read their own
+// inputs from it. Nothing here is inferred from a cluster name or from the
+// directory layout: a box id that was guessed would address another box's
+// artefacts, and the escrow would answer correctly for the wrong hub.
+func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
+	c, err := readDeclaration(gitopsDir, clusterName)
+	if err != nil {
+		return c, err
+	}
+	path := declarationPath(gitopsDir, clusterName)
 	if c.BoxID == "" {
 		return c, fmt.Errorf("%s declares no boxId: artefacts are escrowed under the logical "+
 			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
@@ -123,6 +139,26 @@ func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
 			"k8-secrets/infisical/ on the machine that ran it.", path)
 	}
 	return c, nil
+}
+
+// DeclaredBoxID is the box id alone, for a caller that needs the identity and not
+// the escrow.
+//
+// Separate from Declaration because the two have different preconditions: the box
+// id is declared from the moment a repository is scaffolded, while the escrow
+// coordinates may be filled in later, and a bootstrap must not fail for want of
+// coordinates it is not about to use.
+func DeclaredBoxID(gitopsDir, clusterName string) (string, error) {
+	c, err := readDeclaration(gitopsDir, clusterName)
+	if err != nil {
+		return "", err
+	}
+	if c.BoxID == "" {
+		return "", fmt.Errorf("%s declares no boxId: artefacts are escrowed under the logical "+
+			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
+			"cluster name", declarationPath(gitopsDir, clusterName))
+	}
+	return c.BoxID, nil
 }
 
 // Access reaches a hub on behalf of whoever is authenticated.
