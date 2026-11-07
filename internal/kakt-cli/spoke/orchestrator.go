@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/hcloud"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/teardown"
 )
 
 // Orchestrator manages spoke cluster operations
@@ -200,21 +202,22 @@ func (o *Orchestrator) discoverSpokeClusters(ctx context.Context, client *hcloud
 
 // deleteSpokeCluster deletes all resources for a specific spoke cluster
 func (o *Orchestrator) deleteSpokeCluster(ctx context.Context, client *hcloud.Client, spokeName string) error {
-	labelPattern := fmt.Sprintf("caph-cluster-%s", spokeName)
-
-	matchesSpoke := func(name string, labels map[string]string) bool {
-		if strings.HasPrefix(name, spokeName) || strings.Contains(name, spokeName) {
-			return true
-		}
-		for k, v := range labels {
-			if strings.HasPrefix(k, labelPattern) || strings.Contains(k, spokeName) {
-				return true
-			}
-			if v == spokeName || strings.Contains(v, spokeName) {
-				return true
-			}
-		}
-		return false
+	// ONE OWNERSHIP RULE, shared with `kakt teardown` rather than restated here.
+	//
+	// This matcher was the unsafe shape that command has already had removed: it
+	// returned true on a name PREFIX, a name SUBSTRING, a label-key substring and
+	// a label-VALUE substring, and it never looked at the ownership value at all.
+	// So `caph-cluster-<name>` would also admit a resource belonging to
+	// <name>-2, any object whose metadata merely mentioned the cluster was fair
+	// game, and a resource CAPH marks `shared` -- one other clusters use too --
+	// was deleted as readily as an owned one.
+	//
+	// teardown.Attribute is the rule: the exact key caph-cluster-<cluster> with
+	// the value `owned` (CAPH v1.0.7, api/v1beta1/tags.go). Imported rather than
+	// copied, because the copy is how the two drifted in the first place.
+	matchesSpoke := func(_ string, labels map[string]string) bool {
+		got := teardown.Attribute([]teardown.Resource{{Labels: labels}}, []string{spokeName})
+		return len(got) == 1 && got[0].Eligible
 	}
 
 	deletedServerIDs := make(map[int]bool)

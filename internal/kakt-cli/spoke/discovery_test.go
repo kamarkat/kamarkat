@@ -3,6 +3,8 @@ package spoke
 import (
 	"strings"
 	"testing"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/teardown"
 )
 
 // discoverNames is the label parse discoverSpokeClusters performs, extracted so
@@ -72,5 +74,36 @@ func TestDiscoveryStillFindsPreADR082Names(t *testing.T) {
 	})
 	if !got["spoke-pool-hybrid-dev-01"] {
 		t.Errorf("lost the pre-ADR-082 name; got %v", got)
+	}
+}
+
+// spoke teardown deletes by the same ownership rule as `kakt teardown`, so a
+// resource marked `shared`, one belonging to another cluster, or one with no
+// ownership label at all is left alone.
+//
+// This matcher used to match a name prefix, a name substring, a label-key
+// substring and a label-value substring, and never looked at the value -- so a
+// shared resource other clusters depend on was deleted as readily as an owned
+// one, and caph-cluster-nutgraf-01 also admitted nutgraf-01-2's resources.
+func TestSpokeDeletionUsesTheSharedOwnershipRule(t *testing.T) {
+	matches := func(labels map[string]string) bool {
+		got := teardown.Attribute([]teardown.Resource{{Labels: labels}}, []string{"nutgraf-01"})
+		return len(got) == 1 && got[0].Eligible
+	}
+
+	for _, c := range []struct {
+		why    string
+		labels map[string]string
+		want   bool
+	}{
+		{"the cluster's own server", map[string]string{"caph-cluster-nutgraf-01": "owned"}, true},
+		{"shared with other clusters", map[string]string{"caph-cluster-nutgraf-01": "shared"}, false},
+		{"the management cluster's", map[string]string{"caph-cluster-nutgraf-hub": "owned"}, false},
+		{"a cluster whose name extends this one's", map[string]string{"caph-cluster-nutgraf-01-2": "owned"}, false},
+		{"unlabelled, name alone", nil, false},
+	} {
+		if got := matches(c.labels); got != c.want {
+			t.Errorf("%s: selected=%v, want %v", c.why, got, c.want)
+		}
 	}
 }
