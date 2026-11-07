@@ -501,6 +501,35 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 
 	client := hcloud.NewClient(hcloud.WithToken(hcloudToken))
 
+	// THE PROVIDER IS ASKED FIRST, and what it says is shown before anything is
+	// destroyed.
+	//
+	// Three things come out of this that nothing else can establish: whether the
+	// infrastructure is there at all, which resources are positively owned by the
+	// clusters in scope, and which are excluded and why. A missing kubeconfig
+	// proves none of them -- reading it as "already gone" is what let a teardown
+	// destroy nothing and report success.
+	inv, invErr := o.discoverInventory(ctx, client, append([]string{o.ClusterName}, spokes...))
+	if invErr != nil {
+		// Uncertainty refuses. An inventory that could not be read is not an empty
+		// one, and the difference is a box whose servers keep running.
+		return fmt.Errorf("could not read the provider inventory, so nothing can be "+
+			"established about this box: %w\n\n"+
+			"Nothing was deleted. Check the credential and the provider's availability, "+
+			"then re-run", invErr)
+	}
+	inv.Management = o.ClusterName
+	inv.Workload = spokes
+	state := Classify(inv, !o.InfrastructureOnly)
+	inv.Render(os.Stdout, state, o.Outstanding)
+
+	if state == StateAbsent {
+		// Idempotent, and established rather than assumed: the inventory was read
+		// and this box owns nothing in it. A repeated teardown lands here.
+		fmt.Printf("\n[teardown] %s owns no provider resources; nothing to delete.\n", o.ClusterName)
+		return nil
+	}
+
 	// Every cluster this box owns, matched the same way.
 	//
 	// The hub and its spokes are named differently -- acme-hub against
@@ -535,16 +564,14 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// rather than deleted. The two exceptions are evidence of the same strength
 	// from elsewhere: a load balancer the CCM told us about by IP, and a volume
 	// still attached to a server this run has just deleted.
+	// Attribution lives in inventory.go, so the rule the operator was shown is the
+	// rule that deletes: `caph-cluster-<cluster>: owned` for a cluster in the
+	// target set. `shared` never authorizes deletion -- CAPH uses it for resources
+	// other clusters also use (api/v1beta1/tags.go at v1.0.7) -- and an unexpected
+	// value is unknown rather than permitted.
 	ownedByTarget := func(labels map[string]string) bool {
-		for _, cluster := range owned {
-			if cluster == "" {
-				continue
-			}
-			if _, ok := labels["caph-cluster-"+cluster]; ok {
-				return true
-			}
-		}
-		return false
+		got := Attribute([]Resource{{Labels: labels}}, owned)
+		return len(got) == 1 && got[0].Eligible
 	}
 	matchesCluster := func(_ string, labels map[string]string) bool {
 		return ownedByTarget(labels)
