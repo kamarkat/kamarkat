@@ -158,24 +158,56 @@ func TestRemoveDeclarationRefusesWhileTheAutoscalerNamesTheCluster(t *testing.T)
 	}
 }
 
-// An application still declared on the cluster blocks the removal, and is named.
-func TestRemoveDeclarationRefusesWhileAnAppRunsOnTheCluster(t *testing.T) {
+// Removing a cluster NEVER requires touching an environment's applications.
+//
+// This replaces a test asserting the opposite: it refused while any
+// application's clusterName named the cluster, and told the operator to move or
+// delete each one. An application declares no cluster now -- it is deployed to
+// every cluster serving its environment -- so its definition is the
+// environment's and outlives every cluster in it. What the operator gets instead
+// is a report of what stops running.
+func TestRemoveDeclarationLeavesEnvironmentApplicationsAlone(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
 	dir := box(t, mgmt, cluster)
-	appDir := filepath.Join(dir, "environments", "stg", "waypoint")
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
+
+	// The cluster serves stg, and stg declares two applications.
+	values := filepath.Join(dir, RegistryDir, "clusters", cluster, "values.yaml")
+	if err := os.WriteFile(values,
+		[]byte("clusterName: "+cluster+"\nenvironmentSlug: stg\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "values.yaml"),
-		[]byte("clusterName: "+cluster+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"waypoint", "oranger"} {
+		appDir := filepath.Join(dir, "environments", "stg", name)
+		if err := os.MkdirAll(appDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(appDir, "values.yaml"),
+			[]byte("tenantId: acme\nappId: "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_, err := (ClusterRemoval{GitopsDir: dir, MgmtCluster: mgmt, Name: cluster}).RemoveDeclaration()
-	if err == nil {
-		t.Fatal("the cluster was removed while an app declared it")
+
+	r := ClusterRemoval{GitopsDir: dir, MgmtCluster: mgmt, Name: cluster}
+
+	// Reported, so the operator sees what stops running.
+	env, apps, err := r.AffectedDeployments()
+	if err != nil {
+		t.Fatalf("AffectedDeployments: %v", err)
 	}
-	if !strings.Contains(err.Error(), filepath.Join("environments", "stg", "waypoint")) {
-		t.Errorf("error does not name the app that blocks it: %v", err)
+	if env != "stg" || strings.Join(apps, ",") != "oranger,waypoint" {
+		t.Errorf("affected = %q %v, want stg [oranger waypoint]", env, apps)
+	}
+
+	// And not refused.
+	if _, err := r.RemoveDeclaration(); err != nil {
+		t.Fatalf("the removal was refused because the environment has applications: %v", err)
+	}
+
+	// Their definitions are untouched: they belong to the environment.
+	for _, name := range []string{"waypoint", "oranger"} {
+		if _, err := os.Stat(filepath.Join(dir, "environments", "stg", name, "values.yaml")); err != nil {
+			t.Errorf("%s's definition was removed with the cluster: %v", name, err)
+		}
 	}
 }
 

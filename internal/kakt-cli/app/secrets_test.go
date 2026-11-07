@@ -11,9 +11,8 @@ import (
 
 func fleetFixture() App {
 	return App{
-		TenantID:    "acme",
-		AppID:       "storefront",
-		ClusterName: "nutgraf-01",
+		TenantID: "acme",
+		AppID:    "storefront",
 		Secrets: []Declaration{
 			{Name: "ACME_INTERNAL_TOKEN", Capability: "the BFF/SDK channel", Workloads: []string{"bff", "sdk"}},
 			{Name: "AI_GATEWAY_API_KEY", Capability: "the AI gateway", Workloads: []string{"sdk"}},
@@ -24,19 +23,25 @@ func fleetFixture() App {
 
 // The path is derived from the application's own declaration. Written out per key, it
 // was twenty-three chances to name the wrong cluster.
-func TestSecretPathIsDerived(t *testing.T) {
+func TestSecretPathIsPerDeployment(t *testing.T) {
 	// The segment is the APP. That is what it always held -- before ADR-088 the
 	// field feeding it was called tenantId but carried a product -- so the
 	// content was right and only the label was wrong. Correcting the label
 	// means moving live key material, which is deferred to its own change.
-	if got, want := fleetFixture().SecretPath(), "/spoke-pool/nutgraf-01/tenants/storefront"; got != want {
-		t.Fatalf("SecretPath() = %q, want %q", got, want)
+	// One folder per cluster serving the environment: each deployment's store
+	// reads only its own /spoke-pool/<cluster>/, so a single path would supply
+	// the secret to exactly one of them.
+	if got, want := fleetFixture().SecretPathOn("nutgraf-01"), "/spoke-pool/nutgraf-01/tenants/storefront"; got != want {
+		t.Fatalf("SecretPathOn(nutgraf-01) = %q, want %q", got, want)
+	}
+	if got, want := fleetFixture().SecretPathOn("nutgraf-02"), "/spoke-pool/nutgraf-02/tenants/storefront"; got != want {
+		t.Fatalf("SecretPathOn(nutgraf-02) = %q, want %q", got, want)
 	}
 }
 
 func TestJoinSeparatesPresentAbsentAndOrphan(t *testing.T) {
 	// db-credentials is platform-written and appears in no application's `secrets:`.
-	s := Join(fleetFixture(), []string{"ACME_INTERNAL_TOKEN", "db-credentials"})
+	s := Join(fleetFixture(), "nutgraf-01", []string{"ACME_INTERNAL_TOKEN", "db-credentials"})
 
 	var present, absent, orphan []string
 	for _, e := range s.Entries {
@@ -66,7 +71,7 @@ func TestJoinSeparatesPresentAbsentAndOrphan(t *testing.T) {
 // The consequence a per-key list understates. One absent key fails the whole
 // ExternalSecret, so the SDK loses all three of its keys -- not the one.
 func TestWithheldWorkloadsReportsTheWholeObject(t *testing.T) {
-	s := Join(fleetFixture(), []string{"ACME_INTERNAL_TOKEN"})
+	s := Join(fleetFixture(), "nutgraf-01", []string{"ACME_INTERNAL_TOKEN"})
 
 	got := s.WithheldWorkloads()
 	if got["sdk"] != 3 {
@@ -81,7 +86,7 @@ func TestWithheldWorkloadsReportsTheWholeObject(t *testing.T) {
 }
 
 func TestWithheldIsEmptyWhenEverythingIsSupplied(t *testing.T) {
-	s := Join(fleetFixture(), []string{"ACME_INTERNAL_TOKEN", "AI_GATEWAY_API_KEY", "S3_ACCESS_KEY_ID"})
+	s := Join(fleetFixture(), "nutgraf-01", []string{"ACME_INTERNAL_TOKEN", "AI_GATEWAY_API_KEY", "S3_ACCESS_KEY_ID"})
 	if n := len(s.Missing()); n != 0 {
 		t.Fatalf("Missing() = %d entries, want 0", n)
 	}
@@ -120,8 +125,10 @@ func TestLoadRejectsAFleetWithNoPath(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantErr string
 	}{
-		{"no tenantId", "clusterName: nutgraf-01\n", "tenantId"},
-		{"no clusterName", "tenantId: acme\n", "clusterName"},
+		// tenantId is still required. clusterName is NOT a field any more: an
+		// application is deployed to every cluster serving its environment, so
+		// there is no placement in this file to be missing.
+		{"no tenantId", "appId: acme\n", "tenantId"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -171,44 +178,56 @@ func writeWorkloadCluster(t *testing.T, repoRoot, name, environment string) {
 // Several clusters may serve one environment, and during a replacement two
 // deliberately do (ADR-082, ADR-111). What is refused is an application naming a
 // cluster that is not a workload cluster serving its own environment.
-func TestLoadVerifiesTheCellAgainstTheEnvironment(t *testing.T) {
+// Placement is read from the CLUSTERS, not from the application.
+//
+// This test replaces one that checked an application's clusterName against the
+// cluster's environmentSlug. That pair no longer exists: the application names
+// no cluster, so the only question is which clusters serve an environment --
+// every one of them deploys it, and the management cluster never does.
+func TestClustersServingIsEveryWorkloadClusterInTheEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkloadCluster(t, dir, "nutgraf-01", "dev")
 	writeWorkloadCluster(t, dir, "nutgraf-02", "stg")
 	writeWorkloadCluster(t, dir, "nutgraf-03", "stg")
 
-	app := func(t *testing.T, env, cluster string) error {
-		t.Helper()
-		envDir := filepath.Join(dir, "environments", env, "acme")
-		if err := os.MkdirAll(envDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		body := "tenantId: acme\nclusterName: " + cluster + "\n"
-		if err := os.WriteFile(filepath.Join(envDir, "values.yaml"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		_, err := Load(dir, env, "acme")
-		return err
+	// The management cluster: a declaration with no spoke-pool claim. It must
+	// never appear, which is the same exclusion the ApplicationSets make with
+	// `spoke-type: pool`.
+	mgmt := filepath.Join(dir, "registry", "clusters", "nutgraf-hub")
+	if err := os.MkdirAll(mgmt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mgmt, "values.yaml"),
+		[]byte("clusterName: nutgraf-hub\nenvironmentSlug: dev\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Two clusters serve stg; an application names one of them and is placed.
-	if err := app(t, "stg", "nutgraf-02"); err != nil {
-		t.Errorf("a cluster serving stg was refused for a stg application: %v", err)
+	for env, want := range map[string][]string{
+		"dev":  {"nutgraf-01"},
+		"stg":  {"nutgraf-02", "nutgraf-03"},
+		"prod": nil,
+	} {
+		got, err := ClustersServing(dir, env)
+		if err != nil {
+			t.Fatalf("%s: %v", env, err)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s is served by %v, want %v", env, got, want)
+		}
 	}
-	// Its replacement, serving the same environment, is equally valid -- which is
-	// what lets it be built and verified before anything is cut over.
-	if err := app(t, "stg", "nutgraf-03"); err != nil {
-		t.Errorf("the replacement cluster was refused: %v", err)
+
+	// An application in an environment with no cluster is still a legal
+	// declaration: the definition is independent of any cluster's lifecycle.
+	envDir := filepath.Join(dir, "environments", "prod", "acme")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	// A cluster serving another environment is not.
-	if err := app(t, "stg", "nutgraf-01"); err == nil {
-		t.Error("a dev cluster accepted a stg application")
-	} else if !strings.Contains(err.Error(), "environmentSlug") {
-		t.Errorf("error should name the disagreeing slug, got: %v", err)
+	if err := os.WriteFile(filepath.Join(envDir, "values.yaml"),
+		[]byte("tenantId: acme\nappId: acme\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	// Nor is one that does not exist.
-	if err := app(t, "stg", "nutgraf-99"); err == nil {
-		t.Error("a name with no cluster behind it was accepted")
+	if _, err := Load(dir, "prod", "acme"); err != nil {
+		t.Errorf("an application in an environment with no cluster was refused: %v", err)
 	}
 }
 

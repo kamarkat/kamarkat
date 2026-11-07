@@ -117,11 +117,29 @@ spec:
                   # The named cluster, on a workload cluster only: see the
                   # note in 05-tenant-app-appset.
                   spoke-type: pool
-                  cluster-name: '{{"{{"}} .clusterName {{"}}"}}'
+                  # EVERY CLUSTER SERVING THIS ENVIRONMENT, which is the whole
+                  # placement rule: cluster.environmentSlug == the environment
+                  # directory the application is declared in.
+                  #
+                  # It was `cluster-name: .clusterName`, a field each application
+                  # carried naming one cluster -- so the application's declaration
+                  # WAS the placement decision. A second cluster serving the same
+                  # environment received nothing until every application was
+                  # edited, and removing a cluster meant editing the applications
+                  # that named it. An environment's definitions are independent of
+                  # any cluster's lifecycle now: adding a cluster deploys the
+                  # environment to it, removing one takes only its own instances.
+                  #
+                  # `spoke-type: pool` is what excludes the management hub -- the
+                  # SpokePool composition sets it and the hub has no claim -- and
+                  # `environment` reaches the Argo CD cluster Secret through
+                  # take-along-label.capi-to-argocd.environment on that same
+                  # composition.
+                  environment: '{{"{{"}} index (splitList "/" .path.path) 1 {{"}}"}}'
 
   template:
     metadata:
-      name: 'tenant-{{"{{"}} .tenantId {{"}}"}}-{{"{{"}} .appId {{"}}"}}-{{"{{"}} index (splitList "/" .path.path) 1 {{"}}"}}-public-tls'
+      name: 'tenant-{{"{{"}} .tenantId {{"}}"}}-{{"{{"}} .appId {{"}}"}}-{{"{{"}} index (splitList "/" .path.path) 1 {{"}}"}}-{{"{{"}} .name {{"}}"}}-public-tls'
       labels:
         tenant-id: '{{"{{"}} .tenantId {{"}}"}}'
         app-id: '{{"{{"}} .appId {{"}}"}}'

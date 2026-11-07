@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
 )
 
 // AppTemplateDir and WorkloadTemplateDir are the retained templates an
@@ -18,18 +16,20 @@ const (
 	WorkloadTemplateDir = "templates/workload"
 )
 
-// AppSpec is one application, in one environment, on one cluster.
+// AppSpec is one application, in one environment.
+//
+// Not "on one cluster": an application is deployed to every workload cluster
+// serving its environment, so it has no destination to declare.
 type AppSpec struct {
 	// GitopsDir is the tenant repository this application is declared in.
 	GitopsDir string
-	// Environment is the promotion stage, and the directory the declaration
-	// sits under. It is not a destination: ClusterName is.
+	// Environment is the promotion stage, the directory the declaration sits
+	// under, AND what decides where it runs: every cluster declaring this
+	// environmentSlug deploys it.
 	Environment string
 	// AppID is the product, and its isolation unit -- its namespace, database,
 	// secret path and network policy all derive from it (ADR-088).
 	AppID string
-	// ClusterName is the managed cluster this application runs on.
-	ClusterName string
 	// OwnerEmail is who is paged for it.
 	OwnerEmail string
 	// Workloads are the deployables inside it, one directory and one Chart.yaml
@@ -43,19 +43,18 @@ type AppSpec struct {
 // This was four shell steps and a hand-edit. `mkdir -p`, two `cp`s, then filling
 // in tokens the two templates spelled five ways between them -- an application
 // was <APP_ID>, <APP> and <APPLICATION>, its owner both <TENANT_ID> and
-// <FLEET_ID> -- none of which were in TOKENS.md. The cluster name was the worst
-// of it: nothing read the declaration until the first `kakt app secrets` call,
-// so a wrong cluster sat committed until then, and a clusters generator that
-// matches nothing reports Healthy while generating no Applications.
+// <FLEET_ID> -- none of which were in TOKENS.md.
 //
-// So the cluster is verified FIRST, before anything is written. Everything this
-// command knows how to check, it checks at the point the mistake is made.
+// The cluster name used to be the worst of it: nothing read the declaration
+// until the first `kakt app secrets` call, so a wrong cluster sat committed
+// until then, and a clusters generator matching nothing reported Healthy while
+// generating no Applications. The field is gone and that class of mistake with
+// it -- there is nothing here to get wrong about where the application runs.
 func AddApp(s AppSpec) ([]string, error) {
 	missing := []string{}
 	for name, value := range map[string]string{
 		"environment": s.Environment,
 		"app":         s.AppID,
-		"cluster":     s.ClusterName,
 		"owner-email": s.OwnerEmail,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -66,12 +65,15 @@ func AddApp(s AppSpec) ([]string, error) {
 		return nil, fmt.Errorf("missing: %s", strings.Join(missing, ", "))
 	}
 
-	// The cluster has to exist, be a workload cluster, and serve this
-	// environment. Same check the declaration is read under later, run here so
-	// the two cannot disagree.
-	if err := app.VerifyTargetCluster(s.GitopsDir, s.Environment, s.ClusterName); err != nil {
-		return nil, err
-	}
+	// NO PLACEMENT CHECK, because there is no placement to check. An application
+	// is declared in an environment and deployed to every cluster serving it, so
+	// what mattered here -- does the named cluster exist, is it a workload
+	// cluster, does it serve this environment -- is now a property of the clusters
+	// rather than of this declaration.
+	//
+	// An environment with no cluster yet is allowed: the definition is
+	// independent of any cluster's lifecycle, and the boundary ApplicationSets
+	// generate nothing until one serves it.
 
 	appDir := filepath.Join(s.GitopsDir, "environments", s.Environment, s.AppID)
 	if _, err := os.Stat(appDir); err == nil {
@@ -82,10 +84,9 @@ func AddApp(s AppSpec) ([]string, error) {
 	}
 
 	tokens := map[string]string{
-		"<APP_ID>":         s.AppID,
-		"<ENVIRONMENT>":    s.Environment,
-		"<TARGET_CLUSTER>": s.ClusterName,
-		"<OWNER_EMAIL>":    s.OwnerEmail,
+		"<APP_ID>":      s.AppID,
+		"<ENVIRONMENT>": s.Environment,
+		"<OWNER_EMAIL>": s.OwnerEmail,
 	}
 
 	if err := os.MkdirAll(appDir, 0o755); err != nil {

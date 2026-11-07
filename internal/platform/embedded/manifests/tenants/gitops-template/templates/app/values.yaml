@@ -30,19 +30,23 @@ tenantId: <TENANT_ID>
 # and it would be invisible in every file that relied on it.
 appId: <APP_ID>
 
-# Required. The managed cluster this application runs on, by name.
+# NO PLACEMENT FIELD, and that is the architecture.
 #
-# It must match a workload cluster this box declares -- a directory under
-# registry/clusters/ whose own environmentSlug is the environment above this
-# file. Both halves are checked when the declaration is read; a name with no
-# cluster behind it generates no Application at all, and an ApplicationSet that
-# generates nothing reports Healthy doing it.
+# An application is defined once in its environment and deployed to every
+# workload cluster that serves that environment:
 #
-# This was `cellId`, which named the same thing and said something else. A cell
-# is a policy group (ADR-064: a cluster may belong to several and receives the
-# union of their policy); this is one cluster's identity, and the label it
-# matched has always been patched from the cluster's own name.
-clusterName: <TARGET_CLUSTER>
+#   cluster.environmentSlug == the environment directory above this file
+#
+# So this file says what the application IS, and nothing about where it runs.
+# There is no clusterName, no clusters list and no placement file. Adding a
+# cluster to this environment deploys this application to it; removing one takes
+# only that cluster's instances, and never this declaration.
+#
+# It held `clusterName` (and `cellId` before that), which made the application's
+# own declaration the placement decision: a second cluster serving the same
+# environment received nothing until every application here was edited, and
+# removing a cluster meant editing the applications that named it. The boundary
+# ApplicationSets select on the cluster's `environment` label instead.
 
 tier: starter
 

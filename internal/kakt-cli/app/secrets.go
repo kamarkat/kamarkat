@@ -41,13 +41,10 @@ type App struct {
 	TenantID string `yaml:"tenantId"`
 	AppID    string `yaml:"appId"`
 
-	// ClusterName is the managed cluster this application runs on. It was
-	// `cellId`, which named a cluster in the vocabulary of policy groups: the
-	// label it selects on has always been patched from the cluster's own name,
-	// so placement was already by cluster identity under a key that said
-	// otherwise. A cell is the policy group of ADR-064 and groups nothing here.
-	ClusterName string        `yaml:"clusterName"`
-	Secrets     []Declaration `yaml:"secrets"`
+	// NO ClusterName. An application is deployed to every workload cluster
+	// serving its environment, so it declares no destination -- and its secrets
+	// are therefore not in one place either: see SecretPathOn.
+	Secrets []Declaration `yaml:"secrets"`
 }
 
 // SecretPath is where this application's values live in the provider.
@@ -56,12 +53,60 @@ type App struct {
 // fleet-registry arrangement wrote this path out per key, twenty-three times,
 // each one an opportunity to name a cluster the application does not run on -- which fails as "could not get secret
 // data from provider", indistinguishable from a store or auth fault.
-func (f App) SecretPath() string {
-	// The `/spoke-pool/<name>/` segment keeps its spelling. The value in it has
-	// always been the cluster's name, so renaming the field that supplies it
-	// moves no secret; renaming the segment would orphan every one already
-	// written, on every box.
-	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", f.ClusterName, f.AppID)
+// ONE PATH PER CLUSTER, because a deployment's secrets are the cluster's.
+//
+// An application runs on every cluster serving its environment, and each of
+// those deployments reads from its own cluster's folder -- the store on a
+// managed cluster is scoped to /spoke-pool/<that cluster>/ and can reach no
+// other. So supplying a value means writing it once per cluster, which is what
+// the callers loop over; a single path would have written it where exactly one
+// deployment could read it.
+//
+// The `/spoke-pool/<name>/` segment keeps its spelling: renaming it would orphan
+// every secret already written, on every box.
+func (f App) SecretPathOn(clusterName string) string {
+	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", clusterName, f.AppID)
+}
+
+// ClustersServing is every workload cluster this environment's applications are
+// deployed to: the ones whose own declaration carries this environmentSlug.
+//
+// The placement rule, read from the clusters rather than from the application --
+// which is why it lives here beside the paths derived from it. A cluster with no
+// spoke-pool claim is the management cluster and is excluded, exactly as the
+// boundary ApplicationSets exclude it by requiring the `spoke-type: pool` label.
+func ClustersServing(repoRoot, environment string) ([]string, error) {
+	clustersDir := filepath.Join(repoRoot, registryClustersDir)
+	entries, err := os.ReadDir(clustersDir)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", clustersDir, err)
+	}
+	var serving []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		claims, _ := filepath.Glob(filepath.Join(clustersDir, e.Name(), "infrastructure", "spokepool*.yaml"))
+		if len(claims) == 0 {
+			continue // the management cluster: applications do not run on it
+		}
+		raw, err := os.ReadFile(filepath.Join(clustersDir, e.Name(), "values.yaml"))
+		if err != nil {
+			continue
+		}
+		var decl struct {
+			EnvironmentSlug string `yaml:"environmentSlug"`
+			PublicIngress   bool   `yaml:"publicIngress"`
+		}
+		if err := yaml.Unmarshal(raw, &decl); err != nil {
+			return nil, fmt.Errorf("parse %s/values.yaml: %w", e.Name(), err)
+		}
+		if decl.EnvironmentSlug == environment {
+			serving = append(serving, e.Name())
+		}
+	}
+	sort.Strings(serving)
+	return serving, nil
 }
 
 // Load reads one environment's application declaration.
@@ -85,12 +130,10 @@ func Load(repoRoot, environment, app string) (*App, error) {
 	if f.TenantID == "" {
 		return nil, fmt.Errorf("%s declares no tenantId, which is half of this application's secret path", path)
 	}
-	if f.ClusterName == "" {
-		return nil, fmt.Errorf("%s declares no clusterName, which is half of this application's secret path", path)
-	}
-	if err := VerifyTargetCluster(repoRoot, environment, f.ClusterName); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+	// NOTHING ABOUT PLACEMENT IS CHECKED HERE ANY MORE. The application names no
+	// cluster, so there is no pair to be coherent: where it runs is decided by
+	// which clusters declare this environment, and ClustersServing reads that
+	// when a caller needs it.
 	return &f, nil
 }
 
@@ -99,74 +142,12 @@ func Load(repoRoot, environment, app string) (*App, error) {
 // package carries the whole scaffolder and this one reads two fields.
 const registryClustersDir = "registry/clusters"
 
-// VerifyTargetCluster checks that the cluster an application names is somewhere
-// it can run.
-//
-// Three independent facts, and this is the only place they meet: the
-// application names a cluster, that cluster declares the environment it serves,
-// and the application's own directory names the environment it belongs to.
-// Nothing derives any of them from the others -- several clusters may serve one
-// environment (ADR-082), and during a replacement two deliberately do (ADR-111),
-// so an environment does not name a cluster and a cluster does not claim an
-// environment's applications.
-//
-// What is checked is the pair being coherent:
-//
-//   - the cluster exists at all. A name with no cluster behind it produces a
-//     clusters generator that matches nothing, which ArgoCD reports as Healthy
-//     while generating zero Applications -- indistinguishable from an
-//     environment nobody has deployed to yet.
-//   - it is a workload cluster. A management cluster's directory holds root.yaml
-//     and no spoke-pool claim; a tenant's secrets scoped under the control plane
-//     would be a boundary violation that nothing downstream would notice.
-//   - it serves this application's environment. environments/stg/app naming a
-//     dev cluster is a staging application running on development capacity, with
-//     its secrets in the development scope, and both halves look correct in
-//     isolation.
-func VerifyTargetCluster(repoRoot, environment, clusterName string) error {
-	dir := filepath.Join(repoRoot, registryClustersDir, clusterName)
-	declaration := filepath.Join(dir, "values.yaml")
-
-	raw, err := os.ReadFile(declaration)
-	if err != nil {
-		return fmt.Errorf("no cluster named %q: this box declares none at %s/%s, and an "+
-			"application placed on a cluster that does not exist generates no Application "+
-			"and reports nothing", clusterName, registryClustersDir, clusterName)
-	}
-
-	// spokepool*.yaml, not spokepool-*.yaml. The TEMPLATE ships one claim per
-	// provider -- spokepool-hetzner.yaml, spokepool-hybrid.yaml -- but
-	// adjustDriver keeps the one in use and renames it to spokepool.yaml
-	// (workload_cluster.go), so that is what a hydrated cluster actually holds.
-	// Matching only the template's spelling matched no real cluster at all, and
-	// every application would have been refused as targeting the management
-	// cluster. nutgraf-01 is the counter-example: registry/clusters/nutgraf-01/
-	// infrastructure/spokepool.yaml.
-	claims, err := filepath.Glob(filepath.Join(dir, "infrastructure", "spokepool*.yaml"))
-	if err != nil {
-		return fmt.Errorf("read %s: %w", dir, err)
-	}
-	if len(claims) == 0 {
-		return fmt.Errorf("cluster %q is not a workload cluster: it has no spoke-pool claim, "+
-			"so it is this box's management cluster and applications do not run on it",
-			clusterName)
-	}
-
-	var cluster struct {
-		EnvironmentSlug string `yaml:"environmentSlug"`
-	}
-	if err := yaml.Unmarshal(raw, &cluster); err != nil {
-		return fmt.Errorf("parse %s: %w", declaration, err)
-	}
-	if cluster.EnvironmentSlug != environment {
-		return fmt.Errorf("cluster %q serves environmentSlug %q, not %q: the cluster and the "+
-			"environment disagree about which stage this application is, and each is correct "+
-			"on its own",
-			clusterName, cluster.EnvironmentSlug, environment)
-	}
-	return nil
-}
-
+// WHY THERE IS NO VerifyTargetCluster. It checked three facts against each
+// other -- the application named a cluster, the cluster declared an
+// environment, the application's directory named one -- and the first of those
+// no longer exists. An application is deployed to every cluster serving its
+// environment, so the only question left is which clusters those are, which is
+// ClustersServing above and is not a validation.
 // Declared reports whether the application declares this key, and returns it.
 func (f App) Declared(name string) (Declaration, bool) {
 	for _, d := range f.Secrets {
@@ -197,13 +178,16 @@ type Status struct {
 // Join builds a Status from a declaration and the key names present.
 //
 // Takes NAMES, not secrets. A caller that has no values cannot print one.
-func Join(f App, present []string) Status {
+// The cluster is passed in, because status is per deployment: the same
+// application has one folder per cluster serving its environment, and "is this
+// secret supplied" has a different answer on each.
+func Join(f App, clusterName string, present []string) Status {
 	have := make(map[string]bool, len(present))
 	for _, n := range present {
 		have[n] = true
 	}
 
-	s := Status{App: f, Path: f.SecretPath()}
+	s := Status{App: f, Path: f.SecretPathOn(clusterName)}
 	declared := make(map[string]bool, len(f.Secrets))
 	for _, d := range f.Secrets {
 		declared[d.Name] = true

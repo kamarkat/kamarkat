@@ -166,7 +166,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 				return nil
 			}
 
-			var status app.Status
+			var statuses []app.Status
 			err = withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				// args[0], not icfg.EnvironmentSlug: an application's secrets live in
 				// the environment the application runs in, and icfg carries the
@@ -175,26 +175,54 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 				// (03-platform-services-appset.yaml patches its ClusterSecretStore),
 				// so reading the hub's environment here reports a stg app's secrets
 				// as absent while they are present where the app looks.
-				present, err := c.ListSecretNames(cmd.Context(), icfg.ProjectSlug, args[0], f.SecretPath())
-				if err != nil {
-					return err
+				// ONE REPORT PER DEPLOYMENT. The application runs on every cluster
+				// serving this environment and each reads its own cluster's folder,
+				// so "is this secret supplied" has an answer per cluster. Reporting
+				// one would have reported whichever cluster happened to be first.
+				clusters, cErr := app.ClustersServing(".", args[0])
+				if cErr != nil {
+					return cErr
 				}
-				status = app.Join(*f, present)
+				if len(clusters) == 0 {
+					return fmt.Errorf("no workload cluster serves environment %q, so this "+
+						"application is deployed nowhere and has no secret folder yet.\n\n"+
+						"Add one: kakt tenant add-cluster --environment %s", args[0], args[0])
+				}
+				for _, cluster := range clusters {
+					present, lErr := c.ListSecretNames(cmd.Context(), icfg.ProjectSlug, args[0], f.SecretPathOn(cluster))
+					if lErr != nil {
+						return lErr
+					}
+					statuses = append(statuses, app.Join(*f, cluster, present))
+				}
 				return nil
 			})
 			if err != nil {
 				return err
 			}
 
-			printStatus(status, args[0])
-			if missing := status.Missing(); len(missing) > 0 {
-				names := make([]string, 0, len(missing))
-				for _, m := range missing {
-					names = append(names, m.Name)
+			// Printed per deployment, and the failure counts them: a secret
+			// supplied on one cluster and absent on another is the state this is
+			// for, and a single summary would have hidden exactly that.
+			missingBy := map[string][]string{}
+			for _, status := range statuses {
+				printStatus(status, args[0])
+				for _, m := range status.Missing() {
+					missingBy[status.Path] = append(missingBy[status.Path], m.Name)
 				}
-				return fmt.Errorf("%d declared secret(s) have not been supplied.\n\n"+
-					"Supply each with:\n  kakt app secrets set %s <KEY>\n\nAbsent: %s",
-					len(missing), args[0], strings.Join(names, ", "))
+			}
+			if len(missingBy) > 0 {
+				var where []string
+				total := 0
+				for path, names := range missingBy {
+					sort.Strings(names)
+					where = append(where, fmt.Sprintf("%s: %s", path, strings.Join(names, ", ")))
+					total += len(names)
+				}
+				sort.Strings(where)
+				return fmt.Errorf("%d declared secret(s) have not been supplied across %d "+
+					"deployment(s).\n\nSupply each with:\n  kakt app secrets set %s <KEY>\n\n%s",
+					total, len(missingBy), args[0], strings.Join(where, "\n"))
 			}
 			return nil
 		},
@@ -286,17 +314,36 @@ within its refresh interval, and the workload's reloader restarts on the change.
 				return fmt.Errorf("no value given for %s; nothing was written", key)
 			}
 
+			// WRITTEN ONCE PER CLUSTER, because each deployment reads its own
+			// cluster's folder and the store on a managed cluster is scoped to
+			// /spoke-pool/<that cluster>/. A single write would have supplied the
+			// secret to exactly one of the deployments and left the others
+			// reporting it absent.
+			clusters, err := app.ClustersServing(".", environment)
+			if err != nil {
+				return err
+			}
+			if len(clusters) == 0 {
+				return fmt.Errorf("no workload cluster serves environment %q, so there is "+
+					"nowhere for this value to be read from.\n\n"+
+					"Add one: kakt tenant add-cluster --environment %s", environment, environment)
+			}
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
-				return c.CreateOrUpdateSecret(cmd.Context(),
+				for _, cluster := range clusters {
 					// The environment named on the command line, not the hub's: see
 					// the note in `app secrets status`.
-					icfg.ProjectSlug, environment, f.SecretPath(), key, value)
+					if wErr := c.CreateOrUpdateSecret(cmd.Context(),
+						icfg.ProjectSlug, environment, f.SecretPathOn(cluster), key, value); wErr != nil {
+						return fmt.Errorf("write %s for %s: %w", key, cluster, wErr)
+					}
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
 
 			// The NAME, and never the value.
-			fmt.Printf("\n  wrote %s to %s\n", key, f.SecretPath())
+			fmt.Printf("\n  wrote %s to %d deployment(s): %s\n", key, len(clusters), strings.Join(clusters, ", "))
 			fmt.Printf("  read by: %s\n\n", strings.Join(decl.Workloads, ", "))
 			return nil
 		},
@@ -389,7 +436,19 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 			sort.Strings(skipped)
 			sort.Strings(empty)
 
-			fmt.Printf("\n%s / %s\n%s\n\n", f.TenantID, environment, f.SecretPath())
+			// Resolved before anything is written, so the preview names the
+			// deployments this will reach rather than one folder.
+			importClusters, err := app.ClustersServing(".", environment)
+			if err != nil {
+				return err
+			}
+			if len(importClusters) == 0 {
+				return fmt.Errorf("no workload cluster serves environment %q, so there is "+
+					"nowhere for these values to be read from.\n\n"+
+					"Add one: kakt tenant add-cluster --environment %s", environment, environment)
+			}
+			fmt.Printf("\n%s / %s\n%d deployment(s): %s\n\n",
+				f.TenantID, environment, len(importClusters), strings.Join(importClusters, ", "))
 			for _, k := range willWrite {
 				fmt.Printf("  write  %s\n", k)
 			}
@@ -417,12 +476,16 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 
 			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
 				for _, k := range willWrite {
-					if err := c.CreateOrUpdateSecret(cmd.Context(),
+					// Once per deployment: each cluster's store reads only its own
+					// /spoke-pool/<cluster>/ folder.
+					for _, cluster := range importClusters {
 						// The named environment, not the hub's: see `app secrets status`.
-						icfg.ProjectSlug, environment, f.SecretPath(), k, values[k]); err != nil {
-						return fmt.Errorf("write %s: %w", k, err)
+						if err := c.CreateOrUpdateSecret(cmd.Context(),
+							icfg.ProjectSlug, environment, f.SecretPathOn(cluster), k, values[k]); err != nil {
+							return fmt.Errorf("write %s for %s: %w", k, cluster, err)
+						}
 					}
-					fmt.Printf("  wrote  %s\n", k)
+					fmt.Printf("  wrote  %s to %d deployment(s)\n", k, len(importClusters))
 				}
 				return nil
 			}); err != nil {

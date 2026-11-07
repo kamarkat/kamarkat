@@ -76,7 +76,18 @@ instanceRepoURL: <GITOPS_REPO_URL>
 # several and receives the union of their policy.
 cells: []
 
-workloads: {}
+# Whether this cluster serves the environment's PUBLIC hostnames.
+#
+# An environment's applications run on every cluster that serves it, but a public
+# hostname has exactly one owner: two Gateways claiming one host would each order
+# a certificate for it and each publish the same DNS record, and external-dns
+# ignores records it does not own. So the listeners and certificates are
+# aggregated onto one cluster per environment.
+#
+# An environment with ONE cluster needs no answer -- that cluster serves its
+# hosts. With more than one, exactly one must set this to true, and
+# `kakt app hosts aggregate` refuses the ambiguity rather than choosing.
+publicIngress: false
 # Where this cluster's stateful services run (ADR-046 §11, ADR-075).
 #
 # A placement class is a pair -- a `workload-location` nodeSelector and the

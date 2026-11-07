@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
 )
 
 // PublicHostsFile is where the aggregate for one spoke is written, relative to
@@ -45,8 +43,7 @@ type appDeclaration struct {
 	AppID    string `yaml:"appId"`
 	// The managed cluster this application runs on. Was `cellId`; a cell is a
 	// policy group (ADR-064) and never named this.
-	ClusterName string `yaml:"clusterName"`
-	Public      struct {
+	Public struct {
 		Hosts []string `yaml:"hosts"`
 	} `yaml:"public"`
 }
@@ -85,21 +82,23 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 			continue
 		}
 		rel, _ := filepath.Rel(gitopsDir, path)
-		if decl.ClusterName == "" {
-			return nil, fmt.Errorf("%s declares public hosts but no clusterName, so there is no spoke to put the listener on", rel)
-		}
 		if decl.TenantID == "" || decl.AppID == "" {
 			return nil, fmt.Errorf("%s declares public hosts but not both tenantId and appId, which the certificate Secret name is derived from", rel)
 		}
-		// The named cluster has to exist, be a workload cluster, and serve this
-		// directory's environment. The listener is written into that cluster's
-		// aggregate, so a name with nothing behind it publishes a hostname onto
-		// nothing, and one serving another environment publishes a staging
-		// hostname on development capacity -- neither of which the Gateway can
-		// report.
 		environment := filepath.Base(filepath.Dir(filepath.Dir(path)))
-		if err := app.VerifyTargetCluster(gitopsDir, environment, decl.ClusterName); err != nil {
-			return nil, fmt.Errorf("%s %w", rel, err)
+
+		// WHICH CLUSTER SERVES THE HOSTNAME is not the same question as where the
+		// application runs. It runs on every cluster serving its environment, but
+		// a public hostname has exactly one owner: two Gateways claiming one host
+		// each order a certificate for it and each publish the same DNS record,
+		// and external-dns ignores records it does not own.
+		//
+		// One cluster in the environment needs no answer -- it is the one. More
+		// than one must say which, with `publicIngress: true`, and this refuses
+		// the ambiguity rather than choosing.
+		ingress, err := ingressClusterFor(gitopsDir, environment)
+		if err != nil {
+			return nil, fmt.Errorf("%s declares public hosts: %w", rel, err)
 		}
 		for _, host := range decl.Public.Hosts {
 			// Refused here as well as in preflight. Two apps sharing a hostname
@@ -109,7 +108,7 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 				return nil, fmt.Errorf("hostname %q is declared by both %s and %s; a public hostname has one owner", host, prev, rel)
 			}
 			owner[host] = rel
-			bySpoke[decl.ClusterName] = append(bySpoke[decl.ClusterName], PublicHost{
+			bySpoke[ingress] = append(bySpoke[ingress], PublicHost{
 				Host:      host,
 				TLSSecret: fmt.Sprintf("%s-%s-public-tls", decl.TenantID, decl.AppID),
 				App:       rel,
@@ -165,4 +164,71 @@ func AggregatePublicHosts(gitopsDir string) ([]string, error) {
 		written = append(written, spoke)
 	}
 	return written, nil
+}
+
+// ingressClusterFor names the one cluster that serves an environment's public
+// hostnames.
+//
+// Deliberately separate from placement: placement is every cluster declaring the
+// environment, and hostname ownership is exclusive. One function for both would
+// have made the exclusive thing look derivable from the inclusive one.
+func ingressClusterFor(gitopsDir, environment string) (string, error) {
+	clustersDir := filepath.Join(gitopsDir, RegistryDir, "clusters")
+	entries, err := os.ReadDir(clustersDir)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", clustersDir, err)
+	}
+	var serving, declared []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		claims, _ := filepath.Glob(filepath.Join(clustersDir, e.Name(), "infrastructure", "spokepool*.yaml"))
+		if len(claims) == 0 {
+			continue // the management cluster serves no application hostnames
+		}
+		raw, err := os.ReadFile(filepath.Join(clustersDir, e.Name(), "values.yaml"))
+		if err != nil {
+			continue
+		}
+		var decl struct {
+			EnvironmentSlug string `yaml:"environmentSlug"`
+			PublicIngress   bool   `yaml:"publicIngress"`
+		}
+		if err := yaml.Unmarshal(raw, &decl); err != nil {
+			return "", fmt.Errorf("parse %s/values.yaml: %w", e.Name(), err)
+		}
+		if decl.EnvironmentSlug != environment {
+			continue
+		}
+		serving = append(serving, e.Name())
+		if decl.PublicIngress {
+			declared = append(declared, e.Name())
+		}
+	}
+	sort.Strings(serving)
+	sort.Strings(declared)
+
+	switch {
+	case len(serving) == 0:
+		return "", fmt.Errorf("no workload cluster serves environment %q, so there is nowhere "+
+			"to put the listener. Add one: kakt tenant add-cluster --environment %s",
+			environment, environment)
+	case len(declared) == 1:
+		return declared[0], nil
+	case len(declared) > 1:
+		return "", fmt.Errorf("%d clusters in environment %q declare publicIngress: true (%s). "+
+			"A public hostname has one owner: two Gateways claiming it would each order a "+
+			"certificate and each publish the same DNS record. Leave it true on exactly one",
+			len(declared), environment, strings.Join(declared, ", "))
+	case len(serving) == 1:
+		// The only cluster serving the environment is the one, and a field whose
+		// value has no alternative is a field nobody should have to set.
+		return serving[0], nil
+	default:
+		return "", fmt.Errorf("environment %q is served by %d clusters (%s) and none declares "+
+			"publicIngress: true. A public hostname has one owner and this will not choose: set "+
+			"publicIngress: true on the cluster that serves this environment's hostnames",
+			environment, len(serving), strings.Join(serving, ", "))
+	}
 }

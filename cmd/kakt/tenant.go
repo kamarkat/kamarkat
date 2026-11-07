@@ -713,12 +713,14 @@ may serve one environment, so the application names which.`,
 	f.StringVar(&addApp.GitopsDir, "gitops-dir", ".", "the tenant repository")
 	f.StringVar(&addApp.Environment, "env", "", "the environment this application is declared in (required)")
 	f.StringVar(&addApp.AppID, "app", "", "the application: the product, and its isolation unit (required)")
-	f.StringVar(&addApp.ClusterName, "cluster", "", "the managed cluster it runs on (required)")
+	// No --cluster. An application is deployed to every workload cluster serving
+	// its environment, so there is nothing to choose here; `kakt tenant
+	// add-cluster --environment dev` is what puts a cluster in that set.
 	f.StringVar(&addApp.OwnerEmail, "owner-email", "", "who is paged for it (required)")
 	f.StringSliceVar(&addAppWorkloads, "workload", nil,
 		"a deployable inside this application; repeat for each")
 
-	for _, required := range []string{"env", "app", "cluster", "owner-email"} {
+	for _, required := range []string{"env", "app", "owner-email"} {
 		_ = cmd.MarkFlagRequired(required)
 	}
 	return cmd

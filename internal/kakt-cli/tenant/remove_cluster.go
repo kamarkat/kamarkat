@@ -142,17 +142,19 @@ func (r ClusterRemoval) RemoveDeclaration() ([]string, error) {
 		return nil, err
 	}
 
-	users, err := r.appsOnCluster()
-	if err != nil {
-		return nil, err
-	}
-	if len(users) > 0 {
-		return nil, fmt.Errorf("%d application(s) still run on %q:\n  %s\n\n"+
-			"Removing the cluster would remove them, and their databases, with no commit "+
-			"that says so. Move each to another cluster or remove it, commit, and wait "+
-			"until it is gone from %s",
-			len(users), r.Name, strings.Join(users, "\n  "), r.Name)
-	}
+	// NO APPLICATION REFUSAL, and that is the architecture rather than a relaxed
+	// check.
+	//
+	// It refused while any application's `clusterName` named this cluster, and
+	// told the operator to "move each to another cluster or remove it". An
+	// application declares no cluster now: it is deployed to every cluster serving
+	// its environment, so there is nothing to move and nothing in
+	// environments/<env>/ that removing a cluster should make anyone edit. The
+	// definitions are the environment's and outlive every cluster in it.
+	//
+	// What the operator does need is to know what stops running, which
+	// AffectedDeployments reports and the command prints before it removes
+	// anything.
 
 	var removed []string
 	for _, p := range append([]string{dir}, appFiles...) {
@@ -263,33 +265,41 @@ func (r ClusterRemoval) DestroyBlocked(root []RootResource) error {
 	return nil
 }
 
-// appsOnCluster lists every application declaration that names this cluster,
-// across every environment.
-func (r ClusterRemoval) appsOnCluster() ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(r.GitopsDir, "environments", "*", "*", "values.yaml"))
+// AffectedDeployments names what stops running when this cluster goes: the
+// environment it serves, and that environment's applications.
+//
+// Reported, never refused. Each of those applications is deployed to every
+// cluster serving the environment, so removing this one removes its instances
+// and leaves the others -- and leaves every definition in environments/<env>/
+// exactly where it is. An operator is entitled to see the list before the
+// instances go; they are not being asked to change anything in it.
+func (r ClusterRemoval) AffectedDeployments() (environment string, apps []string, err error) {
+	raw, err := os.ReadFile(filepath.Join(r.GitopsDir, RegistryDir, "clusters", r.Name, "values.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("read environments: %w", err)
+		// A cluster with no declaration left has no environment to read, which is
+		// the normal state on the second step of a removal.
+		return "", nil, nil
 	}
-	var users []string
-	for _, m := range matches {
-		raw, err := os.ReadFile(m)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", m, err)
-		}
-		var decl struct {
-			ClusterName string `yaml:"clusterName"`
-		}
-		if err := yaml.Unmarshal(raw, &decl); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", m, err)
-		}
-		if decl.ClusterName == r.Name {
-			rel, err := filepath.Rel(r.GitopsDir, filepath.Dir(m))
-			if err != nil {
-				rel = filepath.Dir(m)
-			}
-			users = append(users, rel)
+	var decl struct {
+		EnvironmentSlug string `yaml:"environmentSlug"`
+	}
+	if err := yaml.Unmarshal(raw, &decl); err != nil {
+		return "", nil, fmt.Errorf("parse %s's declaration: %w", r.Name, err)
+	}
+	environment = strings.TrimSpace(decl.EnvironmentSlug)
+	if environment == "" {
+		return "", nil, nil
+	}
+
+	entries, err := os.ReadDir(filepath.Join(r.GitopsDir, "environments", environment))
+	if err != nil {
+		return environment, nil, nil
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			apps = append(apps, e.Name())
 		}
 	}
-	sort.Strings(users)
-	return users, nil
+	sort.Strings(apps)
+	return environment, apps, nil
 }

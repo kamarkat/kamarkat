@@ -52,6 +52,20 @@ not meant to be used again.
 The cluster's secrets and backups stay behind, and its name is never reused.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !destroy {
+				// What stops running, printed before anything is removed. Nothing
+				// here is a precondition: an environment's application definitions
+				// are not this cluster's to take with it.
+				if env, apps, err := removal.AffectedDeployments(); err == nil && len(apps) > 0 {
+					fmt.Printf("%s serves environment %q, which declares %d application(s):\n",
+						removal.Name, env, len(apps))
+					for _, a := range apps {
+						fmt.Printf("  %s\n", a)
+					}
+					fmt.Printf("\nTheir deployments on %s stop. Their definitions stay in "+
+						"environments/%s/ and deploy to every other cluster serving %q.\n\n",
+						removal.Name, env, env)
+				}
+
 				removed, err := removal.RemoveDeclaration()
 				if err != nil {
 					return err

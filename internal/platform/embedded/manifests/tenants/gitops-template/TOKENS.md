@@ -39,6 +39,5 @@ product it runs.
 |---|---|
 | `<APP_ID>` | the application: the product, and its isolation unit |
 | `<WORKLOAD>` | one deployable inside that application, and its chart's name |
-| `<TARGET_CLUSTER>` | the managed cluster the application runs on, by name |
 | `<OWNER_EMAIL>` | who is paged for this application |
 | `<KEY>` | a secret's name, in the example commands only |

@@ -36,12 +36,21 @@ func spokeDir(t *testing.T, root, name string) {
 }
 
 func spokeDirIn(t *testing.T, root, name, environment string) {
+	spokeDirServing(t, root, name, environment, false)
+}
+
+// spokeDirServing declares a workload cluster, optionally as the one serving the
+// environment's public hostnames.
+func spokeDirServing(t *testing.T, root, name, environment string, ingress bool) {
 	t.Helper()
 	dir := filepath.Join(root, RegistryDir, "clusters", name)
 	if err := os.MkdirAll(filepath.Join(dir, "infrastructure"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	values := "clusterName: " + name + "\nenvironmentSlug: " + environment + "\n"
+	if ingress {
+		values += "publicIngress: true\n"
+	}
 	if err := os.WriteFile(filepath.Join(dir, "values.yaml"), []byte(values), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +75,19 @@ func readAggregate(t *testing.T, root, spoke string) publicHostsDoc {
 	return doc
 }
 
-func TestAggregateGroupsHostsBySpoke(t *testing.T) {
+// Every application in an environment runs on every cluster serving it, but the
+// environment's public hostnames land on ONE of them.
+//
+// This replaces a test that grouped listeners by each application's clusterName.
+// That field is gone: placement is the environment, and hostname ownership is
+// exclusive because two Gateways claiming one host would each order a
+// certificate for it and each publish the same DNS record.
+func TestAggregatePutsAnEnvironmentsHostsOnItsIngressCluster(t *testing.T) {
 	root := t.TempDir()
-	spokeDir(t, root, "spoke-a")
-	spokeDir(t, root, "spoke-b")
-	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\nclusterName: spoke-a\npublic:\n  hosts: [waypoint.example.test]\n")
-	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\nclusterName: spoke-a\npublic:\n  hosts: [oranger.example.test]\n")
-	writeApp(t, root, "dev", "other", "tenantId: acme\nappId: other\nclusterName: spoke-b\npublic:\n  hosts: [other.example.test]\n")
+	spokeDirServing(t, root, "spoke-a", "dev", true)
+	spokeDirServing(t, root, "spoke-b", "dev", false)
+	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [waypoint.example.test]\n")
+	writeApp(t, root, "dev", "oranger", "tenantId: nutgraf\nappId: oranger\npublic:\n  hosts: [oranger.example.test]\n")
 
 	if _, err := AggregatePublicHosts(root); err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -80,10 +95,10 @@ func TestAggregateGroupsHostsBySpoke(t *testing.T) {
 
 	a := readAggregate(t, root, "spoke-a")
 	if len(a.PublicHosts) != 2 {
-		t.Fatalf("spoke-a: want 2 listeners, got %d", len(a.PublicHosts))
+		t.Fatalf("the ingress cluster should carry both listeners, got %d", len(a.PublicHosts))
 	}
-	// Sorted, so a re-run produces a byte-identical file and does not show up as
-	// a diff every time an unrelated app is added.
+	// Sorted, so a re-run is byte-identical and does not show up as a diff every
+	// time an unrelated app is added.
 	if a.PublicHosts[0].Host != "oranger.example.test" || a.PublicHosts[1].Host != "waypoint.example.test" {
 		t.Errorf("not sorted: %+v", a.PublicHosts)
 	}
@@ -91,8 +106,49 @@ func TestAggregateGroupsHostsBySpoke(t *testing.T) {
 	if a.PublicHosts[1].TLSSecret != "nutgraf-waypoint-public-tls" {
 		t.Errorf("tlsSecret = %q, want nutgraf-waypoint-public-tls", a.PublicHosts[1].TLSSecret)
 	}
-	if b := readAggregate(t, root, "spoke-b"); len(b.PublicHosts) != 1 {
-		t.Errorf("spoke-b: want 1 listener, got %d", len(b.PublicHosts))
+	// The other cluster runs the same applications and claims none of the
+	// hostnames.
+	if b := readAggregate(t, root, "spoke-b"); len(b.PublicHosts) != 0 {
+		t.Errorf("a cluster that is not the ingress claimed %d listener(s)", len(b.PublicHosts))
+	}
+}
+
+// An environment with one cluster needs no declaration: that cluster is the one.
+func TestAggregateNeedsNoIngressFlagForASingleClusterEnvironment(t *testing.T) {
+	root := t.TempDir()
+	spokeDirIn(t, root, "only", "dev")
+	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [waypoint.example.test]\n")
+	if _, err := AggregatePublicHosts(root); err != nil {
+		t.Fatalf("a single-cluster environment required a publicIngress flag: %v", err)
+	}
+	if got := readAggregate(t, root, "only"); len(got.PublicHosts) != 1 {
+		t.Errorf("want 1 listener on the only cluster, got %d", len(got.PublicHosts))
+	}
+}
+
+// Ambiguity is refused, not resolved by picking one.
+func TestAggregateRefusesAmbiguousOrAbsentIngress(t *testing.T) {
+	for _, c := range []struct {
+		why     string
+		ingress []bool
+		expect  string
+	}{
+		{"two clusters, neither claims the hostnames", []bool{false, false}, "none declares publicIngress"},
+		{"two clusters, both claim them", []bool{true, true}, "declare publicIngress: true"},
+	} {
+		root := t.TempDir()
+		spokeDirServing(t, root, "spoke-a", "dev", c.ingress[0])
+		spokeDirServing(t, root, "spoke-b", "dev", c.ingress[1])
+		writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [waypoint.example.test]\n")
+
+		_, err := AggregatePublicHosts(root)
+		if err == nil {
+			t.Errorf("%s: accepted", c.why)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.expect) {
+			t.Errorf("%s: error does not say %q: %v", c.why, c.expect, err)
+		}
 	}
 }
 
@@ -128,16 +184,25 @@ func TestAggregateRefusesAHostnameClaimedTwice(t *testing.T) {
 	}
 }
 
-func TestAggregateRefusesAPublicAppWithNoSpoke(t *testing.T) {
-	// Without a cluster name there is no Gateway to add the listener to, and
-	// writing it
-	// nowhere would present as a hostname that simply does not resolve.
+// An application with public hosts in an environment no cluster serves is
+// refused, because the listener would be written nowhere and the hostname would
+// simply not resolve.
+//
+// This replaces a test that refused an application with no clusterName. The
+// field is gone; what can still be missing is a cluster serving the environment.
+func TestAggregateRefusesPublicHostsInAnEnvironmentNoClusterServes(t *testing.T) {
 	root := t.TempDir()
-	spokeDir(t, root, "spoke-a")
-	writeApp(t, root, "dev", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [w.example.test]\n")
+	spokeDirIn(t, root, "spoke-dev", "dev")
+	writeApp(t, root, "stg", "waypoint", "tenantId: nutgraf\nappId: waypoint\npublic:\n  hosts: [w.example.test]\n")
 
-	if _, err := AggregatePublicHosts(root); err == nil || !strings.Contains(err.Error(), "clusterName") {
-		t.Fatalf("expected a refusal naming clusterName, got: %v", err)
+	_, err := AggregatePublicHosts(root)
+	if err == nil {
+		t.Fatal("public hosts were accepted in an environment with no cluster")
+	}
+	for _, want := range []string{"no workload cluster serves", "add-cluster --environment stg"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
 	}
 }
 
@@ -160,15 +225,9 @@ func TestAggregateIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestAggregateRefusesACellServingAnotherEnvironment(t *testing.T) {
-	// The listener would be written into a cluster that is not the stage the
-	// application belongs to: a staging hostname published on development
-	// capacity, with both halves correct in isolation.
-	root := t.TempDir()
-	spokeDirIn(t, root, "spoke-dev", "dev")
-	writeApp(t, root, "stg", "waypoint", "tenantId: nutgraf\nappId: waypoint\nclusterName: spoke-dev\npublic:\n  hosts: [w.example.test]\n")
-
-	if _, err := AggregatePublicHosts(root); err == nil || !strings.Contains(err.Error(), "environmentSlug") {
-		t.Fatalf("expected a refusal naming the disagreeing slug, got: %v", err)
-	}
-}
+// WHY THERE IS NO TEST FOR "a cluster serving another environment".
+//
+// It asserted that an application's clusterName had to name a cluster serving
+// the application's own environment. Neither half of that pair exists now: the
+// application names no cluster, and the aggregation reads which clusters serve
+// the environment rather than checking a claim about one.
