@@ -73,6 +73,65 @@ refused by the packaging mechanism for the reason stated above; the refusal is c
 and settles the question rather than blocking it. Keying the name on environment and
 provider was the prior arrangement and cannot express the multiple-cells case.
 
+## Amendment 2026-11-07: an application is deployed to every cluster serving its environment
+
+An application is defined once in its environment and deployed to every workload cluster
+whose own `environmentSlug` is that environment. There is no separate placement decision:
+
+```
+cluster.environmentSlug == application's environment directory
+```
+
+**Four things this separates, which were previously conflated:**
+
+| Concept | Means | Declared by |
+|---|---|---|
+| Multiple clusters serving one environment | `dev` is served by `nutgraf-01` and `nutgraf-02` | each cluster's `environmentSlug` |
+| Per-application placement | one application on one cluster, another on a different one | **no longer exists** |
+| Simultaneous multi-cluster deployment | one definition, one deployment instance per cluster | the equality above |
+| Stateful relocation | an application's *data* ends up elsewhere | backup and restore (ADR-014); never a declaration edit |
+
+An application's declaration carried `clusterName` (and `cellId` before that), so the
+application's own file was the placement decision. The costs were structural rather than
+cosmetic: a second cluster serving an environment received nothing until every
+application was edited; removing a cluster meant editing the applications that named it,
+which made deleting an environment's definitions look like the way to remove a cluster;
+and one application could not be deployed to two clusters at all, because the generated
+object carried no cluster in its name and the second instance would have collided with
+the first.
+
+**What the generated identity now carries.** One Application per
+(environment, application, cluster), named with all three. The boundary ApplicationSets
+select `spoke-type: pool` — which is what excludes the management hub, since it has no
+spoke-pool claim — plus `environment`, which reaches the Argo CD cluster Secret through
+`take-along-label.capi-to-argocd.environment` on the SpokePool composition.
+
+**The generated name is load-bearing and that is why this is written down.** The tenant
+ApplicationSets set `preserveResourcesOnDeletion: false`, and the object they generate is
+an XR owning a CNPG Database, the application's namespace, its stores and its
+credentials. Changing a generated name therefore deletes the previous instance and
+everything it owns. Introducing the cluster into the name recreated the existing
+development instances deliberately, under the platform's current no-user contract; the
+same fact means a future change to that name is a data event, not a rename.
+
+**Two things stay exclusive, and neither is derivable from the inclusive rule above.**
+
+*Secrets* are per deployment. A managed cluster's store reads only its own
+`/spoke-pool/<cluster>/`, so a value is supplied once per cluster serving the
+environment; `kakt app secrets status` reports per deployment, because a secret present
+on one cluster and absent on another is a state a single summary hides.
+
+*Public hostnames* have one owner. Two Gateways claiming one host each order a
+certificate for it and each publish the same DNS record, which external-dns then
+ignores. So an environment's listeners and certificates aggregate onto one cluster: the
+only one serving it, or the one declaring `publicIngress: true`. Two claimants, or none
+among several, is refused rather than resolved by choosing.
+
+**Cluster removal never edits an environment's definitions.** `kakt tenant
+remove-cluster` reports the environment and its applications — what stops running — and
+removes only the cluster's own declaration. The definitions stay and keep deploying to
+every other cluster serving that environment.
+
 ## Ownership
 
 | Resource Class | System of Record | Lifecycle Owner | Reconciler | Consumer | Phase |
@@ -80,6 +139,8 @@ provider was the prior arrangement and cannot express the multiple-cells case.
 | Workload cluster claim | Tenant repository | Tenant | Management cluster ArgoCD, Crossplane | CAPI | Day-1+ |
 | Workload cluster creating Application | Tenant repository | Tenant | Management cluster ArgoCD | Management cluster | Day-1+ |
 | Workload cluster name and cell id | Tenant repository | Tenant | — | Fleet ApplicationSets, backup prefix, autoscaler | Day-0 at declaration, immutable after |
+| Application placement | Tenant repository | Tenant | — | Boundary ApplicationSets | Derived: every cluster whose `environmentSlug` matches the application's environment (amendment 2026-11-07) |
+| Environment public-hostname ownership | Tenant repository | Tenant | — | Shared TLS Gateway aggregate | One cluster per environment: the only one, or `publicIngress: true` |
 | Workload cluster template | Platform bundle | Platform | — | Tenant scaffolding | Day-0 |
 
 ## Consequences
