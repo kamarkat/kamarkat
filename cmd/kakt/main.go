@@ -11,7 +11,7 @@ func main() {
 		Use:   "kakt",
 		Short: "Create and maintain a tenant's platform",
 		// Named for the platform rather than for one of its clusters. "hub" is a
-		// cluster role in this architecture -- a hub has spokes -- so a binary
+		// cluster role in this architecture -- a hub holds workload clusters -- so a binary
 		// called hub read as though it managed that one cluster, when what it
 		// creates is the whole box: the control plane, its identity and trust,
 		// and the repository the tenant reconciles from.
@@ -27,7 +27,7 @@ func main() {
 	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newTeardownCmd())
-	rootCmd.AddCommand(newSpokeCmd())
+	rootCmd.AddCommand(newClusterCmd())
 	rootCmd.AddCommand(newConfigureGitHubAccessCmd())
 	rootCmd.AddCommand(newConfigureTailscaleCmd())
 	rootCmd.AddCommand(newInitSecretsCmd())

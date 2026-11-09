@@ -6,10 +6,12 @@ import (
 	"testing"
 )
 
-// A teardown scoped to the hub's name leaves the spokes it provisioned running.
+// A teardown scoped to the management cluster's name leaves the clusters it holds
+// running.
 //
-// The hub is acme-hub; the spoke it created is spoke-pool-hybrid-dev-01, and its
-// control-plane server is named and labelled after the SPOKE:
+// The management cluster is acme-hub; the workload cluster it created was called
+// spoke-pool-hybrid-dev-01 -- the naming of the day -- and its control-plane server
+// is named and labelled after THAT cluster:
 //
 //	spoke-pool-hybrid-dev-01-shtms-m6v5n
 //	labels: caph-cluster-spoke-pool-hybrid-dev-01-fbbcs=owned
@@ -24,16 +26,16 @@ import (
 // management cluster no longer cascades into the clusters it manages, it refuses
 // while they are there (managed.go). This pins the matching, using the real
 // server as the fixture.
-func TestTeardownMatchesTheSpokesTheHubProvisioned(t *testing.T) {
+func TestTeardownMatchesOnlyTheClustersItIsGiven(t *testing.T) {
 	const (
-		hub        = "acme-hub"
-		spoke      = "spoke-pool-hybrid-dev-01"
-		spokeSrv   = "spoke-pool-hybrid-dev-01-shtms-m6v5n"
-		hubSrvName = "acme-hub-wzr8c-mwx5k"
+		hub         = "acme-hub"
+		workload    = "spoke-pool-hybrid-dev-01"
+		workloadSrv = "spoke-pool-hybrid-dev-01-shtms-m6v5n"
+		hubSrvName  = "acme-hub-wzr8c-mwx5k"
 	)
-	spokeLabels := map[string]string{
+	workloadLabels := map[string]string{
 		"caph-cluster-spoke-pool-hybrid-dev-01-fbbcs": "owned",
-		"machine.caph-name":                           spokeSrv,
+		"machine.caph-name":                           workloadSrv,
 		"machine_type":                                "control_plane",
 	}
 	hubLabels := map[string]string{
@@ -41,23 +43,23 @@ func TestTeardownMatchesTheSpokesTheHubProvisioned(t *testing.T) {
 		"machine.caph-name":           hubSrvName,
 	}
 
-	// Scoped to the hub alone, the spoke is invisible -- which is now the
+	// Scoped to the management cluster alone, the workload cluster is invisible -- which is now the
 	// contract: a hub teardown that names no workload cluster touches none.
-	if matches(hub, nil, spokeSrv, spokeLabels) {
-		t.Fatal("fixture wrong: the spoke server must not match the hub name alone")
+	if matches(hub, nil, workloadSrv, workloadLabels) {
+		t.Fatal("fixture wrong: the workload cluster's server must not match the management cluster's name alone")
 	}
 	// Named in the run's scope, it is claimed.
-	if !matches(hub, []string{spoke}, spokeSrv, spokeLabels) {
-		t.Error("the spoke server is not matched even when the run names it")
+	if !matches(hub, []string{workload}, workloadSrv, workloadLabels) {
+		t.Error("the workload cluster's server is not matched even when the run names it")
 	}
-	// And the hub is still matched, with or without spokes.
-	if !matches(hub, []string{spoke}, hubSrvName, hubLabels) {
+	// And the management cluster is still matched, named alongside one or alone.
+	if !matches(hub, []string{workload}, hubSrvName, hubLabels) {
 		t.Error("the hub's own server stopped matching")
 	}
 
 	// A cluster this box does not own is never matched, whatever it is called.
 	otherLabels := map[string]string{"caph-cluster-someone-else-xyz": "owned"}
-	if matches(hub, []string{spoke}, "someone-else-abc-def", otherLabels) {
+	if matches(hub, []string{workload}, "someone-else-abc-def", otherLabels) {
 		t.Error("a foreign CAPH cluster was matched; teardown would delete someone else's servers")
 	}
 }
@@ -87,7 +89,7 @@ func matches(hub string, scope []string, name string, labels map[string]string) 
 // The hub must be asked for the clusters it manages BEFORE anything is
 // destroyed, because afterwards nothing knows what they were -- and it is that
 // answer the ordering gate refuses on.
-func TestSpokesAreDiscoveredBeforeAnythingIsDestroyed(t *testing.T) {
+func TestManagedClustersAreReadBeforeAnythingIsDestroyed(t *testing.T) {
 	src, err := os.ReadFile("orchestrator.go")
 	if err != nil {
 		t.Fatal(err)
@@ -96,13 +98,13 @@ func TestSpokesAreDiscoveredBeforeAnythingIsDestroyed(t *testing.T) {
 	run := body[strings.Index(body, "func (o *Orchestrator) Run("):]
 	run = run[:strings.Index(run, "\nfunc ")]
 
-	discover := strings.Index(run, "o.spokeClusterNames(ctx)")
+	discover := strings.Index(run, "o.reportedClusters(ctx)")
 	drain := strings.Index(run, "o.drainLoadBalancerServices(ctx)")
 	strip := strings.Index(run, "o.stripKubernetesFinalizers(ctx)")
 	del := strings.Index(run, "o.deleteHetznerResources(ctx")
 
 	if discover < 0 {
-		t.Fatal("Run never asks the hub for its spokes; a spoke-scoped server is never matched")
+		t.Fatal("Run never asks the management cluster what it holds; the ordering gate has nothing to refuse on")
 	}
 	for name, at := range map[string]int{
 		"drainLoadBalancerServices": drain,
@@ -112,7 +114,7 @@ func TestSpokesAreDiscoveredBeforeAnythingIsDestroyed(t *testing.T) {
 		if at < 0 {
 			t.Errorf("%s not found in Run; this test is reading the wrong function", name)
 		} else if discover > at {
-			t.Errorf("spokes are discovered AFTER %s, by which point the hub may not answer", name)
+			t.Errorf("the cluster list is read AFTER %s, by which point the management cluster may not answer", name)
 		}
 	}
 }
@@ -125,11 +127,11 @@ func TestUnclaimedServersAreReportedAndNotDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	fn := body[strings.Index(body, "func reportOrphanedSpokes"):]
+	fn := body[strings.Index(body, "func reportUnclaimedResources"):]
 	fn = fn[:strings.Index(fn, "\nfunc ")]
 
 	if strings.Contains(fn, "Delete(") || strings.Contains(fn, "DeleteWithResult(") {
-		t.Error("reportOrphanedSpokes deletes; it must only report, or a cleanup command " +
+		t.Error("reportUnclaimedResources deletes; it must only report, or a cleanup command " +
 			"can destroy a cluster it was never pointed at")
 	}
 	if !strings.Contains(fn, "hcloud server delete") {

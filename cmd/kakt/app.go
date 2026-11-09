@@ -55,7 +55,7 @@ func newAppCmd() *cobra.Command {
 	return cmd
 }
 
-// newAppHostsCmd regenerates each spoke's public-hostname aggregate (ADR-096).
+// newAppHostsCmd regenerates each cluster's public-hostname aggregate (ADR-096).
 //
 // The shared :443 Gateway has exactly one owner, and its listener list comes
 // from this aggregate rather than from each app's own Application -- the
@@ -72,17 +72,17 @@ func newAppHostsCmd() *cobra.Command {
 	}
 	hosts.AddCommand(&cobra.Command{
 		Use:          "aggregate",
-		Short:        "Regenerate registry/clusters/<spoke>/generated/values/public-hosts.yaml",
+		Short:        "Regenerate registry/clusters/<cluster>/generated/values/public-hosts.yaml",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			written, err := tenant.AggregatePublicHosts(appRepoRoot)
 			if err != nil {
 				return err
 			}
-			for _, spoke := range written {
-				fmt.Printf("[app-hosts] ✓ %s/%s\n", spoke, tenant.PublicHostsFile)
+			for _, cluster := range written {
+				fmt.Printf("[app-hosts] ✓ %s/%s\n", cluster, tenant.PublicHostsFile)
 			}
-			fmt.Printf("[app-hosts] %d spoke(s) updated; commit the result\n", len(written))
+			fmt.Printf("[app-hosts] %d cluster(s) updated; commit the result\n", len(written))
 			return nil
 		},
 	})

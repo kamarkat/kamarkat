@@ -93,8 +93,8 @@ func workerReplicasOverride() *int {
 
 // resolveHCloudToken makes the Hetzner token available to everything that reads it.
 //
-// Five places in this CLI read HCLOUD_TOKEN from the environment -- bootstrap,
-// pivot twice, spoke and teardown -- so the token is resolved once, here, and put
+// Several places in this CLI read HCLOUD_TOKEN from the environment -- bootstrap,
+// pivot twice, and teardown -- so the token is resolved once, here, and put
 // back into the environment rather than threaded through each of them.
 //
 // The file fallback exists because teardown already had it and bootstrap did not:

@@ -80,7 +80,7 @@ type Orchestrator struct {
 	// bootstrap wrote them under --gitops-dir, so a teardown launched from
 	// anywhere else found no state, fell through to --context=kind-<cluster>,
 	// and every kubectl call reached localhost:8080. Nothing failed: the cluster
-	// simply answered nothing. It listed no spokes and left their servers
+	// simply answered nothing. It listed no managed clusters and left their servers
 	// running, read no DNS ownership and left the records orphaned, and reported
 	// a completed teardown -- the box was reachable the whole time.
 	GitopsDir string
@@ -102,14 +102,19 @@ type Orchestrator struct {
 	// delete them from. See managed.go.
 	Scope []string
 
-	// Spokes names the spoke clusters this box declares, for when the hub cannot
-	// be asked for them.
+	// ManagedDestroyTimeout bounds the wait on each workload cluster's own
+	// deletion, which the platform performs. Zero means 30 minutes.
+	ManagedDestroyTimeout time.Duration
+
+	// Managed names the workload clusters this box declares, for when the
+	// management cluster cannot be asked for them.
 	//
-	// spokeClusterNames reads the list from the running hub, which is the right
+	// reportedClusters reads the list from the running hub, which is the right
 	// source while there is one and returns nothing once there is not -- and a
-	// hub that is already gone is exactly when its spokes get stranded. The
-	// servers carry the SPOKE's name and label and mention the hub nowhere, so a
-	// teardown scoped to the hub walks past them, and reportOrphanedSpokes
+	// management cluster that is already gone is exactly when the clusters it
+	// manages get stranded. Their servers carry the WORKLOAD cluster's name and
+	// label and mention the management cluster nowhere, so a
+	// teardown scoped to the hub walks past them, and reportUnclaimedResources
 	// correctly refuses to delete on a label that proves only "some cluster".
 	//
 	// A name supplied here is different evidence: it comes from what this box
@@ -120,7 +125,7 @@ type Orchestrator struct {
 	// gate -- a cluster this box manages, which the management cluster must
 	// outlive -- and no longer widens what this run deletes. Destroying a
 	// workload cluster is asked for by naming it in Scope.
-	Spokes []string
+	Managed []string
 }
 
 // Run executes immediate forceful deletion of Kubernetes CAPI resources, Hetzner Cloud infra, Kind/Docker, and local state.
@@ -148,7 +153,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	// Step 1: Let the CCM deprovision its own load balancers while it is still
 	// alive. Must run before anything else is destroyed — see the function comment.
-	// Ask the hub which spokes it owns while it can still answer. Everything
+	// Ask the management cluster which clusters it holds while it can still answer. Everything
 	// below this line destroys, and after it nothing knows.
 	// Whether the box can be reached at all, established once and reported.
 	// Unreachable is not "nothing to do": every read below returns empty, and a
@@ -195,13 +200,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// reason this teardown may not proceed. A management cluster is destroyed
 	// last, and only once the clusters it manages are gone -- see managed.go for
 	// why that is an ordering and not a preference.
-	reported := o.spokeClusterNames(ctx)
+	reported := o.reportedClusters(ctx)
 	if err := o.refuseWhileManaged(o.managedClusters(reported, false)); err != nil {
 		return err
 	}
 
 	// Everything else this box manages: every source, including the declaration
-	// and --spoke, and checked against the provider rather than taken on trust.
+	// and --managed-cluster, and checked against the provider rather than taken on trust.
 	managed := o.managedClusters(reported, true)
 	if len(o.Scope) > 0 {
 		fmt.Printf("[teardown] Named for destruction before the management cluster: %s\n",
@@ -212,6 +217,20 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			len(managed), strings.Join(managedNames(managed), ", "))
 		fmt.Println("[teardown] They are checked against the provider before anything is deleted;")
 		fmt.Println("[teardown] if any still has resources, nothing is destroyed.")
+	}
+
+	// THE NAMED CLUSTERS GO FIRST, THROUGH THE PLATFORM.
+	//
+	// Only when the management cluster can be reached, which is the only state in
+	// which the platform can delete anything: in recovery mode there are no
+	// controllers to ask, and the same clusters are destroyed at the provider in
+	// the same order further down.
+	if reachable && len(o.Scope) > 0 {
+		if err := o.destroyManagedClusters(ctx, o.Scope, o.ManagedDestroyTimeout); err != nil {
+			// Not recorded-and-continued. The next steps dismantle the management
+			// cluster, and it is the only thing that can finish this.
+			return fmt.Errorf("%w: %v", ErrOrderViolation, err)
+		}
 	}
 
 	// Read the box's DNS identity and credential now, for the same reason: both
@@ -329,19 +348,21 @@ func (o *Orchestrator) resolveKubectlBaseArgs() (baseArgs []string, ok bool) {
 	return []string{"--kubeconfig", o.Kubeconfig}, true
 }
 
-// spokeClusterNames returns the CAPI clusters this hub provisioned, other than
+// reportedClusters returns the CAPI clusters this hub provisioned, other than
 // the hub itself.
 //
 // Asked BEFORE anything is destroyed, because the hub is the only thing that
-// knows. A spoke's servers carry the spoke's name and the spoke's
-// caph-cluster-<spoke> label and mention the hub nowhere, so a teardown scoped
+// knows. A workload cluster's servers carry that cluster's name and its
+// caph-cluster-<cluster> label and mention the management cluster nowhere, so a
+// teardown scoped
 // to the hub's name walks straight past them: one cx33 control plane for
 // spoke-pool-hybrid-dev-01 survived every `local-e2e clean` in this repository
 // and was still billing when someone thought to look.
 //
-// Empty when the hub cannot be reached. That is not the same as "no spokes", and
-// the caller must not treat it as such -- see reportOrphanedSpokes.
-func (o *Orchestrator) spokeClusterNames(ctx context.Context) []string {
+// Empty when the management cluster cannot be reached. That is not the same as
+// "it manages none", and
+// the caller must not treat it as such -- see reportUnclaimedResources.
+func (o *Orchestrator) reportedClusters(ctx context.Context) []string {
 	baseArgs, ok := o.resolveKubectlBaseArgs()
 	if !ok {
 		return nil
@@ -354,31 +375,31 @@ func (o *Orchestrator) spokeClusterNames(ctx context.Context) []string {
 		return nil
 	}
 
-	var spokes []string
+	var clusters []string
 	for _, line := range strings.Split(string(out), "\n") {
 		name := strings.TrimSpace(line)
 		if name == "" || name == o.ClusterName {
 			continue
 		}
-		spokes = append(spokes, name)
+		clusters = append(clusters, name)
 	}
-	return spokes
+	return clusters
 }
 
-// reportOrphanedSpokes names the CAPH-managed servers this teardown did not
+// reportUnclaimedResources names the CAPH-managed servers this teardown did not
 // touch, so a hub that could not be asked does not silently leave a bill.
 //
 // It reports and does not delete. The label says a server belongs to SOME
 // cluster, not that it belongs to THIS box, and a Hetzner project can hold more
 // than one -- deleting on that evidence would make a cleanup command capable of
 // destroying a cluster it was never pointed at.
-func reportOrphanedSpokes(servers []string) {
+func reportUnclaimedResources(servers []string) {
 	if len(servers) == 0 {
 		return
 	}
 	fmt.Println("[teardown] ⚠️  CAPH-managed servers remain, and this teardown could not")
 	fmt.Println("[teardown]     confirm they belong to this box (the hub was unreachable, so")
-	fmt.Println("[teardown]     its spoke list could not be read):")
+	fmt.Println("[teardown]     its cluster list could not be read):")
 	for _, name := range servers {
 		fmt.Printf("[teardown]       %s\n", name)
 	}
@@ -401,7 +422,7 @@ func reportOrphanedSpokes(servers []string) {
 // as a billed orphan that nothing will ever collect.
 //
 // That is not hypothetical. Four rebuilds on 2026-08-22 leaked four load balancers
-// into a five-load-balancer project quota. The fifth request — the spoke's own
+// into a five-load-balancer project quota. The fifth request — the workload cluster's own
 // control-plane LB — was refused with resource_limit_exceeded, leaving
 // spoke-pool-hybrid-dev-01 at InfrastructureReady=False for five hours while the
 // bootstrap polled a terminal error to timeout. See ADR-046 §23.
@@ -660,7 +681,7 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// Taken from the inventory the operator was shown, not from a second walk of
 	// the project: a resource CAPH labelled for a cluster this run does not target
 	// is exactly an Excluded entry with a cluster in its reason.
-	reportOrphanedSpokes(unclaimedFrom(inv))
+	reportUnclaimedResources(unclaimedFrom(inv))
 	return nil
 }
 

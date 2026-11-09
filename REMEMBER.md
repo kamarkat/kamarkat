@@ -117,17 +117,20 @@ happened and reported success while broken.
   `registry/clusters/<cluster>/values.yaml`, and a managed cluster's environment
   is declared by that cluster. `kakt tenant add-cluster --environment` is the one
   place the flag remains, and it names the stage *that* cluster serves.
-- `kakt spoke teardown` without `--name` deletes **every** workload cluster in the
-  Hetzner project, and then requires `--mgmt-cluster` so the hub can be excluded
-  from the sweep (both carry the same `caph-cluster-<name>` label). Name the one
-  you mean. It reports three outcomes apart now -- deleted, already absent, and
-  failed -- and exits non-zero on a failure; it used to print "successfully torn
-  down" whether it deleted anything or not.
+- **The management cluster goes last.** `kakt teardown` refuses while a cluster it
+  manages is still there, from the management cluster's own CAPI inventory and from
+  the provider's inventory for every cluster the repository declares. It does not
+  cascade: the clusters a run destroys are the ones named on it, with
+  `--destroy-managed <clusters>` (the platform deletes them, in order, before the
+  hub) or `--infrastructure-only <clusters>` when the API is gone.
+- There is no `kakt spoke` command. Removing a cluster from a live box is
+  `kakt tenant remove-cluster`; recovery operations on one are `kakt cluster
+  restore-pki` and `kakt cluster match-inventory`. Deleting a cluster's servers at
+  the provider while its management cluster is alive is not a removal -- the claim
+  is still reconciled and the platform rebuilds the cluster.
 - `kakt teardown` (the hub) **requires** `--name`: scripts/lib/teardown.sh refuses
   rather than guessing a target from `.state`, from Hetzner, or from
   `hub-<provider>-<env>`.
-- `hub teardown` does **not** delete the spoke. Tear the spoke down first, or the
-  CAPI controllers that would unwind it are gone.
 - `hub configure-eso` always returns an error. Do not call it.
 
 ## Validation

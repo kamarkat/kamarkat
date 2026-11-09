@@ -1617,7 +1617,7 @@ const veleroExcludeLabel = "velero.io/exclude-from-backup"
 //
 // The residual window is worth naming rather than hiding. A certificate authority
 // created between one reconcile and the next could be captured by a backup taken in
-// that gap. It is harmless rather than merely unlikely: `kakt spoke restore-pki` is
+// that gap. It is harmless rather than merely unlikely: `kakt cluster restore-pki` is
 // the only writer of PKI, it reads from the escrow alone, and Velero does not replace
 // an existing resource -- so a stray copy in an archive is never promoted into a
 // second authority. The label removes it from the archive; the single-writer rule is
@@ -1649,7 +1649,7 @@ const classMBootstrapLabel = "recovery.platform.io/class-m"
 // trust root inside a Class M archive -- outside the Class E boundary it is supposed to
 // live in. Worse, if it were later restored, VELERO would create it, and Velero is a
 // writer. An earlier revision of this design argued the window was harmless because
-// `kakt spoke restore-pki` reads only the escrow; that conclusion was wrong, because
+// `kakt cluster restore-pki` reads only the escrow; that conclusion was wrong, because
 // it reasoned about one writer and there are two.
 //
 // So the credentials stream selects on this label and takes nothing else. Any Secret

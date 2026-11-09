@@ -81,7 +81,7 @@ THE CLUSTERCLASS IS NOT APPLIED BY DEFAULT, AND THE TWO CLASSES DIFFER:
                             ever changes -- and its live state can differ from the
                             repository with nothing reporting it.
 
-So: no flag for a spoke, --apply-class for the hub.
+So: no flag for a workload cluster, --apply-class for the management cluster.
 
 Adopting a new template ROLLS THE CONTROL PLANE -- each node is replaced, because
 the file and the mount are part of a node's bootstrap and nothing rewrites them in
@@ -124,7 +124,7 @@ again -- are not performed here and are not optional.`,
 	f.StringVar(&encContext, "context", "", "kubeconfig context")
 	f.StringVar(&encClassFile, "class", "", fmt.Sprintf(
 		"ClusterClass asset to apply; %q for the management cluster (default), %q for a workload cluster",
-		defaultHubClass, defaultSpokeClass))
+		defaultHubClass, defaultWorkloadClass))
 	f.BoolVar(&encDryRun, "dry-run", false, "say what would be applied, change nothing")
 	_ = cmd.MarkFlagRequired("cluster")
 	_ = cmd.MarkFlagRequired("box")
@@ -135,7 +135,9 @@ const (
 	// The management cluster's class, from the CLI's own assets.
 	defaultHubClass = "classes/hetzner-mgmt-ubuntu-v1.yaml"
 	// A workload cluster's class, from the platform manifests packaged for shipping.
-	defaultSpokeClass = "manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml"
+	// The file keeps its shipped name: it is a path in a published bundle, and a
+	// rename there is a migration rather than a word change.
+	defaultWorkloadClass = "manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml"
 )
 
 // readClusterClass finds a ClusterClass in whichever embed holds it.

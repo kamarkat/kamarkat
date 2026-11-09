@@ -409,7 +409,7 @@ real and none are recorded elsewhere.
 | # | Finding | Status |
 |---|---|---|
 | 1 | **`hub bootstrap --environment` coerces `""` -> `prod`** (`cmd/hub/bootstrap.go:214-218`), and `--topology` defaults to `single`. Together they point the spoke AppSet at `spoke-pools/prod/hybrid[/single]`, which does not exist — the spoke silently never provisions. The v2 plan carried this in a "Traps" table that went away with the rebuild; it is still a live footgun for any future bootstrap | open |
-| 2 | **`hub spoke teardown --name=X` is a silent no-op** — `spoke/orchestrator.go:88-141` rebuilds the name by splitting the CAPH label and taking parts 2-5, yielding `spoke-pool-hybrid`, which never matches. Reports success, deletes nothing | open |
+| 2 | **`hub spoke teardown --name=X` is a silent no-op** — it rebuilt the name by splitting the CAPH label and taking parts 2-5, yielding `spoke-pool-hybrid`, which never matched. Reported success, deleted nothing | closed: the command is withdrawn (ADR-114 §6). Destroying a managed cluster is `kakt tenant remove-cluster`, or `kakt teardown --destroy-managed` when the box is going |
 | 3 | **The hub pod CIDR is a Go string literal** (`internal/hub-cli/cluster/provisioner.go`) — a day-0 topology input with no flag or ClusterClass patch. Spoke-terminated ingress removed the *consequence* (no rebuild needed), but the smell remains: changing it still means editing a string and rebuilding the binary | open, deprioritised |
 | 4 | **`zero-ops-auth` is Hono-only.** A platform-wide auth primitive normally ships a framework-agnostic core with thin adapters; this locks every tenant to one framework | open, design debt |
 

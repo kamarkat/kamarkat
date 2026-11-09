@@ -65,7 +65,7 @@ type ManagedCluster struct {
 //
 // THREE SOURCES, UNIONED, because each is the only one available in some state
 // of a box: the live cluster answers until it is gone, the repository answers
-// after that, and --spoke answers when neither is to hand. A gate that consulted
+// after that, and --managed-cluster answers when neither is to hand. A gate that consulted
 // only the live cluster would pass for exactly the box that most needs it -- the
 // unreachable one, whose workload clusters are the ones that get stranded.
 //
@@ -111,8 +111,8 @@ func (o *Orchestrator) managedClusters(reported []string, includeDeclared bool) 
 		}
 	}
 	if includeDeclared {
-		for _, name := range o.Spokes {
-			note(name, "--spoke")
+		for _, name := range o.Managed {
+			note(name, "--managed-cluster")
 		}
 	}
 
@@ -162,7 +162,13 @@ func (o *Orchestrator) refuseWhileManaged(managed []ManagedCluster) error {
 		fmt.Fprintf(&b, "  kakt tenant remove-cluster --name %s --mgmt-cluster %s --gitops-dir %s --destroy\n\n",
 			m.Name, o.ClusterName, o.gitopsDirForMessage())
 	}
-	fmt.Fprintf(&b, "Then tear this box down.")
+	fmt.Fprintf(&b, "Then tear this box down.\n\n")
+	fmt.Fprintf(&b, "Or, if the whole box is going, in one run -- each cluster destroyed through\n"+
+		"this management cluster first, and it last:\n\n")
+	fmt.Fprintf(&b, "  kakt teardown --name %s --gitops-dir %s --confirm --destroy-managed %s\n\n",
+		o.ClusterName, o.gitopsDirForMessage(), strings.Join(managedNames(managed), ","))
+	fmt.Fprintf(&b, "That leaves their declarations in the repository, which is correct only\n"+
+		"because the repository is going too. To keep the box, use the form above.")
 	return fmt.Errorf("%w\n\n%s", ErrOrderViolation, b.String())
 }
 
@@ -209,15 +215,17 @@ func (o *Orchestrator) refuseWhileManagedResourcesRemain(inv Inventory, managed 
 			m.Name, m.Owned, ownershipLabelPrefix, m.Name, lifecycleOwned, m.Source)
 	}
 	fmt.Fprintf(&b, "\nThe management cluster is destroyed last, and only once the clusters it\n"+
-		"manages are gone. Destroy each of these first:\n\n")
+		"manages are gone.\n\n")
+	fmt.Fprintf(&b, "If this box's management cluster can still be reached, remove each one through\n"+
+		"its declaration, so the platform deletes the cluster rather than its servers\n"+
+		"being deleted from under it:\n\n")
 	for _, m := range remaining {
-		fmt.Fprintf(&b, "  kakt spoke teardown --name %s --mgmt-cluster %s --force\n", m.Name, o.ClusterName)
+		fmt.Fprintf(&b, "  kakt tenant remove-cluster --name %s --mgmt-cluster %s --gitops-dir %s\n",
+			m.Name, o.ClusterName, o.gitopsDirForMessage())
+		fmt.Fprintf(&b, "  # commit and push, wait for it to sync, then the same with --destroy\n")
 	}
-	fmt.Fprintf(&b, "\nIf the management cluster still holds CAPI objects for one of them, remove it\n"+
-		"through its declaration instead -- kakt tenant remove-cluster --destroy -- so the\n"+
-		"platform deletes the cluster rather than its servers being deleted from under it.\n")
-	fmt.Fprintf(&b, "\nOr, if this run is meant to take them too, name them -- they are then\n"+
-		"destroyed before the management cluster, in that order:\n\n"+
+	fmt.Fprintf(&b, "\nIf it cannot be reached, name them on this run -- they are then destroyed\n"+
+		"before the management cluster, in that order:\n\n"+
 		"  --infrastructure-only %s,%s", o.ClusterName, strings.Join(names, ","))
 	return fmt.Errorf("%w\n\n%s", ErrOrderViolation, b.String())
 }

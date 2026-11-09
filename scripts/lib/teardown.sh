@@ -132,64 +132,17 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
         log "  workload cluster: $SPOKEPOOL_NAME"
     fi
 
-    KUBECONFIG_PATH="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
 }
 
-# ─── Stop ArgoCD from re-creating what we delete ─────────────────────────────
-_release_spoke_claim() {
-    [[ ! -f "$KUBECONFIG_PATH" ]] && { log "  hub kubeconfig absent — skipping (nothing is reconciling)"; return 0; }
-    if ! kubectl --kubeconfig="$KUBECONFIG_PATH" --request-timeout=15s cluster-info >/dev/null 2>&1; then
-        log "  hub API unreachable — skipping (nothing is reconciling)"
-        return 0
-    fi
-
-    # Force, never graceful. Every object here is bookkeeping: the actual cloud
-    # infrastructure is deleted directly through the Hetzner API further down. A
-    # graceful delete blocks on finalizers whose controllers are about to be
-    # destroyed anyway — Crossplane's on the SpokePool, and ArgoCD's
-    # resources-finalizer, which additionally triggers a cascading delete of every
-    # managed resource. Waiting on either buys nothing and can hang indefinitely.
-    #
-    # So: strip finalizers first, then delete with --wait=false, and never block.
-    local kc=(kubectl --kubeconfig="$KUBECONFIG_PATH" --request-timeout=20s)
-
-    # Both shapes. platform-spoke-pools is what the bundle used to ship, and a box
-    # built before the claim moved into the tenant's repository still has it;
-    # <cell>-infrastructure is what creates a workload cluster now. Whichever is
-    # absent is ignored, so this works on either.
-    local app
-    for app in platform-spoke-pools "${SPOKEPOOL_NAME}-infrastructure"; do
-        [[ "$app" == "-infrastructure" ]] && continue
-        log "  force-deleting ArgoCD Application $app"
-        "${kc[@]}" patch application "$app" -n platform-ops \
-            --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
-        "${kc[@]}" delete application "$app" -n platform-ops \
-            --ignore-not-found --wait=false 2>&1 | sed 's/^/    /' || true
-    done
-
-    log "  force-deleting SpokePool ${SPOKEPOOL_NAME}"
-    "${kc[@]}" patch spokepool "$SPOKEPOOL_NAME" \
-        --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
-    "${kc[@]}" delete spokepool "$SPOKEPOOL_NAME" \
-        --ignore-not-found --wait=false 2>&1 | sed 's/^/    /' || true
-
-    # CAPI objects hold finalizers that block on draining nodes and de-provisioning
-    # cloud resources through controllers that are seconds from deletion. Strip
-    # them so nothing downstream waits on a controller that no longer exists.
-    local kind
-    for kind in clusters machinedeployments machinesets machines hetznerclusters hetznerbaremetalhosts; do
-        local objs
-        objs=$("${kc[@]}" get "$kind" -A --no-headers -o custom-columns=NS:.metadata.namespace,N:.metadata.name 2>/dev/null || true)
-        [[ -z "$objs" ]] && continue
-        local ns name
-        while read -r ns name; do
-            [[ -z "$name" ]] && continue
-            "${kc[@]}" patch "$kind" "$name" -n "$ns" \
-                --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 \
-                && log "    stripped finalizers: ${kind%s}/$name"
-        done <<< "$objs"
-    done
-}
+# ArgoCD IS STOPPED BY THE CLI, NOT HERE.
+#
+# This stripped the Application's finalizers and force-deleted it, then did the
+# same to the SpokePool and every CAPI object -- which stops the reconciler and
+# also stops the PLATFORM from deleting the cluster, leaving the servers to the
+# sweep below. `kakt teardown --destroy-managed` removes the box's root
+# Application and then deletes each cluster's Applications with ArgoCD's cascade,
+# so the controllers that own the cluster deprovision it, including the load
+# balancers only the in-cluster controller can.
 
 # ─── Delete whatever the CLI left behind ─────────────────────────────────────
 # Dependency order matters: a network cannot be deleted while servers or load
@@ -434,13 +387,9 @@ run_full_teardown() {
     _print_inventory "$inv" "inventory"
 
     # Resources belonging to a workload cluster that is not this box's. Reported,
-    # and nothing more: `kakt spoke teardown --name <cluster>` deletes only the
-    # resources carrying that cluster's CAPH ownership label, so a foreign spoke is
-    # no longer a reason to skip the step.
+    # and nothing more: deletion is by this cluster's CAPH ownership label, so a
+    # workload cluster belonging to another box is never reached.
     #
-    # It used to be. The CLI's --name filter was a no-op, so the step deleted EVERY
-    # spoke in the project and had to be skipped whenever another box shared it --
-    # which left this box's spoke to a name-matching sweep instead.
     local foreign
     foreign=$(grep $'\tother$' <<< "$inv" | awk -F'\t' '{print $3}' | sort -u || true)
     if [[ -n "$foreign" ]]; then
@@ -461,45 +410,36 @@ run_full_teardown() {
     fi
 
     log ""
-    log "── 1/6 releasing the spoke claim (ArgoCD + Crossplane) ──"
-    _release_spoke_claim
-
-    log ""
-    log "── 2/6 tearing down the spoke (must precede the hub) ──"
+    log "── 1/4 destroying the workload cluster, then the hub ──"
     #
-    # NOT OPTIONAL, AND NOT COSMETIC ORDER. `kakt teardown` now refuses to destroy
-    # a management cluster while a cluster it manages is still there, because the
-    # management cluster holds that cluster's CAPI objects and the only controller
-    # that can deprovision its load balancers. So this step is what makes 3/6
-    # possible, rather than a tidier sequence.
+    # ONE ORDERED RUN, and the order is the CLI's to enforce: --destroy-managed
+    # deletes the workload cluster's Applications on the hub, which is what
+    # destroys the cluster, waits for each, re-reads the provider, and only then
+    # takes the hub. `kakt teardown` refuses outright if a cluster it manages is
+    # still there, so there is no sequence of these commands that strands one.
     #
-    # Named, both of them. Without --name the CLI refuses (it would mean every
-    # workload cluster in the project), and without --mgmt-cluster a discovery
-    # keyed on the CAPH label cannot tell the management cluster apart from a
-    # workload one -- the hub carries the same label shape.
-    if [[ -z "$SPOKEPOOL_NAME" ]]; then
-        log "  no workload cluster declared — nothing to tear down before the hub"
-    else
-        "$KAKT_BINARY" spoke teardown --force --debug \
-            --name "$SPOKEPOOL_NAME" --mgmt-cluster "$CLUSTER_NAME" 2>&1 | sed 's/^/  /' \
-            || log "  ⚠️  spoke teardown returned non-zero — the hub teardown below will refuse"
-    fi
+    # Deleting a cluster's servers at the provider is not a substitute while the
+    # hub is alive: the claim is still reconciled, so the platform rebuilds the
+    # cluster on new servers -- under a name whose secret path and backup prefix
+    # are never reused.
+    # --gitops-dir, because that is where the box's declaration is: it names the
+    # escrow holding the kubeconfig and the provider credential, which are read
+    # with the operator's own identity rather than from this machine.
+    "$KAKT_BINARY" teardown --name="$CLUSTER_NAME" --confirm --force --debug \
+        --gitops-dir "$ZERO_OPS_DIR" \
+        ${SPOKEPOOL_NAME:+--destroy-managed="$SPOKEPOOL_NAME"} 2>&1 | sed 's/^/  /' \
+        || log "  ⚠️  teardown returned non-zero — the sweep below will catch leftovers"
 
     log ""
-    log "── 3/6 tearing down the hub ──"
-    "$KAKT_BINARY" teardown --name="$CLUSTER_NAME" --confirm --force --debug 2>&1 | sed 's/^/  /' \
-        || log "  ⚠️  hub teardown returned non-zero — the sweep below will catch leftovers"
-
-    log ""
-    log "── 4/6 home-lab worker VMs (Hyper-V) ──"
+    log "── 2/4 home-lab worker VMs (Hyper-V) ──"
     _teardown_home_workers
 
     log ""
-    log "── 5/6 verification sweep ──"
+    log "── 3/4 verification sweep ──"
     _sweep_leftovers "$CLUSTER_NAME" "$SPOKEPOOL_NAME"
 
     log ""
-    log "── 6/6 local artifacts ──"
+    log "── 4/4 local artifacts ──"
     _local_cleanup
 
     log ""

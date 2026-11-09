@@ -73,7 +73,7 @@ type deliverOpts struct {
 // newEscrowDeliverBackupCredentialsCmd puts the escrowed backup authorities into the
 // cluster, without either of them passing through Git, a log, an argument or a file.
 //
-// Create-only and non-destructive, exactly as `spoke restore-pki` is and for the same
+// Create-only and non-destructive, exactly as `cluster restore-pki` is and for the same
 // reasons: an identical Secret already present is accepted, a different one is a
 // refusal, and nothing is overwritten. On a successor hub this is what must run
 // BEFORE Velero is pointed at the historical backups -- without the key they cannot

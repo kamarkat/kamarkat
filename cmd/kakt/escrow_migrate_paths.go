@@ -33,7 +33,7 @@ import (
 //     path it generates a new 32-byte key and applies it, and the first thing that
 //     key does is fail to decrypt every Secret the cluster has already written.
 //
-// Run it for the hub and for every spoke. It is idempotent, it never overwrites a
+// Run it for the management cluster and for every workload cluster. It is idempotent, it never overwrites a
 // destination that differs, and it leaves the old copies in place.
 func newEscrowMigratePathsCmd() *cobra.Command {
 	var (
@@ -60,7 +60,7 @@ Reports fingerprints, never values.`,
 	f := cmd.Flags()
 	f.StringVar(&box, "box", "", "the logical hub that owns these clusters (required)")
 	f.StringSliceVar(&clusters, "cluster", nil,
-		"a cluster in that box, repeatable: the hub and every spoke (required)")
+		"a cluster in that box, repeatable: the management cluster and every workload cluster (required)")
 	_ = cmd.MarkFlagRequired("box")
 	_ = cmd.MarkFlagRequired("cluster")
 	return cmd
@@ -74,7 +74,7 @@ func runEscrowMigratePaths(ctx context.Context, box string, clusters []string) e
 		return fmt.Errorf("--box is required: the scoped path is keyed by it")
 	}
 	if len(clusters) == 0 {
-		return fmt.Errorf("--cluster is required: name the hub and every spoke, " +
+		return fmt.Errorf("--cluster is required: name the management cluster and every workload cluster, " +
 			"because each has its own artefacts and its own path")
 	}
 

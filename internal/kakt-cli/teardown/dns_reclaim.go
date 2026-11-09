@@ -122,7 +122,7 @@ func (o *Orchestrator) resolveDNSOwnership(ctx context.Context) (dnsOwnership, b
 // readDNSOwnership pulls the DNS credential and this box's external-dns identity
 // out of the live cluster.
 //
-// It must run BEFORE anything is destroyed, for the same reason spokeClusterNames
+// It must run BEFORE anything is destroyed, for the same reason reportedClusters
 // does: both facts live only in the cluster, and after teardown starts nothing can
 // answer. The token is a tenant credential that the platform never stores on disk
 // -- it arrives by ExternalSecret and dies with the box -- so the one chance to

@@ -12,8 +12,8 @@ That makes the recreation test the restore proof, which is the right shape: ADR-
 reconstruction, and recreating a hub is the only exercise that proves the whole chain --
 escrowed master keys, the at-rest encryption key, a managed cluster's trust roots, and the
 object archive -- rather than one restore in isolation. It also exercises the commands added
-for it: `kakt escrow verify`, `escrow verify-recovery`, `spoke restore-pki` and
-`spoke match-inventory`, none of which has been run against a live box.
+for it: `kakt escrow verify`, `escrow verify-recovery`, `cluster restore-pki` and
+`cluster match-inventory`, none of which has been run against a live box.
 
 Sequence: staging is created -> hub recreation test on staging -> that result is the restore
 evidence -> prod. Phases 7-8 follow it rather than preceding it.
@@ -307,7 +307,7 @@ the same operation as destroying the Hetzner infrastructure they describe.** The
 reconstruction are usually the ones still serving traffic.
 
 1. **Decide the infrastructure's disposition first, in the provider**, not in Kubernetes. List
-   the servers (`kakt spoke match-inventory` reports them) and establish which are live and
+   the servers (`kakt cluster match-inventory` reports them) and establish which are live and
    which are genuinely orphaned. Nothing below is safe until this is known.
 2. **Do not unpause a deleting object to clear its finalizers.** Resuming the controller is what
    makes it act, and for a `Cluster` or `Machine` being deleted, acting means deleting

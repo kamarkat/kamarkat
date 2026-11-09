@@ -746,11 +746,11 @@ func runAddApp(cmd *cobra.Command, _ []string) error {
 	// nothing today -- it is run because a preflight check asserts the file
 	// matches the declarations exactly, and leaving it to be remembered later is
 	// how it stops matching.
-	spokes, err := tenant.AggregatePublicHosts(addApp.GitopsDir)
+	clusters, err := tenant.AggregatePublicHosts(addApp.GitopsDir)
 	if err != nil {
 		return fmt.Errorf("regenerate the public hostname aggregate: %w", err)
 	}
-	fmt.Printf("[add-app] %d cluster aggregate(s) checked\n", len(spokes))
+	fmt.Printf("[add-app] %d cluster aggregate(s) checked\n", len(clusters))
 
 	fmt.Printf(`
 Next:

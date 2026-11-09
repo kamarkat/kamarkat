@@ -19,20 +19,20 @@ func srv(id int64, machineName, machineType string) hcloudServer {
 // object remediates a machine that is serving.
 func TestClassifyInventoryCoversEveryRelationship(t *testing.T) {
 	machines := []hcloudMachine{
-		{Name: "spoke-cp-aaa", ProviderID: "hcloud://101"}, // matched, id agrees
-		{Name: "spoke-md-bbb"},                             // matched, no id yet
-		{Name: "spoke-md-ccc", ProviderID: "hcloud://999"}, // conflicting
-		{Name: "spoke-md-ddd", ProviderID: "hcloud://104"}, // ambiguous: two servers
-		{Name: "spoke-md-eee"},                             // object without server
+		{Name: "wl-cp-aaa", ProviderID: "hcloud://101"}, // matched, id agrees
+		{Name: "wl-md-bbb"},                             // matched, no id yet
+		{Name: "wl-md-ccc", ProviderID: "hcloud://999"}, // conflicting
+		{Name: "wl-md-ddd", ProviderID: "hcloud://104"}, // ambiguous: two servers
+		{Name: "wl-md-eee"},                             // object without server
 	}
 	servers := []hcloudServer{
-		srv(101, "spoke-cp-aaa", "control_plane"),
-		srv(102, "spoke-md-bbb", "worker"),
-		srv(103, "spoke-md-ccc", "worker"), // object says 999
-		srv(104, "spoke-md-ddd", "worker"),
-		srv(105, "spoke-md-ddd", "worker"), // duplicate name
-		srv(106, "spoke-md-fff", "worker"), // server without object
-		srv(107, "", "worker"),             // owner label but no machine name
+		srv(101, "wl-cp-aaa", "control_plane"),
+		srv(102, "wl-md-bbb", "worker"),
+		srv(103, "wl-md-ccc", "worker"), // object says 999
+		srv(104, "wl-md-ddd", "worker"),
+		srv(105, "wl-md-ddd", "worker"), // duplicate name
+		srv(106, "wl-md-fff", "worker"), // server without object
+		srv(107, "", "worker"),          // owner label but no machine name
 	}
 
 	rows, matched, unresolved := classifyInventory(machines, servers)
@@ -47,13 +47,13 @@ func TestClassifyInventoryCoversEveryRelationship(t *testing.T) {
 	}
 
 	for k, want := range map[string]string{
-		"spoke-cp-aaa": stateMatched,
-		"spoke-md-bbb": stateMatched,
-		"spoke-md-ccc": stateConflicting,
-		"spoke-md-ddd": stateAmbiguous,
-		"spoke-md-eee": stateObjectWithoutServer,
-		"106":          stateServerWithoutObject,
-		"107":          stateUnattributable,
+		"wl-cp-aaa": stateMatched,
+		"wl-md-bbb": stateMatched,
+		"wl-md-ccc": stateConflicting,
+		"wl-md-ddd": stateAmbiguous,
+		"wl-md-eee": stateObjectWithoutServer,
+		"106":       stateServerWithoutObject,
+		"107":       stateUnattributable,
 	} {
 		if states[k] != want {
 			t.Errorf("%s classified %q, want %q", k, states[k], want)
@@ -74,7 +74,7 @@ func TestClassifyInventoryCoversEveryRelationship(t *testing.T) {
 func TestClassifyInventoryEdges(t *testing.T) {
 	// An empty comparison classifies as nothing, which is correct here and is
 	// precisely why the CALLER must refuse it rather than read "no unresolved rows"
-	// as "matched". runSpokeMatchInventory rejects an empty object set for that
+	// as "matched". runClusterMatchInventory rejects an empty object set for that
 	// reason; see the comment there.
 	if rows, m, u := classifyInventory(nil, nil); len(rows) != 0 || m != 0 || u != 0 {
 		t.Errorf("an empty inventory gave %d rows, %d matched, %d unresolved", len(rows), m, u)

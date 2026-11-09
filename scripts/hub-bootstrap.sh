@@ -812,20 +812,19 @@ step1_bootstrap_hub() {
     # the fresh bootstrap still proceeds from scratch.
     if [[ "$TEARDOWN" == "true" ]]; then
         log "TEARDOWN=true — tearing down existing cluster '${CLUSTER_NAME}' (forceful)..."
-        # THE WORKLOAD CLUSTER FIRST. `kakt teardown` refuses to destroy a
-        # management cluster while a cluster it manages is still there -- the hub
-        # holds its CAPI objects and the only controller that can deprovision its
-        # load balancers -- so a rebuild that took the hub first would both refuse
-        # and, if it had not, strand the pool. Named on both commands: destroyed by
-        # the first, evidence for the second's ordering gate.
-        if [[ -n "${SPOKEPOOL_NAME:-}" ]]; then
-            log "Tearing down workload cluster '${SPOKEPOOL_NAME}' before the hub..."
-            "$KAKT_BINARY" spoke teardown --force \
-                --name="${SPOKEPOOL_NAME}" --mgmt-cluster="${CLUSTER_NAME}" 2>&1 \
-                || log "WARNING: workload cluster teardown returned non-zero — the hub teardown will refuse if anything remains"
-        fi
+        # THE WORKLOAD CLUSTER FIRST, IN THE SAME RUN. `kakt teardown` refuses to
+        # destroy a management cluster while a cluster it manages is still there --
+        # the hub holds its CAPI objects and the only controller that can
+        # deprovision its load balancers -- so a rebuild that took the hub first
+        # would both refuse and, if it had not, strand the pool.
+        #
+        # --destroy-managed deletes the workload cluster's Applications on the hub,
+        # which is what destroys the cluster, waits for it, and only then lets the
+        # hub go.
         "$KAKT_BINARY" teardown --name="${CLUSTER_NAME}" --confirm --force \
-            ${SPOKEPOOL_NAME:+--spoke="${SPOKEPOOL_NAME}"} 2>&1 || log "WARNING: Teardown returned non-zero — cluster may not exist, continuing..."
+            --gitops-dir "$ZERO_OPS_DIR" \
+            ${SPOKEPOOL_NAME:+--destroy-managed="${SPOKEPOOL_NAME}"} 2>&1 \
+            || log "WARNING: Teardown returned non-zero — cluster may not exist, continuing..."
 
         log "Pre-flight: cleaning up any leftover kind clusters (bootstrap kind, prior runs)..."
         # hub teardown only knows about the named hub cluster. The kind

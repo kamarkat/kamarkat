@@ -79,11 +79,8 @@ kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
 # Only use if local kind cluster does not exist and already pivoted
 export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt teardown --name=hub --force --confirm 2>&1 | tee .zero-ops/teardown-hub.log
 
-# Teardown spoke clusters (independent of hub)
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt spoke teardown --force 2>&1 | tee .zero-ops/teardown-spoke.log
-
-# Teardown specific spoke cluster
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt spoke teardown --name=spoke-pool-eu-prod-01 --force 2>&1 | tee .zero-ops/teardown-spoke.log
+# Teardown the whole box: the workload clusters first, the management cluster last
+export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt teardown --name=hub --force --confirm --gitops-dir . --destroy-managed=<workload cluster> 2>&1 | tee .zero-ops/teardown.log
 
 ```
 

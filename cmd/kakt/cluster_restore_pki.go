@@ -54,10 +54,10 @@ const (
 // decidePKI decides from the material alone, never from intent.
 //
 // Intent is carried by WHICH PATH RAN -- the declarative provisioning path for a new
-// spoke, this command for an existing one -- so this function never has to guess it.
+// cluster, this command for an existing one -- so this function never has to guess it.
 // That separation is deliberate: presence of an escrow artefact or of a Secret means
 // opposite things in the two lifecycles, and a rule that read presence as intent is
-// exactly how a spoke with a reused name inherits a predecessor's trust roots.
+// exactly how a cluster with a reused name inherits a predecessor's trust roots.
 func decidePKI(escrowed, live map[string][]byte, liveFound bool) pkiDecision {
 	switch {
 	case len(escrowed) == 0:
@@ -97,14 +97,14 @@ type restorePKIOpts struct {
 	dryRun                                bool
 }
 
-// newSpokeRestorePKICmd restores a cluster's escrowed trust roots into a
+// newClusterRestorePKICmd restores a cluster's escrowed trust roots into a
 // replacement hub, before anything is allowed to reconcile that cluster.
 //
 // THIS COMMAND IS THE RECOVERY INTENT. Creation and recovery are not distinguished
 // by looking at whether an escrow artefact or a Secret happens to exist -- both are
-// present in situations that mean opposite things, and a spoke whose NAME was reused
+// present in situations that mean opposite things, and a cluster whose NAME was reused
 // would inherit a predecessor's trust roots on that reasoning. They are
-// distinguished by which path is taken: creating a spoke is the ordinary declarative
+// distinguished by which path is taken: creating a cluster is the ordinary declarative
 // path, where Cluster API generates PKI as it always has and nothing here runs;
 // recovering one is this command, invoked deliberately against a named box and
 // cluster.
@@ -113,7 +113,7 @@ type restorePKIOpts struct {
 // (ADR-092): there is no steady-state declaration to forget to remove, so recovery
 // cannot persist into normal operation, and the exit is enforced by there being
 // nothing to exit from.
-func newSpokeRestorePKICmd() *cobra.Command {
+func newClusterRestorePKICmd() *cobra.Command {
 	var o restorePKIOpts
 
 	cmd := &cobra.Command{
@@ -122,8 +122,8 @@ func newSpokeRestorePKICmd() *cobra.Command {
 		Long: `Writes a cluster's escrowed Cluster API trust roots -- ca, etcd, sa and proxy --
 into platform-capi on the hub this kubeconfig points at.
 
-For reconstruction, not for provisioning. A new spoke gets new PKI from Cluster API
-on the ordinary declarative path; this restores the PKI an EXISTING spoke is already
+For reconstruction, not for provisioning. A new cluster gets new PKI from Cluster API
+on the ordinary declarative path; this restores the PKI an EXISTING cluster is already
 running with, so a replacement hub can issue node certificates for it again.
 
 Refuses to run against a cluster Cluster API is not paused on. Fails closed when the
@@ -132,7 +132,7 @@ and overwrites neither. Safe to re-run: material already in place is left alone.
 
 Reports fingerprints, never key material.`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runSpokeRestorePKI(c.Context(), o)
+			return runClusterRestorePKI(c.Context(), o)
 		},
 	}
 
@@ -147,7 +147,7 @@ Reports fingerprints, never key material.`,
 	return cmd
 }
 
-func runSpokeRestorePKI(ctx context.Context, o restorePKIOpts) error {
+func runClusterRestorePKI(ctx context.Context, o restorePKIOpts) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}

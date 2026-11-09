@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/teardown"
@@ -17,9 +18,11 @@ var (
 	teardownDNSZone   string
 	teardownForce     bool
 	teardownConfirm   bool
-	teardownSpokes    []string
+	teardownManaged   []string
 	teardownGitops    string
 	teardownInfraOnly string
+	teardownDestroy   string
+	teardownTimeout   time.Duration
 	// teardownKubeconfig is the explicit override, for a box whose kubeconfig was
 	// never escrowed -- a bootstrap that failed before hub-operator reconciled.
 	teardownKubeconfig string
@@ -59,9 +62,10 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 		"external-dns txt-owner-id whose records to release (default: read from the cluster)")
 	cmd.Flags().StringVar(&teardownDNSZone, "dns-zone", "",
 		"the zone those records live in, e.g. dev.nutgraf.in (default: read from the cluster)")
-	// The spoke list normally comes from the hub. A hub that is already gone
-	// answers nothing, which is exactly when its spokes get stranded: the servers
-	// carry the spoke's name, mention the hub nowhere, and survive the teardown
+	// The cluster list normally comes from the management cluster. One that is
+	// already gone answers nothing, which is exactly when the clusters it held get
+	// stranded: their servers carry their own names, mention the management
+	// cluster nowhere, and survive the teardown
 	// that was supposed to take them. Naming the pool here is what the box
 	// declares, and it outlives the cluster.
 	// Where the box's state and kubeconfig actually are. bootstrap writes both
@@ -72,7 +76,7 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 		"the box's repository, which declares its escrow and its box id")
 	// The box's own name. Every cluster it creates derives from the domain
 	// (ADR-082), so one prefix names every server it owns -- and unlike the hub's
-	// spoke list or the tenant repository, it is still available once both are
+	// cluster list or the tenant repository, it is still available once both are
 	// gone, which is precisely when a teardown needs it.
 	cmd.Flags().StringVar(&teardownKubeconfig, "kubeconfig", "",
 		"use this kubeconfig instead of reading the escrowed one (for a box that never "+
@@ -82,7 +86,7 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 	// it had. It named the box's prefix, and because a box's clusters share that
 	// prefix by construction it made a hub teardown sweep its workload clusters'
 	// servers. Ownership is the CAPH label on each resource; the target set is the
-	// hub plus the spokes this run resolves.
+	// management cluster plus the clusters this run names.
 	cmd.Flags().StringVar(&teardownInfraOnly, "infrastructure-only", "",
 		"destroy the provider infrastructure of a box whose Kubernetes API cannot be "+
 			"reached, naming the clusters to destroy (comma-separated). The workload "+
@@ -92,7 +96,27 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 	// a management cluster is torn down only once the clusters it manages are gone
 	// -- so this widens the ORDERING GATE, not the target set. To destroy a
 	// workload cluster, name it in --infrastructure-only.
-	cmd.Flags().StringSliceVar(&teardownSpokes, "spoke", nil,
+	//
+	// IT WAS --spoke. The platform says management cluster and workload cluster --
+	// the words the tenant commands, the CRDs and kubefirst's own types use -- and
+	// the old name survived here alone. Withdrawn rather than aliased, so a script
+	// that passes it stops instead of silently losing the ordering evidence it
+	// believed it had supplied.
+	// Emptying the box in one run, with the platform doing the deleting.
+	//
+	// The capability `kakt spoke teardown` used to provide, minus what made it
+	// dangerous: it deleted a cluster's servers at the provider while the
+	// management cluster was alive, so the SpokePool claim was still reconciled
+	// and the platform rebuilt the cluster on new servers under a name that is
+	// never reused. Here the cluster's own Applications are deleted on the
+	// management cluster, which is what destroys it, and the management cluster is
+	// touched only once that has finished.
+	cmd.Flags().StringVar(&teardownDestroy, "destroy-managed", "",
+		"also destroy these workload clusters first, through the management cluster "+
+			"(comma-separated). Without it, a box with managed clusters is refused")
+	cmd.Flags().DurationVar(&teardownTimeout, "timeout", 30*time.Minute,
+		"how long to wait for each workload cluster's own deletion")
+	cmd.Flags().StringSliceVar(&teardownManaged, "managed-cluster", nil,
 		"workload cluster(s) this box declares, used when the management cluster cannot "+
 			"be reached to list them (repeatable)")
 
@@ -134,13 +158,24 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 	// nothing a prefix might also match.
 	var infraOnly bool
 	var declaredScope []string
-	if raw := strings.TrimSpace(teardownInfraOnly); raw != "" {
-		infraOnly = true
+	scopeFrom := func(raw string) {
 		for _, name := range strings.Split(raw, ",") {
 			if n := strings.TrimSpace(name); n != "" && n != clusterName {
 				declaredScope = append(declaredScope, n)
 			}
 		}
+	}
+	if raw := strings.TrimSpace(teardownInfraOnly); raw != "" {
+		infraOnly = true
+		scopeFrom(raw)
+	}
+	if raw := strings.TrimSpace(teardownDestroy); raw != "" {
+		if infraOnly {
+			return fmt.Errorf("--destroy-managed and --infrastructure-only both name the " +
+				"clusters to destroy. --infrastructure-only is the recovery form, where the " +
+				"platform cannot be asked to delete anything; pass one of them")
+		}
+		scopeFrom(raw)
 	}
 
 	var access teardown.Orchestrator
@@ -156,22 +191,23 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 	}
 
 	orchestrator := &teardown.Orchestrator{
-		Kubeconfig:         access.Kubeconfig,
-		ProviderToken:      access.ProviderToken,
-		InfrastructureOnly: infraOnly,
-		ClusterName:        clusterName,
-		Force:              teardownForce,
-		Debug:              debug,
-		DNSOnly:            teardownDNSOnly,
-		GitopsDir:          teardownGitops,
+		Kubeconfig:            access.Kubeconfig,
+		ProviderToken:         access.ProviderToken,
+		InfrastructureOnly:    infraOnly,
+		ManagedDestroyTimeout: teardownTimeout,
+		ClusterName:           clusterName,
+		Force:                 teardownForce,
+		Debug:                 debug,
+		DNSOnly:               teardownDNSOnly,
+		GitopsDir:             teardownGitops,
 
 		// What this run destroys, in order: the named workload clusters, then the
 		// management cluster. These names were parsed and then DROPPED -- the
-		// orchestrator never received them, so `--infrastructure-only hub,spoke`
+		// orchestrator never received them, so `--infrastructure-only hub,workload`
 		// silently destroyed only the hub while reporting both as the scope.
 		Scope: declaredScope,
 
-		Spokes: teardownSpokes,
+		Managed: teardownManaged,
 		DNS: teardown.DNSOverride{
 			Owner: teardownDNSOwner,
 			Zone:  teardownDNSZone,

@@ -20,7 +20,7 @@ func TestBothClusterClassesAreReachable(t *testing.T) {
 	// cluster's, the packaged platform manifests hold a workload cluster's. A single
 	// accessor would silently miss whichever tree it did not look in, and the command
 	// would then work for one cluster and fail for the other with "file not found".
-	for _, path := range []string{defaultHubClass, defaultSpokeClass} {
+	for _, path := range []string{defaultHubClass, defaultWorkloadClass} {
 		body, err := readClusterClass(path)
 		if err != nil {
 			t.Fatalf("readClusterClass(%q): %v", path, err)
@@ -51,7 +51,7 @@ func TestBothClassesDeliverTheProviderConfigAndNowRequireIt(t *testing.T) {
 	mountLine := regexp.MustCompile(`(?m)^\s*mountPath:\s*/etc/kubernetes/enc\s*$`)
 	perCluster := `"name": "{{ .builtin.cluster.name }}` + assets.EncryptionSecretName("")
 
-	for _, path := range []string{defaultHubClass, defaultSpokeClass} {
+	for _, path := range []string{defaultHubClass, defaultWorkloadClass} {
 		body, err := readClusterClass(path)
 		if err != nil {
 			t.Fatalf("readClusterClass(%q): %v", path, err)

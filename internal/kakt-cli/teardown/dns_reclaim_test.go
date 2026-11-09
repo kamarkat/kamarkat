@@ -6,7 +6,7 @@ import (
 )
 
 // The zone as it actually stood on 2026-09-15, which is the case that motivated
-// this code: six records belonging to the live box, two belonging to its spoke,
+// this code: six records belonging to the live box, two to its workload cluster,
 // one orphan left by a box that no longer exists, and a pair created by hand.
 func productionZone() []hetznerRRSet {
 	txt := func(name, owner, resource string) hetznerRRSet {

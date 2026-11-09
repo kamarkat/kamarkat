@@ -8,8 +8,8 @@ import (
 // The four outcomes are decided by the material alone, never by whether something
 // happens to exist being read as intent.
 //
-// The case that matters most is the last one: a spoke created with a name a previous
-// spoke used has its own, newly generated authority, and the escrow still holds the
+// The case that matters most is the last one: a cluster created with a name a previous
+// cluster used has its own, newly generated authority, and the escrow still holds the
 // predecessor's. Reading "an escrow artefact exists" as "this is a recovery" would
 // hand the new cluster trust roots its nodes never had.
 func TestDecidePKICoversCreationAndRecovery(t *testing.T) {
@@ -24,7 +24,7 @@ func TestDecidePKICoversCreationAndRecovery(t *testing.T) {
 		liveFound bool
 		want      pkiDecision
 	}{
-		{"recovering a spoke this hub has no PKI for", original, nil, false, pkiRestore},
+		{"recovering a cluster this hub has no PKI for", original, nil, false, pkiRestore},
 		{"re-running after it was already restored", original, sameBytes, true, pkiAlreadyPresent},
 		{"a reused name, or a regenerated root", original, different, true, pkiConflict},
 		{"recovery asked for with nothing escrowed", nil, nil, false, pkiMissing},

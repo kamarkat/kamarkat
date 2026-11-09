@@ -224,7 +224,7 @@ func runEscrowVerifyRecovery(ctx context.Context, box, cluster, fromFile string,
 			"  etcd nobody can read. This is the gap ADR-076 exists to prevent and it cannot be\n"+
 			"  closed after the cluster is gone.\n\n"+
 			"  Check that --cluster names the cluster the value came from before concluding the\n"+
-			"  escrow is wrong: the spoke's key does not decrypt the hub's.",
+			"  escrow is wrong: the workload cluster's key does not decrypt the management cluster's.",
 			escrow.ArtifactSecretEncryptionKey, cluster)
 	}
 

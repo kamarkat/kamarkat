@@ -942,7 +942,7 @@ silently passed over, and a Secret restored from the backup first would become t
 root with nothing ever comparing the two. Restore order would decide which authority won.
 
 So the PKI is excluded from the Class M backup outright. The escrow is its only source, and
-`kakt spoke restore-pki` its only writer.
+`kakt cluster restore-pki` its only writer.
 
 **Separating it needs more than exclusion, and an earlier revision got this wrong.** A
 bootstrap-data Secret and a certificate authority carry the same type

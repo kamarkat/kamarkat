@@ -154,22 +154,42 @@ other sees:
 | Source | Asked | Blind to |
 |---|---|---|
 | the management cluster's own CAPI inventory | before anything is destroyed, while it answers | a cluster whose CAPI objects are gone and whose servers are not |
-| the provider's inventory, for every cluster the box declares in `registry/clusters/` or names with `--spoke` | after the inventory read, before any deletion | a cluster declared and never provisioned |
+| the provider's inventory, for every cluster the box declares in `registry/clusters/` or names with `--managed-cluster` | after the inventory read, before any deletion | a cluster declared and never provisioned |
 
 The declaration is consulted only against the provider, never on its own: a stale
 directory for a cluster already destroyed must not block a teardown that is correct. A
 cluster the provider says owns nothing is gone for this purpose, stated as what was
 established — no resource in the project carries its ownership label.
 
-In recovery mode the operator may name workload clusters alongside the management
-cluster. They are then destroyed **in order**: each named workload cluster first, the
+A run may name the workload clusters it is to destroy, and then it destroys them
+first. With the management cluster reachable that is `--destroy-managed`, and the
+PLATFORM does the deleting: the box's root Application is removed so nothing
+recreates what follows, then each cluster's own Applications are deleted and waited
+on, which is what destroys the cluster and lets the in-cluster controllers
+deprovision the load balancers only they can. kubefirst sequences its own teardown
+the same way, deleting the registry Application with cascade before any cloud
+resource (`providers/civo/delete.go`).
+
+In recovery mode the operator names them with `--infrastructure-only` instead,
+alongside the management cluster. They are then destroyed **in order**: each named workload cluster first, the
 provider re-read, and the management cluster only once nothing carries the others'
 ownership labels. Verified, not assumed — a sweep reports its failures and carries on, so
 "the sweep ran" is not "the cluster is gone". If anything survives, the management
 cluster is left standing deliberately, because it is the only thing that can still
 finish the job, and the run exits non-zero naming what remains.
 
-`--spoke` names a cluster for this gate and no longer widens what the run deletes.
+`--managed-cluster` names a cluster for this gate and does not widen what the run
+deletes. It was `--spoke`; the platform's vocabulary is management cluster and
+workload cluster, and the CLI now has no command, flag or message carrying the
+other word.
+
+**`kakt spoke teardown` is withdrawn.** It deleted a workload cluster's resources
+straight through the provider, with no way to tell the management cluster it had
+done so -- so used while the box was alive the claim was still reconciled and the
+platform rebuilt the cluster on new servers, under a name whose secret path and
+backup prefix are never reused (§7). Its two sibling commands, which are
+reconstruction tools rather than deletions, moved to `kakt cluster restore-pki` and
+`kakt cluster match-inventory`.
 
 ### 7. What a teardown deliberately does not take
 
@@ -202,16 +222,23 @@ which a local file cannot give.
 
 ## Impact
 
-- `kakt teardown` gains `--infrastructure-only` and loses `--tenant`. It refuses while a
-  cluster it manages is still there, and the clusters it destroys are the ones named on
-  the run -- `--spoke` is evidence for the gate, not authorization.
-- `scripts/lib/teardown.sh` already sequenced the spoke before the hub; it now names both
-  clusters on `kakt spoke teardown` (the CLI refuses an unnamed sweep, and without
-  `--mgmt-cluster` a label-keyed discovery cannot tell a management cluster from a
-  workload one). `scripts/dev/local-e2e.sh clean` destroys the declared pool first.
+- `kakt teardown` gains `--infrastructure-only` and `--destroy-managed`, and loses
+  `--tenant`. It refuses while a cluster it manages is still there, and the clusters it
+  destroys are the ones named on the run -- `--managed-cluster` (formerly `--spoke`) is
+  evidence for the gate, not authorization.
+- `kakt spoke` is gone: `spoke teardown` withdrawn, `restore-pki` and
+  `match-inventory` now under `kakt cluster`. No kakt command, flag or message uses
+  the word. The identifiers that remain are stored or published names -- the
+  `SpokePool` claim kind, `/spoke-pool/<cluster>/` secret paths, `spoke-pki-*` escrow
+  artefacts, `manifests/spoke/` and `spokepool-clusterclass-v1.yaml` -- where a rename
+  is a migration of live boxes rather than a word change, and is not done here.
+- `scripts/lib/teardown.sh` already sequenced the workload cluster before the hub; it now names
+  the declared pool on `--destroy-managed`, so the platform destroys it before the
+  management cluster, and no longer releases the claim itself: stripping finalizers
+  stopped the reconciler and the platform's own deletion with it.
+  `scripts/dev/local-e2e.sh clean` and the `TEARDOWN=true` rebuild path do the same.
 - Ownership attribution, inventory, state classification and the target report are
-  shared with `kakt spoke teardown`, which carried the same unsafe matcher and now
-  imports the rule rather than restating it.
+  the one rule, stated once in `inventory.go`.
 - The provider credential is read from the escrow (ADR-076 amendment), so
   `HCLOUD_TOKEN` is an override rather than a convention.
 

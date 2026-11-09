@@ -17,13 +17,13 @@ func newConfigureTailscaleCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "configure-tailscale",
-		Short: "Configure Tailscale credentials for hybrid spoke control-plane nodes",
+		Short: "Configure Tailscale credentials for hybrid workload cluster control-plane nodes",
 		Long: `Configure Tailscale credentials (Secret Zero) for the hybrid provider cell.
 
 This command injects the Tailscale auth key + CP node hostname used by the
 shared ClusterClass Tailscale pre-kubeadm hook (contentFrom.secret → the
 tailscale-hybrid-psk Secret in platform-capi). It is part of the hybrid
-bootstrap flow and must run before a hybrid spoke is provisioned.
+bootstrap flow and must run before a hybrid workload cluster is provisioned.
 
 Values are read from k8-secrets/tailscale/{authkey,hostname} (gitignored),
 matching the hetzner/github Secret Zero pattern.
@@ -31,7 +31,7 @@ matching the hetzner/github Secret Zero pattern.
 After running this command:
 - hub-operator uploads tailscale-hybrid-psk to Infisical (CLISecretMappings)
 - ESO syncs it back, so ArgoCD cannot reset it to empty
-- Hybrid spoke CP nodes join the tailnet before kubeadm init`,
+- Hybrid workload cluster CP nodes join the tailnet before kubeadm init`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve defaults from k8-secrets (gitignored) before validation.
 			if authkey == "" {
@@ -70,7 +70,7 @@ After running this command:
 	}
 
 	cmd.Flags().StringVar(&authkey, "authkey", "", "Tailscale auth key (default: k8-secrets/tailscale/authkey)")
-	cmd.Flags().StringVar(&hostname, "hostname", "", "Spoke CP tailnet hostname (default: k8-secrets/tailscale/hostname)")
+	cmd.Flags().StringVar(&hostname, "hostname", "", "workload cluster CP tailnet hostname (default: k8-secrets/tailscale/hostname)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: ~/.kube/config)")
 
 	return cmd
@@ -94,8 +94,8 @@ func runConfigureTailscale(cmd *cobra.Command, authkey, hostname, kubeconfig str
 	fmt.Println("\nNext steps:")
 	fmt.Println("1. hub-operator uploads tailscale-hybrid-psk to Infisical on next reconcile")
 	fmt.Println("2. ESO syncs it back (tailscale-authkey / tailscale-hostname)")
-	fmt.Println("3. Delete any stuck hybrid spoke so CAPI recreates the CP with the pre-kubeadm join")
-	fmt.Println("4. Run on-prem-join.sh on home nodes once the spoke CP is Ready")
+	fmt.Println("3. Delete any stuck hybrid cluster so CAPI recreates the CP with the pre-kubeadm join")
+	fmt.Println("4. Run on-prem-join.sh on home nodes once that cluster's CP is Ready")
 
 	return nil
 }

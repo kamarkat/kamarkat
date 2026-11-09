@@ -37,7 +37,7 @@ type matchOpts struct {
 	cluster, kubeconfig, kubeContext, token string
 }
 
-// newSpokeMatchInventoryCmd compares recovered CAPI objects with the servers that
+// newClusterMatchInventoryCmd compares recovered CAPI objects with the servers that
 // actually exist, before anything is allowed to reconcile them.
 //
 // ADR-111 §5: the provider's inventory is the one authority a lost hub cannot take
@@ -47,7 +47,7 @@ type matchOpts struct {
 // It classifies and refuses; it never adopts, creates or deletes. Every unresolved
 // row is for a person to resolve, because every automatic resolution is an invented
 // adoption protocol and the provider offers no supported one (ADR-111 §3).
-func newSpokeMatchInventoryCmd() *cobra.Command {
+func newClusterMatchInventoryCmd() *cobra.Command {
 	var o matchOpts
 
 	cmd := &cobra.Command{
@@ -65,7 +65,7 @@ remediates, because the deployed provider defines no supported adoption contract
 
 Read-only. It changes nothing in either the cluster or the provider.`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runSpokeMatchInventory(c.Context(), o)
+			return runClusterMatchInventory(c.Context(), o)
 		},
 	}
 
@@ -92,7 +92,7 @@ type hcloudMachine struct {
 	ProviderID string
 }
 
-func runSpokeMatchInventory(ctx context.Context, o matchOpts) error {
+func runClusterMatchInventory(ctx context.Context, o matchOpts) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
