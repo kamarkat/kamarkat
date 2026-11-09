@@ -84,8 +84,11 @@ records and load balancers behind by construction.
 ### 3. The provider is asked, and the answer is shown before anything is destroyed
 
 The provider inventory is enumerated for every resource type the deletion path handles —
-servers, load balancers, volumes, placement groups, firewalls, floating and primary IPs
-— following pagination, so a box larger than one page cannot appear partly absent. That
+servers, load balancers, volumes, placement groups, firewalls, floating and primary IPs,
+networks — following pagination, so a box larger than one page cannot appear partly
+absent. The two lists are the same list on purpose: a kind the deletion path handles and
+the inventory omits would be destroyed without having been shown, which is the one thing
+this report exists to prevent. That
 produces four states, and only one of them deletes:
 
 | Provider inventory | Kubernetes API | Behaviour |
@@ -121,7 +124,54 @@ The applications of the environment it served are declared independently of it
 environment. `kakt tenant remove-cluster` reports what stops running, and refuses only
 on a reference that would otherwise dangle — the box's own `burstSpokePool`.
 
-### 6. What a teardown deliberately does not take
+### 6. The management cluster goes last, and does not cascade
+
+**A management cluster is not destroyed while a cluster it manages is still there.** The
+run refuses, names what it found and the source that still says so, and deletes nothing.
+
+Three things make this an ordering rather than a preference:
+
+- the workload cluster's CAPI objects live on the management cluster, so once it is gone
+  nothing on this platform can delete that cluster — there is no controller to reconcile
+  the deletion and no provider credential mounted anywhere;
+- its load balancers can only be deprovisioned by the in-cluster controller, whose
+  credential arrives by ExternalSecret from the management cluster's secret store, and a
+  load balancer orphaned that way is never collected (ADR-046 §23: four of them once
+  exhausted a five-load-balancer project quota);
+- its backups, secret paths and DNS records are reclaimed through the management cluster,
+  and its name is never reused (§7 below), so what is stranded stays stranded.
+
+**The cascade is withdrawn.** A hub teardown read the hub's own CAPI cluster list and
+swept those clusters' resources into the same run. That destroys production clusters
+nobody named on the command line, by a list the operator first sees in the inventory
+report, and when half the sweep fails the management cluster is gone anyway and the
+remainder is unreachable. **The clusters a run may destroy are the clusters named on
+it**, and a management-cluster teardown names none.
+
+The check is made against two independent sources, because each is blind to what the
+other sees:
+
+| Source | Asked | Blind to |
+|---|---|---|
+| the management cluster's own CAPI inventory | before anything is destroyed, while it answers | a cluster whose CAPI objects are gone and whose servers are not |
+| the provider's inventory, for every cluster the box declares in `registry/clusters/` or names with `--spoke` | after the inventory read, before any deletion | a cluster declared and never provisioned |
+
+The declaration is consulted only against the provider, never on its own: a stale
+directory for a cluster already destroyed must not block a teardown that is correct. A
+cluster the provider says owns nothing is gone for this purpose, stated as what was
+established — no resource in the project carries its ownership label.
+
+In recovery mode the operator may name workload clusters alongside the management
+cluster. They are then destroyed **in order**: each named workload cluster first, the
+provider re-read, and the management cluster only once nothing carries the others'
+ownership labels. Verified, not assumed — a sweep reports its failures and carries on, so
+"the sweep ran" is not "the cluster is gone". If anything survives, the management
+cluster is left standing deliberately, because it is the only thing that can still
+finish the job, and the run exits non-zero naming what remains.
+
+`--spoke` names a cluster for this gate and no longer widens what the run deletes.
+
+### 7. What a teardown deliberately does not take
 
 Secrets under the box's and cluster's paths, and database backups under their own
 prefixes, survive the infrastructure. A name is never reused, because those two outlive
@@ -141,13 +191,24 @@ whose history includes hand-created infrastructure leaves residue that must be r
 deliberately. That is the intended trade: the alternative is a command that deletes
 things it cannot attribute.
 
+**Negative.** Emptying a box is now at least two commands, and a scripted
+"destroy everything" has to walk its managed clusters itself. That is the intended
+trade: the one-command form destroyed clusters nobody named, and its failure mode left
+them undeletable.
+
 **Negative.** Enumerating the provider inventory before deleting costs API calls and
 makes a teardown slower to start. It buys the only honest answer to "is it still there",
 which a local file cannot give.
 
 ## Impact
 
-- `kakt teardown` gains `--infrastructure-only` and loses `--tenant`.
+- `kakt teardown` gains `--infrastructure-only` and loses `--tenant`. It refuses while a
+  cluster it manages is still there, and the clusters it destroys are the ones named on
+  the run -- `--spoke` is evidence for the gate, not authorization.
+- `scripts/lib/teardown.sh` already sequenced the spoke before the hub; it now names both
+  clusters on `kakt spoke teardown` (the CLI refuses an unnamed sweep, and without
+  `--mgmt-cluster` a label-keyed discovery cannot tell a management cluster from a
+  workload one). `scripts/dev/local-e2e.sh clean` destroys the declared pool first.
 - Ownership attribution, inventory, state classification and the target report are
   shared with `kakt spoke teardown`, which carried the same unsafe matcher and now
   imports the rule rather than restating it.

@@ -2,6 +2,7 @@ package teardown
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -90,6 +91,17 @@ type Orchestrator struct {
 	// the CAPH label and the target set is explicit; there is nothing a prefix can
 	// add that is not either already known or a guess.
 
+	// Scope names the workload clusters THIS RUN destroys, before the management
+	// cluster and in that order.
+	//
+	// It is the list given to --infrastructure-only, and it is the only way a
+	// workload cluster enters a teardown's target set. Nothing is inferred into
+	// it: a management cluster teardown no longer cascades into the clusters it
+	// manages, because a cascade destroys production clusters nobody named and,
+	// when half of it fails, leaves the remainder with no management cluster to
+	// delete them from. See managed.go.
+	Scope []string
+
 	// Spokes names the spoke clusters this box declares, for when the hub cannot
 	// be asked for them.
 	//
@@ -103,6 +115,11 @@ type Orchestrator struct {
 	// A name supplied here is different evidence: it comes from what this box
 	// DECLARES, which survives the cluster. It is the same lookup local-e2e and
 	// the tenant workflow use to know which pool a box has.
+	//
+	// IT NAMES, IT DOES NOT AUTHORIZE. A name here is evidence for the ordering
+	// gate -- a cluster this box manages, which the management cluster must
+	// outlive -- and no longer widens what this run deletes. Destroying a
+	// workload cluster is asked for by naming it in Scope.
 	Spokes []string
 }
 
@@ -171,23 +188,30 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			"DNS records were not released: the owner id lives in the cluster")
 	}
 
-	spokes := o.spokeClusterNames(ctx)
-	if len(spokes) == 0 && len(o.Spokes) > 0 {
-		// The hub could not be asked. Fall back to what the box declares. This is
-		// a last resort and not the mechanism: the hub is the source of truth and
-		// is queried first, above, while it is still alive.
-		spokes = o.Spokes
-		fmt.Printf("[teardown] The hub could not be asked for its spokes; using the "+
-			"declared pool(s): %s\n", strings.Join(spokes, ", "))
+	// WHAT THIS BOX MANAGES, AND THE ORDER THAT FOLLOWS FROM IT.
+	//
+	// Asked of the management cluster while it can still answer, because
+	// afterwards nothing knows. What comes back is not a target list: it is the
+	// reason this teardown may not proceed. A management cluster is destroyed
+	// last, and only once the clusters it manages are gone -- see managed.go for
+	// why that is an ordering and not a preference.
+	reported := o.spokeClusterNames(ctx)
+	if err := o.refuseWhileManaged(o.managedClusters(reported, false)); err != nil {
+		return err
 	}
-	if len(spokes) == 0 && len(o.Spokes) == 0 && !reachable {
-		fmt.Println("[teardown] ⚠️  No spoke is known, from the cluster or the command line.")
-		fmt.Println("[teardown]     Any spoke servers this box provisioned will be LEFT RUNNING.")
-		fmt.Println("[teardown]     Name the pool with --spoke to remove them.")
+
+	// Everything else this box manages: every source, including the declaration
+	// and --spoke, and checked against the provider rather than taken on trust.
+	managed := o.managedClusters(reported, true)
+	if len(o.Scope) > 0 {
+		fmt.Printf("[teardown] Named for destruction before the management cluster: %s\n",
+			strings.Join(o.Scope, ", "))
 	}
-	if len(spokes) > 0 {
-		fmt.Printf("[teardown] This hub provisioned %d spoke cluster(s): %s\n",
-			len(spokes), strings.Join(spokes, ", "))
+	if len(managed) > 0 {
+		fmt.Printf("[teardown] This box also manages %d cluster(s) this run does not name: %s\n",
+			len(managed), strings.Join(managedNames(managed), ", "))
+		fmt.Println("[teardown] They are checked against the provider before anything is deleted;")
+		fmt.Println("[teardown] if any still has resources, nothing is destroyed.")
 	}
 
 	// Read the box's DNS identity and credential now, for the same reason: both
@@ -202,7 +226,14 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.stripKubernetesFinalizers(ctx)
 
 	// Step 3: Delete Hetzner cloud infrastructure directly via Hetzner API
-	if err := o.deleteHetznerResources(ctx, ccmLoadBalancerIPs, spokes); err != nil {
+	if err := o.deleteHetznerResources(ctx, ccmLoadBalancerIPs, o.Scope, managed); err != nil {
+		if errors.Is(err, ErrOrderViolation) {
+			// Stop here. The steps below release this box's DNS records and delete
+			// its local kubeconfig and state, and a box that still has a running
+			// cluster under it needs all three.
+			o.recordOutstanding("provider infrastructure cleanup", err)
+			return o.result()
+		}
 		// Recorded, not merely printed. A warning on a terminal that exits 0 is
 		// indistinguishable from success to anything reading the status, and this
 		// is the step that stops the servers billing.
@@ -508,7 +539,7 @@ func (o *Orchestrator) stripKubernetesFinalizers(ctx context.Context) {
 // it to this cluster, so the name/label matcher below cannot see it. The IP match
 // needs no cooperation from naming conventions, which also means it covers
 // LoadBalancer Services authored by a fleet, not just platform ones.
-func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalancerIPs, spokes []string) error {
+func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalancerIPs, workload []string, managed []ManagedCluster) error {
 	fmt.Println("\n[teardown] Forcefully deleting Hetzner Cloud infrastructure resources...")
 
 	// Supplied by the caller, which read it from the box's escrow or took it from
@@ -536,7 +567,7 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// clusters in scope, and which are excluded and why. A missing kubeconfig
 	// proves none of them -- reading it as "already gone" is what let a teardown
 	// destroy nothing and report success.
-	inv, invErr := o.discoverInventory(ctx, client, append([]string{o.ClusterName}, spokes...))
+	inv, invErr := o.discoverInventory(ctx, client, append([]string{o.ClusterName}, workload...))
 	if invErr != nil {
 		// Uncertainty refuses. An inventory that could not be read is not an empty
 		// one, and the difference is a box whose servers keep running.
@@ -546,9 +577,18 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 			"then re-run", invErr)
 	}
 	inv.Management = o.ClusterName
-	inv.Workload = spokes
+	inv.Workload = workload
 	state := Classify(inv, !o.InfrastructureOnly)
 	inv.Render(os.Stdout, state, o.Outstanding)
+
+	// THE GATE, ON THE PROVIDER'S ANSWER, BEFORE ANYTHING IS DELETED.
+	//
+	// Placed before the nothing-to-do return as well, so a run that would delete
+	// nothing still refuses rather than reporting a completed teardown of a box
+	// whose workload cluster is up.
+	if err := o.refuseWhileManagedResourcesRemain(inv, managed); err != nil {
+		return err
+	}
 
 	if state == StateNoOwnedResources {
 		// Idempotent, and said precisely: the inventory was read and nothing in it
@@ -563,15 +603,86 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 		return nil
 	}
 
-	// Every cluster this box owns, matched the same way.
-	//
-	// The hub and its spokes are named differently -- acme-hub against
-	// spoke-pool-hybrid-dev-01 -- but CAPH marks them identically, with the
-	// server name carrying the cluster name and a caph-cluster-<cluster> label
-	// declaring ownership. One convention, applied to the whole set, so a spoke
-	// is not a special case that someone has to remember.
-	owned := append([]string{o.ClusterName}, spokes...)
+	// The addresses the drain recorded, resolved once for the management cluster's
+	// own sweep.
+	orphanIPs := make(map[string]bool, len(ccmLoadBalancerIPs))
+	for _, ip := range ccmLoadBalancerIPs {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			orphanIPs[ip] = true
+		}
+	}
 
+	// THE ORDER, ENFORCED: the named workload clusters first, each one verified
+	// gone from the provider, and the management cluster only after that.
+	//
+	// Verified rather than assumed. A sweep reports its failures on the terminal
+	// and carries on, so "the workload sweep ran" is not the same statement as
+	// "the workload cluster is gone" -- and the difference is the whole point of
+	// the ordering. The provider is asked again, and if anything is still owned
+	// the management cluster is left standing, which keeps the only thing that
+	// can finish the job.
+	for _, name := range workload {
+		fmt.Printf("\n[teardown] Destroying workload cluster %s, before the management cluster.\n", name)
+		o.sweepOwned(ctx, client, []string{name}, nil)
+	}
+	if len(workload) > 0 {
+		after, err := o.discoverInventory(ctx, client, workload)
+		if err != nil {
+			return fmt.Errorf("%w: the workload cluster(s) were swept, but the provider could "+
+				"not be re-read to confirm it: %v\n\n%s was NOT touched. Re-run once the "+
+				"provider answers; this is idempotent",
+				ErrOrderViolation, err, o.ClusterName)
+		}
+		if left := after.Eligible(); len(left) > 0 {
+			var b strings.Builder
+			fmt.Fprintf(&b, "%v: %d resource(s) of %s survived the sweep:\n\n",
+				ErrOrderViolation, len(left), strings.Join(workload, ", "))
+			for _, a := range byKind(left) {
+				fmt.Fprintf(&b, "  %-16s %-40s id=%-12d %s%s=%s\n",
+					a.Kind, a.Name, a.ID, ownershipLabelPrefix, a.Cluster, a.Lifecycle)
+			}
+			fmt.Fprintf(&b, "\n%s was NOT destroyed, deliberately: it is the only thing left "+
+				"that can delete them.\nClear the resources above, then re-run.", o.ClusterName)
+			return fmt.Errorf("%w\n\n%s", ErrOrderViolation, b.String())
+		}
+		fmt.Printf("[teardown] ✓ %s: nothing in this project carries their ownership label any more.\n",
+			strings.Join(workload, ", "))
+	}
+
+	fmt.Printf("\n[teardown] Destroying the management cluster %s, last.\n", o.ClusterName)
+	o.sweepOwned(ctx, client, []string{o.ClusterName}, orphanIPs)
+
+	fmt.Println("[teardown] ✓ Hetzner Cloud resource cleanup completed")
+
+	// Said last, so it is the final thing on screen rather than scrolled away by
+	// the deletions above.
+	//
+	// Taken from the inventory the operator was shown, not from a second walk of
+	// the project: a resource CAPH labelled for a cluster this run does not target
+	// is exactly an Excluded entry with a cluster in its reason.
+	reportOrphanedSpokes(unclaimedFrom(inv))
+	return nil
+}
+
+// sweepOwned deletes every provider resource positively owned by the named
+// clusters, in dependency order.
+//
+// ONE CLUSTER SET PER CALL, so the order between clusters is the caller's to
+// state. The management cluster is swept last and separately: see
+// deleteHetznerResources.
+//
+// The hub and its workload clusters are named differently -- acme-hub against
+// spoke-pool-hybrid-dev-01 -- but CAPH marks them identically, with the server
+// name carrying the cluster name and a caph-cluster-<cluster> label declaring
+// ownership. One convention, applied to whatever set it is given, so a workload
+// cluster is not a special case someone has to remember.
+//
+// orphanIPs are the public addresses of load balancers the CCM owned, from the
+// drain. Matching on those addresses is what catches a CCM load balancer at all:
+// its name and labels carry nothing that ties it to a cluster. They belong to
+// the cluster whose API was drained, so they are passed on that cluster's sweep
+// and no other.
+func (o *Orchestrator) sweepOwned(ctx context.Context, client *hcloud.Client, owned []string, orphanIPs map[string]bool) {
 	// OWNERSHIP IS A LABEL, AND ONLY A LABEL.
 	//
 	// CAPH marks every resource it provisions with caph-cluster-<cluster>, so that
@@ -610,28 +721,12 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 		return ownedByTarget(labels)
 	}
 
-	// Whatever CAPH owns and this teardown did not claim. Reported, never
-	// deleted -- see reportOrphanedSpokes.
-	var unclaimed []string
-	noteIfUnclaimed := func(name string, labels map[string]string) {
-		if ownedByTarget(labels) {
-			return
-		}
-		for k := range labels {
-			if strings.HasPrefix(k, "caph-cluster-") {
-				unclaimed = append(unclaimed, name)
-				return
-			}
-		}
-	}
-
 	deletedServerIDs := make(map[int]bool)
 
 	// 1. Delete servers
 	allServers, err := client.Server.All(ctx)
 	if err == nil {
 		for _, server := range allServers {
-			noteIfUnclaimed(server.Name, server.Labels)
 			if matchesCluster(server.Name, server.Labels) {
 				deletedServerIDs[server.ID] = true
 				fmt.Printf("[teardown] Deleting server: %s (ID: %d)\n", server.Name, server.ID)
@@ -654,13 +749,6 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// neither name nor label — it is only reachable by the IP recorded during the
 	// drain. Missing that second matcher is what leaked four load balancers and
 	// exhausted the project quota (ADR-046 §23).
-	orphanIPs := make(map[string]bool, len(ccmLoadBalancerIPs))
-	for _, ip := range ccmLoadBalancerIPs {
-		if ip = strings.TrimSpace(ip); ip != "" {
-			orphanIPs[ip] = true
-		}
-	}
-
 	matchesDrainedIP := func(lb *hcloud.LoadBalancer) bool {
 		if len(orphanIPs) == 0 || lb.PublicNet.IPv4.IP == nil {
 			return false
@@ -795,12 +883,6 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 		fmt.Printf("[DEBUG] Failed to list networks: %v\n", err)
 	}
 
-	fmt.Println("[teardown] ✓ Hetzner Cloud resource cleanup completed")
-
-	// Said last, so it is the final thing on screen rather than scrolled away by
-	// the deletions above.
-	reportOrphanedSpokes(unclaimed)
-	return nil
 }
 
 // roots are the directories this box's local artifacts can be under: the working

@@ -360,15 +360,24 @@ do_clean() {
         echo "  able to reclaim spoke servers if the hub is already gone." >&2
     }
 
-    # --tenant is the reliable one. --spoke reads the tenant repository, which the
-    # lines below delete and which never existed if scaffolding failed; the hub's
-    # own spoke list dies with the hub. TENANT is derived from DOMAIN and is
-    # present whatever state the box is in, and every cluster this box creates is
-    # named from it (ADR-082), so it matches the hub's servers and the spokes'
-    # alike. Without it, a run that provisioned a spoke and then failed left those
-    # servers running and billing.
+    # THE WORKLOAD CLUSTER FIRST, AND SEPARATELY. `kakt teardown` refuses to
+    # destroy a management cluster while a cluster it manages is still there: the
+    # hub holds that cluster's CAPI objects and the only controller that can
+    # deprovision its load balancers, so a hub taken first strands the rest. The
+    # pool is named on both commands -- destroyed by the first, and evidence for
+    # the second's ordering gate.
+    #
+    # --tenant IS GONE from the CLI, and was still being passed here, so every
+    # `clean` failed on an unknown flag before it deleted anything. It named the
+    # box's prefix, and because a box's clusters share that prefix by construction
+    # it made a hub teardown sweep the workload cluster's servers too.
+    if [ -n "$pool" ]; then
+        "$ROOT/bin/kakt" spoke teardown --force \
+            --name "$pool" --mgmt-cluster "$CLUSTER" 2>&1 | sed 's/^/  /' \
+            || echo "local-e2e: workload cluster teardown did not complete; the hub teardown will refuse." >&2
+    fi
+
     if ! "$ROOT/bin/kakt" teardown --name "$CLUSTER" --force --confirm \
-             --tenant "$TENANT" \
              --gitops-dir "$WORKSPACE/$repo" \
              ${pool:+--spoke "$pool"} 2>&1 | sed 's/^/  /'; then
         echo "local-e2e: teardown did not complete cleanly." >&2
@@ -376,8 +385,8 @@ do_clean() {
         echo "  reclaimed by a later box -- check now, and release them with:" >&2
         echo "    kakt teardown --name $CLUSTER --confirm --dns-only \\" >&2
         echo "      --dns-owner <owner> --dns-zone <zone>" >&2
-        echo "  Spoke servers may also be left running. Check and remove with:" >&2
-        echo "    kakt teardown --name $CLUSTER --force --confirm --tenant $TENANT \\" >&2
+        echo "  Servers may also be left running. Check and remove with:" >&2
+        echo "    kakt teardown --name $CLUSTER --force --confirm \\" >&2
         echo "      --gitops-dir $WORKSPACE/$repo${pool:+ --spoke $pool}" >&2
     fi
 
@@ -1001,9 +1010,11 @@ say "done: $VERSION"
 if wants bootstrap; then
     cat <<EOF
 
-Tear down when finished:
+Tear down when finished -- the workload cluster first, then the management
+cluster, which refuses while a cluster it manages is still there:
 
-  $ROOT/bin/kakt teardown --name $CLUSTER --force --confirm --tenant $TENANT --gitops-dir $WORKSPACE/$TENANT-gitops
+  $ROOT/bin/kakt spoke teardown --force --name <workload cluster> --mgmt-cluster $CLUSTER
+  $ROOT/bin/kakt teardown --name $CLUSTER --force --confirm --gitops-dir $WORKSPACE/$TENANT-gitops
   rm -rf $WORKSPACE/$TENANT-gitops
   gh repo delete $GIT_ORG/$TENANT-gitops --yes
 EOF

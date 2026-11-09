@@ -156,6 +156,37 @@ func (i Inventory) Excluded() []Attribution {
 	return out
 }
 
+// Resources returns the raw provider objects the inventory was built from, so
+// another question can be asked of the same read.
+//
+// One query, several questions. The ordering gate has to know whether a cluster
+// OUTSIDE this operation's target set still has resources, and re-listing the
+// project to find out would be a second inventory that can disagree with the one
+// the operator was shown.
+func (i Inventory) Resources() []Resource {
+	out := make([]Resource, 0, len(i.Items))
+	for _, a := range i.Items {
+		out = append(out, a.Resource)
+	}
+	return out
+}
+
+// OwnedByCluster counts, for each named cluster, the resources it positively
+// owns -- by the same rule that authorizes deletion, so a cluster this reports
+// as having none is a cluster a teardown of it would find nothing to delete.
+func OwnedByCluster(resources []Resource, clusters []string) map[string]int {
+	counts := map[string]int{}
+	for _, cluster := range clusters {
+		counts[cluster] = 0
+	}
+	for _, a := range Attribute(resources, clusters) {
+		if a.Eligible {
+			counts[a.Cluster]++
+		}
+	}
+	return counts
+}
+
 // State is what the provider and the cluster together say about this box.
 type State string
 
@@ -314,6 +345,17 @@ func (o *Orchestrator) discoverInventory(ctx context.Context, client *hcloud.Cli
 	}
 	for _, ip := range floating {
 		resources = append(resources, Resource{Kind: "floating-ip", Name: ip.Name, ID: ip.ID, Labels: ip.Labels})
+	}
+
+	// Networks are enumerated because step 8 of the deletion deletes them. A kind
+	// the deleter handles and the inventory does not would be destroyed without
+	// having been shown -- which is the one thing this report exists to prevent.
+	networks, err := client.Network.All(ctx)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("list networks: %w", err)
+	}
+	for _, n := range networks {
+		resources = append(resources, Resource{Kind: "network", Name: n.Name, ID: n.ID, Labels: n.Labels})
 	}
 
 	primary, err := client.PrimaryIP.All(ctx)

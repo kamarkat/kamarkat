@@ -303,3 +303,48 @@ func (r ClusterRemoval) AffectedDeployments() (environment string, apps []string
 	sort.Strings(apps)
 	return environment, apps, nil
 }
+
+// DeclaredWorkloadClusters names every workload cluster this box declares, which
+// is the set its management cluster has to outlive.
+//
+// Read from the repository rather than from the management cluster, because the
+// caller that needs it most cannot reach the management cluster: a teardown of a
+// box whose API is gone still has to know which clusters it created, and the
+// declaration is the only source that survives the cluster.
+//
+// A workload cluster is a directory under registry/clusters/ with a SpokePool
+// claim of its own -- the same discriminator RemoveDeclaration uses, for the same
+// reason: the management cluster's directory holds the others'
+// <name>-infrastructure.yaml and has no claim, so the absence of one is what
+// tells them apart in every layout this platform has shipped.
+func DeclaredWorkloadClusters(gitopsDir, mgmtCluster string) ([]string, error) {
+	root := filepath.Join(gitopsDir, RegistryDir, "clusters")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		// A repository with no registry declares no cluster. That is not an error
+		// here: --gitops-dir is optional on a recovery teardown, and reporting a
+		// missing directory as a failure would make the absence of a declaration
+		// look like a reason not to continue.
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", root, err)
+	}
+
+	var clusters []string
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == mgmtCluster {
+			continue
+		}
+		claims, err := filepath.Glob(filepath.Join(root, entry.Name(), "infrastructure", "spokepool*.yaml"))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", filepath.Join(root, entry.Name()), err)
+		}
+		if len(claims) == 0 {
+			continue
+		}
+		clusters = append(clusters, entry.Name())
+	}
+	sort.Strings(clusters)
+	return clusters, nil
+}

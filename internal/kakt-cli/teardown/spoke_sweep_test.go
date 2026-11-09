@@ -18,9 +18,12 @@ import (
 // The string "acme-hub" appears nowhere in it. One cx33 survived every clean in
 // this repository on exactly that basis, and was still billing when it was found.
 //
-// The fix is that teardown asks the hub for its spokes first, and then matches
-// the whole set the same way. This pins the matching, using the real server as
-// the fixture.
+// So a workload cluster is reached only when it is NAMED: teardown matches
+// whatever set it is given, by the ownership label, and the set is the clusters
+// the run was told to destroy. It is not the hub's live CAPI list -- a
+// management cluster no longer cascades into the clusters it manages, it refuses
+// while they are there (managed.go). This pins the matching, using the real
+// server as the fixture.
 func TestTeardownMatchesTheSpokesTheHubProvisioned(t *testing.T) {
 	const (
 		hub        = "acme-hub"
@@ -38,13 +41,14 @@ func TestTeardownMatchesTheSpokesTheHubProvisioned(t *testing.T) {
 		"machine.caph-name":           hubSrvName,
 	}
 
-	// Scoped to the hub alone, the spoke is invisible -- the defect.
+	// Scoped to the hub alone, the spoke is invisible -- which is now the
+	// contract: a hub teardown that names no workload cluster touches none.
 	if matches(hub, nil, spokeSrv, spokeLabels) {
 		t.Fatal("fixture wrong: the spoke server must not match the hub name alone")
 	}
-	// With the hub's spoke list, it is claimed.
+	// Named in the run's scope, it is claimed.
 	if !matches(hub, []string{spoke}, spokeSrv, spokeLabels) {
-		t.Error("the spoke server is not matched even when the hub reported the spoke")
+		t.Error("the spoke server is not matched even when the run names it")
 	}
 	// And the hub is still matched, with or without spokes.
 	if !matches(hub, []string{spoke}, hubSrvName, hubLabels) {
@@ -62,8 +66,8 @@ func TestTeardownMatchesTheSpokesTheHubProvisioned(t *testing.T) {
 // rather than exported because the real one closes over the cloud client's
 // iteration; the assertion here is about the RULE, and the rule is small enough
 // that a copy which disagrees would fail the source check below.
-func matches(hub string, spokes []string, name string, labels map[string]string) bool {
-	owned := append([]string{hub}, spokes...)
+func matches(hub string, scope []string, name string, labels map[string]string) bool {
+	owned := append([]string{hub}, scope...)
 	for _, cluster := range owned {
 		if strings.Contains(name, cluster) {
 			return true
@@ -80,8 +84,9 @@ func matches(hub string, spokes []string, name string, labels map[string]string)
 	return false
 }
 
-// The hub must be asked for its spokes BEFORE anything is destroyed, because
-// afterwards nothing knows what they were.
+// The hub must be asked for the clusters it manages BEFORE anything is
+// destroyed, because afterwards nothing knows what they were -- and it is that
+// answer the ordering gate refuses on.
 func TestSpokesAreDiscoveredBeforeAnythingIsDestroyed(t *testing.T) {
 	src, err := os.ReadFile("orchestrator.go")
 	if err != nil {

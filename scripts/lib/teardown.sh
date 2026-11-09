@@ -436,20 +436,21 @@ run_full_teardown() {
     inv=$(_hcloud_inventory "$CLUSTER_NAME" "$SPOKEPOOL_NAME" || true)
     _print_inventory "$inv" "inventory"
 
-    # `hub spoke teardown` must run without --name (see header), which deletes
-    # EVERY spoke in the project. Refuse if that would take out another
-    # environment's spoke rather than discovering it afterwards.
+    # Resources belonging to a workload cluster that is not this box's. Reported,
+    # and nothing more: `kakt spoke teardown --name <cluster>` deletes only the
+    # resources carrying that cluster's CAPH ownership label, so a foreign spoke is
+    # no longer a reason to skip the step.
+    #
+    # It used to be. The CLI's --name filter was a no-op, so the step deleted EVERY
+    # spoke in the project and had to be skipped whenever another box shared it --
+    # which left this box's spoke to a name-matching sweep instead.
     local foreign
     foreign=$(grep $'\tother$' <<< "$inv" | awk -F'\t' '{print $3}' | sort -u || true)
     if [[ -n "$foreign" ]]; then
         log ""
-        log "⚠️  Spoke resources NOT belonging to '$SPOKEPOOL_NAME' are present in this Hetzner project:"
+        log "ℹ️  Resources of other workload clusters are present in this Hetzner project:"
         while IFS= read -r n; do log "     $n"; done <<< "$foreign"
-        log "   'hub spoke teardown' cannot be scoped by name (its --name filter is a no-op),"
-        log "   so running it would delete these too."
-        SKIP_CLI_SPOKE_TEARDOWN=1
-        log "   Skipping the CLI spoke teardown; this box's spoke will be removed by the"
-        log "   scoped sweep instead, which deletes only names matching $SPOKEPOOL_NAME."
+        log "   They are not touched: deletion is by this cluster's ownership label."
     fi
 
     if [[ "${TEARDOWN_YES:-0}" != "1" ]]; then
@@ -468,11 +469,23 @@ run_full_teardown() {
 
     log ""
     log "── 2/6 tearing down the spoke (must precede the hub) ──"
-    if [[ "${SKIP_CLI_SPOKE_TEARDOWN:-0}" == "1" ]]; then
-        log "  skipped — handled by the scoped sweep (foreign spokes present)"
+    #
+    # NOT OPTIONAL, AND NOT COSMETIC ORDER. `kakt teardown` now refuses to destroy
+    # a management cluster while a cluster it manages is still there, because the
+    # management cluster holds that cluster's CAPI objects and the only controller
+    # that can deprovision its load balancers. So this step is what makes 3/6
+    # possible, rather than a tidier sequence.
+    #
+    # Named, both of them. Without --name the CLI refuses (it would mean every
+    # workload cluster in the project), and without --mgmt-cluster a discovery
+    # keyed on the CAPH label cannot tell the management cluster apart from a
+    # workload one -- the hub carries the same label shape.
+    if [[ -z "$SPOKEPOOL_NAME" ]]; then
+        log "  no workload cluster declared — nothing to tear down before the hub"
     else
-        "$KAKT_BINARY" spoke teardown --force --debug 2>&1 | sed 's/^/  /' \
-            || log "  ⚠️  spoke teardown returned non-zero — the sweep below will catch leftovers"
+        "$KAKT_BINARY" spoke teardown --force --debug \
+            --name "$SPOKEPOOL_NAME" --mgmt-cluster "$CLUSTER_NAME" 2>&1 | sed 's/^/  /' \
+            || log "  ⚠️  spoke teardown returned non-zero — the hub teardown below will refuse"
     fi
 
     log ""

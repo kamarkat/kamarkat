@@ -28,9 +28,19 @@ var (
 func newTeardownCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "teardown",
-		Short: "Teardown a Hub Cluster",
-		Long: `Teardown a Hub Cluster by forcefully deleting all cloud infrastructure,
-Kubernetes CAPI resources, Kind/Docker artifacts, and local state.`,
+		Short: "Destroy a box's management cluster, once the clusters it manages are gone",
+		Long: `Destroy a box's management cluster: its cloud infrastructure, its CAPI
+resources, the DNS records it published, and this machine's local artifacts for it.
+
+THE MANAGEMENT CLUSTER GOES LAST. It refuses while a cluster it manages is still
+there, and it does not take those clusters with it. The management cluster holds
+their CAPI objects and the only controller that can deprovision their load
+balancers, so a box torn down from the top leaves them running, billing, and
+undeletable by the platform. Remove each one first with
+` + "`kakt tenant remove-cluster`" + `.
+
+A resource is deleted only when the provider says the cluster owns it:
+caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 		PreRunE: validateTeardownFlags,
 		RunE:    runTeardown,
 	}
@@ -75,10 +85,16 @@ Kubernetes CAPI resources, Kind/Docker artifacts, and local state.`,
 	// hub plus the spokes this run resolves.
 	cmd.Flags().StringVar(&teardownInfraOnly, "infrastructure-only", "",
 		"destroy the provider infrastructure of a box whose Kubernetes API cannot be "+
-			"reached, naming the clusters to destroy (repeatable, comma-separated). "+
+			"reached, naming the clusters to destroy (comma-separated). The workload "+
+			"clusters named here are destroyed first and the management cluster last. "+
 			"Kubernetes cleanup is reported as not performed")
+	// NAMES, DOES NOT AUTHORIZE. A cluster named here is one this box manages, and
+	// a management cluster is torn down only once the clusters it manages are gone
+	// -- so this widens the ORDERING GATE, not the target set. To destroy a
+	// workload cluster, name it in --infrastructure-only.
 	cmd.Flags().StringSliceVar(&teardownSpokes, "spoke", nil,
-		"spoke cluster(s) this box declares, used when the hub cannot be reached (repeatable)")
+		"workload cluster(s) this box declares, used when the management cluster cannot "+
+			"be reached to list them (repeatable)")
 
 	// --name is required for a teardown, which destroys a named cluster. A
 	// --dns-only run destroys no cluster and names records by owner instead.
@@ -148,6 +164,12 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 		Debug:              debug,
 		DNSOnly:            teardownDNSOnly,
 		GitopsDir:          teardownGitops,
+
+		// What this run destroys, in order: the named workload clusters, then the
+		// management cluster. These names were parsed and then DROPPED -- the
+		// orchestrator never received them, so `--infrastructure-only hub,spoke`
+		// silently destroyed only the hub while reporting both as the scope.
+		Scope: declaredScope,
 
 		Spokes: teardownSpokes,
 		DNS: teardown.DNSOverride{
