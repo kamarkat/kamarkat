@@ -51,35 +51,36 @@ management:
   # environment of whatever provisioned it (ADR-037 clause 2).
   infisicalEnvironmentSlug: management
 
-# This cluster's name, pinned at scaffolding for the same reason dns.ownerId is
-# (see below) and never changed afterwards.
-#
-# Written here rather than left for the chart to derive. What the chart derives
-# when this is absent is `<environmentSlug>-<provider>` -- which is identical on
-# every box built from the same pair, and is therefore not a name but a category.
-# Three things key on it and each fails the same way:
-#
-#   * the escrow path holding this box's Infisical master keys and its admin
-#     kubeconfig (ADR-076). Two boxes sharing it overwrite each other's, and a
-#     restore hands one box the other's encryption key.
-#   * the WAL archive prefix for the management cluster's database (ADR-014).
-#     barman refuses a prefix holding another database's segments, so the first
-#     box to use it archives and every later one never backs up at all.
-#   * the external-dns owner id, when dns.ownerId is not pinned separately.
-#
-# Changing it after the box exists orphans everything written under the old name.
 # The logical hub (ADR-111 ss1): this box, stable for as long as it exists.
 #
 # Keyed on by everything that must survive a cluster being replaced -- the escrow
 # path holding this box's Infisical master keys and its identity provider's
-# encryption key, and the DNS records this box owns. Written once at scaffolding
-# and NEVER changed afterwards, for the same reason dns.ownerId is not.
+# encryption key, and the DNS records this box owns, which is why dns.ownerId
+# below is this value and not the cluster's. Two boxes sharing it overwrite each
+# other's master keys, and a restore hands one box the other's encryption key.
+#
+# Written once at scaffolding and NEVER changed afterwards: changing it orphans
+# everything already written under the old name.
 #
 # Separate from clusterName below because the two have different lifetimes. While
-# they were one value a hub could not be replaced without re-keying everything the
-# box owns, which is why replacing one was not possible at all.
+# they were one value the management cluster could not be replaced without
+# re-keying everything the box owns, which is why replacing one was not possible
+# at all.
 boxId: <BOX_ID>
 
+# THIS INCARNATION of the box's management cluster, and the one of the two that
+# changes.
+#
+# It keys this cluster's own object and node names, and the WAL archive prefix for
+# its database (ADR-014): barman refuses a prefix already holding another
+# database's segments, so a name the box has used before archives nothing while
+# every backup reports success. A replacement therefore takes a NEW name --
+# declared beside this one by `kakt tenant add-management`, which keeps boxId
+# above and changes only this.
+#
+# Written here rather than left for the chart to derive. What the chart derives
+# when this is absent is `<environmentSlug>-<provider>` -- which is identical on
+# every box built from the same pair, and is therefore not a name but a category.
 clusterName: <CLUSTER_NAME>
 environmentRevision: <BUNDLE_VERSION>
 # The ACME issuer this environment's public certificates come from.
@@ -203,7 +204,7 @@ placement:
 # no in-cluster fix once it has happened.
 dns:
   provider: hetzner
-  ownerId: "<CLUSTER_NAME>"
+  ownerId: "<BOX_ID>"
 
 # Capability selection (ADR-066). "A tenant runs what it needs and does not carry
 # the rest."

@@ -51,8 +51,8 @@ another and useless to anyone who obtains it.`,
 	f := cmd.Flags()
 	f.StringVar(&verifyCluster, "cluster", "", "cluster name the escrow is scoped to (required)")
 	f.StringVar(&verifyBox, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
-	f.BoolVar(&isHub, "hub", false, "this is the management cluster; all artefacts apply")
-	f.BoolVar(&isWorkload, "workload", false, "this is a workload cluster; hub-only artefacts do not apply")
+	f.BoolVar(&isHub, "management", false, "this is the management cluster; all artefacts apply")
+	f.BoolVar(&isWorkload, "workload", false, "this is a workload cluster; management-only artefacts do not apply")
 	_ = cmd.MarkFlagRequired("cluster")
 	_ = cmd.MarkFlagRequired("box")
 	return cmd
@@ -112,7 +112,7 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 	// from the caller rather than guessed from the name, because a name convention is
 	// not a contract and a wrong guess here reports a real gap as not applicable.
 	if !isHub && !isWorkload {
-		return fmt.Errorf("say which this cluster is: --hub for the management cluster, " +
+		return fmt.Errorf("say which this cluster is: --management for the management cluster, " +
 			"--workload for a workload cluster. The recovery contract differs (ADR-076), and " +
 			"guessing it reports artefacts a cluster never had as missing")
 	}
