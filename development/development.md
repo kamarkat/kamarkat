@@ -62,7 +62,7 @@ KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfi
 
 ## Tenant repo testing
 ### Once, on a branch you've pushed (ArgoCD reads git, not your working tree)
-./kakt tenant scaffold --tenant local --org soloz-io --domain local.nutgraf.in \
+./kakt tenant scaffold --tenant local --box soloz-io --domain local.nutgraf.in \
   --bundle-version development --local
 
 https://app.infisical.com/organizations/89f6d208-ea9b-4b6d-b4bd-a249f50ead8d/identities/671e356d-76ad-4886-8357-635abf19d435
@@ -119,21 +119,21 @@ chmod +x kakt
 ## Scaffold a real tenant repo 
 
 cd /Users/arun_subramanian/Projects/kamarkat/kamarkat
-./kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+./kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
 Or from your current directory:
 
-/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
 ### Interactive
 
-kakt tenant scaffold --tenant test-tenant --org soloz-io --domain test-tenant.nutgraf.in
+kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
 Prompts for the two secrets (no echo), sets them on the tenant's repo, dispatches the bootstrap, prints the Actions URL.
 
 ### Non-interactive:
 
-kakt tenant scaffold --tenant tenant1 --org soloz-io --domain tenant1.nutgraf.in \
+kakt tenant scaffold --tenant tenant1 --box soloz-io --domain tenant1.nutgraf.in \
   --provider-token "$HCLOUD_TOKEN" --gitops-token "$GITOPS_PAT"
 
 No secrets → repository is created, then handover instructions with the exact commands. Not an error, since the repo exists by then.

@@ -542,7 +542,7 @@ do_scaffold() {
 
     say "scaffolding $GIT_ORG/$repo against $VERSION"
     ( cd "$WORKSPACE" && "$ROOT/bin/kakt" tenant scaffold --local \
-        --tenant "$TENANT" --org "$GIT_ORG" --domain "$DOMAIN" \
+        --tenant "$TENANT" --box "$GIT_ORG" --domain "$DOMAIN" \
         --cluster "$CLUSTER" --provider "$PROVIDER" \
         --subdomain "$SUBDOMAIN" \
         --region "$REGION" \

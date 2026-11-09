@@ -141,7 +141,7 @@ func TestSpec_RepoNameAndValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation to fail on an empty spec")
 	}
-	for _, want := range []string{"tenant", "org", "domain"} {
+	for _, want := range []string{"tenant", "box", "domain"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("validation error does not name %q: %v", want, err)
 		}

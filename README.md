@@ -116,7 +116,7 @@ gh release download --repo kamarkat/kamarkat \
   --output kakt && chmod +x kakt
 
 ./kakt tenant scaffold \
-  --tenant acme --org acme-inc --domain acme.example
+  --tenant acme --box acme-inc --domain acme.example
 ```
 
 The version a box starts on is the version of the binary that scaffolded it, so

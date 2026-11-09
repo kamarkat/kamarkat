@@ -36,7 +36,7 @@ trap 'rm -rf "$sandbox"' EXIT
 # matters -- can the binary resolve the platform content Day-0 needs -- without
 # provisioning anything or needing a cloud credential.
 if ! out=$(cd "$sandbox" && "$BIN" tenant scaffold --dry-run \
-        --tenant probe --org probe-org --domain probe.example \
+        --tenant probe --box probe-org --domain probe.example \
         --cluster probe-hub --provider hetzner \
         --bundle-version "$VERSION" --out "$sandbox/render" 2>&1); then
     echo "released-cli-standalone: scaffolding failed outside a checkout, so the" >&2

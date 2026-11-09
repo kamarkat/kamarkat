@@ -129,7 +129,7 @@ export PATH="$PWD/bin:$PATH"
 export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
 
 kakt tenant scaffold --local \
-  --tenant acme --org <your-gh-org> --domain acme.example \
+  --tenant acme --box <your-gh-org> --domain acme.example \
   --cluster acme-hub --environment dev --provider hetzner \
   --bundle-version 0.1.16-rc.1
 ```

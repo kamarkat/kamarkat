@@ -95,7 +95,7 @@ func (s Spec) repoURL() string {
 func (s Spec) validate() error {
 	missing := []string{}
 	for name, v := range map[string]string{
-		"tenant": s.TenantID, "org": s.GitOrg, "domain": s.Domain,
+		"tenant": s.TenantID, "box": s.GitOrg, "domain": s.Domain,
 		"provider": s.Provider,
 		"cluster": s.ClusterName, "bundle-version": s.BundleVersion,
 		"platform-repo": s.PlatformRepoURL, "bundle-registry": s.BundleRegistry,

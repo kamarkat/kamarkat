@@ -335,7 +335,7 @@ func newTenantScaffoldCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scaffold",
 		Short: "Create and render a tenant's <tenant>-gitops repository",
-		Long: `Create <org>/<tenant>-gitops and render it from the platform template.
+		Long: `Create <box>/<tenant>-gitops and render it from the platform template.
 
 Onboarding, as ADR-062 defines it. The repository is created in the TENANT's
 organisation and is theirs; the platform holds a repository-scoped credential
@@ -351,7 +351,7 @@ what a tenant would receive before any repository exists.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&scaffoldSpec.TenantID, "tenant", "", "tenant identifier (required)")
-	f.StringVar(&scaffoldSpec.GitOrg, "org", "", "the tenant's git organisation (required)")
+	f.StringVar(&scaffoldSpec.GitOrg, "box", "", "the box this repository belongs to: the tenant's git organisation, where it is created (required)")
 	f.StringVar(&scaffoldSpec.Domain, "domain", "", "the tenant's base domain (required)")
 	f.StringVar(&scaffoldSpec.Provider, "provider", "hetzner", "cloud provider")
 	f.StringVar(&scaffoldSpec.Region, "region", "hel1", "cloud region")
