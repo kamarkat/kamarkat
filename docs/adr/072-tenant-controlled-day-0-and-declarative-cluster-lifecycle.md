@@ -64,6 +64,33 @@ A tenant's cluster is bootstrapped by applying the Application its own repositor
 
 This settles a disagreement that existed silently: the CLI's rendered seed and the scaffolded `bundle.yaml` install the same bundle and disagree about who owns the values. The repository owns them.
 
+## Amendment 2026-11-09: a workload cluster's Applications, and what its own directory holds
+
+ADR-045's amendment of the same date places the Applications a workload cluster
+contributes — `<cluster>-infrastructure` and `<cluster>-generated` — in the MANAGEMENT
+cluster's directory, since that is the only directory anything applies. This ADR owns
+the question of what the cluster's own directory is for, and the answer narrows:
+
+| `registry/clusters/<cluster>/` holds | Read by |
+|---|---|
+| `infrastructure/spokepool.yaml` | the `<cluster>-infrastructure` Application, in the management cluster's directory |
+| `generated/` | the `<cluster>-generated` Application, likewise; `.gitkeep` until Day-0 or `app hosts aggregate` writes |
+| `values.yaml` | the CLI and people — a RECORD of what the cluster was declared as |
+
+`values.yaml` is not rendered by anything. The chart reads the management cluster's
+values, applications declare themselves under `environments/<env>/<app>/` (ADR-082,
+amendment 2026-11-07), and what the cluster actually runs is its claim. It is kept
+because a cluster that is only a claim cannot say who owns it, which environment it
+serves, or what it was sized as — and `add-cluster` holds all three at declaration
+time. The per-value notes in the template say where each control is, so a reader does
+not edit a record expecting an effect.
+
+Two fields are withdrawn from it: `workloads` (BYOWR, read until 2026-09-05 and
+withdrawn by ADR-073) and, from a MANAGEMENT cluster's values, `environmentSlug` — the
+hub declares no workload environment (ADR-111 Revision 7), and under the
+environment-driven deployment rule it would additionally have read as a claim on that
+environment's applications.
+
 ## Ownership
 
 This ADR owns the location of Day-0 execution and the mechanism of post-Day-0 cluster lifecycle. It does not change ADR-040's phase boundary, ADR-045's artifact registry, or ADR-062's repository separation; it makes each of them true in practice. For resource ownership, see ADR-039.

@@ -129,7 +129,7 @@ among several, is refused rather than resolved by choosing.
 
 **Cluster removal never edits an environment's definitions.** `kakt tenant
 remove-cluster` reports the environment and its applications — what stops running — and
-removes only the cluster's own declaration. The definitions stay and keep deploying to
+removes only the cluster's own declaration (ADR-114 decides what destruction then takes). The definitions stay and keep deploying to
 every other cluster serving that environment.
 
 ## Ownership

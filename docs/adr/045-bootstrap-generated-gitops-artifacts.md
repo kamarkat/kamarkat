@@ -132,6 +132,58 @@ Two artifacts are the first consumers of this pattern:
 
 This ADR defines a pattern and does not own platform resources. For resource ownership, see ADR-039.
 
+## Amendment 2026-11-09: the Application that owns a cluster's generated/ lives in the management cluster's directory
+
+A generated artifact needs an Application that applies it, and for a workload cluster
+that Application was in the wrong directory — so the artifacts were in git, owned by
+nothing, on every box.
+
+**What was wrong.** The workload-cluster template hydrated `generated.yaml` into
+`registry/clusters/<cluster>/`, and nothing applies that directory. The management
+cluster's root Application applies its OWN directory with `recurse: false`, and the
+cluster's `<cluster>-infrastructure` Application covers only
+`registry/clusters/<cluster>/infrastructure`. So the Application that owns
+`generated/` was never created on any box, and every artifact written there was
+reconciled by nothing. Nothing reported it: an Application that does not exist is not
+degraded, and the validator that checks for an owner of `clusters/<cluster>/generated`
+matched the HUB's, which does exist, and passed.
+
+**The decision.** The Applications a workload cluster contributes are placed in the
+MANAGEMENT cluster's directory, named `<cluster>-<role>.yaml`, because that is the one
+directory something applies. Two of them, from one list that both the code which
+creates them and the code which destroys them reads:
+
+| File, in the management cluster's directory | Application | Owns |
+|---|---|---|
+| `<cluster>-infrastructure.yaml` | `<cluster>-infrastructure` | the SpokePool claim that creates the cluster |
+| `<cluster>-generated.yaml` | `<cluster>-generated` | `registry/clusters/<cluster>/generated/`, this ADR's artifacts |
+
+The object lives where the controller is — the management cluster's ArgoCD — and its
+destination names the cluster the content is for, which is the same split ADR-072 makes
+for the infrastructure Application.
+
+**The directory must exist in git from the moment the Application does.** An Application
+over an empty directory syncs nothing and reports healthy, which is the correct state
+before Day-0 writes; an Application over a path the repository does not carry is a
+ComparisonError, which is not that state. For a workload cluster nothing writes there
+until the first application declares a public host, so the gap is the normal case rather
+than a moment. `add-cluster` therefore creates `generated/` with a `.gitkeep`, in code
+rather than in the template: the embed set deletes every directory named `generated`
+from a released binary — they hold one cluster's instance data, and 0.1.2 published this
+hub's Infisical project ids to every tenant that way — so a template directory would
+exist in development builds and be missing from every release.
+
+**A withdrawn Application.** The same template also hydrated `bundle.yaml`, an
+Application named `<cluster>-platform` pulling the environment-manager chart with the
+workload cluster as its destination. It is withdrawn: nothing applied it either, and it
+could not have worked where it was aimed, because that chart renders ApplicationSets and
+a managed cluster runs Argo CD core — repo-server and application-controller, with no
+ApplicationSet controller. What installs the platform on a managed cluster is the
+management cluster's own boundary ApplicationSets, which select it by the
+`spoke-type: pool` label the SpokePool composition writes onto its Argo CD cluster
+Secret. A test asserts the template declares no chart source, so it cannot return
+quietly.
+
 ## Consequences
 
 ### Positive

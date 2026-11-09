@@ -9,7 +9,9 @@ Secrets at rest, Accepted), ADR-104 (no key material in node bootstrap material 
 not in force), ADR-003 §6 (ESO/Infisical, at-rest encryption), ADR-112 (each platform application
 owns its PostgreSQL cluster), ADR-037 (environment promotion; its clause 2 is superseded by
 Revision 7 below), ADR-046 §11 (placement classes), ADR-051 (environment DNS naming; its
-Amendment 2026-09-18 decided the DNS half of Revision 7)
+Amendment 2026-09-18 decided the DNS half of Revision 7), ADR-114 (destroying a box: the
+inverse of this ADR, and where ownership, the two teardown modes and what outlives a
+cluster are decided)
 
 *Revised 2026-11-02 (Revision 5): Class B is per application (ADR-112); Velero is Class M's
 mechanism. Revision 6: Class M splits into credentials, resources and activation streams, and

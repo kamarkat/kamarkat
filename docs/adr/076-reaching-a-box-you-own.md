@@ -13,8 +13,9 @@ a tenant who stops buying maintenance keeps a running control plane.
 Neither says how anyone reaches it. Five facts bear on that.
 
 **Day-0 produces an admin credential and then discards it.** CAPI writes the
-cluster's admin kubeconfig into a Secret, and the CLI copies it to
-`k8-secrets/kubeconfig/<cluster>.kubeconfig`. That directory is gitignored, the
+cluster's admin kubeconfig into a Secret, and the CLI copied it to
+`k8-secrets/kubeconfig/<cluster>.kubeconfig` (no longer read as an access source: see
+the amendment of 2026-11-09). That directory is gitignored, the
 bootstrap workflow never mentions it, and it is not a registered ADR-045 artifact.
 Under ADR-072 Day-0 runs on an ephemeral runner, so the file is destroyed with the
 job. A tenant finishes onboarding owning a cluster they hold no credential for.
@@ -365,6 +366,76 @@ An encrypted kubeconfig in the tenant's repository was considered and is rejecte
 below. The short reason is that git history is permanent: ciphertext committed today
 is decryptable by whoever holds the key in five years, and a credential with a
 one-year life leaves four years of exposure for no benefit.
+
+## Amendment 2026-11-09: access is derived from an identity, not kept on a machine
+
+The decision above stands: the escrow is the authority, and a box's admin credential is
+preserved outside the box because Day-0 produces it on a runner that is then destroyed.
+What this amendment corrects is the other half — how a person or a pipeline *obtains* it.
+
+**What the Context above still described, and what was wrong with it.** The CLI copied
+the kubeconfig to `k8-secrets/kubeconfig/<cluster>.kubeconfig`, and every external
+command that needed a cluster resolved it from that machine: a path recorded in
+`.state`, then that directory, then `--context=kind-<cluster>` as a last resort. Three
+consequences, each observed rather than predicted:
+
+- A box was operable from exactly one workstation — the one that bootstrapped it. A
+  second authorized operator could authenticate to nothing, because the credential was
+  a file rather than a grant.
+- Reading the escrow needed the escrow's own MACHINE identity, so its four
+  `INFISICAL_ESCROW_*` values had to be copied onto each workstation. A shared secret
+  authenticates everyone as the same identity, cannot be revoked for one of them, and
+  records the box rather than the operator in the audit log.
+- The last resort failed OPEN. On a cloud box `--context=kind-<cluster>` resolves to
+  nothing, so every `kubectl` read returned empty and a teardown destroyed the servers
+  while skipping the load-balancer drain, the finalizer strip and the DNS release — and
+  reported success.
+
+**The decision.** An external command resolves cluster access per invocation, from three
+inputs and no others:
+
+| Input | Where it lives | Why not elsewhere |
+|---|---|---|
+| The box's identity and the address of its escrow | the box's own declaration, `registry/clusters/<cluster>/values.yaml` (`boxId`, `escrow.url`, `escrow.projectId`) | they are NAMES and grant nothing; keeping them only in `k8-secrets/infisical/` is what made a second workstation impossible — a developer could authenticate and still not know which Infisical to ask |
+| The identity asking | the operator's own Infisical session (`kakt login`), kept in the OS credential store; or a machine identity in the environment for automation | the read is then authorized by that person's permissions and attributed to them, not to a shared box credential |
+| The credential itself | read from the escrow at the moment of use, written to a 0600 temporary file, removed when the command ends | a credential that persists on a workstation is one that outlives the task and the authorization |
+
+`kakt login` uses the identity provider's own browser flow; the session is stored through
+the platform's credential-store abstraction and never in a dotfile. A machine with no OS
+credential store is told to use a machine identity rather than being given a file vault,
+because a passphrase beside its own ciphertext is the shape this ADR already rejects for
+kubeconfigs.
+
+**One resolver, and no searching.** All of it lives behind a single interface
+(`internal/kakt-cli/hubaccess`), which every external hub-facing command consumes:
+teardown, `kakt kubeconfig`, diagnostics, recovery. `.state`, `k8-secrets/` and any
+inferred context are no longer access sources. An operator who means to use a particular
+file passes `--kubeconfig`, which is a statement rather than a search, and which remains
+the supported path for a box that never finished bootstrapping and therefore escrowed
+nothing.
+
+**Provider credentials are escrowed too, and box-scoped.** Destroying or repairing
+infrastructure is a provider API call, and that credential lived in `HCLOUD_TOKEN` or
+`k8-secrets/hetzner/token` — so the only machine that could delete a box's servers was
+the one that created them. It is now enrolled into the escrow as
+`provider-credential-<provider>` BEFORE any infrastructure exists, and a failure to
+enrol fails the bootstrap: a box whose recovery credential is nowhere is a box that
+cannot be recovered, which is the condition this ADR exists to prevent. It is keyed by
+the BOX, not the cluster, so a successor hub finds the credential already there (ADR-111
+§1); a different credential is never replaced implicitly, and rotation is an explicit
+act.
+
+ADR-114 is the first consumer of all of this: a teardown is exactly the operation whose
+credentials cannot come from the box, and it is where the four provider-discovery states
+and the refusal to proceed on an unknown answer are decided.
+
+**What this does not claim.** Reading an escrowed kubeconfig grants cluster-admin,
+because that is what the credential is. An authenticated Infisical read is an
+authorization boundary at the CREDENTIAL, not per-person RBAC inside the cluster, and the
+audit attribution it buys is for the retrieval rather than for what the holder then does.
+Day-to-day access remains OIDC through the box's own identity provider, exactly as
+decided above; this amendment is about the break-glass and lifecycle path, which is the
+one that could not previously be exercised from a second machine at all.
 
 ## Alternatives considered
 
