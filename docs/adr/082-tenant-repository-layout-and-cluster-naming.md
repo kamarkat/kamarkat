@@ -75,12 +75,31 @@ provider was the prior arrangement and cannot express the multiple-cells case.
 
 ## Amendment 2026-11-07: an application is deployed to every cluster serving its environment
 
-An application is defined once in its environment and deployed to every workload cluster
-whose own `environmentSlug` is that environment. There is no separate placement decision:
+**The contract, in full, including both of its negatives:**
+
+> A workload cluster declares its `environmentSlug`. Every application defined in that
+> environment is deployed to every workload cluster serving that environment.
+> **Applications do not select clusters, and clusters do not select individual
+> workloads.**
 
 ```
 cluster.environmentSlug == application's environment directory
 ```
+
+An application is defined once in its environment and deployed to every workload cluster
+serving it. There is no separate placement decision, and there are therefore two shapes
+that do not belong in this model and are not coming back:
+
+| Withdrawn shape | Where it was | Why it is excluded |
+|---|---|---|
+| Application-side placement — `clusterName`, `cellId`, or a `clusters[]` list | `environments/<env>/<app>/values.yaml` | it made the application's own file the placement decision, so an environment's definitions had to be edited whenever its clusters changed |
+| Cluster-side workload selection — `workloads[]`, or any per-cluster list of what runs on it | `registry/clusters/<cluster>/values.yaml` | it would make a cluster's declaration a second authority over the same fact, and two authorities over placement disagree silently: an application present in one and absent from the other generates nothing and reports healthy |
+
+Both negatives matter for the same reason the positive rule does. Placement is derived
+from one equality, so there is no second place it can be stated, no pair of statements to
+reconcile, and nothing to edit when a cluster is added or removed. A cluster's
+declaration says what the cluster IS; an application's says what the application IS;
+neither names the other.
 
 **Four things this separates, which were previously conflated:**
 
