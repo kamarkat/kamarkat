@@ -1,8 +1,10 @@
 package tenant
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -272,4 +274,61 @@ func renameIncarnation(raw []byte, from, to string) []byte {
 		lines[i] = strings.ReplaceAll(line, from, to)
 	}
 	return []byte(strings.Join(lines, "\n"))
+}
+
+// IncarnationsEverDeclared enumerates every management cluster this repository
+// has ever declared, including those whose directory is gone.
+//
+// `Box.Management` reads the working tree, which is the right answer for what the
+// box declares NOW and the wrong one for what it has OWNED. A directory removed
+// or renamed -- by a mistaken cleanup, a rebase, or someone tidying up after a
+// cluster they believed was destroyed -- takes its incarnation out of that list,
+// and an incarnation absent from the list is never asked about at the provider.
+// Its servers then become invisible to the duplicate check at exactly the moment
+// they matter: a second management cluster is admitted because the first was
+// forgotten.
+//
+// So the repository's own history is read as well. It is box-scoped by
+// construction (one repository is one box), authoritative about what was
+// declared, needs no credential, and cannot be edited by deleting a file --
+// which is the failure this closes. CAPH's label identifies a cluster rather than
+// a box, so the identities have to come from the box's own records; this is one
+// of them, and nothing here guesses a name from a prefix or a resource.
+//
+// Names are returned, not verdicts. Whether any of these clusters EXISTS is a
+// question only the provider answers.
+func IncarnationsEverDeclared(ctx context.Context, gitopsDir string) ([]string, error) {
+	// --diff-filter=A over the marker path: every commit that ADDED a management
+	// cluster's root Application, whatever happened to it afterwards.
+	marker := filepath.Join(RegistryDir, "clusters")
+	cmd := exec.CommandContext(ctx, "git", "-C", gitopsDir, "log",
+		"--all", "--diff-filter=A", "--name-only", "--pretty=format:",
+		"--", marker+"/*/"+managementMarker)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("read this box's declaration history (git log in %s): %w: %s",
+			gitopsDir, err, strings.TrimSpace(string(out)))
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "/")
+		// registry/clusters/<name>/root.yaml
+		if len(parts) != 4 || parts[3] != managementMarker {
+			continue
+		}
+		name := parts[2]
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }

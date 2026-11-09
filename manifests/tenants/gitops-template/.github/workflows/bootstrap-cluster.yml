@@ -82,6 +82,23 @@ on:
 # default is read-only the callee asking for `contents: write` exceeds it. GitHub
 # rejects that before the job starts, as a `startup_failure` after a few seconds
 # with no logs and no annotation naming the cause.
+# ONE BOOTSTRAP AT A TIME FOR THIS BOX, which is what makes the one-management-
+# cluster rule hold rather than merely be checked.
+#
+# `kakt bootstrap` asks the provider what this box already owns and then builds.
+# Two dispatches that overlap can both read an empty inventory and both build, and
+# no read-only check can prevent that by itself: the guarantee needs the two runs
+# serialized, and this repository IS the box, so the repository is the scope.
+#
+# Queued rather than cancelled. A bootstrap is resumable, so a second dispatch of
+# the SAME cluster waits and then continues the attempt already made; a dispatch
+# of a DIFFERENT cluster waits and is then refused by admission, because by then
+# the first run owns infrastructure. Cancelling instead would abandon a half-built
+# control plane, which is the state that costs money and explains nothing.
+concurrency:
+  group: bootstrap-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 

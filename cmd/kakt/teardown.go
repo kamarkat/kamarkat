@@ -48,7 +48,7 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 		RunE:    runTeardown,
 	}
 
-	cmd.Flags().StringVar(&clusterName, "name", "", "Hub Cluster name (required)")
+	cmd.Flags().StringVar(&clusterName, "name", "", "management cluster name (required)")
 	cmd.Flags().BoolVar(&teardownForce, "force", true, "Force deletion of resources (default true)")
 	cmd.Flags().BoolVar(&teardownConfirm, "confirm", false, "Confirm deletion (required for safety)")
 	cmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging")

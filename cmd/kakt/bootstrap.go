@@ -10,6 +10,7 @@ import (
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/bootstrap"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/cluster"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/preflight"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"github.com/spf13/cobra"
 )
 
@@ -186,7 +187,7 @@ sixteen hours behind a run that reported success.`,
 	}
 
 	// Required flags
-	cmd.Flags().StringVar(&clusterName, "name", "", "Hub Cluster name (alphanumeric + hyphens)")
+	cmd.Flags().StringVar(&clusterName, "name", "", "management cluster name (alphanumeric + hyphens)")
 	// ADR-076. Empty on a first build: the issuer runs on the cluster being
 	// created, so at this moment it does not exist and cannot be pointed at.
 	// Supplied on a REBUILD of an environment whose issuer already runs, which is
@@ -326,6 +327,37 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		if err := requireTailnetCredentials(tailnetName); err != nil {
 			return err
 		}
+	}
+
+	// ONE MANAGEMENT CLUSTER PER BOX, settled here for the same reason: a second
+	// one is only detectable before it is built, and a resumed bootstrap skips
+	// completed phases so a check inside a phase never runs on the attempt that
+	// matters.
+	//
+	// The provider's inventory is the authority and the only thing asked. A
+	// declaration in the repository and an escrow artefact both outlive the
+	// cluster by design, and an unreachable Kubernetes API is the state of a
+	// wedged cluster whose servers are still running -- the worst possible moment
+	// to conclude that nothing is there and build a second control plane.
+	admission, err := bootstrap.ManagementAdmission{
+		GitopsDir: gitopsDir,
+		Creating:  clusterName,
+		Owned:     providerOwnedCounts,
+		// Box-wide: an incarnation whose directory was removed still owns its
+		// servers, and the repository's history is the box's own record of
+		// having declared it.
+		Incarnations: tenant.IncarnationsEverDeclared,
+	}.Admit(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("   Box: %s\n", admission.BoxID)
+	if admission.Resuming > 0 {
+		// Named rather than silent: this run is continuing an attempt that left
+		// infrastructure behind, and a tenant who expected a clean build should
+		// see that it is not one.
+		fmt.Printf("   Resuming: %s already owns %d provider resource(s) from an earlier attempt\n",
+			clusterName, admission.Resuming)
 	}
 
 	// At-rest encryption is settled HERE, before anything is provisioned, for the

@@ -1040,6 +1040,50 @@ from the field that requests it, precisely because that mode can delete what nob
 **That idiom is adopted verbatim**: destructive breadth is never reachable from a declaration
 alone. It is the same reasoning as §3's refusal to let an unverified object be released.
 
+### 5. The identities asked about are the box's, not the working tree's
+
+CAPH's `caph-cluster-<name>=owned` identifies a **cluster**, not the box it belongs to, so
+admission has to supply the names. Taking them from the working tree alone leaves one way to
+defeat the whole check: remove or rename a management cluster's directory — a mistaken
+cleanup, a rebase, someone tidying up after a cluster they believed was destroyed — and that
+incarnation is never asked about, so its surviving servers are invisible at the one moment
+they matter.
+
+Identities therefore come from the box's own records: the clusters the working tree declares
+**and** every cluster the repository's history shows was ever declared, read from the commits
+that added a `registry/clusters/*/root.yaml`. One repository is one box, so that record is
+box-scoped by construction; it needs no credential, and it cannot be edited by deleting a
+file. Nothing is inferred from a resource name or a tenant prefix.
+
+History widens who is *asked about*; it never makes a removed cluster reconcilable. A cluster
+present only in history has no root Application today, so provisioning it is refused with the
+command that declares it again. A record that cannot be read is refused rather than treated as
+"none", for the same reason an unreadable provider inventory is.
+
+The remaining gap is narrow and worth naming: a repository whose history has been rewritten or
+re-created loses that record. The authoritative record for that case is the escrow, where every
+incarnation is a folder under `/hub-operator/<boxId>/clusters/` (§1). Reading it would make
+bootstrap require the escrow credential, which today is optional at bootstrap time, so it is
+not done here.
+
+### 6. One bootstrap at a time per box
+
+A read-only inventory check followed by provisioning is not by itself an upper bound: two
+dispatches that overlap can both observe an empty inventory and both build. The guarantee needs
+the runs serialized, and the box already has a serialization scope — its repository, where the
+bootstrap workflow runs. `bootstrap-cluster.yml` now declares
+`concurrency: { group: bootstrap-${{ github.repository }}, cancel-in-progress: false }`.
+
+Queued rather than cancelled, because a bootstrap is resumable. A second dispatch of the **same**
+cluster waits and then continues the attempt already made (§3 above); a dispatch of a
+**different** cluster waits and is then refused by admission, because by then the first run owns
+infrastructure. Cancelling would abandon a half-built control plane instead.
+
+This covers the path a box is built through. Two operators running `kakt bootstrap` from their
+own workstations against one box are outside any repository-scoped mechanism; the admission check
+still narrows the window to the time between the inventory read and the first resource created,
+and nothing short of a lock the provider itself honours would close it.
+
 ### 5. What this revision does not change
 
 Planned succession and disaster reconstruction remain separate paths (§4, §5). The supported
@@ -1182,3 +1226,87 @@ configuration are unchanged and are not derived from any environment. The suppor
 combination stands as §9 records it. ADR-112 continues to own per-application clusters and their
 archives. No new operator, control plane, reconciler or release gate is introduced, and no
 release workflow changes.
+
+## Revision 8 (2026-11-09): one management cluster per box, and the provider decides
+
+§1 made the box outlive its cluster, and §4 described a planned succession in which a
+predecessor and a successor coexist. Nothing enforced an upper bound, and the lifecycle
+tooling that followed made the gap reachable: `kakt tenant add-management` declares a new
+incarnation beside the old one, and `bootstrap` would have built it whatever the previous
+one was doing.
+
+### 1. The invariant
+
+**A box has at most one management cluster holding infrastructure at a time.** A box may
+have many incarnations across its life; two of them owning management infrastructure
+simultaneously is not a succession, it is two control planes reconciling one repository.
+Both would act on the same claims under `registry/clusters/`, so each would provision the
+other's workload clusters under names already taken, and each would archive its database to
+a prefix the other is writing.
+
+`boxId` stays, the replacement takes a new `clusterName`, the repository is reused as it is,
+and no past incarnation's escrow artefacts or archives are deleted by the replacement.
+
+This narrows §4 rather than contradicting it. The concurrency §4 describes is `clusterctl
+move` between a live predecessor and a live successor, which is a transfer of one set of
+management objects. What is excluded is two clusters independently reconciling the tenant's
+declarations, which §4 never proposed and nothing prevented.
+
+### 2. The provider's inventory is the authority, and the only source consulted
+
+Three sources could answer "does this box already have a management cluster", and two of
+them are wrong in opposite directions:
+
+| Source | Why it is not the authority |
+|---|---|
+| the gitops repository | a declaration outlives every incarnation by design (§1). It proves a cluster was wanted, never that one exists. |
+| the escrow | holds a predecessor's artefacts deliberately, for as long as its recovery point matters (§1, table). |
+| the Kubernetes API | answers only while the cluster is healthy. An unreachable API is also the state of a cluster whose servers are running and whose control plane is wedged — the most dangerous moment to conclude "absent". |
+
+So admission asks the provider, whose resources carry their owning cluster's name as a
+label written by the infrastructure controller: `caph-cluster-<name>=owned`, exactly as
+§5 already relies on for reconstruction, and exactly as the teardown deletes by. One
+question, one implementation. A cluster that owns no labelled resource is **verifiably**
+destroyed; one that owns any is present whether or not it answers.
+
+An inventory that cannot be read is refused, not treated as empty: an unreadable answer is
+the same evidence as an unasked question.
+
+### 3. Retry versus duplicate
+
+Infrastructure owned by the incarnation **being created** is an earlier attempt at the same
+one, so continuing is a retry and is allowed — and reported, because a bootstrap that
+silently adopts half-built infrastructure is how two attempts come to disagree about what
+exists. Infrastructure owned by any **other** declared management cluster is a duplicate
+and is refused.
+
+### 4. Teardown ordering is unchanged and now also gates creation
+
+§23 of ADR-046 and the teardown's own ordering rule stand: the management cluster goes last.
+Admission additionally refuses a replacement while any workload cluster this box declares
+still owns provider resources. Built anyway, the replacement would leave those clusters
+unmanaged and still billing, then rebuild them from the claims still in the repository under
+the names they already hold.
+
+### 5. What this revision does not change
+
+Disaster reconstruction (§5 of the original decision) is explicitly **not** addressed here.
+Admission refuses an ordinary creation while workload clusters still own infrastructure, which is
+correct for deliberate replacement and means a management cluster lost while its workload clusters
+survive cannot be rebuilt through `bootstrap`. Whether the platform re-adopts surviving clusters or
+requires them to be destroyed first is a product decision with its own mechanism, and it is not
+settled by this revision. Nothing here deletes or recreates a surviving workload cluster, and no
+ordinary bootstrap is reinterpreted as a recovery.
+
+The identity scopes of §1, the recovery-state contract of §2, the adoption pause of §3,
+`clusterctl move` as the planned transfer in §4, the reconstruction order of §5 and the
+version compatibility of §9 are untouched. Admission is a preflight in an existing command,
+checked before anything is provisioned, using the inventory the teardown already owns. No
+new operator, controller, admission webhook, compatibility layer or release gate is
+introduced.
+
+One correction shipped with it: the gitops template rendered `dns.ownerId` from
+`<CLUSTER_NAME>`, while §1 and §4 both key DNS record ownership on `boxId` — §4 is explicit
+that a successor *adopts* the zone's records rather than re-keying them. Identical for a
+box's first incarnation and therefore invisible until a second one existed. The template now
+renders `boxId`, and the rendered value is unchanged for every box that exists today.
