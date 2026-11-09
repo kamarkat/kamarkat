@@ -3,25 +3,22 @@
 #
 # Sourced by hub-bootstrap.sh; invoked by `hub-bootstrap.sh <env> --teardown`.
 #
-# Three defects make a naive teardown leave paid infrastructure running, and each
-# one is silent — the command exits 0 either way:
+# The order is the contract, not a convenience:
 #
-#   1. `hub teardown --name=<hub>` matches Hetzner resources by name/label
-#      containing the HUB name (teardown/orchestrator.go:137). Spoke resources are
-#      named spoke-pool-*, so the spoke is never touched. Tearing the hub down
-#      first also removes the CAPI controllers that would have unwound the spoke,
-#      which is why the spoke must go first.
+#   1. The spoke goes first. The hub holds the spoke's CAPI objects and the only
+#      controller that can deprovision its load balancers, so a hub destroyed
+#      first leaves the spoke running with nothing able to delete it. `kakt
+#      teardown` now refuses on exactly that, naming what it found, so step 2
+#      below is what makes step 3 possible.
 #
-#   2. `hub spoke teardown --name=<spoke>` is a no-op. discoverSpokeClusters
-#      rebuilds the name from label parts as strings.Join(parts[2:5], "-")
-#      (spoke/orchestrator.go:104), so caph-cluster-spoke-pool-hybrid-dev-01-*
-#      yields "spoke-pool-hybrid" — which never equals "spoke-pool-hybrid-dev-01",
-#      so the filter skips it. It must be called WITHOUT --name, which deletes
-#      every spoke in the project; this script therefore takes an inventory first
-#      and refuses if a spoke from another environment would be caught.
+#   2. The claim goes before the infrastructure. ArgoCD re-creates the SpokePool
+#      while it is being deleted, so the Application and the claim are removed
+#      first -- which the Go orchestrator does not do for the hub's own root
+#      Application.
 #
-#   3. ArgoCD re-creates the SpokePool while it is being deleted, so the claim has
-#      to be removed before the infrastructure.
+#   3. Deletion is by ownership label. `caph-cluster-<cluster>=owned`, an exact
+#      key, so naming one cluster cannot reach another's resources and a spoke
+#      belonging to a different box in the same project is reported and left.
 #
 # A verification sweep runs afterwards and deletes anything the CLI missed, scoped
 # to this environment's names, because "teardown succeeded" with servers still
