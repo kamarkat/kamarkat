@@ -40,9 +40,10 @@ vocabularies.
 ## Decision
 
 **A tenant repository holds exactly one management cluster and any number of workload
-clusters.** Each has a directory named for it, as ADR-062 requires. The management
-cluster's directory additionally holds one Application per workload cluster, which is
-what brings that cluster into being.
+clusters.** Each has a directory named for it, as ADR-062 requires. A workload cluster's
+directory holds the SpokePool claim that brings it into being; the management cluster's
+directory holds the two ApplicationSets that generate the Applications for every cluster
+declaring one (amendment 2026-11-09).
 
 **The declaration that creates a workload cluster is the tenant's, not the bundle's.**
 It is hydrated from a retained template into the workload cluster's own directory and
@@ -72,6 +73,67 @@ Alternatives considered. Templating the name in the packaged chart was attempted
 refused by the packaging mechanism for the reason stated above; the refusal is correct
 and settles the question rather than blocking it. Keying the name on environment and
 provider was the prior arrangement and cannot express the multiple-cells case.
+
+## Amendment 2026-11-09: a workload cluster's existence is its claim file
+
+**`registry/clusters/<name>/infrastructure/spokepool.yaml` is the declaration, and the
+only one.** The file present means the cluster is desired; a commit that removes it is
+what deletes the cluster. The management cluster's directory carries two ApplicationSets
+generated from that path -- `<mgmt>-workload-clusters` and `<mgmt>-workload-generated` --
+so the two Applications a management cluster holds for a workload cluster are derived
+from the claim rather than committed beside it.
+
+What this replaces, and why it was not a design. Those Applications were flat files
+hydrated into the management cluster's directory, and that directory is applied by a root
+Application with `prune: false` -- correctly, because pruning it would let a mis-resolved
+conflict delete the platform Application and take every workload on the box with it. So
+`git rm` of a cluster's Application files left both Applications, and the cluster,
+running; something else had to delete the objects, and that something was a second
+imperative step (`kakt tenant remove-cluster --destroy`) holding a kubeconfig and reading
+the root's `requiresPruning` status to prove the removal had been pushed and synced. Its
+entire job was to close a window the repository had already declared shut.
+
+**The scope is an allowlist by construction.** A generator keyed on the claim path can
+only produce, and therefore only delete, Applications for clusters that declare a claim.
+The management cluster declares none -- Day-0 brought it into being -- so no element is
+ever generated for it, its own `bundle.yaml`, `generated.yaml` and `root.yaml` stay flat
+files, and the root still does not prune. The pruning boundary contains workload
+clusters and nothing else.
+
+**The deletion contract is the asymmetry between the two sets.** The infrastructure set
+sets `preserveResourcesOnDeletion: false`, so Argo CD gives its Applications the
+resources-finalizer and deleting one cascades to the claim, which Crossplane and Cluster
+API unwind. The generated set sets it to `true`: every resource it holds is addressed to
+the workload cluster being destroyed, so a cascade there buys nothing and blocks on an
+API server that is already gone. Neither template hardcodes the finalizer --
+`preserveResourcesOnDeletion` is what adds or withholds it (Argo CD v3.5.7,
+`docs/operator-manual/applicationset/Application-Deletion.md`), and stating it twice is
+how the two come to disagree.
+
+**A commit cannot report progress, so observation does.** `kakt tenant cluster-status`
+reads the declaration, the two Applications, the claim, the Cluster API object and the
+provider's inventory, and reports `declared`, `deleting`, `removed`, `failed` or
+`unknown`. `removed` requires the provider to have been asked: a declaration gone from
+git is not a destroyed cluster, and the state where nothing in the cluster holds it while
+the servers still run is reported as `failed`, because nothing is left that can finish.
+
+**The guard moves to the commit.** Refusing a removal while the box's `burstSpokePool`
+names the cluster, and refusing to let a cluster removal reach the management cluster's
+own declaration, are checks on the tenant repository's pull requests
+(`.github/workflows/cluster-removal.yml`), which also requires the destruction to be
+stated in the description rather than inferred from a deleted file. That makes the
+branch the management cluster reconciles load-bearing: a required check protects nothing
+if a commit can reach that branch another way, so the check also runs on direct pushes,
+where it cannot block but does leave a failed run against the commit that bypassed
+review. Chosen over a management-cluster admission webhook because the commit is the
+thing being guarded and the review is where the cause still is.
+
+kubefirst reaches the same place from the other side: its one registry Application sets
+`prune: true` (`internal/argocd/argocd.go:175` at the deployed reference) and removing a
+service there is a commit and nothing else (`internal/services/services.go:298`, which
+deletes files, commits, pushes, and calls no Argo CD API). What is not adopted is the
+blast radius: that root prunes its whole directory with no per-resource exemption, which
+is the thing `prune: false` here exists to prevent.
 
 ## Amendment 2026-11-07: an application is deployed to every cluster serving its environment
 

@@ -382,3 +382,15 @@ func (o *Orchestrator) discoverInventory(ctx context.Context, client *hcloud.Cli
 
 	return Inventory{Items: Attribute(labelled, targets), Queried: true}, nil
 }
+
+// ProviderInventory reads the provider's inventory for the named clusters, for a
+// caller that only wants the answer.
+//
+// Exported so `kakt tenant cluster-status` asks the provider the same question
+// the teardown asks, by the same ownership rule: a second implementation of
+// "does this cluster still have resources" is a second answer, and the two
+// disagreeing is exactly the uncertainty both commands exist to remove.
+func ProviderInventory(ctx context.Context, token string, clusters []string) (Inventory, error) {
+	o := &Orchestrator{}
+	return o.discoverInventory(ctx, hcloud.NewClient(hcloud.WithToken(token)), clusters)
+}

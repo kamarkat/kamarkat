@@ -1,190 +1,99 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/kubectl"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
 
-// newRemoveWorkloadClusterCmd is add-cluster's inverse.
+// newRemoveWorkloadClusterCmd is add-cluster's inverse, and it edits the
+// repository.
 //
-// Two invocations, not one, because the management cluster's root Application
-// self-heals: an Application deleted while its file is still in git comes back
-// on the next pass, and the cluster with it. So the declaration is removed and
-// pushed first, and only then is anything deleted on the management cluster --
-// which the second invocation confirms from the root's own view of git before
-// it deletes.
+// ONE INVOCATION, because the declaration is the cluster. The management
+// cluster's two ApplicationSets are generated from
+// registry/clusters/<name>/infrastructure/spokepool.yaml, so the commit that
+// removes that file stops the Applications being generated: the infrastructure
+// one is deleted with Argo CD's resources-finalizer, the claim goes with it, and
+// Crossplane and Cluster API unwind the cluster.
+//
+// IT WAS TWO, AND THE SECOND ONE WAS A WORKAROUND. The per-cluster Applications
+// were flat files in the management cluster's directory, which its root applies
+// with `prune: false`, so removing the files left both Applications -- and the
+// cluster -- running. `--destroy` then deleted those objects over a kubeconfig,
+// after reading the root's `requiresPruning` status to prove the removal had been
+// pushed and synced. Every part of that existed to close a window the repository
+// had already declared shut: declaration gone, cluster alive. The window is gone,
+// so the step is too (ADR-114 §5).
+//
+// What a commit cannot do is report progress. `kakt tenant cluster-status` does
+// that by observation.
 func newRemoveWorkloadClusterCmd() *cobra.Command {
 	var removal tenant.ClusterRemoval
-	var destroy bool
-	var kubeconfig string
-	var timeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:          "remove-cluster",
-		Short:        "Remove a workload cluster: its declaration, then the cluster",
+		Short:        "Remove a workload cluster by deleting its declaration",
 		SilenceUsage: true,
-		Long: `Remove a workload cluster from a tenant's box, in two steps.
+		Long: `Remove a workload cluster from a tenant's box by deleting its declaration:
+registry/clusters/<name>/, which holds the SpokePool claim that declares it.
 
-Without --destroy, it checks that nothing still names the cluster -- no
-application, and not the box's own burst pool -- and deletes the declaration from
-the repository: registry/clusters/<name>/, and the cluster's Applications in the
-management cluster's directory, <name>-infrastructure.yaml and
-<name>-generated.yaml. Nothing is destroyed yet -- the management cluster never
-deletes a cluster because its declaration disappeared. Commit and push.
+It checks that nothing still names the cluster -- not the box's own burst pool --
+prints the environment's applications so you can see what stops running, and
+deletes the directory. Nothing is destroyed yet, because nothing is committed yet.
 
-With --destroy, once the management cluster has synced that commit, it deletes
-the cluster's Applications on the management cluster: <name>-generated, then
-<name>-infrastructure, which destroys the cluster and its nodes. It refuses while
-the management cluster still reads the declaration from git, and while it cannot
-tell, because an Application deleted under either condition is recreated -- and a
-recreated infrastructure Application builds a new cluster under a name that is
-not meant to be used again.
+COMMITTING IS THE REMOVAL. The management cluster generates the cluster's
+Applications from that claim file; once it is gone from the branch the management
+cluster reconciles, the Applications stop being generated, the claim is deleted
+with them, and the cluster is unwound by the controllers that own it. Watch it
+with kakt tenant cluster-status --name <name>.
 
 The cluster's secrets and backups stay behind, and its name is never reused.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !destroy {
-				// What stops running, printed before anything is removed. Nothing
-				// here is a precondition: an environment's application definitions
-				// are not this cluster's to take with it.
-				if env, apps, err := removal.AffectedDeployments(); err == nil && len(apps) > 0 {
-					fmt.Printf("%s serves environment %q, which declares %d application(s):\n",
-						removal.Name, env, len(apps))
-					for _, a := range apps {
-						fmt.Printf("  %s\n", a)
-					}
-					fmt.Printf("\nTheir deployments on %s stop. Their definitions stay in "+
-						"environments/%s/ and deploy to every other cluster serving %q.\n\n",
-						removal.Name, env, env)
+			// What stops running, printed before anything is removed. Nothing here
+			// is a precondition: an environment's application definitions are not
+			// this cluster's to take with it.
+			if env, apps, err := removal.AffectedDeployments(); err == nil && len(apps) > 0 {
+				fmt.Printf("%s serves environment %q, which declares %d application(s):\n",
+					removal.Name, env, len(apps))
+				for _, a := range apps {
+					fmt.Printf("  %s\n", a)
 				}
-
-				removed, err := removal.RemoveDeclaration()
-				if err != nil {
-					return err
-				}
-				fmt.Printf("✓ declaration of %q removed\n", removal.Name)
-				for _, p := range removed {
-					fmt.Printf("  %s\n", p)
-				}
-				fmt.Println("\nNothing is destroyed yet. Commit and push, wait for the management cluster")
-				fmt.Printf("to sync, then run this again with --destroy to destroy %s.\n", removal.Name)
-				return nil
+				fmt.Printf("\nTheir deployments on %s stop. Their definitions stay in "+
+					"environments/%s/ and deploy to every other cluster serving %q.\n\n",
+					removal.Name, env, env)
 			}
-			return destroyWorkloadCluster(cmd, removal, kubeconfig, timeout)
+
+			removed, err := removal.RemoveDeclaration()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("✓ declaration of %q removed\n", removal.Name)
+			for _, p := range removed {
+				fmt.Printf("  %s\n", p)
+			}
+			fmt.Println("\nNothing is destroyed yet: the working tree is edited, not the branch")
+			fmt.Println("the management cluster reconciles. Commit and push, and that commit is")
+			fmt.Printf("what destroys %s.\n\n", removal.Name)
+			fmt.Printf("  kakt tenant cluster-status --name %s --mgmt-cluster %s\n",
+				removal.Name, removal.MgmtCluster)
+			fmt.Printf("\nIts secrets under /spoke-pool/%s/ and its backups under the %s/ prefix\n",
+				removal.Name, removal.Name)
+			fmt.Println("remain. The name is not reused: both outlive the cluster.")
+			return nil
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&removal.GitopsDir, "gitops-dir", ".", "the tenant repository")
 	f.StringVar(&removal.MgmtCluster, "mgmt-cluster", "", "the management cluster that created this one (required)")
 	f.StringVar(&removal.Name, "name", "", "the workload cluster to remove (required)")
-	f.BoolVar(&destroy, "destroy", false,
-		"destroy the cluster on the management cluster, once its declaration is removed and pushed")
-	f.StringVar(&kubeconfig, "kubeconfig", "",
-		"the management cluster's kubeconfig (default: k8-secrets/kubeconfig/<mgmt-cluster>.kubeconfig in --gitops-dir)")
-	f.DurationVar(&timeout, "timeout", 30*time.Minute, "how long to wait for each Application to be deleted")
+	// --destroy, --kubeconfig and --timeout ARE GONE, and withdrawn rather than
+	// accepted-and-ignored: a script that passes --destroy stops instead of
+	// quietly doing half of what it asked for. There is nothing left for them to
+	// do -- the commit destroys the cluster, and watching it is cluster-status.
 	for _, required := range []string{"mgmt-cluster", "name"} {
 		_ = cmd.MarkFlagRequired(required)
 	}
 	return cmd
-}
-
-// destroyWorkloadCluster deletes the cluster's Applications on the management
-// cluster, after confirming the root no longer applies its declaration.
-func destroyWorkloadCluster(cmd *cobra.Command, r tenant.ClusterRemoval, kubeconfig string, timeout time.Duration) error {
-	if r.Declared() {
-		return fmt.Errorf("%q is still declared in %s: run without --destroy first, then commit "+
-			"and push.\n\nDeleting its Applications while the declaration is in git does not "+
-			"hold: the management cluster's root Application recreates them, and the cluster "+
-			"with them", r.Name, r.GitopsDir)
-	}
-	if kubeconfig == "" {
-		kubeconfig = filepath.Join(r.GitopsDir, "k8-secrets", "kubeconfig", r.MgmtCluster+".kubeconfig")
-	}
-	if _, err := os.Stat(kubeconfig); err != nil {
-		return fmt.Errorf("no kubeconfig at %s: %w.\nPass --kubeconfig with the management "+
-			"cluster's", kubeconfig, err)
-	}
-
-	ctx := cmd.Context()
-	k := &kubectl.Executor{}
-	base := []string{"--kubeconfig", kubeconfig, "-n", "platform-ops"}
-
-	// The root's own view of git. prune: false means a file removed from git
-	// stays applied and is reported requiresPruning; an entry WITHOUT that flag
-	// is one the root still reads from git, and would recreate.
-	out, err := k.Output(ctx, append(base, "get", "application", r.RootApplication(), "-o", "json")...)
-	if err != nil {
-		return fmt.Errorf("read %s on the management cluster: %v\n%s", r.RootApplication(), err, out)
-	}
-	var root struct {
-		Status struct {
-			Resources []struct {
-				Kind            string `json:"kind"`
-				Name            string `json:"name"`
-				RequiresPruning bool   `json:"requiresPruning"`
-			} `json:"resources"`
-		} `json:"status"`
-	}
-	if err := json.Unmarshal(out, &root); err != nil {
-		return fmt.Errorf("parse %s: %w", r.RootApplication(), err)
-	}
-	// The decision belongs to the library, which is where it can be tested
-	// against a stale root without a cluster to stale.
-	observed := make([]tenant.RootResource, 0, len(root.Status.Resources))
-	for _, res := range root.Status.Resources {
-		observed = append(observed, tenant.RootResource{
-			Kind: res.Kind, Name: res.Name, RequiresPruning: res.RequiresPruning,
-		})
-	}
-	if err := r.DestroyBlocked(observed); err != nil {
-		return err
-	}
-
-	var deleted, absent int
-	for _, app := range r.Applications() {
-		out, err := k.Output(ctx, append(base, "get", "application", app, "--ignore-not-found", "-o", "name")...)
-		if err != nil {
-			return fmt.Errorf("read %s: %v\n%s", app, err, out)
-		}
-		if strings.TrimSpace(string(out)) == "" {
-			fmt.Printf("  · %s: already absent\n", app)
-			absent++
-			continue
-		}
-		fmt.Printf("  deleting %s (up to %v)\n", app, timeout)
-		out, err = k.Output(ctx, append(base, "delete", "application", app,
-			"--wait", fmt.Sprintf("--timeout=%s", timeout))...)
-		if err != nil {
-			return fmt.Errorf("delete %s: %v\n%s", app, err, out)
-		}
-		fmt.Printf("  ✓ %s deleted\n", app)
-		deleted++
-	}
-
-	// Nothing deleted is not a failure when every Application is verifiably gone:
-	// that is what a re-run of a destroy that succeeded looks like, and it was
-	// reported as "nothing was destroyed. Check the name, and --kubeconfig is the
-	// management cluster's" -- blaming the arguments for a cluster that is
-	// already gone. A wrong name or a wrong box reads the same way, so the state
-	// is named rather than diagnosed.
-	if deleted == 0 && absent == len(r.Applications()) {
-		fmt.Printf("\n✓ %s already destroyed: the management cluster holds no Applications for it\n", r.Name)
-		fmt.Println("  (if you expected otherwise, check --name and that --kubeconfig is this box's)")
-		return nil
-	}
-
-	fmt.Printf("\n✓ %s destroyed\n", r.Name)
-	fmt.Println("\nStill there, until you delete them:")
-	fmt.Printf("  secrets  /spoke-pool/%s/ in the box's secret store\n", r.Name)
-	fmt.Printf("  backups  the %s/ prefix in your object storage\n", r.Name)
-	fmt.Printf("\nThe name %s is not reused: its secret path and backup prefix outlive it.\n", r.Name)
-	return nil
 }

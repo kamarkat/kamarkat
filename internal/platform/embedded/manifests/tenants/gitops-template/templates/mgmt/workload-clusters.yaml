@@ -1,0 +1,160 @@
+# WHAT MAKES A WORKLOAD CLUSTER EXIST: its claim file, and nothing else.
+#
+# These two ApplicationSets are generated from
+# registry/clusters/*/infrastructure/spokepool.yaml. A claim file present means
+# the cluster is desired; a commit that removes the file is what deletes the
+# cluster. There is no second step, no command to run afterwards and no state in
+# which the repository says a cluster is gone while the cluster runs.
+#
+# WHAT THIS REPLACES. The two Applications were flat files hydrated into this
+# directory -- <cluster>-infrastructure.yaml and <cluster>-generated.yaml -- and
+# this cluster's root Application applies this directory with `prune: false`. So
+# a `git rm` of those files left both Applications running and the cluster with
+# them, and something else had to delete the objects: `kakt tenant remove-cluster
+# --destroy`, a second, credentialled, imperative step whose whole job was to
+# close a window the repository had already declared shut. kubefirst's registry
+# Application prunes (argo-cd v3.5.7 object in internal/argocd/argocd.go:175) and
+# removing a service there is a commit and nothing else; this gets to the same
+# place without widening the root's blast radius.
+#
+# WHY A GENERATOR AND NOT `prune: true` ON THE ROOT. The root applies this
+# directory flat: bundle.yaml, generated.yaml and root.yaml sit in it beside the
+# per-cluster files, so one sync policy governs all of them. Pruning there means a
+# mis-resolved conflict that drops bundle.yaml deletes the platform Application
+# and its resources-finalizer takes every workload on the box with it -- the
+# reason that flag is off, written in root.yaml. A generator's scope is an
+# allowlist by construction: the only Applications these can delete are the ones
+# matching a claim file, and the management cluster has no claim.
+#
+# THE MANAGEMENT CLUSTER IS OUTSIDE THIS LIFECYCLE. It declares no SpokePool --
+# Day-0 brought it into being -- so no element is ever generated for it, and its
+# own bundle.yaml, generated.yaml and root.yaml stay where they are, applied by a
+# root that still does not prune.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: <CLUSTER_NAME>-workload-clusters
+  namespace: platform-ops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    # THE DELETION CONTRACT, AND THE ONLY PLACE IT IS STATED.
+    #
+    # false means the generated Application carries Argo CD's
+    # resources-finalizer, so when the claim file disappears and this element
+    # stops being generated, the Application is deleted WITH its resources: the
+    # SpokePool claim goes, Crossplane and Cluster API unwind the cluster, and
+    # the in-cluster controllers deprovision what only they can.
+    #
+    # The finalizer is deliberately not also written into the template below.
+    # preserveResourcesOnDeletion is what adds or withholds it (argo-cd v3.5.7,
+    # docs/operator-manual/applicationset/Application-Deletion.md), so stating it
+    # twice is how the two come to disagree.
+    preserveResourcesOnDeletion: false
+  generators:
+    - git:
+        repoURL: <GITOPS_REPO_URL>
+        revision: main
+        # THE FILE IS THE DECLARATION. A files generator matches the file itself,
+        # so removing it stops the element being produced -- which a directories
+        # generator would not: a stray file left beside the claim would keep the
+        # directory, and the cluster, alive.
+        #
+        # One document per file, which is why the Namespace that used to share
+        # this file lives in namespace.yaml beside it: the generator parses the
+        # matched file to build its parameters, and a multi-document stream is not
+        # parseable as one.
+        files:
+          - path: 'registry/clusters/*/infrastructure/spokepool.yaml'
+  template:
+    metadata:
+      # The cluster's own name, read from the path rather than from the file's
+      # contents: the path is what the generator matched and cannot disagree with
+      # the directory the Application then applies.
+      name: '{{ index (splitList "/" .path.path) 2 }}-infrastructure'
+      namespace: platform-ops
+    spec:
+      project: default
+      source:
+        repoURL: <GITOPS_REPO_URL>
+        targetRevision: main
+        path: '{{ .path.path }}'
+      # In-cluster: the claim is reconciled by THIS cluster's Crossplane, which is
+      # what provisions the workload cluster. The workload cluster does not exist
+      # yet to reconcile its own creation.
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: platform-ops
+      syncPolicy:
+        automated:
+          # prune: false INSIDE the Application, deliberately, and it is not in
+          # tension with the policy above. This governs objects edited out of the
+          # claim directory while the cluster is meant to exist; that governs the
+          # Application's own removal when the cluster is not. Pruning here would
+          # make an edit to the directory capable of deleting the claim.
+          prune: false
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: <CLUSTER_NAME>-workload-generated
+  namespace: platform-ops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    # true, and this asymmetry with the set above is the ordering that used to be
+    # performed by hand.
+    #
+    # Every resource this Application holds is addressed to the WORKLOAD cluster
+    # (destination.name below) -- Day-0's artifacts for it, under
+    # registry/clusters/<cluster>/generated/. When the claim goes, that cluster is
+    # being destroyed, so deleting its contents first buys nothing and can block:
+    # a cascade against a cluster whose API server is already gone waits on a
+    # finalizer nothing will clear.
+    #
+    # It preserves nothing of the management cluster's. The management cluster's
+    # own generated/ -- which holds hub-cluster.yaml, the CAPI Cluster this box
+    # runs on -- belongs to <CLUSTER_NAME>-generated, a flat file in this
+    # directory that these sets never generate and never delete.
+    preserveResourcesOnDeletion: true
+  generators:
+    - git:
+        repoURL: <GITOPS_REPO_URL>
+        revision: main
+        files:
+          - path: 'registry/clusters/*/infrastructure/spokepool.yaml'
+  template:
+    metadata:
+      name: '{{ index (splitList "/" .path.path) 2 }}-generated'
+      namespace: platform-ops
+    spec:
+      project: default
+      source:
+        repoURL: <GITOPS_REPO_URL>
+        targetRevision: main
+        path: 'registry/clusters/{{ index (splitList "/" .path.path) 2 }}/generated'
+        directory:
+          recurse: true
+          # The directory ships with a .gitkeep and is empty until Day-0 writes
+          # into it. An Application over an empty directory syncs nothing and
+          # reports healthy; one over a path git does not carry is a
+          # ComparisonError, which is why the directory exists from the start.
+          include: '*.yaml'
+      # The WORKLOAD cluster: these are its Day-0 artifacts and they belong on it,
+      # not on the management cluster whose Argo CD holds the Application.
+      destination:
+        name: '{{ index (splitList "/" .path.path) 2 }}'
+        namespace: platform-ops
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

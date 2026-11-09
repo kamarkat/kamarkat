@@ -62,13 +62,3 @@ spec:
     count: 0
     instanceType: cx33
   maxTenantCapacity: 20
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: <CLUSTER_NAME>
-  labels:
-    spoke-type: pool
-    cluster-name: <CLUSTER_NAME>
-    provider: <CLOUD_PROVIDER>
-    environment: <ENVIRONMENT>

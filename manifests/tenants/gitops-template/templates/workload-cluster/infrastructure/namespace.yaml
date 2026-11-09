@@ -1,0 +1,19 @@
+# The namespace this workload cluster's platform content lands in, on the
+# MANAGEMENT cluster.
+#
+# IT USED TO SHARE spokepool.yaml, and it cannot any more. That file is the
+# management cluster's generator input -- registry/clusters/*/infrastructure/
+# spokepool.yaml is what declares this cluster's existence, and a git files
+# generator parses the matched file to build its parameters, which a
+# multi-document stream is not parseable as. Split so the declaration stays one
+# document; both files are applied by the same Application over this directory,
+# so nothing about what reaches the cluster changed.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: <CLUSTER_NAME>
+  labels:
+    spoke-type: pool
+    cluster-name: <CLUSTER_NAME>
+    provider: <CLOUD_PROVIDER>
+    environment: <ENVIRONMENT>

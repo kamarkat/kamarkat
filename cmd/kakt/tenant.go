@@ -47,6 +47,7 @@ func newTenantCmd() *cobra.Command {
 	cmd.AddCommand(newTenantSetGitopsTokenCmd())
 	cmd.AddCommand(newAddWorkloadClusterCmd())
 	cmd.AddCommand(newRemoveWorkloadClusterCmd())
+	cmd.AddCommand(newClusterStatusCmd())
 	cmd.AddCommand(newAddAppCmd())
 	return cmd
 }

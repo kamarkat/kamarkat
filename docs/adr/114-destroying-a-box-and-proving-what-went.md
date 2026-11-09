@@ -116,13 +116,29 @@ Work that could not be performed is recorded and reported, and the command exits
 non-zero. A provider deletion that failed is recorded the same way: it is the step whose
 failure means the servers are still running.
 
-### 5. A cluster's removal never edits an environment's definitions
+### 5. Removing a workload cluster is a commit, and nothing else
 
-Removing a workload cluster removes its own declaration and its deployment instances.
-The applications of the environment it served are declared independently of it
-(ADR-082, amendment 2026-11-07) and keep running on every other cluster serving that
-environment. `kakt tenant remove-cluster` reports what stops running, and refuses only
-on a reference that would otherwise dangle — the box's own `burstSpokePool`.
+A workload cluster exists because `registry/clusters/<name>/infrastructure/spokepool.yaml`
+exists. The commit that removes that file is the removal: the management cluster's
+ApplicationSets stop generating the cluster's Applications, the infrastructure one is
+deleted with Argo CD's resources-finalizer, the claim goes with it, and Crossplane and
+Cluster API unwind the cluster. ADR-082's amendment of 2026-11-09 holds the mechanism,
+the pruning boundary and the deletion contract.
+
+**`--destroy` is withdrawn**, with `DestroyBlocked` and the `requiresPruning` reading it
+depended on. It existed to delete Application objects a `git rm` had left running,
+because the management cluster's root does not prune — a second, credentialled,
+imperative step whose whole job was to close a window the repository had already declared
+shut. That window no longer exists. `kakt tenant remove-cluster` edits the declaration
+and says what to commit; `kakt tenant cluster-status` reports what is actually left, by
+observation, and never equates a declaration removed from git with a destroyed cluster.
+
+Removing a cluster still edits no environment. The applications of the environment it
+served are declared independently of it (ADR-082, amendment 2026-11-07) and keep running
+on every other cluster serving that environment. What is refused is a reference that
+would otherwise dangle — the box's own `burstSpokePool` — refused now by the tenant
+repository's own pull-request check, because the commit is the destruction and the review
+is where the cause still is.
 
 ### 6. The management cluster goes last, and does not cascade
 
@@ -222,6 +238,13 @@ which a local file cannot give.
 
 ## Impact
 
+- `kakt tenant remove-cluster` loses `--destroy`, `--kubeconfig` and `--timeout`, and
+  `kakt tenant cluster-status` is added. The tenant repository gains
+  `.github/workflows/cluster-removal.yml`; its management cluster's directory gains two
+  ApplicationSets and loses one flat Application file per workload cluster, which an
+  existing box migrates in a single commit -- the sets adopt the live Applications by
+  name (Argo CD sets itself as controller owner on an object that has none), so neither
+  a competing reconciler nor a deletion occurs in the transition.
 - `kakt teardown` gains `--infrastructure-only` and `--destroy-managed`, and loses
   `--tenant`. It refuses while a cluster it manages is still there, and the clusters it
   destroys are the ones named on the run -- `--managed-cluster` (formerly `--spoke`) is

@@ -49,14 +49,13 @@ func TestRender_RetainedTemplateKeepsPerClusterTokens(t *testing.T) {
 	// Asserted per file, because the two carry different cluster facts: the
 	// Application names the cluster, and the values file describes where it runs.
 	for f, tokens := range map[string][]string{
-		// bundle.yaml is gone from this template: a managed cluster's platform
-		// comes from the hub's boundary ApplicationSets, and the Application that
-		// used to be here pulled a chart whose ApplicationSets a managed cluster
-		// has no controller for. The two Applications that remain are the ones the
-		// management cluster holds for it.
-		"infrastructure-app.yaml": {"<CLUSTER_NAME>"},
-		"generated-app.yaml":      {"<CLUSTER_NAME>"},
-		"values.yaml":             {"<ENVIRONMENT>", "<CLOUD_PROVIDER>", "<CLOUD_REGION>", "<BUNDLE_VERSION>"},
+		// No Application files here any anywhere else in this template: the two a
+		// management cluster holds for a workload cluster are GENERATED from the
+		// claim below, by the ApplicationSets in templates/mgmt. What a tenant
+		// keeps is the declaration itself.
+		"infrastructure/spokepool-hetzner.yaml": {"<CLUSTER_NAME>", "<ENVIRONMENT>", "<CLOUD_PROVIDER>"},
+		"infrastructure/namespace.yaml":         {"<CLUSTER_NAME>"},
+		"values.yaml":                           {"<ENVIRONMENT>", "<CLOUD_PROVIDER>", "<CLOUD_REGION>", "<BUNDLE_VERSION>"},
 	} {
 		got := read(t, dst, "templates", "workload-cluster", f)
 		for _, token := range tokens {
@@ -74,7 +73,7 @@ func TestRender_RetainedTemplateKeepsPerClusterTokens(t *testing.T) {
 // tenant should never have to supply its own repository URL to add one.
 func TestRender_RetainedTemplateHasTenantFactsFilled(t *testing.T) {
 	dst := render(t, testSpec())
-	got := read(t, dst, "templates", "workload-cluster", "generated-app.yaml")
+	got := read(t, dst, "templates", "workload-cluster", "values.yaml")
 	if !strings.Contains(got, "https://github.com/acme-inc/acme-gitops") {
 		t.Error("retained template does not name the tenant's own repository")
 	}

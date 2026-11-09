@@ -3,22 +3,24 @@ package tenant
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// add-cluster places a workload cluster's Applications where something applies
-// them, and leaves its generated directory existing.
+// add-cluster writes ONE declaration: the cluster's own directory, with a claim
+// in it and a generated directory git carries.
 //
-// Both halves were wrong. generated.yaml was hydrated into
-// registry/clusters/<cluster>/, which no Application covers -- the management
-// cluster's root applies its OWN directory with recurse: false -- so the
-// Application was never created on any box and every ADR-045 artifact written
-// into generated/ was in git and applied to nothing. And the directory it points
-// at did not exist in git until something wrote a file there, which for a managed
-// cluster is not Day-0 but the first app with a public host: an Application over
-// a path the repository does not carry is a ComparisonError, not the empty-and-
-// healthy state its own comment describes.
-func TestAddClusterPlacesItsApplicationsOnTheManagementCluster(t *testing.T) {
+// Nothing is written into the management cluster's directory any more, and that
+// is the lifecycle: the two Applications are generated from the claim, so the
+// file that declares the cluster is the only thing that has to exist -- and the
+// only thing that has to go.
+//
+// The generated directory still has to exist from the start. An Application over
+// an empty directory syncs nothing and reports healthy, which is the state ADR-045
+// artifacts arrive into; one over a path the repository does not carry is a
+// ComparisonError, and for a managed cluster nothing writes there until the first
+// app declares a public host.
+func TestAddClusterWritesOnlyTheDeclaration(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
 	dir := t.TempDir()
 
@@ -46,15 +48,30 @@ func TestAddClusterPlacesItsApplicationsOnTheManagementCluster(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	// Every Application in the management cluster's directory, named for this
-	// cluster, and nothing left in the cluster's own.
-	for _, app := range workloadClusterApps {
-		placed := filepath.Join(dir, app.appFile(mgmt, cluster))
-		if _, err := os.Stat(placed); err != nil {
-			t.Errorf("%s was not placed on the management cluster: %v", app.suffix, err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, RegistryDir, "clusters", cluster, app.template)); !os.IsNotExist(err) {
-			t.Errorf("%s was left in the cluster's own directory, where nothing applies it", app.template)
+	// The claim, single-document and under the name the generators match.
+	claim := filepath.Join(dir, RegistryDir, "clusters", cluster, "infrastructure", "spokepool.yaml")
+	raw, err := os.ReadFile(claim)
+	if err != nil {
+		t.Fatalf("the claim that declares this cluster was not written: %v", err)
+	}
+	if n := strings.Count(string(raw), "\n---"); n != 0 {
+		t.Errorf("the claim holds %d extra document(s); a git files generator parses the "+
+			"matched file as one, so the cluster would never be generated", n)
+	}
+	if !strings.Contains(string(raw), "kind: SpokePool") {
+		t.Error("the claim does not declare a SpokePool")
+	}
+
+	// Nothing in the management cluster's directory. A file placed there is
+	// applied by a root that does not prune, which is what made a second,
+	// imperative destroy step necessary.
+	entries, err := os.ReadDir(filepath.Join(dir, RegistryDir, "clusters", mgmt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), cluster) {
+			t.Errorf("add-cluster placed %s in the management cluster's directory", e.Name())
 		}
 	}
 

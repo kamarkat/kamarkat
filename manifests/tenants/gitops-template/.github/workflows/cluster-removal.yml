@@ -1,0 +1,185 @@
+# Review a commit that destroys a workload cluster.
+#
+# A workload cluster exists because registry/clusters/<name>/infrastructure/
+# spokepool.yaml exists: the management cluster generates the cluster's
+# Applications from that file, so a commit that removes it is what deletes the
+# cluster, its nodes and the data on their volumes. There is no second step and
+# nothing else to approve, which means this repository's review of the commit is
+# the approval -- and this workflow is what makes the commit legible as a
+# destruction rather than a file deletion.
+#
+# It refuses three things the platform cannot recover from, and asks for one
+# statement of intent.
+#
+# BRANCH PROTECTION IS LOAD-BEARING, and it is not something this workflow can
+# supply. A required check on a pull request protects nothing if a commit can
+# reach the reconciled branch another way, so the branch the management cluster
+# reconciles (`main`) needs: required pull request review, this check required,
+# and no force-push or bypass for anyone who is not meant to destroy a cluster by
+# hand. The `push` trigger below exists because that protection can be wrong: it
+# cannot stop a direct push, but it fails loudly on one, so a bypass leaves a red
+# run against the commit that used it.
+name: Cluster removal
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - 'registry/clusters/*/infrastructure/spokepool.yaml'
+      - 'registry/clusters/*/root.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'registry/clusters/*/infrastructure/spokepool.yaml'
+      - 'registry/clusters/*/root.yaml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  removal:
+    runs-on: ubuntu-latest
+    steps:
+      # Both parents, because the question is what the commit DELETES, which only
+      # a diff can answer.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: What this commit removes
+        id: diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BASE"
+          # A first push to a branch, or a repository with no parent commit, has
+          # nothing to diff against. Nothing is established, so nothing is
+          # claimed: the run reports it rather than passing quietly.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              echo "::warning::no base commit to diff against; this check established nothing"
+              echo "removed=" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          removed=$(git diff --diff-filter=D --name-only "$base" HEAD -- \
+              'registry/clusters/*/infrastructure/spokepool.yaml' | sed 's|/infrastructure/spokepool.yaml$||' | sed 's|^registry/clusters/||' || true)
+          hub_files=$(git diff --diff-filter=D --name-only "$base" HEAD -- \
+              'registry/clusters/*/root.yaml' 'registry/clusters/*/workload-clusters.yaml' || true)
+
+          # The management cluster is outside this lifecycle and cannot be removed
+          # this way. Its root Application is what reconciles every other cluster
+          # in the box, and the ApplicationSets beside it are what hold them.
+          if [ -n "$hub_files" ]; then
+              echo "::error::this commit deletes the management cluster's own declaration:"
+              printf '%s\n' "$hub_files" | sed 's/^/  /'
+              echo "::error::that is not how a box is destroyed. Use kakt teardown, which refuses while a cluster it manages is still there."
+              exit 1
+          fi
+
+          if [ -z "$removed" ]; then
+              echo "no workload cluster declaration is removed by this commit"
+              echo "removed=" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          echo "removed<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$removed" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "workload cluster declaration(s) removed:"
+          printf '%s\n' "$removed" | sed 's/^/  /'
+
+      - name: The cluster must be a workload cluster
+        if: steps.diff.outputs.removed != ''
+        env:
+          REMOVED: ${{ steps.diff.outputs.removed }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # Read AT THE BASE, because the directory is gone at HEAD. A management
+          # cluster is the one with a root.yaml and no claim of its own; a cluster
+          # that had a claim is by construction not it, and this is the belt to
+          # that brace -- a repository where both were somehow true would have the
+          # box deleted by a cluster removal.
+          while IFS= read -r cluster; do
+              [ -n "$cluster" ] || continue
+              if git cat-file -e "$BASE:registry/clusters/$cluster/root.yaml" 2>/dev/null; then
+                  echo "::error::$cluster carries root.yaml: it is the management cluster, not a workload cluster"
+                  exit 1
+              fi
+          done <<< "$REMOVED"
+          echo "every removed declaration is a workload cluster's"
+
+      - name: Nothing may still reference the cluster
+        if: steps.diff.outputs.removed != ''
+        env:
+          REMOVED: ${{ steps.diff.outputs.removed }}
+        run: |
+          set -euo pipefail
+          # The box's autoscaler names its burst pool by value, and the name is not
+          # a reference the platform can follow: a stale one leaves the autoscaler
+          # waiting forever on a kubeconfig for a cluster that was destroyed, while
+          # reporting healthy. Checked at HEAD, so a commit that removes the
+          # cluster AND repoints the pool in the same change passes.
+          fail=0
+          while IFS= read -r cluster; do
+              [ -n "$cluster" ] || continue
+              refs=$(grep -rl "^burstSpokePool: *${cluster}\$" registry/clusters/*/values.yaml 2>/dev/null || true)
+              if [ -n "$refs" ]; then
+                  echo "::error::$cluster is still this box's burst pool, declared in:"
+                  printf '%s\n' "$refs" | sed 's/^/  /'
+                  echo "::error::point burstSpokePool at another cluster, or clear it, in this same commit"
+                  fail=1
+              fi
+          done <<< "$REMOVED"
+          [ "$fail" -eq 0 ] || exit 1
+          echo "no burst pool reference survives this commit"
+
+      - name: The destruction must be stated, not inferred
+        if: steps.diff.outputs.removed != '' && github.event_name == 'pull_request'
+        env:
+          REMOVED: ${{ steps.diff.outputs.removed }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # A deleted file reads like a cleanup. This is the line that makes a
+          # reviewer read it as a destruction, and it names the cluster so that a
+          # rebase, a revert or a bad merge cannot quietly widen what the pull
+          # request was approved to destroy.
+          fail=0
+          while IFS= read -r cluster; do
+              [ -n "$cluster" ] || continue
+              if ! printf '%s' "$BODY" | grep -qiE "^destroy-cluster: *${cluster} *\$"; then
+                  echo "::error::this pull request destroys $cluster, its nodes and the data on their volumes."
+                  echo "::error::Say so in the description, on a line of its own:  destroy-cluster: $cluster"
+                  fail=1
+              fi
+          done <<< "$REMOVED"
+          [ "$fail" -eq 0 ] || exit 1
+          echo "every destroyed cluster is named in the description"
+
+      - name: The remaining claims still declare their clusters
+        if: steps.diff.outputs.removed != ''
+        run: |
+          set -euo pipefail
+          # The generator that creates a cluster's Applications parses the claim
+          # file it matched, and a multi-document file is not parseable as one -- so
+          # a claim that grew a second document would stop declaring its cluster,
+          # silently. Checked on every removal because that is when the generator's
+          # inputs are being changed.
+          fail=0
+          for claim in registry/clusters/*/infrastructure/spokepool.yaml; do
+              [ -e "$claim" ] || continue
+              python3 - "$claim" <<'PY' || fail=1
+          import sys, yaml
+          path = sys.argv[1]
+          docs = [d for d in yaml.safe_load_all(open(path)) if d]
+          if len(docs) != 1:
+              print(f"::error::{path} holds {len(docs)} documents; the generator reads it as one, so this cluster would never be generated")
+              raise SystemExit(1)
+          if docs[0].get("kind") != "SpokePool":
+              print(f"::error::{path} declares {docs[0].get('kind')!r}, not a SpokePool")
+              raise SystemExit(1)
+          PY
+          done
+          [ "$fail" -eq 0 ] || exit 1
+          echo "every remaining claim is a single SpokePool document"

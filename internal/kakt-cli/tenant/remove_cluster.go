@@ -10,16 +10,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ClusterRemoval takes a workload cluster out of a tenant's box, in the two
-// steps the management cluster's own reconciliation forces.
+// ClusterRemoval takes a workload cluster out of a tenant's box by deleting its
+// declaration. THAT IS THE WHOLE REMOVAL.
 //
-// The declaration leaves git first. The management cluster's root Application
-// applies registry/clusters/<mgmt>/ with selfHeal and prune: false, so an
-// infrastructure Application deleted while its file is still there is recreated
-// on the next pass -- and the cluster with it. Once the file is gone the root
-// stops applying it but, prune being off, leaves it in place: a bad merge must
-// not be able to destroy a cluster. Destroying it is then a deliberate delete
-// on the management cluster, which is the second step.
+// The cluster exists because registry/clusters/<name>/infrastructure/spokepool.yaml
+// exists: the management cluster's two ApplicationSets are generated from that
+// file. Commit its absence and the generated Applications stop being produced,
+// the infrastructure one is deleted with Argo CD's resources-finalizer, the claim
+// goes with it, and Crossplane and Cluster API unwind the cluster.
+//
+// So this command edits the repository and nothing else. There is no second,
+// credentialled step: the state it used to close -- declaration gone, cluster
+// running -- cannot be reached, because the commit is what deletes the cluster.
+// What the commit cannot do is report progress, which `kakt tenant cluster-status`
+// does by observation (ADR-114 §5).
 //
 // The name is never reused. It names the cluster's secret path and backup
 // prefix, which outlive it.
@@ -33,57 +37,37 @@ type ClusterRemoval struct {
 }
 
 // Applications are the management cluster's Applications for this cluster, in
-// the order they are deleted: what runs on it first, the cluster itself last.
-// Deleting the infrastructure Application destroys the cluster, after which the
-// other has nowhere to delete from.
+// the order the platform deletes them: what runs on it first, the cluster itself
+// last.
 //
-// Read from workloadClusterApps, the same list `add-cluster` creates them from.
-// It was a literal here, naming <cluster>-platform and <cluster>-generated, and
-// nothing created either: every `--destroy` reported them "not present" while
-// this command's own help named them as what it deletes.
+// Observed, not created and not deleted by this package: the ApplicationSets
+// generate them from the claim file. `cluster-status` asks about exactly these
+// two, which is why the suffixes are one list (workloadClusterAppSuffixes) rather
+// than a literal here -- a literal drifted once already, naming
+// <cluster>-platform and <cluster>-generated when nothing created either.
 func (r ClusterRemoval) Applications() []string {
-	apps := make([]string, 0, len(workloadClusterApps))
-	for _, app := range workloadClusterApps {
-		apps = append(apps, r.Name+"-"+app.suffix)
+	apps := make([]string, 0, len(workloadClusterAppSuffixes))
+	for _, suffix := range workloadClusterAppSuffixes {
+		apps = append(apps, r.Name+"-"+suffix)
 	}
 	return apps
 }
 
-// RootApplication is the management cluster's Application that applies its
-// registry directory, the one whose view of git gates the second step.
-func (r ClusterRemoval) RootApplication() string {
-	return r.MgmtCluster + "-root"
-}
-
-// declaration is what the first step deletes: the cluster's own directory, and
-// every Application of its own that sits in the management cluster's directory.
+// declaration is what this command deletes: the cluster's own directory, which
+// holds the claim that declares it.
 //
-// Both halves, from the same inventory as everything else. Deleting only the
-// infrastructure Application would leave <cluster>-generated declared in git,
-// and the root would go on applying an Application whose source path had just
-// been deleted -- a permanent ComparisonError on the box, for a cluster that no
-// longer exists.
-func (r ClusterRemoval) declaration() (dir string, appFiles []string) {
-	dir = filepath.Join(r.GitopsDir, RegistryDir, "clusters", r.Name)
-	for _, app := range workloadClusterApps {
-		appFiles = append(appFiles, filepath.Join(r.GitopsDir, app.appFile(r.MgmtCluster, r.Name)))
-	}
-	return dir, appFiles
+// ONE PATH, where there used to be three. The two Applications were flat files in
+// the management cluster's directory and had to be deleted alongside it; they are
+// generated from the claim now, so the directory is the whole declaration and
+// nothing outside it names this cluster.
+func (r ClusterRemoval) declaration() string {
+	return filepath.Join(r.GitopsDir, RegistryDir, "clusters", r.Name)
 }
 
-// Declared reports whether any part of the declaration is still in the
-// working tree.
+// Declared reports whether the declaration is still in the working tree.
 func (r ClusterRemoval) Declared() bool {
-	dir, appFiles := r.declaration()
-	if _, err := os.Stat(dir); err == nil {
-		return true
-	}
-	for _, p := range appFiles {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
-	}
-	return false
+	_, err := os.Stat(r.declaration())
+	return err == nil
 }
 
 // RemoveDeclaration checks the cluster can go and deletes its declaration from
@@ -128,7 +112,7 @@ func (r ClusterRemoval) RemoveDeclaration() ([]string, error) {
 			r.MgmtCluster, RegistryDir, r.MgmtCluster)
 	}
 
-	dir, appFiles := r.declaration()
+	dir := r.declaration()
 	claims, err := filepath.Glob(filepath.Join(dir, "infrastructure", "spokepool*.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", dir, err)
@@ -156,21 +140,14 @@ func (r ClusterRemoval) RemoveDeclaration() ([]string, error) {
 	// AffectedDeployments reports and the command prints before it removes
 	// anything.
 
-	var removed []string
-	for _, p := range append([]string{dir}, appFiles...) {
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		if err := os.RemoveAll(p); err != nil {
-			return removed, fmt.Errorf("remove %s: %w", p, err)
-		}
-		rel, err := filepath.Rel(r.GitopsDir, p)
-		if err != nil {
-			rel = p
-		}
-		removed = append(removed, rel)
+	if err := os.RemoveAll(dir); err != nil {
+		return nil, fmt.Errorf("remove %s: %w", dir, err)
 	}
-	return removed, nil
+	rel, err := filepath.Rel(r.GitopsDir, dir)
+	if err != nil {
+		rel = dir
+	}
+	return []string{rel}, nil
 }
 
 // burstPoolReference refuses while the box's own autoscaler names this cluster.
@@ -214,55 +191,6 @@ func (r ClusterRemoval) burstPoolReference() error {
 		"reporting healthy while the box has no burst capacity at all.\n\n"+
 		"Point burstSpokePool at another cluster or clear it, commit, then remove this one",
 		r.MgmtCluster, r.Name, rel, box.BurstSpokePool)
-}
-
-// RootResource is one entry of the management cluster's root Application status:
-// an object the root is managing, and whether git has stopped declaring it.
-type RootResource struct {
-	Kind            string
-	Name            string
-	RequiresPruning bool
-}
-
-// DestroyBlocked reports why this cluster must not be destroyed yet, reading the
-// root Application's own view of git. A nil error is permission to delete.
-//
-// prune: false is what makes this readable at all. A file removed from git stays
-// applied and the root marks it requiresPruning, so an entry WITHOUT that flag is
-// one the root still reads from git and would recreate -- and recreating an
-// infrastructure Application provisions a new cluster under a name whose secret
-// path and backup prefix belong to the old one.
-//
-// IT FAILS CLOSED ON AN UNKNOWN ANSWER. An empty status is not "the cluster is
-// gone from git", it is "the root has not said" -- a hard refresh, a root that
-// has not reconciled since the push, an Application that has never synced. The
-// root always manages the management cluster's own Applications, so a status with
-// nothing in it never describes a healthy box, and treating it as permission is
-// how a cluster gets destroyed and immediately rebuilt. root.yaml makes the same
-// argument about its own directory filter: an allowlist fails closed on the thing
-// it forgot, a denylist fails open.
-func (r ClusterRemoval) DestroyBlocked(root []RootResource) error {
-	if len(root) == 0 {
-		return fmt.Errorf("%s reports no resources, so its view of git cannot be read: a root "+
-			"that has not reconciled is not the same as a declaration that is gone.\n\n"+
-			"Refresh it (argocd app get %s --refresh, or kubectl annotate it with "+
-			"argocd.argoproj.io/refresh=normal), wait for it to report, then re-run",
-			r.RootApplication(), r.RootApplication())
-	}
-	managed := map[string]bool{}
-	for _, res := range root {
-		if res.Kind == "Application" && !res.RequiresPruning {
-			managed[res.Name] = true
-		}
-	}
-	for _, app := range r.Applications() {
-		if managed[app] {
-			return fmt.Errorf("%s still applies %s from git: the removal is not pushed, or not "+
-				"synced yet.\n\nPush the commit that removes it, wait for %s to sync, then re-run",
-				r.RootApplication(), app, r.RootApplication())
-		}
-	}
-	return nil
 }
 
 // AffectedDeployments names what stops running when this cluster goes: the

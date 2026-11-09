@@ -52,9 +52,39 @@ func (o *Orchestrator) destroyManagedClusters(ctx context.Context, clusters []st
 		timeout = 30 * time.Minute
 	}
 
+	// NOTHING MAY REGENERATE WHAT THIS DELETES, and two things would.
+	//
+	// The root Application applies the management cluster's directory with
+	// selfHeal, so it re-applies the ApplicationSets below. And those sets
+	// generate a cluster's Applications from its claim file, which is still in
+	// git during a teardown -- so deleting a generated Application while its set
+	// still matches would have the platform recreate it, as a NEW cluster under a
+	// name whose secret path and backup prefix belong to the old one. The order
+	// here is: the root, then the sets, then the Applications.
 	root := o.ClusterName + "-root"
 	fmt.Printf("\n[teardown] Removing %s, so nothing recreates what is deleted next.\n", root)
 	o.forceDeleteApplication(ctx, baseArgs, root)
+
+	// --cascade=orphan, deliberately. Deleting an ApplicationSet normally takes
+	// its child Applications with it through their owner references, and their
+	// resources with those -- every workload cluster at once, unwaited and
+	// unreported. Orphaning stops the generation and leaves the Applications
+	// standing, so each cluster is then deleted one at a time, waited on, and
+	// reported.
+	for _, set := range tenant.WorkloadClusterAppSets(o.ClusterName) {
+		fmt.Printf("[teardown] Stopping %s from regenerating what is deleted next.\n", set)
+		args := append(append([]string{}, baseArgs...),
+			"delete", "applicationset", set, "-n", constants.NamespaceOps,
+			"--ignore-not-found", "--cascade=orphan", "--wait=false")
+		if out, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput(); err != nil {
+			// Returned, not stepped over. If the set survives, every delete below
+			// is undone by it and the run would report destroying clusters that
+			// are being rebuilt.
+			return fmt.Errorf("%s could not be stopped, so it would regenerate every "+
+				"Application deleted below: %w\n%s\n\nNothing further was deleted",
+				set, err, out)
+		}
+	}
 
 	for _, cluster := range clusters {
 		removal := tenant.ClusterRemoval{MgmtCluster: o.ClusterName, Name: cluster}

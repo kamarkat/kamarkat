@@ -31,39 +31,43 @@ func box(t *testing.T, mgmt, cluster string) string {
 	// the template carries a bundle.yaml of its own, which is why its presence
 	// cannot be what identifies the management cluster. nutgraf-gitops has two.
 	write(filepath.Join(filepath.Dir(clusterDir), "bundle.yaml"), "kind: Application\n")
-	for _, app := range workloadClusterApps {
-		write(filepath.Join(dir, app.appFile(mgmt, cluster)), "kind: Application\n")
-	}
 	return dir
 }
 
-// Every Application add-cluster creates is one remove-cluster knows about.
+// The names this package reports are the names the ApplicationSets generate.
 //
-// They were two lists: the removal named <cluster>-platform and
-// <cluster>-generated, and add-cluster created neither, so `--destroy` reported
-// both "not present" on every box while its help text named them as what it
-// deletes. One inventory is the only thing that keeps them in step.
-func TestRemovalCoversEveryApplicationAddCreates(t *testing.T) {
+// They are two statements of one fact in two languages -- Go suffixes here, a
+// goTemplate expression in templates/mgmt/workload-clusters.yaml -- and the cost
+// of their disagreeing is a status command that reports a cluster "removed"
+// because it asked about Applications nobody creates. That is not hypothetical:
+// the removal once named <cluster>-platform and <cluster>-generated while
+// add-cluster created neither, and every --destroy reported them "not present".
+func TestReportedApplicationNamesMatchTheApplicationSets(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
-	dir := box(t, mgmt, cluster)
-	r := ClusterRemoval{GitopsDir: dir, MgmtCluster: mgmt, Name: cluster}
+	r := ClusterRemoval{GitopsDir: box(t, mgmt, cluster), MgmtCluster: mgmt, Name: cluster}
 
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "manifests", "tenants",
+		"gitops-template", "templates", "mgmt", "workload-clusters.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
 	for _, app := range r.Applications() {
-		file := filepath.Join(dir, RegistryDir, "clusters", mgmt, app+".yaml")
-		if _, err := os.Stat(file); err != nil {
-			t.Errorf("remove-cluster deletes the Application %s, but nothing creates %s", app, file)
+		suffix := app[len(cluster):] // "-infrastructure", "-generated"
+		expr := `name: '{{ index (splitList "/" .path.path) 2 }}` + suffix + `'`
+		if !strings.Contains(body, expr) {
+			t.Errorf("this package reports %s, but no ApplicationSet template generates %q",
+				app, expr)
 		}
 	}
-	if len(r.Applications()) != len(workloadClusterApps) {
-		t.Errorf("the removal names %d Applications, the inventory has %d",
-			len(r.Applications()), len(workloadClusterApps))
+	if n := strings.Count(body, "kind: ApplicationSet"); n != len(r.Applications()) {
+		t.Errorf("%d ApplicationSets for %d reported Applications", n, len(r.Applications()))
 	}
 }
 
-// The declaration is the cluster's directory AND both of its Applications in the
-// management cluster's. Leaving one behind leaves the root applying an
-// Application whose source path has just been deleted.
-func TestRemoveDeclarationTakesTheApplicationsWithTheDirectory(t *testing.T) {
+// The declaration is the cluster's directory, and removing it is the whole
+// removal: the Applications are generated from the claim inside it.
+func TestRemoveDeclarationRemovesTheClaimDirectory(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
 	dir := box(t, mgmt, cluster)
 	r := ClusterRemoval{GitopsDir: dir, MgmtCluster: mgmt, Name: cluster}
@@ -72,16 +76,21 @@ func TestRemoveDeclarationTakesTheApplicationsWithTheDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveDeclaration: %v", err)
 	}
-	if len(removed) != 1+len(workloadClusterApps) {
-		t.Errorf("removed %v, want the cluster directory and %d Applications",
-			removed, len(workloadClusterApps))
+	if len(removed) != 1 || removed[0] != filepath.Join(RegistryDir, "clusters", cluster) {
+		t.Errorf("removed %v, want only the cluster's directory", removed)
 	}
 	if r.Declared() {
 		t.Error("the cluster is still declared after its declaration was removed")
 	}
-	for _, app := range workloadClusterApps {
-		if _, err := os.Stat(filepath.Join(dir, app.appFile(mgmt, cluster))); !os.IsNotExist(err) {
-			t.Errorf("%s survived the removal", app.appFile(mgmt, cluster))
+	if _, err := os.Stat(filepath.Join(dir, RegistryDir, "clusters", cluster,
+		"infrastructure", "spokepool.yaml")); !os.IsNotExist(err) {
+		t.Error("the claim survived the removal, so nothing would delete the cluster")
+	}
+	// The management cluster's own directory is untouched: it is outside this
+	// lifecycle, and a removal that reached into it would take the box.
+	for _, keep := range []string{"bundle.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, RegistryDir, "clusters", mgmt, keep)); err != nil {
+			t.Errorf("the management cluster lost %s: %v", keep, err)
 		}
 	}
 }
@@ -208,76 +217,5 @@ func TestRemoveDeclarationLeavesEnvironmentApplicationsAlone(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "environments", "stg", name, "values.yaml")); err != nil {
 			t.Errorf("%s's definition was removed with the cluster: %v", name, err)
 		}
-	}
-}
-
-// The destroy gate reads the root's own view of git, and an unknown answer is
-// not permission.
-func TestDestroyBlocked(t *testing.T) {
-	r := ClusterRemoval{GitopsDir: t.TempDir(), MgmtCluster: "acme-hub", Name: "acme-stg-01"}
-	infra := r.Name + "-infrastructure"
-	generated := r.Name + "-generated"
-
-	cases := []struct {
-		name     string
-		root     []RootResource
-		blocked  bool
-		contains string
-	}{{
-		// The root always manages the management cluster's own Applications, so
-		// nothing at all is a root that has not reported -- a hard refresh, or an
-		// Application that has never synced. Destroying on that answer and having
-		// the root recreate the Application builds a new cluster under a name whose
-		// secrets and backups belong to the old one.
-		name:     "a root that has reported nothing",
-		root:     nil,
-		blocked:  true,
-		contains: "reports no resources",
-	}, {
-		name: "the declaration is still in git",
-		root: []RootResource{
-			{Kind: "Application", Name: "acme-hub-platform"},
-			{Kind: "Application", Name: infra},
-		},
-		blocked:  true,
-		contains: infra,
-	}, {
-		name: "another of the cluster's Applications is still in git",
-		root: []RootResource{
-			{Kind: "Application", Name: "acme-hub-platform"},
-			{Kind: "Application", Name: generated},
-			{Kind: "Application", Name: infra, RequiresPruning: true},
-		},
-		blocked:  true,
-		contains: generated,
-	}, {
-		name: "the root has stopped applying both",
-		root: []RootResource{
-			{Kind: "Application", Name: "acme-hub-platform"},
-			{Kind: "Application", Name: generated, RequiresPruning: true},
-			{Kind: "Application", Name: infra, RequiresPruning: true},
-		},
-		blocked: false,
-	}, {
-		// A destroy that already ran: the Applications are gone from the root's
-		// status entirely, and the root is reporting its own.
-		name:    "the cluster is gone from the root",
-		root:    []RootResource{{Kind: "Application", Name: "acme-hub-platform"}},
-		blocked: false,
-	}}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			err := r.DestroyBlocked(c.root)
-			if c.blocked && err == nil {
-				t.Fatal("destroy was permitted")
-			}
-			if !c.blocked && err != nil {
-				t.Fatalf("destroy was refused: %v", err)
-			}
-			if err != nil && !strings.Contains(err.Error(), c.contains) {
-				t.Errorf("error does not name %q: %v", c.contains, err)
-			}
-		})
 	}
 }
