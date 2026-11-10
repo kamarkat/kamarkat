@@ -50,7 +50,7 @@ another and useless to anyone who obtains it.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&verifyCluster, "cluster", "", "cluster name the escrow is scoped to (required)")
-	f.StringVar(&verifyBox, "box", "", "the logical hub the escrow is keyed by; box-scoped artefacts live under it (required)")
+	f.StringVar(&verifyBox, "box", "", "the box the escrow is keyed by; box-scoped artefacts live under it (required)")
 	f.BoolVar(&isHub, "management", false, "this is the management cluster; all artefacts apply")
 	f.BoolVar(&isWorkload, "workload", false, "this is a workload cluster; management-only artefacts do not apply")
 	_ = cmd.MarkFlagRequired("cluster")
