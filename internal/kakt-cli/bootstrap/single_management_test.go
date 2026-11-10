@@ -102,7 +102,7 @@ func TestAnExistingManagementClusterRefusesASecond(t *testing.T) {
 	for _, want := range []string{
 		"Cannot create the management cluster",
 		"acme-hub still owns 7 provider resource(s)",
-		"kakt teardown --name acme-hub --confirm",
+		"kakt teardown --name acme-hub --gitops-dir . --confirm",
 		"boxId stays acme-hub",
 	} {
 		if !strings.Contains(err.Error(), want) {

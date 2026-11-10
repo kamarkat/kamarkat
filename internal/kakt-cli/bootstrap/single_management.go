@@ -223,11 +223,10 @@ func admissionRefused(box tenant.Box, creating string, existing, managed []strin
 		b.WriteString("\n\nA box has one management cluster at a time. Two of them reconcile the same\n")
 		b.WriteString("declarations in this repository, so each would provision the other's workload\n")
 		b.WriteString("clusters under names already taken.\n\n")
-		b.WriteString("Inspect it, then destroy it:\n")
+		b.WriteString("Destroy it:\n")
 		for _, line := range existing {
 			name := strings.Fields(strings.TrimSpace(line))[0]
-			fmt.Fprintf(&b, "  kakt tenant cluster-status --name %s\n", name)
-			fmt.Fprintf(&b, "  kakt teardown --name %s --confirm\n", name)
+			fmt.Fprintf(&b, "  kakt teardown --name %s --gitops-dir . --confirm\n", name)
 		}
 		b.WriteString("\n")
 	}
@@ -242,7 +241,7 @@ func admissionRefused(box tenant.Box, creating string, existing, managed []strin
 		b.WriteString("Remove each one first, which is a commit:\n")
 		for _, line := range managed {
 			name := strings.Fields(strings.TrimSpace(line))[0]
-			fmt.Fprintf(&b, "  kakt tenant remove-cluster --mgmt-cluster <current> --name %s\n", name)
+			fmt.Fprintf(&b, "  kakt tenant remove-cluster --mgmt-cluster <management-cluster> --name %s\n", name)
 		}
 		b.WriteString("\n")
 	}
