@@ -118,6 +118,23 @@ Which repositories belong to which tenant is established by the App installation
 
 What remains — that an organisation is a customer, what it has bought, what it is owed — is commercial and is not held as reconciled state.
 
+### A credential is named for the access it grants
+
+Every credential this platform asks for is named for what it is permitted to do and who owns it, never for the mechanism that implements it. An operator is asked for the access; whether they satisfy it with a GitHub App installation token, a classic PAT or a fine-grained one is theirs to choose and is not a question the CLI asks.
+
+| Variable | The access | Owner |
+|---|---|---|
+| `GITHUB_ORG_SETUP_TOKEN` | create this tenant's GitOps repository in their organisation | the platform operator, on their own machine, across every box |
+| `GITOPS_REPO_WRITE_TOKEN` | write the box's GitOps repository, and read it from ArgoCD; inherited by the tenant's application builds so they can pin a chart version | the tenant, in their own organisation's secrets |
+
+No credential substitutes for another. Each is read by its own name and a missing one is reported by that name: the bootstrap that gives ArgoCD write access to the box's own repository fails when `GITOPS_REPO_WRITE_TOKEN` is absent rather than reaching for the operator's credential or the Actions token, because either would be stored in the cluster's repo-creds Secret and outlive the run that borrowed it (ADR-065).
+
+No credential substitutes for another. Each is read by its own name, and a missing one is reported by that name: the bootstrap that gives ArgoCD read access to the box's own repository fails when `GITOPS_REPO_WRITE_TOKEN` is absent rather than reaching for the operator's credential, because that credential would be written into the cluster's repo-creds Secret and outlive the run that borrowed it (ADR-065).
+
+`GITHUB_TOKEN` names neither. It is reserved for GitHub Actions' own job token and for third-party interfaces that require that exact variable name — a credential of ours parked under it is read by whatever else happens to be in the environment, and inside a workflow it is silently the wrong one: Actions' token reaches only the repository running the job, never its siblings.
+
+This replaces two earlier names that described implementations rather than access. `GITHUB_APP_TOKEN` and `GITHUB_TOKEN` were two variables for one permission, and which one an operator had chosen changed nothing but a line of output; they are now one variable, and the kind of token is read from the token itself. The boundary is unchanged: two credentials, two owners, each revocable without the other (ADR-065).
+
 ### Vocabulary
 
 One word per concept, used unchanged by ADR-063 through ADR-067.

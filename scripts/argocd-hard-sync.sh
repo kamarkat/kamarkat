@@ -6,7 +6,7 @@
 #   scripts/argocd-hard-sync.sh --wait <app>...          just report/wait
 #   scripts/argocd-hard-sync.sh --promote <version>      a whole promotion, in order
 #
-#   KUBECONFIG=k8-secrets/kubeconfig/nutgraf-hub.kubeconfig \
+#   KUBECONFIG=~/.kamarkat/run/kubeconfig/nutgraf-hub.kubeconfig \
 #     scripts/argocd-hard-sync.sh --promote 0.1.16-rc.104
 #
 # WHY A SCRIPT INSTEAD OF A REMEMBERED kubectl PATCH

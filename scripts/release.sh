@@ -314,7 +314,7 @@ fi
 if [ "$SYNC" = 0 ]; then
   echo
   note "Not synced (--no-sync). The repository says $VERSION; the box does not yet."
-  note "  KUBECONFIG=$GITOPS_DIR/k8-secrets/kubeconfig/<hub>.kubeconfig \\"
+  note "  KUBECONFIG=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/<hub>.kubeconfig \\"
   note "    scripts/argocd-hard-sync.sh --promote $VERSION"
   exit 0
 fi
@@ -327,13 +327,13 @@ if [ -z "${KUBECONFIG:-}" ]; then
   # does not exist and the script would die with "command not found" at the last
   # step of a release that had already published and promoted.
   HUBS=""
-  for k in "$GITOPS_DIR"/k8-secrets/kubeconfig/*hub*.kubeconfig; do
+  for k in "${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig"/*hub*.kubeconfig; do
     [ -f "$k" ] && HUBS="$HUBS$k"$'\n'
   done
   HUB_COUNT=$(printf '%s' "$HUBS" | grep -c . || true)
   case "$HUB_COUNT" in
     1) KUBECONFIG="$(printf '%s' "$HUBS" | head -1)"; export KUBECONFIG; note "using $KUBECONFIG" ;;
-    0) die "no hub kubeconfig under $GITOPS_DIR/k8-secrets/kubeconfig/ -- set KUBECONFIG" ;;
+    0) die "no hub kubeconfig under ${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/ -- set KUBECONFIG" ;;
     *) die "several hub kubeconfigs found; set KUBECONFIG to the one to drive:
 $(printf '%s' "$HUBS" | sed 's/^/     /')" ;;
   esac

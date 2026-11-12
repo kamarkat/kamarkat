@@ -44,7 +44,7 @@ waiting for ArgoCD to sync.
 ./scripts/validate-tenant-workloads.sh waypoint
 
 # Override kubeconfig or spoke name
-KUBECONFIG=k8-secrets/kubeconfig/hub.kubeconfig \
+KUBECONFIG=~/.kamarkat/run/kubeconfig/hub.kubeconfig \
   WORKLOAD_CLUSTER=<your-workload-cluster> \
   ./scripts/validate-tenant-workloads.sh app-creator
 ```
@@ -53,7 +53,7 @@ KUBECONFIG=k8-secrets/kubeconfig/hub.kubeconfig \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KUBECONFIG` | `k8-secrets/kubeconfig/hub.kubeconfig` | Hub cluster kubeconfig |
+| `KUBECONFIG` | `~/.kamarkat/run/kubeconfig/hub.kubeconfig` | Hub cluster kubeconfig |
 | `WORKLOAD_CLUSTER` | _(required)_ | ArgoCD cluster name of the workload cluster; the tenant chooses it (ADR-082), so there is no default |
 | `ARGOCD_NS` | `platform-ops` | Namespace where ArgoCD runs |
 
@@ -116,7 +116,7 @@ the box rather than of the invocation.
 
 ```bash
 SPOKEPOOL_NAME=<your-workload-cluster> ENVIRONMENT=dev \
-  KUBECONFIG=k8-secrets/kubeconfig/<cluster>.kubeconfig \
+  KUBECONFIG=~/.kamarkat/run/kubeconfig/<cluster>.kubeconfig \
   ./scripts/post-bootstrap-validate.sh
 ```
 

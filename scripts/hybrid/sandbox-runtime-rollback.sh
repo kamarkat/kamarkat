@@ -5,7 +5,7 @@
 set -euo pipefail
 
 NODE="${1:?usage: $0 <node-name>}"
-KC="${KUBECONFIG:-${SPOKE_KUBECONFIG:-zero-ops/.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-01.kubeconfig}}"
+KC="${KUBECONFIG:-${SPOKE_KUBECONFIG:-${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/nutgraf-01.kubeconfig}}"
 
 echo "=== Rolling back sandbox runtime on node: $NODE ==="
 

@@ -1,0 +1,81 @@
+# This box, as its own repository declares it.
+#
+# A box is created before any of its clusters, so what the box IS cannot live
+# inside a cluster's declaration. It lived there until now -- `boxId` was read
+# out of the first management cluster's values.yaml -- which made "a box with no
+# clusters" unrepresentable and contradicted the premise it was keyed on: the box
+# outlives the cluster (ADR-111 §1).
+#
+# The platform never writes this file after creating it. `kakt box init` renders
+# it once; every later command reads it.
+#
+# WHAT IS A NAME AND WHAT IS A CREDENTIAL. Everything here is a name, an address
+# or an identifier, which is why it is committed. No credential appears in this
+# repository's contents: the box's secrets are its repository's Actions secrets,
+# and its master keys are in the escrow this file addresses.
+
+# The box's permanent identity.
+#
+# It keys the escrow path holding this box's master keys, the DNS records it owns
+# and its database's archive prefix. It starts as the first management cluster's
+# name and never changes again -- a successor cluster takes a new name and keeps
+# this one (ADR-111 §1), and anything already written under a boxId is orphaned
+# by changing it.
+boxId: <BOX_ID>
+
+# The two names minted with it, recorded rather than recomputed.
+#
+# Every name a box owns carries the same suffix, so its resources are
+# recognisable as one box's: this repository, and the name its first management
+# cluster takes. A later command reads them from here; nothing derives them from
+# the boxId, because parsing an identity to rename a repository is how a
+# continuation renames something that already exists.
+gitopsRepo: <GITOPS_REPO>
+managementClusterName: <MANAGEMENT_CLUSTER>
+
+# The tenant that owns this box, and the organisation its repository lives in.
+tenantId: <TENANT_ID>
+gitOrg: <GIT_ORG>
+
+# The DNS this box owns. Every hostname on it sits under <SUBDOMAIN>.<DOMAIN>,
+# or under the apex when the subdomain is empty.
+domain: <DOMAIN_NAME>
+subdomain: "<SUBDOMAIN>"
+
+# What a cluster declared here starts as, unless the declaration overrides it.
+# `kakt tenant add-management` and `kakt tenant add-cluster` read these.
+provider: <CLOUD_PROVIDER>
+region: <CLOUD_REGION>
+workers: <WORKER_COUNT>
+
+# The platform version this box was created on, and where its charts come from.
+#
+# This is the box's starting pin, not a running version: each cluster records its
+# own in registry/clusters/<name>/values.yaml and they are promoted one at a time
+# (ADR-064). The workflows in .github/ pin the platform's reusable workflow to
+# this version (ADR-072).
+bundleVersion: <BUNDLE_VERSION>
+platformRepoUrl: <PLATFORM_REPO_URL>
+bundleRegistry: <BUNDLE_REGISTRY>
+
+# The platform branch a DEVELOPMENT box reads its charts from, and empty on every
+# released box, which names a published chart instead (ADR-068). It is recorded
+# rather than resolved again later: `kakt tenant add-management` composes a
+# cluster's chart source from these four values, and resolving the branch at that
+# moment would read whatever the operator happens to have checked out.
+platformRevision: "<PLATFORM_REVISION>"
+
+# Where this box's artefacts are escrowed (ADR-076, ADR-111).
+#
+# A url, a project and an organisation identify the escrow and grant nothing; the
+# identity that reads it is never written here. Declared so the box can be
+# operated from any authorized workstation rather than only from the machine that
+# created it.
+escrow:
+  url: <ESCROW_URL>
+  projectId: <ESCROW_PROJECT_ID>
+  organizationId: <ESCROW_ORG_ID>
+
+# The one human this box accepts for escrow-backed operations: Infisical's own id
+# for the account, never an address. `kakt whoami` prints it.
+platformAdminIdentity: <PLATFORM_ADMIN_IDENTITY>

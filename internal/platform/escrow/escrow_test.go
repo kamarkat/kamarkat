@@ -50,8 +50,17 @@ func TestEscrowRefusesTheBoxItProtects(t *testing.T) {
 // a hazard here: a test clearing the environment would otherwise pick up the REAL
 // credentials of whoever ran it, pass for the wrong reason, and — worse — be one
 // mistake away from reaching the live escrow.
+// isolateFromCheckout puts a test somewhere with no checkout AND no operator
+// store of its own.
+//
+// KAMARKAT_HOME is part of the isolation, not an extra: settings now come from
+// ~/.kamarkat, so a test that did not relocate it read the DEVELOPER'S real
+// store. That is how a suite comes to pass or fail depending on whose machine it
+// runs on -- and it did: a partial set left by a half-finished `escrow init` made
+// a completeness test report the wrong missing value.
 func isolateFromCheckout(t *testing.T) {
 	t.Helper()
+	t.Setenv("KAMARKAT_HOME", t.TempDir())
 	prev, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -63,11 +72,15 @@ func isolateFromCheckout(t *testing.T) {
 }
 
 // The checkout is a real source of settings, and a test must say which it is using.
-func TestSettingsComeFromTheCheckoutWhenTheEnvironmentIsSilent(t *testing.T) {
+func TestSettingsComeFromTheOperatorStoreWhenTheEnvironmentIsSilent(t *testing.T) {
 	isolateFromCheckout(t)
 	withEnv(t, map[string]string{})
 
-	dir := filepath.Join(".", "k8-secrets", "infisical")
+	// The operator's store, relocated for the test the same way a CI runner
+	// relocates it.
+	home := t.TempDir()
+	t.Setenv("KAMARKAT_HOME", home)
+	dir := filepath.Join(home, StoreEscrowSubdir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -85,14 +98,44 @@ func TestSettingsComeFromTheCheckoutWhenTheEnvironmentIsSilent(t *testing.T) {
 	// Trailing newlines are trimmed: a file written by a shell redirect has one, and
 	// a client id with a newline on the end authenticates as nobody.
 	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "cid-1" {
-		t.Fatalf("read %q from the checkout, want %q", got, "cid-1")
+		t.Fatalf("read %q from the operator store, want %q", got, "cid-1")
 	}
 
 	// The environment still wins, because an in-cluster caller has that and no
-	// checkout at all.
+	// store at all.
 	withEnv(t, map[string]string{"INFISICAL_ESCROW_CLIENT_ID": "from-env"})
+	t.Setenv("KAMARKAT_HOME", home)
 	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "from-env" {
-		t.Fatalf("the checkout overrode the environment: got %q", got)
+		t.Fatalf("the store overrode the environment: got %q", got)
+	}
+}
+
+// A checkout is no longer a source, and saying so is the point.
+//
+// The old location is looked for ONLY to tell an operator where the files have
+// to move. Reading it as well would leave two copies of a client secret, one of
+// which goes stale without anything noticing.
+func TestTheOldCheckoutLocationIsNotRead(t *testing.T) {
+	isolateFromCheckout(t)
+	withEnv(t, map[string]string{})
+	t.Setenv("KAMARKAT_HOME", t.TempDir())
+
+	dir := filepath.Join(".", "k8-secrets", "infisical")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "INFISICAL_ESCROW_CLIENT_ID"),
+		[]byte("from-checkout"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "" {
+		t.Errorf("a checkout still supplies escrow settings: got %q", got)
+	}
+	// And the operator is told where they are, rather than only that they are missing.
+	hint := MoveHint("INFISICAL_ESCROW_CLIENT_ID")
+	if !strings.Contains(hint, "no longer read") || !strings.Contains(hint, "mv ") {
+		t.Errorf("the hint does not say how to move them:\n%s", hint)
 	}
 }
 

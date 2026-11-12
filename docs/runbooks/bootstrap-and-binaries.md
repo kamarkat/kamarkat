@@ -42,9 +42,9 @@ go build -o bin/kakt ./cmd/hub
 # - fleet-registry repository (tenant configurations)
 # - Any other repositories in the soloz-io organization
 # CRITICAL: Must run BEFORE init-secrets so platform-data namespace exists
-export GITHUB_TOKEN=$(cat k8-secrets/github/github-pat-token)
+export GHCR_TOKEN=$(cat ~/.kamarkat/github/github-pat-token)
 ./bin/kakt configure-github-access \
-  --ghcr-pat=$GITHUB_TOKEN \
+  --ghcr-pat=$GHCR_TOKEN \
   --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
 
 # Step 4: Wait for ArgoCD to sync and create namespaces

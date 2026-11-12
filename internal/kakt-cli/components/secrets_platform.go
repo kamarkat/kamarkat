@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,7 +32,7 @@ import (
 type optionalSecret struct {
 	name      string
 	namespace string
-	dir       string            // under k8-secrets/
+	dir       string            // under the operator's store
 	keys      map[string]string // secret key -> environment variable
 	secType   corev1.SecretType
 	what      string // what it enables
@@ -158,7 +159,7 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 			// means Day-0 was run by hand and should say so rather than build a
 			// box that looks finished.
 			return fmt.Errorf("%s was not supplied, and %s needs it.\n\n"+
-				"Set %s in the environment, or put the values under k8-secrets/%s/.\n"+
+				"Set %s in the environment, or put the values under ~/.kamarkat/%s/.\n"+
 				"Scaffolding collects these; a hand-run Day-0 has to pass them.",
 				s.name, s.what, strings.Join(envNames(s), ", "), s.dir)
 		case len(missing) > 0:
@@ -198,7 +199,8 @@ func resolveOptional(s optionalSecret) (data map[string]string, found, missing [
 			found = append(found, key)
 			continue
 		}
-		if v := readCheckoutFile(filepath.Join("k8-secrets", s.dir, key)); v != "" {
+		// The operator's store, not a checkout (internal/kakt-cli/opstore).
+		if v := opstore.Value(s.dir + "/" + key); v != "" {
 			data[key] = v
 			found = append(found, key)
 			continue

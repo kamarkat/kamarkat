@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -927,7 +928,10 @@ func (o *Orchestrator) localArtifacts() []string {
 	var paths []string
 	for _, root := range o.roots() {
 		paths = append(paths,
-			filepath.Join(root, "k8-secrets", "kubeconfig", o.ClusterName+".kubeconfig"),
+			// Day-0's working copy, in the operator's runtime path. Still only a
+			// candidate: the escrowed kubeconfig is the authority, and this is
+			// what a teardown of a box that never finished bootstrapping finds.
+			runtimeKubeconfig(o.ClusterName),
 			filepath.Join(root, o.ClusterName+".kubeconfig"),
 		)
 	}
@@ -1054,4 +1058,16 @@ func (o *Orchestrator) localCleanup(ctx context.Context) error {
 
 	fmt.Println("[teardown] ✓ Local cleanup complete")
 	return nil
+}
+
+// runtimeKubeconfig is Day-0's working copy for a cluster, if it has one.
+//
+// Returns "" when there is none, so it drops out of the candidate list rather
+// than becoming a path that does not exist (internal/kakt-cli/opstore).
+func runtimeKubeconfig(cluster string) string {
+	p, err := opstore.KubeconfigPath(cluster)
+	if err != nil {
+		return ""
+	}
+	return p
 }

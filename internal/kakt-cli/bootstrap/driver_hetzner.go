@@ -52,7 +52,7 @@ type HetznerDriver struct {
 // briefly defaulted to zero on the reasoning that its capacity should come from the
 // tenant's own hardware (ADR-075) -- which is the right end state and the wrong
 // default to reach it by: it made on-prem hardware a precondition for the simplest
-// box the platform can build, and `kakt tenant scaffold` with no arguments produced
+// box the platform can build, and `kakt box init` with no arguments produced
 // a repository whose bootstrap was refused for having nowhere to schedule.
 //
 // The field outlived that default as write-only state with a comment describing

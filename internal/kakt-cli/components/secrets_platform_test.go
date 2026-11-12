@@ -60,6 +60,11 @@ func TestOptionalSecretPrefersEnvironment(t *testing.T) {
 // whose database has nowhere to back up to, not a box with a feature off.
 func TestPlatformCredentialAbsentResolvesToNothing(t *testing.T) {
 	t.Setenv("ZERO_OPS_DIR", t.TempDir())
+	// And an empty operator store. These resolve from ~/.kamarkat/ now
+	// (internal/kakt-cli/opstore), so on a machine that has actually staged a
+	// box's credentials this asserted against the operator's real S3 keys and
+	// failed for being configured.
+	t.Setenv("KAMARKAT_HOME", t.TempDir())
 	for _, e := range []string{
 		"S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 		"GRAFANA_IRM_ALERTMANAGER_URL", "GRAFANA_IRM_HEARTBEAT_URL",

@@ -41,6 +41,27 @@ provider: <CLOUD_PROVIDER>
 escrow:
   url: <ESCROW_URL>
   projectId: <ESCROW_PROJECT_ID>
+  # The organization the project belongs to, so that an administrator id is
+  # checked inside the organization that issued it.
+  organizationId: <ESCROW_ORG_ID>
+
+# The ONE human this box accepts for escrow-backed operations.
+#
+# Infisical's own id for the account, never an address: an address can be changed
+# and re-assigned, so a box that named its administrator by email would hand that
+# authority to whoever next holds it. `kakt whoami` prints the id to put here.
+#
+# WHAT THIS IS, AND WHAT IT IS NOT. `kakt` refuses to act as any other human
+# identity against this box, which turns a wrong session into a refusal instead of
+# a surprise. It is not the security boundary: that is membership of this box's
+# escrow project, held and enforced by Infisical. Another member of that project,
+# or an organization administrator, can read these artefacts through Infisical's
+# own API whatever this file says -- so the project is kept to one human member and
+# the identities that automation needs.
+#
+# Changing this is a deliberate handover, not an edit in passing: the new identity
+# also has to hold membership of the escrow project, which no commit can grant.
+platformAdminIdentity: <PLATFORM_ADMIN_IDENTITY>
 
 management:
   # The Infisical environment holding THIS HUB's credentials.

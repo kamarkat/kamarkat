@@ -619,3 +619,185 @@ the second is stated at scaffold time rather than discovered.
 - ADR-070: The Minimum Supported Box
 - ADR-071: How This Platform Differs from kubefirst
 - ADR-072: Tenant-Controlled Day-0 and Declarative Cluster Lifecycle
+
+## Amendment 2026-11-10: one declared platform administrator, and no local provider token
+
+Two gaps closed together, because they are the same gap seen from each end: who may
+reach a box's escrow, and where a box's infrastructure credential comes from.
+
+### 1. The administrator is declared, by id
+
+`kakt login` authenticates a human against the escrow's own Infisical and proves the
+session before storing it. What it did not capture was a stable principal: the session
+held an email, and an address can be changed and re-assigned. The session now also
+carries Infisical's `user.id`, and a session without one is refused at login, because
+there would be nothing to check it against.
+
+A box declares the one human it accepts, in the file that already declares its identity
+and its escrow coordinates:
+
+```yaml
+escrow:
+  url: https://app.infisical.com
+  projectId: <project>
+  organizationId: <org>
+platformAdminIdentity: <infisical user id>
+```
+
+`hubaccess.Open` refuses any other human identity, and refuses an identity whose session
+belongs to a different organization than the box declares — an id is only meaningful
+inside the organization that issued it. The organization is read from the same declaration,
+so like the binding below it is a consistency check: it catches a session pointed at the
+wrong box, not an attacker who rewrote the declaration.
+
+**This is a guard rail, not the boundary.** It stops this CLI acting as an identity the
+box has not declared, which turns a wrong session into a refusal instead of a surprise.
+The boundary is membership of the escrow project, held and enforced by Infisical: another
+member of that project, or an organization administrator, reaches these artefacts through
+Infisical's own API whatever the declaration says. The project is therefore kept to one
+human member plus the identities automation needs, and the tests and docs state the
+difference rather than implying the stronger claim.
+
+**Infisical Free sets the granularity.** Five identities per organization, human and
+machine combined; built-in roles only; folder-level access controls and custom roles are
+paid. So the escrow cannot be scoped below the project, and per-box isolation is one
+project per box — not a role and not a path. Nothing here depends on a paid capability.
+
+### 2. Human and automation identities are separated
+
+The machine identity in `INFISICAL_ESCROW_*` used to win whenever it was set. It now
+loses to a human session, so an operator at a terminal that also carries automation
+credentials acts as themselves and is subject to the check above. `KAKT_IDENTITY=machine`
+selects the other way explicitly, and refuses when no machine identity is configured;
+CI and `hub-operator` are unaffected because they hold no session.
+
+### 3. The escrow destination is bound inside the escrow, and what that is worth
+
+The escrow url and project id are committed, because they are names rather than
+credentials — that is what lets any authorized workstation reach the box. `kakt escrow
+bind-destination` additionally records those coordinates **in the escrow they name**, and
+every `Open` compares the two.
+
+**This is a consistency check, not an independent pin, and it must not be described as
+one.** Both halves come from the project the repository names: the expected value from the
+declaration, the recorded one from the escrow that declaration points at. Anyone who can
+edit the declaration *and* write to the project they redirect it to can place a matching
+record there, and the check passes.
+
+What it does establish:
+
+* **A destination nobody established is refused.** A project with no binding for this box
+  is not treated as this box's escrow, so a redirect to an unprepared project — a typo, a
+  copied project id, another box's project — fails closed rather than receiving recovery
+  material.
+* **Drift is refused.** A declaration edited without a deliberate rebind no longer matches
+  the binding its own escrow holds.
+* **A rebind is explicit and auditable.** `--rebind` is required, the initial binding and a
+  replacement are reported differently, and the before and after are both printed.
+
+**The real anchors for a privileged write are two, and neither is this check.** The first
+is the acting identity's membership of the escrow project: Infisical decides, and a
+redirect only succeeds at a project that identity may write. The second is governance on
+the declaration — review and branch protection on the repository that carries it, which
+the platform cannot enforce from inside and which is therefore the tenant's to set. The
+same limitation already applies to the workload-cluster removal check.
+
+### 4. No command reads a provider token from the workstation
+
+`HCLOUD_TOKEN`, `k8-secrets/hetzner/token` and `--hcloud-token` are gone from every
+ordinary infrastructure command. The reason is correctness before ergonomics: a token
+exported in a shell authenticates **perfectly** against whichever provider project issued
+it, and then answers about the wrong account — an inventory that comes back empty, a
+duplicate management cluster admitted because the first was invisible, a teardown that
+deletes nothing and reports success.
+
+One resolver, `hubaccess.ProviderToken`, reads the box-scoped credential from the box's
+own escrow, and bootstrap resolves it **once** before admission so the gate and the
+provisioning that follows use the same value from the same source. An escrow that cannot
+be reached, or holds no credential, fails closed naming the enrolment command.
+
+Enrolment stays the one place a credential is accepted from an operator, and it is
+explicit and piped: `kakt escrow enroll-provider-credential --gitops-dir . --cluster <c> < token`.
+Bootstrap no longer enrols from the environment.
+
+A first enrolment also **establishes** the box's escrow binding (§3), because otherwise the
+ordering has no entry: every other command refuses an unbound project, and nothing could
+bind one without first writing to it. A project already bound to different coordinates is
+still refused — moving a bound box is a rebind. In CI the enrolment step is skipped when the
+repository holds no provider secret, which is the state of an already-enrolled box: its
+credential is in the escrow, and a second copy in repository secrets only widens where it
+can leak from.
+
+### 4a. Initialisation runs as the administrator, and chooses the roles
+
+`kakt escrow init` authenticated **as a machine identity**, which is why onboarding began with
+three manual acts in Infisical: create an account, create an identity, choose its roles. The
+first is irreducible — the account is the tenant's. The other two existed only because the
+command had no human session to act with, and that predates `kakt login`.
+
+It now runs as the signed-in administrator:
+
+* **The project is created by the human**, so they are its admin because they made it. The
+  `--owner-email` invitation is removed, along with the defect it repaired: Infisical adds only
+  the *creating* actor to a project, so a machine-created project had no human members and did
+  not appear in anyone's project list.
+* **One automation identity per organisation**, found by a fixed name and reused by every later
+  box, which is then added to its own escrow project. An identity per box would exhaust the
+  five-identity plan at the fifth box, and the escrow paths are already box-scoped, so a second
+  identity buys no isolation.
+* **The roles are the platform's choice, not the operator's.** Organisation `no-access`, because
+  the identity performs no organisation action; project `member`, not `admin`.
+* **A client secret is issued only for an identity this run created.** Infisical returns one
+  once, so for a reused identity there is nothing to read back, and issuing another would leave
+  two live credentials for a box already running on the first.
+
+**Authorization, verified in the vendored Infisical rather than inferred from the route's
+`AuthMode`** — accepting a JWT says the caller may be a human, not which humans may do this:
+
+| Operation | Permission | org `member` | org `admin` |
+|---|---|---|---|
+| create an identity | `Identity.Create` | yes | yes |
+| attach Universal Auth | `Identity.EditAuth` | **no** | yes |
+| issue a client secret | `Identity.CreateToken` | **no** | yes |
+
+`ee/services/permission/org-permission.ts` grants a member Read/Create/Edit/Delete on Identity
+and withholds `EditAuth`, `CreateToken`, `GetToken` and `RevokeAuth`;
+`identity-edit-auth-permission.test.ts` asserts it. So a member could create an identity and
+never make it usable — initialisation therefore requires an **organisation admin** and refuses a
+member with that reason, rather than leaving an inert identity against the quota.
+
+The project role is `member` for the same kind of reason: `default-roles.ts`
+`buildMemberPermissionRules` grants Secrets describe/read/edit/create/delete and SecretFolders
+edit/create/delete, which is everything `BackupArtifact`, `RestoreArtifact` and `ensurePath` do.
+`admin` adds membership and role management an automation credential has no use for, and it was
+previously held by accident — the identity created the project.
+
+Rollback removes **only** what the run created. A pre-existing identity is never deleted and a
+working credential is never revoked, because other boxes authenticate with them; if the cleanup
+itself fails, the identity is named so it can be removed by hand.
+
+### 5. Identity budget
+
+| Identity | Count |
+|---|---|
+| Human platform administrator | 1 |
+| `hub-operator` machine identity | 1 |
+| CI machine identity | 1 |
+
+Three per customer organization, leaving two of the five. Nothing is created per box, per
+cluster, per tenant, per application or per login. A machine identity granted several
+projects has cross-project privileges, which is the acknowledged cost of staying inside
+the Free tier's identity count.
+
+### 6. Unchanged
+
+The Cloud/self-hosted boundary is untouched: Cloud Infisical holds only the allowlisted
+bootstrap and recovery artefacts (master keys, the identity provider's key, admin
+kubeconfigs, encryption keys, spoke PKI, the backup SSE-C key, the provider and store
+credentials, and now the destination binding). Tenant and application secrets stay in the
+box's own self-hosted Infisical and reach workloads as Kubernetes Secrets. No tenant,
+application or workload cluster authenticates to Cloud Infisical, and no escrow artefact
+is mirrored into the operational store.
+
+`kakt logout` still deletes only the local session; Infisical has no revocation endpoint
+this CLI can call, so a lost workstation is remediated in Infisical rather than in `kakt`.

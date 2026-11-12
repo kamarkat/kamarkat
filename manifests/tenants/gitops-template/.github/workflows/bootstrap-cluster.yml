@@ -15,13 +15,21 @@
 # REQUIRED -- Day-0 refuses without them, rather than building a box that looks
 # configured and is not:
 #   HCLOUD_TOKEN    the cloud API token clusters are created with
-#   GITOPS_TOKEN    write access to this repository, so Day-0 can commit the
-#                   artifacts it generates for the cluster it creates
+#   GITOPS_REPO_WRITE_TOKEN
+#                   write access to this repository, so Day-0 can commit the
+#                   artifacts it generates for the cluster it creates, and so
+#                   ArgoCD can read it. Your applications' builds inherit it
+#                   from your organisation to pin a chart version here
 #   GHCR_USERNAME   your container registry, for pulling YOUR private images.
 #   GHCR_TOKEN      The platform's own images are public; your workloads are
 #                   yours (ADR-066) and this is what runs them.
-#   INFISICAL_ADMIN_EMAIL     the administrator of this box's own Infisical,
-#   INFISICAL_ADMIN_PASSWORD  set by the handover. There is no default.
+#   INFISICAL_ADMIN_EMAIL     the administrator of this box's own Infisical --
+#   INFISICAL_ADMIN_PASSWORD  NOT the escrow's, which has no account here. The
+#                             address is whoever scaffolded the box; the password
+#                             is generated, escrowed as infisical-admin-credential
+#                             and set here in one step, so a re-run reads back the
+#                             one this instance was created with. No default: the
+#                             one that existed was identical on every box.
 #
 # STRONGLY RECOMMENDED -- absent, the box bootstraps and runs, and says what it
 # is missing:
@@ -46,9 +54,13 @@ on:
   workflow_dispatch:
     inputs:
       cluster:
+        # No default. A box holds several clusters over its life and this
+        # repository is created before any of them exists, so the one being
+        # bootstrapped is named at dispatch rather than baked in at creation --
+        # a default here was the first cluster's name forever, including on the
+        # runs that replaced it.
         description: The cluster to bootstrap, as named under registry/clusters/
         required: true
-        default: <CLUSTER_NAME>
       provider:
         required: true
         default: <CLOUD_PROVIDER>
@@ -115,7 +127,7 @@ jobs:
       tailnet: ${{ inputs.tailnet }}
     secrets:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-      GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+      GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
       # The administrator of this box's own Infisical, set by the handover.
       INFISICAL_ADMIN_EMAIL: ${{ secrets.INFISICAL_ADMIN_EMAIL }}
       INFISICAL_ADMIN_PASSWORD: ${{ secrets.INFISICAL_ADMIN_PASSWORD }}

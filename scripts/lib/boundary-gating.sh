@@ -19,7 +19,7 @@
 _gating_kubeconfig() {
     local kc="${KUBECONFIG_PATH:-}"
     if [[ -z "$kc" ]]; then
-        kc="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
+        kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
     fi
     [[ -f "$kc" ]] || return 1
     echo "$kc"

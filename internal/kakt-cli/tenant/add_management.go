@@ -25,9 +25,14 @@ import (
 type Box struct {
 	// ID is `boxId`: the logical hub, stable for as long as the box exists.
 	ID string
+	// Decl is the box's own declaration, which ID is read from and which a
+	// cluster declared here is rendered from.
+	Decl BoxDecl
 	// Management names the management clusters this repository declares, by
-	// directory. More than one is the planned-succession case (ADR-111 ss4),
-	// where a predecessor and its successor coexist.
+	// directory. EMPTY is a valid box -- one created and not yet given a
+	// management cluster. More than one is the planned-succession case
+	// (ADR-111 ss4, narrowed by Revision 8: several may be DECLARED, one holds
+	// infrastructure), where a predecessor and its successor coexist.
 	Management []string
 }
 
@@ -46,67 +51,89 @@ const managementMarker = "root.yaml"
 var boxIDLine = regexp.MustCompile(`(?m)^boxId:\s*"?([A-Za-z0-9][A-Za-z0-9._-]*)"?\s*$`)
 
 // DiscoverBox reads the box a gitops repository declares.
+//
+// The IDENTITY comes from the box's own declaration (registry/box.yaml) and the
+// INCARNATIONS from the directories under registry/clusters/. It used to take
+// both from the clusters: `boxId` was regexed out of the first management
+// cluster's values.yaml, which made a repository with no clusters unreadable as
+// a box -- and stored the one fact that must outlive every cluster (ADR-111 §1)
+// inside the first one.
+//
+// A box with no clusters is therefore a box. `kakt box init` creates one, and
+// `kakt tenant add-management` declares its first management cluster.
 func DiscoverBox(gitopsDir string) (Box, error) {
+	decl, err := ReadBoxDecl(gitopsDir)
+	if err != nil {
+		return Box{}, err
+	}
+	mgmt, err := managementClusters(gitopsDir, decl.BoxID)
+	if err != nil {
+		return Box{}, err
+	}
+	return Box{ID: decl.BoxID, Decl: decl, Management: mgmt}, nil
+}
+
+// managementClusters lists this box's management clusters, and checks that each
+// one claims the box it is in.
+//
+// The check is the one DiscoverBox always made, pointed at the declaration
+// instead of at a sibling: two different `boxId` values in one repository are
+// two boxes sharing one escrow scope and one DNS owner id, and that is the
+// collision boxId exists to prevent. Now that the box declares its own id, a
+// mismatch names which of the two is wrong instead of reporting a tie.
+func managementClusters(gitopsDir, boxID string) ([]string, error) {
 	clusters := filepath.Join(gitopsDir, RegistryDir, "clusters")
 	entries, err := os.ReadDir(clusters)
 	if err != nil {
-		return Box{}, fmt.Errorf("%s is not a box: it has no %s/clusters/ to read a box from.\n"+
-			"Run this inside a tenant's gitops repository, or pass --gitops-dir.",
-			gitopsDir, RegistryDir)
+		if os.IsNotExist(err) {
+			// A box before its first cluster. Not an error: the directory is
+			// created with the box and holds only .gitkeep until a cluster is
+			// declared.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", clusters, err)
 	}
 
 	var mgmt []string
-	ids := map[string][]string{}
+	var foreign []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		values := filepath.Join(clusters, e.Name(), "values.yaml")
 		if _, err := os.Stat(filepath.Join(clusters, e.Name(), managementMarker)); err != nil {
 			continue
 		}
 		mgmt = append(mgmt, e.Name())
+
+		values := filepath.Join(clusters, e.Name(), "values.yaml")
 		raw, err := os.ReadFile(values)
 		if err != nil {
-			return Box{}, fmt.Errorf("%s declares a management cluster with no values: %w",
+			return nil, fmt.Errorf("%s declares a management cluster with no values: %w",
 				e.Name(), err)
 		}
 		m := boxIDLine.FindSubmatch(raw)
 		if m == nil {
-			return Box{}, fmt.Errorf("%s is not a box: %s declares no boxId.\n\n"+
-				"boxId is the box's permanent identity -- it keys the escrow path holding\n"+
-				"this box's master keys, the DNS records it owns and its database's archive\n"+
-				"prefix. A repository scaffolded by this platform always carries one.",
-				gitopsDir, filepath.Join(RegistryDir, "clusters", e.Name(), "values.yaml"))
+			return nil, fmt.Errorf("%s declares no boxId.\n\n"+
+				"A management cluster carries the boxId of the box it belongs to, and the\n"+
+				"chart reads it from there. This box is %s.", values, boxID)
 		}
-		id := string(m[1])
-		ids[id] = append(ids[id], e.Name())
+		if id := string(m[1]); id != boxID {
+			foreign = append(foreign, fmt.Sprintf("  %s declares boxId %s", e.Name(), id))
+		}
 	}
 
-	if len(mgmt) == 0 {
-		return Box{}, fmt.Errorf("%s is not a box: nothing under %s/clusters/ declares a\n"+
-			"management cluster (a directory holding %s).\n\n"+
-			"A box is created by `kakt tenant scaffold`, which writes its first one.",
-			gitopsDir, RegistryDir, managementMarker)
-	}
-	if len(ids) > 1 {
-		var lines []string
-		for id, in := range ids {
-			lines = append(lines, fmt.Sprintf("  %s: %s", id, strings.Join(in, ", ")))
-		}
-		sort.Strings(lines)
-		return Box{}, fmt.Errorf("this repository declares %d boxes, and a repository is one box:\n%s\n\n"+
+	if len(foreign) > 0 {
+		sort.Strings(foreign)
+		return nil, fmt.Errorf("this repository is box %s, and %d of its management clusters\n"+
+			"claim another box:\n%s\n\n"+
 			"Every management cluster here is an incarnation of ONE box and must carry the\n"+
 			"same boxId. Two values mean two boxes sharing one escrow scope and one DNS\n"+
 			"owner id, which is the collision boxId exists to prevent.",
-			len(ids), strings.Join(lines, "\n"))
+			boxID, len(foreign), strings.Join(foreign, "\n"))
 	}
 
 	sort.Strings(mgmt)
-	for id := range ids {
-		return Box{ID: id, Management: mgmt}, nil
-	}
-	return Box{}, fmt.Errorf("%s is not a box", gitopsDir)
+	return mgmt, nil
 }
 
 // ManagementCluster is a new incarnation of the box's management cluster.
@@ -122,24 +149,58 @@ type ManagementCluster struct {
 	// never be a name the box has used before.
 	Name string
 	// From is the incarnation this one is rendered from, needed only when the
-	// box declares more than one.
+	// box declares more than one. Meaningless for a box's FIRST management
+	// cluster, which is rendered from the template and succeeds nothing.
 	From string
+	// What this cluster differs from its box in. Empty means "as the box
+	// declares", which is the usual answer: registry/box.yaml carries the
+	// defaults every cluster of this box starts from.
+	Overrides ClusterOverrides
 }
 
-// Add writes the new incarnation, and returns the paths a tenant commits.
+// Add declares a management cluster for this box, and returns the paths a tenant
+// commits.
 //
-// Rendered from the incarnation that is already there rather than from
-// templates/mgmt: that directory IS the template with this box's own values in
-// it, so the successor inherits the domain, the provider, the escrow coordinates
-// and every later edit without a second set of tokens to keep in step. The
-// template is consumed at onboarding and does not survive it.
+// TWO SOURCES, BY WHETHER THE BOX HAS ONE YET.
+//
+//   - The FIRST is rendered from templates/mgmt, using the facts the box
+//     recorded in registry/box.yaml. It succeeds nothing, so there is nothing to
+//     inherit from.
+//   - A SUCCESSOR is rendered from the incarnation already there rather than
+//     from the template: that directory is the template with this box's own
+//     values in it, so the successor inherits the domain, the provider, the
+//     escrow coordinates and every later edit without a second set of tokens to
+//     keep in step.
+//
+// Declaring is not building. ADR-111 Revision 8 allows several management
+// clusters to be DECLARED and at most one to hold infrastructure, and the
+// bootstrap's own admission check is what enforces that -- so a successor
+// declared here cannot be stood up beside a predecessor that still owns servers.
 func (m ManagementCluster) Add() ([]string, error) {
-	if strings.TrimSpace(m.Name) == "" {
-		return nil, fmt.Errorf("--name is required: the new management cluster's name")
-	}
 	box, err := DiscoverBox(m.GitopsDir)
 	if err != nil {
 		return nil, err
+	}
+	if len(box.Management) == 0 {
+		// The FIRST cluster's name is the one the box minted with its own
+		// identity, so it is not asked for: every name this box owns carries
+		// the same suffix, and typing one of them by hand is how they stop
+		// agreeing. --name still overrides, for a box being given a first
+		// cluster under a name of the operator's choosing.
+		if strings.TrimSpace(m.Name) == "" {
+			m.Name = box.Decl.ManagementCluster
+		}
+		if strings.TrimSpace(m.Name) == "" {
+			return nil, fmt.Errorf("%s declares no managementClusterName, so there is no name "+
+				"to give this box's first management cluster. Pass --name.",
+				filepath.Join(RegistryDir, BoxDeclFile))
+		}
+		return m.addFirst(box)
+	}
+	if strings.TrimSpace(m.Name) == "" {
+		return nil, fmt.Errorf("--name is required: box %s already declares %s, so a new\n"+
+			"management cluster needs a name of its own -- and never one this box has used.",
+			box.ID, strings.Join(box.Management, ", "))
 	}
 
 	from := m.From
@@ -331,4 +392,63 @@ func IncarnationsEverDeclared(ctx context.Context, gitopsDir string) ([]string, 
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// addFirst declares the box's first management cluster, from the template.
+//
+// WHAT IS DIFFERENT FROM A SUCCESSOR, and it is not only the source directory.
+// A successor must take a name the box has never used, because its WAL archive
+// prefix is keyed on `clusterName` and barman refuses a prefix already holding
+// another database's segments. The first incarnation has the opposite rule: its
+// name IS the box's id by convention (`kakt box init` pins boxId to the name the
+// first cluster will take), so a name equal to the boxId is the normal answer
+// here and a refusal would reject every ordinary box.
+//
+// Rendered strictly: every cluster token must resolve, because this directory is
+// what the box's root Application reconciles and an unsubstituted token in it is
+// a cluster that reports healthy while reconciling a literal `<CLUSTER_NAME>`.
+func (m ManagementCluster) addFirst(box Box) ([]string, error) {
+	if strings.TrimSpace(m.From) != "" {
+		return nil, fmt.Errorf("--from %s names an incarnation to succeed, and box %s has no\n"+
+			"management cluster yet. This is its first; drop --from.", m.From, box.ID)
+	}
+
+	src := filepath.Join(m.GitopsDir, "templates", "mgmt")
+	if _, err := os.Stat(src); err != nil {
+		return nil, fmt.Errorf("%s has no templates/mgmt to render a management cluster from.\n\n"+
+			"A box created by `kakt box init` carries it. A repository scaffolded before the\n"+
+			"box and its clusters were separated does not, and declares its management\n"+
+			"cluster already.", m.GitopsDir)
+	}
+	dst := filepath.Join(m.GitopsDir, RegistryDir, "clusters", m.Name)
+	if _, err := os.Stat(dst); err == nil {
+		return nil, fmt.Errorf("%s is already declared, so this would replace a declaration a\n"+
+			"cluster may be reconciling. Pick a name the box has not used.",
+			filepath.Join(RegistryDir, "clusters", m.Name))
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		return nil, fmt.Errorf("render %s from the template: %w", m.Name, err)
+	}
+	spec := box.Decl.specFor(m.Name, m.Overrides)
+	if err := substitute(dst, spec.clusterTokens(), true); err != nil {
+		return nil, err
+	}
+
+	var written []string
+	if err := filepath.Walk(dst, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, relErr := filepath.Rel(m.GitopsDir, p)
+		if relErr != nil {
+			return relErr
+		}
+		written = append(written, rel)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	sort.Strings(written)
+	return written, nil
 }

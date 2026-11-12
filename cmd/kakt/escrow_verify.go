@@ -90,6 +90,12 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 		{escrow.ArtifactSecretEncryptionKey, "the API server's at-rest encryption key", false},
 		{"infisical-master-keys", "the secret store's encryption key and auth secret", true},
 		{escrow.ArtifactZitadelMasterkey, "the identity provider's key-encryption key", true},
+		// The administrator of the box's own Infisical. Management-cluster only
+		// because there is one Infisical per box and it runs there. A box whose
+		// escrow lacks this cannot be re-entered by a second Day-0 run and has no
+		// break-glass account for its secret store -- the account exists, and
+		// nothing anywhere knows its password.
+		{escrow.ArtifactInfisicalAdmin, "the box Infisical's administrator credential", true},
 		// ADR-111 §10: the tenant's half of the management-state backups'
 		// encryption. One per box, so the management cluster's row.
 		{escrow.ArtifactBackupSSECKey, "the management-state backups' encryption key", true},

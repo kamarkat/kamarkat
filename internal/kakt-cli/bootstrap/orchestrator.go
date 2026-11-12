@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/cluster"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/kamarkat/kamarkat/internal/platform"
 	"os"
 	"os/exec"
@@ -1014,11 +1015,15 @@ func (o *Orchestrator) hubKubeconfigFromBootstrap(ctx context.Context, bootstrap
 		return ""
 	}
 
-	path := filepath.Join("k8-secrets", "kubeconfig", o.ClusterName+".kubeconfig")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		fmt.Printf("[bootstrap] cannot create %s: %v\n", filepath.Dir(path), err)
+	// The operator's private runtime path (internal/kakt-cli/opstore). Written
+	// here rather than to a temp file because pivot-move later rewrites the same
+	// path and the on-prem join is passed it through HUB_KUBECONFIG.
+	path, err := opstore.KubeconfigPath(o.ClusterName)
+	if err != nil {
+		fmt.Printf("[bootstrap] no runtime path for %s's kubeconfig: %v\n", o.ClusterName, err)
 		return ""
 	}
+	// KubeconfigPath created the directory 0700 already.
 	if err := os.WriteFile(path, decoded, 0o600); err != nil {
 		fmt.Printf("[bootstrap] cannot write %s: %v\n", path, err)
 		return ""
@@ -2332,20 +2337,31 @@ func (o *Orchestrator) waitForOperatorPods(ctx context.Context, kubeconfig strin
 	return waiter.Wait(ctx, kubeconfig)
 }
 
-// ensureArgoCDGitHubAuth provisions the ArgoCD repo-creds secret (GitHub PAT)
-// so private-repo apps can sync. Token from GITHUB_TOKEN env or the local
-// k8-secrets/github/github-pat-token file.
+// ensureArgoCDGitHubAuth provisions the ArgoCD repo-creds secret so private-repo
+// apps can sync.
+//
+// It reads the credential by what it is FOR -- write access to this box's own
+// GitOps repository -- rather than by how it was issued, and it reads nothing
+// else. Nothing here cares whether the value is a PAT or an App installation
+// token.
+//
+// ONE SOURCE, NO FALLBACK. This credential belongs to the box's owner, and the
+// two values that used to stand in for it belong to somebody else: the
+// operator's own GITHUB_ORG_SETUP_TOKEN, which creates repositories across every
+// tenant organisation it can reach, and GITHUB_TOKEN, which inside a workflow is
+// Actions' own and cannot read this repository's siblings. Either one would put
+// a credential of the wrong owner into a cluster's repo-creds Secret, where it
+// lives on long after the bootstrap that borrowed it -- which is precisely the
+// ownership boundary ADR-065 draws. A box missing its own credential says so.
 func (o *Orchestrator) ensureArgoCDGitHubAuth(ctx context.Context, kubeconfig, orgURL string) error {
-	githubToken := os.Getenv("GITHUB_TOKEN")
+	githubToken := strings.TrimSpace(os.Getenv("GITOPS_REPO_WRITE_TOKEN"))
 	if githubToken == "" {
-		data, err := os.ReadFile("k8-secrets/github/github-pat-token")
-		if err != nil {
-			return fmt.Errorf("GITHUB_TOKEN not set and github-pat-token file unreadable: %w", err)
-		}
-		githubToken = strings.TrimSpace(string(data))
-	}
-	if githubToken == "" {
-		return fmt.Errorf("GITHUB_TOKEN is empty — ArgoCD cannot read this box's own gitops repository")
+		return fmt.Errorf("GITOPS_REPO_WRITE_TOKEN is not set, so ArgoCD cannot read %s.\n\n"+
+			"It is this box's own credential, with write access to its GitOps repository.\n"+
+			"In a workflow run it arrives as the repository secret of that name; locally,\n"+
+			"export it for this command. No other credential is read in its place: one\n"+
+			"belonging to somebody else would be stored in the cluster's repo-creds Secret\n"+
+			"and outlive this run (ADR-065)", orgURL)
 	}
 
 	ci := &components.Installer{Kubeconfig: kubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}

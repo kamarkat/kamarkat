@@ -26,6 +26,18 @@ NEVER ASK TM TO DO RELEASE OR PRODUCT TESTING. THEIR JOB IS ONLY IMPLEMENT, BUIL
 
 your feedbacks must not force the TM to follow multiple iterations. if the design is valid, your response must guide the TM to complete the tasks in single iterations rather then gating into multiple smaller steps. No legacy scope, migration, compatibility aliases, fallback behavior, or dual configuration.
 
+Make sure the TM is not drifting from the agreed scope.
+work in one direction and speaking same language.
+Keep TM focussed on completing the finalized flow.
+Stop and course correct the direction if you are being pulled to complete more feature without a need. 
+only approve the flow which is mandatroy and not on any assumptions.
+
+make sure all comamnds are linked to cli comamnds page to avoid duplicate esplanations.
+
+A failed bootstrap, failed required workload check, or failed final platform validation must produce a failed workflow.
+
+Retain diagnostic summaries, but do not let continue-on-error turn an unusable cluster into a successful CI run.
+
 planning is ur job. debugging and execution is the the team members job. so provide clear next set of tasks for you to proceed further.
 
 ## Team Member
@@ -38,6 +50,11 @@ are you redy yo take instrcutrions from team lead?
 
 Local cluster access: zero-ops/.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig...
 
+make sure all comamnds are linked to cli comamnds page to avoid duplicate esplanations.
+
+A failed bootstrap, failed required workload check, or failed final platform validation must produce a failed workflow.
+
+Retain diagnostic summaries, but do not let continue-on-error turn an unusable cluster into a successful CI run.
 
 ### Others
 -------

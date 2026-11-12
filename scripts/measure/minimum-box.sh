@@ -26,7 +26,7 @@
 #
 #   minimum-box.sh <kubeconfig>
 #
-# HCLOUD_TOKEN is read from the environment, or from k8-secrets/hetzner/token.
+# HCLOUD_TOKEN is read from the environment, or from this operator's store.
 # The pricing endpoint is read-only and the token is never sent anywhere else.
 set -euo pipefail
 
@@ -40,8 +40,9 @@ PRICES="$HERE/prices.yaml"
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
 TOKEN="${HCLOUD_TOKEN:-}"
-if [ -z "$TOKEN" ] && [ -f "k8-secrets/hetzner/token" ]; then
-    TOKEN="$(cat k8-secrets/hetzner/token)"
+KAMARKAT_STORE="${KAMARKAT_HOME:-$HOME/.kamarkat}"
+if [ -z "$TOKEN" ] && [ -f "$KAMARKAT_STORE/hetzner/token" ]; then
+    TOKEN="$(cat "$KAMARKAT_STORE/hetzner/token")"
 fi
 [ -n "$TOKEN" ] || {
     echo "no HCLOUD_TOKEN: prices are fetched live and cannot be guessed" >&2

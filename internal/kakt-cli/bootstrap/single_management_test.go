@@ -18,6 +18,13 @@ import (
 func box(t *testing.T, boxID string, management []string, workload []string) string {
 	t.Helper()
 	dir := t.TempDir()
+	// The box declares itself, as `kakt box init` writes it. Identity comes from
+	// here and not from a cluster, which is what lets a box exist before its
+	// first management cluster does.
+	if err := os.MkdirAll(filepath.Join(dir, "registry"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "registry", "box.yaml"), "boxId: "+boxID+"\n")
 	for _, m := range management {
 		base := filepath.Join(dir, "registry", "clusters", m)
 		if err := os.MkdirAll(base, 0o755); err != nil {

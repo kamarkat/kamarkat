@@ -62,12 +62,16 @@ KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfi
 
 ## Tenant repo testing
 ### Once, on a branch you've pushed (ArgoCD reads git, not your working tree)
-./kakt tenant scaffold --tenant local --box soloz-io --domain local.nutgraf.in \
-  --bundle-version development --local
+./kakt box init --tenant local --box soloz-io --domain local.nutgraf.in \
+  --bundle-version development
+cd local-gitops-* && ../kakt tenant add-management
 
 https://app.infisical.com/organizations/89f6d208-ea9b-4b6d-b4bd-a249f50ead8d/identities/671e356d-76ad-4886-8357-635abf19d435
 
-### It creates + pushes the repo, sets the secrets, clones locally, then stops:
+### box init mints the box's three names, creates + pushes the repo with NO
+### clusters, sets the secrets and leaves a checkout; add-management declares the
+### first cluster in it (no --name), which you then commit and push yourself.
+### A run that stops part-way: kakt box init --resume <checkout>
 cd local-gitops
 
 export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/k8-secrets/hetzner/token)
@@ -119,24 +123,28 @@ chmod +x kakt
 ## Scaffold a real tenant repo 
 
 cd /Users/arun_subramanian/Projects/kamarkat/kamarkat
-./kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+./kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
 Or from your current directory:
 
-/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
 ### Interactive
 
-kakt tenant scaffold --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
 
-Prompts for the two secrets (no echo), sets them on the tenant's repo, dispatches the bootstrap, prints the Actions URL.
+Asks for each credential it does not have (no echo, a browser on the page that
+issues it), then creates the repo and sets them on it. Declaring the management
+cluster and dispatching the bootstrap are your next two steps.
 
 ### Non-interactive:
 
-kakt tenant scaffold --tenant tenant1 --box soloz-io --domain tenant1.nutgraf.in \
+kakt box init --no-prompt --tenant tenant1 --box soloz-io --domain tenant1.nutgraf.in \
   --provider-token "$HCLOUD_TOKEN" --gitops-token "$GITOPS_PAT"
 
-No secrets → repository is created, then handover instructions with the exact commands. Not an error, since the repo exists by then.
+No secrets → nothing is created, and the handover instructions say what is
+missing. The repository is created only once the set is complete, so a re-run
+after supplying the rest is the whole recovery.
 
 ## Delete
 

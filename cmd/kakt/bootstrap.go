@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/bootstrap"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/cluster"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/preflight"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"github.com/spf13/cobra"
@@ -68,9 +70,9 @@ func requireTailnetCredentials(tailnet string) error {
 
 	keyed := os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TAILSCALE_AUTHKEY") != ""
 	if !keyed {
-		if _, err := os.Stat(filepath.Join("k8-secrets", "tailscale", "authkey")); err != nil {
+		if opstore.ValueOrEnv("TS_AUTHKEY", "tailscale/authkey") == "" {
 			missing = append(missing, "  no Tailscale authkey. Set TS_AUTHKEY (or TAILSCALE_AUTHKEY), "+
-				"or write one to k8-secrets/tailscale/authkey")
+				"or write one to ~/.kamarkat/tailscale/authkey")
 		}
 	}
 
@@ -92,75 +94,38 @@ func workerReplicasOverride() *int {
 	return &n
 }
 
-// resolveHCloudToken makes the Hetzner token available to everything that reads it.
+// resolveHCloudToken puts the BOX'S OWN cloud credential into the environment.
 //
-// Several places in this CLI read HCLOUD_TOKEN from the environment -- bootstrap,
-// pivot twice, and teardown -- so the token is resolved once, here, and put
-// back into the environment rather than threaded through each of them.
+// The readers downstream -- the provider driver, the pivot, the preflight
+// validators -- take it from the environment, so it is resolved once here and set
+// for them rather than threaded through each.
 //
-// The file fallback exists because teardown already had it and bootstrap did not:
-// the same credential, in the same file, worked for tearing a cluster down and not
-// for building one. k8-secrets/ is the operator's own gitignored directory, so this
-// helps someone working in a checkout and does nothing in CI, where the variable is
-// set from a secret.
-func resolveHCloudToken() error {
-	if os.Getenv("HCLOUD_TOKEN") != "" {
-		return nil
-	}
-	const rel = "k8-secrets/hetzner/token"
-	for _, path := range hcloudTokenPaths(rel) {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		token := strings.TrimSpace(string(raw))
-		if token == "" {
-			continue
-		}
-		// Set rather than returned: the readers downstream take it from the
-		// environment, and passing it explicitly would mean changing all of them.
-		if err := os.Setenv("HCLOUD_TOKEN", token); err != nil {
-			return fmt.Errorf("could not make the Hetzner token available: %w", err)
-		}
-		fmt.Printf("[bootstrap] using the Hetzner token from %s\n", path)
-		return nil
-	}
-	return fmt.Errorf("no Hetzner API token.\n\n"+
-		"Clusters are created with it, so bootstrap needs one of:\n\n"+
-		"  HCLOUD_TOKEN   exported in this shell\n"+
-		"  %s   the same token, relative to this checkout\n\n"+
-		"Create one at https://console.hetzner.cloud/ under Security > API tokens,\n"+
-		"with Read & Write permission.", rel)
-}
-
-// hcloudTokenPaths lists where the token file may be, nearest first.
+// It comes from the box's escrow and from nowhere else. HCLOUD_TOKEN exported in a
+// shell and k8-secrets/hetzner/token beside a checkout were both accepted before,
+// and both are ways for a credential belonging to a DIFFERENT provider project to
+// authenticate perfectly and answer about the wrong infrastructure: an inventory
+// that comes back empty, a duplicate management cluster admitted because the first
+// was invisible, a teardown that deletes nothing and succeeds. Anything already in
+// the environment is overwritten for the same reason.
 //
-// The working directory is no longer where the operator's checkout is. A released
-// binary carries its platform content (ADR-063), so bootstrap is run FROM the
-// tenant's repository -- and the tenant's repository has no k8-secrets/. The
-// fallback is therefore resolved against the checkout rather than the cwd, which
-// is what it always meant: k8-secrets/ is the operator's own gitignored directory,
-// and reading it from wherever bootstrap happens to be run was an accident of the
-// two being the same place.
-//
-// ZERO_OPS_DIR first because a developer can say where the checkout is; the
-// executable's directory second because `bin/kakt` and `./kakt` both sit in one.
-func hcloudTokenPaths(rel string) []string {
-	paths := []string{rel}
-	if root := strings.TrimSpace(os.Getenv("ZERO_OPS_DIR")); root != "" {
-		paths = append(paths, filepath.Join(root, rel))
+// Enrolment is the one place an operator hands over a credential, and it is
+// explicit and piped (`kakt escrow enroll-provider-credential`). A box whose
+// escrow holds none fails closed here, naming that command.
+func resolveHCloudToken(ctx context.Context, gitopsDir, clusterName string) (string, error) {
+	token, err := hubaccess.ProviderToken(ctx, gitopsDir, clusterName, "hetzner")
+	if err != nil {
+		return "", err
 	}
-	if exe, err := os.Executable(); err == nil {
-		if exe, err = filepath.EvalSymlinks(exe); err == nil {
-			dir := filepath.Dir(exe)
-			// Both layouts the repository produces: `./kakt` at the root, and
-			// `bin/kakt` from the Makefile.
-			paths = append(paths,
-				filepath.Join(dir, rel),
-				filepath.Join(filepath.Dir(dir), rel))
-		}
+	if strings.TrimSpace(token) == "" {
+		return "", fmt.Errorf("this box's escrow holds no Hetzner credential, and clusters are "+
+			"created with one.\n\nEnrol it, as the platform administrator:\n\n"+
+			"  kakt escrow enroll-provider-credential --gitops-dir %s --cluster %s < token",
+			gitopsDir, clusterName)
 	}
-	return paths
+	if err := os.Setenv("HCLOUD_TOKEN", token); err != nil {
+		return "", fmt.Errorf("could not make the box's Hetzner credential available: %w", err)
+	}
+	return token, nil
 }
 
 func newBootstrapCmd() *cobra.Command {
@@ -277,9 +242,6 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		if osType != "ubuntu" {
 			return fmt.Errorf("unsupported OS type %q: ubuntu is the only supported node operating system (ADR-001)", osType)
 		}
-		if err := resolveHCloudToken(); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -339,10 +301,19 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	// cluster by design, and an unreachable Kubernetes API is the state of a
 	// wedged cluster whose servers are still running -- the worst possible moment
 	// to conclude that nothing is there and build a second control plane.
+	// The box's own credential, read once, used by the gate below and by every
+	// provisioning step after it. One value from one source: a gate that asked a
+	// different credential than the provisioning uses would be answering about
+	// different infrastructure.
+	providerToken, err := resolveHCloudToken(ctx, gitopsDir, clusterName)
+	if err != nil {
+		return err
+	}
+
 	admission, err := bootstrap.ManagementAdmission{
 		GitopsDir: gitopsDir,
 		Creating:  clusterName,
-		Owned:     providerOwnedCounts,
+		Owned:     providerOwnedCounts(providerToken),
 		// Box-wide: an incarnation whose directory was removed still owns its
 		// servers, and the repository's history is the box's own record of
 		// having declared it.
@@ -499,15 +470,4 @@ func maskToken(token string) string {
 		return "***"
 	}
 	return token[:4] + "..." + token[len(token)-4:]
-}
-
-func readGitHubToken() string {
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
-	}
-	data, err := os.ReadFile("k8-secrets/github/github-pat-token")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }

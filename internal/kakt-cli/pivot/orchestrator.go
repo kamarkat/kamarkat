@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,7 +246,14 @@ func (o *Orchestrator) getKubeconfig(ctx context.Context) (string, error) {
 	}
 
 	// Save to k8-secrets/kubeconfig directory
-	kubeconfigDir := "k8-secrets/kubeconfig"
+	// The operator's private runtime path, not a checkout: a working kubeconfig
+	// is cluster-admin and must not sit where it can be committed
+	// (internal/kakt-cli/opstore).
+	kcPath, kcErr := opstore.KubeconfigPath(o.ClusterName)
+	if kcErr != nil {
+		return "", kcErr
+	}
+	kubeconfigDir := filepath.Dir(kcPath)
 	if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create kubeconfig directory: %w", err)
 	}

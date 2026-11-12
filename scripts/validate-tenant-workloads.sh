@@ -12,11 +12,11 @@
 #
 # Examples:
 #   ./scripts/validate-tenant-workloads.sh app-creator
-#   KUBECONFIG=k8-secrets/kubeconfig/hub.kubeconfig \
+#   KUBECONFIG=~/.kamarkat/run/kubeconfig/hub.kubeconfig \
 #     ./scripts/validate-tenant-workloads.sh app-creator
 #
 # Environment variables:
-#   KUBECONFIG   Path to kubeconfig (default: k8-secrets/kubeconfig/hub.kubeconfig)
+#   KUBECONFIG   Path to kubeconfig (default: ~/.kamarkat/run/kubeconfig/hub.kubeconfig)
 #   WORKLOAD_CLUSTER  ArgoCD cluster name of the workload cluster (REQUIRED, no default)
 #                     SPOKE_NAME is accepted as the older spelling.
 #   ARGOCD_NS    Namespace where ArgoCD runs (default: platform-ops)
@@ -26,7 +26,7 @@ set -euo pipefail
 # ─── Configuration ────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-KUBECONFIG="${KUBECONFIG:-$PROJECT_ROOT/k8-secrets/kubeconfig/hub.kubeconfig}"
+KUBECONFIG="${KUBECONFIG:-${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig}"
 # No default, for the reason post-bootstrap-validate.sh records beside the same
 # decision: a fallback to spoke-pool-eu-prod-01 validated whatever box was in
 # front of it against the PRODUCTION pool name, found nothing, and reported the
@@ -139,7 +139,7 @@ kc_hub() { kubectl --kubeconfig="$KUBECONFIG" "$@"; }
 # No fallback is allowed: missing spoke kubeconfig is a hard failure.
 _SPOKE_KUBECONFIG=""
 _resolve_spoke_kubeconfig() {
-    local spoke_kc="$PROJECT_ROOT/k8-secrets/kubeconfig/${SPOKE_NAME}.kubeconfig"
+    local spoke_kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${SPOKE_NAME}.kubeconfig"
     if [[ -f "$spoke_kc" ]]; then
         _SPOKE_KUBECONFIG="$spoke_kc"
     else

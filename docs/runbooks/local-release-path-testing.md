@@ -58,7 +58,7 @@ Authenticate helm once per session — the script does not log in, because the
 credential is yours:
 
 ```bash
-echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u <your-gh-user> --password-stdin
+echo "$CHART_PUBLISH_TOKEN" | helm registry login ghcr.io -u <your-gh-user> --password-stdin
 ```
 
 Then package, gate and publish:

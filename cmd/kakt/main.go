@@ -7,6 +7,18 @@ import (
 )
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// newRootCmd builds the whole command tree.
+//
+// Separate from main so a test can construct it. Cobra registers flags when a
+// command is built, and a duplicate flag name PANICS at that moment -- which is
+// every invocation of this binary, not just the command that owns the flag. A
+// compile passes, the tests pass, and `kakt anything` dies on startup.
+func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "kakt",
 		Short: "Create and maintain a tenant's platform",
@@ -35,6 +47,7 @@ func main() {
 	rootCmd.AddCommand(newReseedCmd())
 	rootCmd.AddCommand(newVerifyCmd())
 	rootCmd.AddCommand(newKubeconfigCmd())
+	rootCmd.AddCommand(newBoxCmd())
 	rootCmd.AddCommand(newTenantCmd())
 	rootCmd.AddCommand(newBundleVersionCmd())
 	rootCmd.AddCommand(newEscrowCmd())
@@ -44,7 +57,5 @@ func main() {
 	rootCmd.AddCommand(newAppCmd())
 	rootCmd.AddCommand(newReleaseCmd())
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }

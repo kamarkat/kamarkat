@@ -92,8 +92,15 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${KUBECONFIG_VALUE:-}" ]; then
-              mkdir -p k8-secrets/kubeconfig
-              printf '%s' "$KUBECONFIG_VALUE" > "k8-secrets/kubeconfig/${{ steps.p.outputs.cluster }}.kubeconfig"
+              # The runner's own private path, never the checkout: a kubeconfig
+              # written into a working tree can be committed, uploaded as an
+              # artifact, or picked up by a later step that had no business
+              # holding cluster-admin. KAMARKAT_HOME is runner-local and discarded
+              # with the job.
+              kcdir="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig"
+              mkdir -p "$kcdir" && chmod 700 "$kcdir"
+              umask 077
+              printf '%s' "$KUBECONFIG_VALUE" > "$kcdir/${{ steps.p.outputs.cluster }}.kubeconfig"
               echo "have=yes" >> "$GITHUB_OUTPUT"
           else
               echo "::notice::no KUBECONFIG_${{ steps.p.outputs.secret }} secret; the verdict will be unverified"

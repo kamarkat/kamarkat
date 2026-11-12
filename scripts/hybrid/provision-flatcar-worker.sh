@@ -104,7 +104,7 @@ Options:
   --spoke <name>       Shorthand to target a specific spoke cluster.
   --node N             Provision only node index N (1-based from home-lab.env).
   --env FILE           Path to environment file (default: scripts/hybrid/home-lab.env)
-  --ts-authkey KEY     Tailscale auth-key (auto-loaded from k8-secrets/tailscale/authkey if omitted).
+  --ts-authkey KEY     Tailscale auth-key (auto-loaded from ~/.kamarkat/tailscale/authkey if omitted).
   --vswitch NAME       Hyper-V Virtual Switch name (default: 'Default Switch').
   --host-cpu-max N     Host PROCTHROTTLEMAX percent (default 70, ADR-046 §24.5):
                        the thermal cap that keeps a thin box from tripping ACPI
@@ -217,7 +217,8 @@ fi
 unset _caller_hub_kubeconfig _caller_spoke_name
 
 # Auto-fetch Tailscale authkey from k8-secrets if not passed via CLI
-DEFAULT_TS_AUTHKEY_FILE="${REPO_ROOT}/k8-secrets/tailscale/authkey"
+# The operator's own store, not a checkout (internal/kakt-cli/opstore).
+DEFAULT_TS_AUTHKEY_FILE="${KAMARKAT_HOME:-$HOME/.kamarkat}/tailscale/authkey"
 if [[ -z "$TS_AUTHKEY" && -f "$DEFAULT_TS_AUTHKEY_FILE" ]]; then
   TS_AUTHKEY="$(tr -d '\r\n' < "$DEFAULT_TS_AUTHKEY_FILE")"
 fi

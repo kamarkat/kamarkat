@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +36,9 @@ const (
 
 type matchOpts struct {
 	cluster, kubeconfig, kubeContext, token string
+	// gitops and box say where the box declares its escrow, which is where the
+	// provider credential comes from.
+	gitops, box string
 }
 
 // newClusterMatchInventoryCmd compares recovered CAPI objects with the servers that
@@ -73,9 +77,10 @@ Read-only. It changes nothing in either the cluster or the provider.`,
 	f.StringVar(&o.cluster, "cluster", "", "the cluster whose machines to match (required)")
 	f.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig for the hub holding platform-capi")
 	f.StringVar(&o.kubeContext, "context", "", "kubeconfig context")
-	f.StringVar(&o.token, "hcloud-token", "",
-		"provider API token; or set HCLOUD_TOKEN. Taken explicitly rather than read from the "+
-			"cluster, because during a reconstruction the cluster's copy is itself restored state")
+	f.StringVar(&o.gitops, "gitops-dir", ".",
+		"the box's repository, which declares its escrow and its box id")
+	f.StringVar(&o.box, "box-cluster", "",
+		"the management cluster whose declaration names this box's escrow (default: --cluster)")
 	_ = cmd.MarkFlagRequired("cluster")
 	return cmd
 }
@@ -96,14 +101,22 @@ func runClusterMatchInventory(ctx context.Context, o matchOpts) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if o.token == "" {
-		o.token = strings.TrimSpace(os.Getenv("HCLOUD_TOKEN"))
+	// The box's own credential, from its escrow. The provider's inventory is the
+	// authority this compares against, so it has to be THIS box's provider
+	// project: a token for another one answers truthfully about the wrong
+	// account, and every machine here would read as missing.
+	//
+	// Not read from the cluster either, which is the point of the command --
+	// during a reconstruction the cluster's copy is itself restored state.
+	declaring := strings.TrimSpace(o.box)
+	if declaring == "" {
+		declaring = o.cluster
 	}
-	if o.token == "" {
-		return fmt.Errorf("a provider API token is required: --hcloud-token or HCLOUD_TOKEN. " +
-			"The provider's inventory is the authority this compares against, and without it " +
-			"there is nothing to compare the recovered objects to")
+	token, err := hubaccess.ProviderToken(ctx, o.gitops, declaring, "hetzner")
+	if err != nil {
+		return err
 	}
+	o.token = token
 
 	hetznerCluster, err := o.hetznerClusterName(ctx)
 	if err != nil {

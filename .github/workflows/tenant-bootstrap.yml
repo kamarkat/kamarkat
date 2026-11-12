@@ -60,9 +60,15 @@ on:
         default: ''
     secrets:
       HCLOUD_TOKEN:
-        description: The tenant's Hetzner API token. Never leaves the tenant's account.
-        required: true
-      GITOPS_TOKEN:
+        # OPTIONAL, and absent is the steady state. A box's provider credential
+        # lives in its escrow; this secret exists only to enrol the first one.
+        # Once enrolled, delete it -- a second copy in repository secrets widens
+        # where it can leak from and nothing reads it.
+        description: >-
+          The tenant's Hetzner API token, for the FIRST enrolment only. Omit it
+          once the box's credential is in escrow. Never leaves the tenant's account.
+        required: false
+      GITOPS_REPO_WRITE_TOKEN:
         description: Write access to this repository, so Day-0 can commit the artifacts it generates.
         required: true
       INFISICAL_ADMIN_EMAIL:
@@ -147,15 +153,15 @@ jobs:
       - name: Check out the tenant's repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITOPS_TOKEN }}
+          token: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
 
       # Deliberately unauthenticated. Day-0 needs no platform credential, and
       # this step is where that is either true or merely claimed: fetching the
-      # release under the tenant's own GITOPS_TOKEN would spend a repository-write
-      # token on reading the platform's releases, and would only ever succeed for
-      # a tenant who had been granted access to the platform's repository. The
-      # platform publishes; the tenant downloads; neither holds anything of the
-      # other's (ADR-065).
+      # release under the tenant's own GITOPS_REPO_WRITE_TOKEN would spend a
+      # repository-write token on reading the platform's releases, and would only
+      # ever succeed for a tenant who had been granted access to the platform's
+      # repository. The platform publishes; the tenant downloads; neither holds
+      # anything of the other's (ADR-065).
       - name: Fetch the released platform CLI
         run: |
           set -euo pipefail
@@ -184,7 +190,10 @@ jobs:
       - name: Check the declaration before acting on it
         run: |
           set -euo pipefail
-          f="clusters/${{ inputs.cluster }}/bundle.yaml"
+          # registry/clusters/, which is where a tenant's declarations live. This
+          # read was clusters/<cluster>/bundle.yaml -- a path no scaffolded
+          # repository has, so the step it guards could only ever fail.
+          f="registry/clusters/${{ inputs.cluster }}/bundle.yaml"
           if [[ ! -f "$f" ]]; then
             echo "::error::$f does not exist. A cluster is bootstrapped from the"
             echo "::error::declaration this repository holds; scaffold it first."
@@ -214,11 +223,46 @@ jobs:
           ref: v${{ inputs.bundle-version }}
           path: .platform-validators
 
+      # The provider credential is ENROLLED here, and read from the box's escrow
+      # by every command afterwards.
+      #
+      # This is the one place a credential is accepted from outside: a box's first
+      # bootstrap has nothing escrowed yet. It is piped on stdin rather than passed
+      # as a flag or left in the environment, so it reaches no process argument list
+      # and no log. Re-runs are idempotent -- an identical credential writes nothing,
+      # and a DIFFERENT one is refused until someone rotates it deliberately, which
+      # is what stops a changed repository secret from silently repointing a box at
+      # another provider project.
+      #
+      # The skip is decided INSIDE the step, not in `if:`. Step conditions cannot
+      # read the secrets context, so `if: secrets.<NAME> != ''` evaluates to false on
+      # every run -- it would have skipped the enrolment a first bootstrap needs.
+      - name: Enrol the provider credential in this box's escrow
+        env:
+          INFISICAL_ESCROW_URL: ${{ secrets.INFISICAL_ESCROW_URL }}
+          INFISICAL_ESCROW_PROJECT_ID: ${{ secrets.INFISICAL_ESCROW_PROJECT_ID }}
+          INFISICAL_ESCROW_CLIENT_ID: ${{ secrets.INFISICAL_ESCROW_CLIENT_ID }}
+          INFISICAL_ESCROW_CLIENT_SECRET: ${{ secrets.INFISICAL_ESCROW_CLIENT_SECRET }}
+          KAKT_IDENTITY: machine
+          PROVIDER_CREDENTIAL: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROVIDER_CREDENTIAL:-}" ]; then
+            echo "no provider credential in this repository's secrets; the box's own"
+            echo "escrowed credential is what the bootstrap below will read."
+            exit 0
+          fi
+          printf '%s' "$PROVIDER_CREDENTIAL" | ./kakt escrow enroll-provider-credential \
+            --gitops-dir . --cluster "${{ inputs.cluster }}"
+
       - name: Bootstrap the management cluster
         id: bootstrap-mgmt
         env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+          # No HCLOUD_TOKEN. The provider credential is read from this box's
+          # escrow, which is the only copy that can answer about this box.
+          # The one git credential Day-0 holds: it clones and commits to this
+          # repository with it, and ArgoCD reads the repository through it.
+          GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
           # Read by the hybrid driver at capi-init, before the hub Cluster exists,
           # because the ClusterClass reads the credential while that Cluster is
           # being created. Empty under hetzner, where nothing reads it.
@@ -319,20 +363,48 @@ jobs:
           # creates the management cluster; add-cluster adds workload clusters, and
           # a box may legitimately have none yet. The spoke gates are skipped in
           # that case, which is what the workload step further down already does.
+          # EVERY declared cluster, not the first one.
+          #
+          # This read ended in `head -1`, so a box with three workload clusters
+          # told the hub about one of them and the other two went unmentioned --
+          # silently, because one name looks exactly like a correct answer.
+          #
+          # A box with none is not an error. Scaffolding creates the management
+          # cluster; `kakt tenant add-cluster` adds workload clusters, and a box
+          # may legitimately have none yet. The hub's spoke gates are skipped in
+          # that case.
+          #
           # `|| true` is load-bearing. This step runs under `set -euo pipefail`, and
           # on a box with no workload cluster the glob matches nothing: bash passes
           # the pattern through literally, grep exits 2, and pipefail turns that
           # into an aborted bootstrap -- failing the box for the one case this is
-          # written to tolerate. Verified: exit 2 without it.
-          pool=$(grep -l '^kind: SpokePool' registry/clusters/*/infrastructure/spokepool.yaml 2>/dev/null \
-                 | head -1 | xargs -r grep -m1 '^  name:' | awk '{print $2}' || true)
+          # written to tolerate.
+          # A cluster name is a DNS label, so word splitting is safe and an array
+          # is not needed. awk reads each matched file directly, which is one
+          # process per file instead of a nested shell per file.
+          pools=$(grep -l '^kind: SpokePool' registry/clusters/*/infrastructure/spokepool.yaml 2>/dev/null \
+                    | xargs -r -n1 awk '/^  name:/ {print $2; exit}' \
+                    | sed '/^$/d' | sort -u || true)
+          count=$(printf '%s\n' "$pools" | grep -c . || true)
           spoke=()
-          if [ -n "$pool" ]; then
-            spoke=(--spoke "$pool")
-            echo "workload cluster declared: $pool"
-          else
-            echo "no workload cluster declared in this repository; the hub's spoke gates are skipped"
-          fi
+          case "$count" in
+            0)
+              echo "no workload cluster declared in this repository; the hub's spoke gates are skipped"
+              ;;
+            1)
+              spoke=(--spoke "$pools")
+              echo "workload cluster declared: $pools"
+              ;;
+            *)
+              # The hub's spoke gates assert about ONE named pool, and naming one
+              # of several would report partial coverage as full. Every declared
+              # cluster is brought up and asserted in the workload step below,
+              # which handles all of them; the hub phase takes none.
+              echo "workload clusters declared: $(echo $pools)"
+              echo "more than one, so the hub's single-pool gates are skipped; each cluster"
+              echo "is brought up and checked in the workload step"
+              ;;
+          esac
 
           ZERO_OPS_DIR="$PWD" \
           KAKT_BINARY="$PWD/kakt" \
@@ -403,40 +475,67 @@ jobs:
         id: bootstrap-workload
         if: steps.verify.outcome == 'success'
         continue-on-error: true
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: |
           set -euo pipefail
-          kc="k8-secrets/kubeconfig/${{ inputs.cluster }}.kubeconfig"
+          # Day-0's working copy, in the runner's own private path rather than
+          # the checkout -- a kubeconfig in a working tree can be committed,
+          # uploaded as an artifact, or read by a later step with no business
+          # holding cluster-admin (internal/kakt-cli/opstore).
+          kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${{ inputs.cluster }}.kubeconfig"
           if [ ! -r "$kc" ]; then
             echo "no kubeconfig at $kc; the management cluster did not finish" >&2
             exit 1
           fi
 
-          # The claim names the cluster. Read it rather than taking it as an
-          # input: the claim arrives through boundary 03 from this repository, so
-          # the cluster is the only thing that knows which ones this box has.
-          pool=$(KUBECONFIG="$kc" kubectl get spokepools.nutgraf.in -A \
-                   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-          if [ -z "$pool" ]; then
-            echo "no workload cluster declared on this box; nothing to bring up"
+          # THE REPOSITORY is the authority for which clusters a box has
+          # (ADR-082): the claim file is the declaration, and the cluster
+          # reconciles it. This read was `kubectl get spokepools -o
+          # jsonpath={.items[0]...}` -- the cluster's view, and only its first
+          # item, so a box with several brought up one and reported success for
+          # the rest.
+          # A cluster name is a DNS label, so word splitting is safe and an array
+          # is not needed. awk reads each matched file directly, which is one
+          # process per file instead of a nested shell per file.
+          pools=$(grep -l '^kind: SpokePool' registry/clusters/*/infrastructure/spokepool.yaml 2>/dev/null \
+                    | xargs -r -n1 awk '/^  name:/ {print $2; exit}' \
+                    | sed '/^$/d' | sort -u || true)
+          count=$(printf '%s\n' "$pools" | grep -c . || true)
+          if [ "$count" -eq 0 ]; then
+            # Not a failure, and not a provisioned cluster either. Both readings
+            # are wrong: one fails a correct box, the other claims capacity that
+            # was never declared.
+            echo "no workload cluster declared in this repository; nothing to bring up"
+            echo "pools=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "workload cluster: $pool"
-          echo "pool=$pool" >> "$GITHUB_OUTPUT"
+          echo "workload clusters: $(echo $pools)"
+          echo "pools=$(echo $pools)" >> "$GITHUB_OUTPUT"
 
-          CLUSTER_NAME="${{ inputs.cluster }}" \
-          PROVIDER="${{ inputs.provider }}" \
-          SPOKEPOOL_NAME="$pool" \
-          ZERO_OPS_DIR="$PWD" \
-          KAKT_BINARY="$PWD/kakt" \
-          bash -c '
-            source .platform-validators/scripts/hub-bootstrap.sh
-            read_kubeconfig_from_state
-            export KUBECONFIG="$KUBECONFIG_PATH"
-            step10_wait_spokepool || exit 1
-            step10e_spoke_home_worker "$SPOKEPOOL_NAME"
-          '
+          # Each one on its own. A cluster is a separate claim, so a run that
+          # satisfied one must not read as satisfying the others, and the first
+          # failure stops the step rather than being averaged away.
+          failed=""
+          for pool in $pools; do
+            echo "── $pool ──"
+            if ! CLUSTER_NAME="${{ inputs.cluster }}" \
+              PROVIDER="${{ inputs.provider }}" \
+              SPOKEPOOL_NAME="$pool" \
+              ZERO_OPS_DIR="$PWD" \
+              KAKT_BINARY="$PWD/kakt" \
+              bash -c '
+                source .platform-validators/scripts/hub-bootstrap.sh
+                read_kubeconfig_from_state
+                export KUBECONFIG="$KUBECONFIG_PATH"
+                step10_wait_spokepool || exit 1
+                step10e_spoke_home_worker "$SPOKEPOOL_NAME"
+              '; then
+              failed="$failed $pool"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::these workload clusters did not come up:$failed"
+            exit 1
+          fi
 
       # Step 3 of three: the box as a whole, after both clusters exist.
       #
@@ -460,7 +559,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          kc="$PWD/k8-secrets/kubeconfig/${{ inputs.cluster }}.kubeconfig"
+          kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${{ inputs.cluster }}.kubeconfig"
 
           # The zone the box actually publishes on, read from what it declares
           # rather than assumed from the environment name (ADR-051). Without it
@@ -602,3 +701,40 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # THE RUN'S VERDICT, and the reason this step exists.
+      #
+      # verify, bootstrap-workload and validate each carry
+      # `continue-on-error: true` so that the summaries below them still run: a
+      # failure is most useful when it is reported, and a step that aborts the job
+      # takes the diagnosis with it. But continue-on-error also makes the JOB
+      # succeed, so a box that does not work was reporting a green run -- the one
+      # outcome CI must never produce.
+      #
+      # So the outcomes are read here, after every summary has been written, and
+      # the job ends on them. `skipped` is not a failure: a workload step that was
+      # skipped because the hub never converged is already accounted for by the
+      # hub's own failure.
+      - name: Verdict
+        if: always()
+        run: |
+          set -euo pipefail
+          failed=()
+          [ "${{ steps.verify.outcome }}" = "failure" ] && failed+=("the hub did not converge")
+          [ "${{ steps.bootstrap-workload.outcome }}" = "failure" ] && failed+=("a declared workload cluster did not come up")
+          [ "${{ steps.validate.outcome }}" = "failure" ] && failed+=("the platform did not validate")
+
+          if [ "${#failed[@]}" -eq 0 ]; then
+            echo "bootstrap completed: hub ${{ steps.verify.outcome }}, workload ${{ steps.bootstrap-workload.outcome }}, validation ${{ steps.validate.outcome }}"
+            exit 0
+          fi
+          {
+            echo "### ❌ Bootstrap failed"
+            echo
+            for f in "${failed[@]}"; do echo "- $f"; done
+            echo
+            echo "The summaries above name what failed. Re-running is safe: every phase is"
+            echo "checkpointed, and the validation reads rather than changes the box."
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '::error::%s\n' "${failed[@]}"
+          exit 1

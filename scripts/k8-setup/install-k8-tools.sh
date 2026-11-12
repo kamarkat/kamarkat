@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HUB_KUBECONFIG="${SCRIPT_DIR}/../../k8-secrets/kubeconfig/hub.kubeconfig"
+# Day-0's working copy, in the operator's runtime path (internal/kakt-cli/opstore).
+HUB_KUBECONFIG="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig"
 
 # Ensure ~/bin exists and is in PATH
 mkdir -p ~/bin
@@ -188,7 +189,8 @@ install_argocd
 install_gh
 
 # Persist GitHub token to ~/.bashrc so gh works in all shells
-GH_TOKEN_FILE="${SCRIPT_DIR}/../../k8-secrets/github/github-pat-token"
+# The operator's own store, not a checkout (internal/kakt-cli/opstore).
+GH_TOKEN_FILE="${KAMARKAT_HOME:-$HOME/.kamarkat}/github/github-pat-token"
 if [[ ! -f "$GH_TOKEN_FILE" ]]; then
   echo "ERROR: GitHub PAT not found at $GH_TOKEN_FILE"
   echo "  Create the file with your GitHub Personal Access Token:"

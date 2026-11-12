@@ -17,10 +17,13 @@
 #         (default: all but clean. `clean` is opt-in: it destroys a running
 #          cluster and deletes a GitHub repository, so it is never implied.)
 #
-# Credentials are read from k8-secrets/, one file per credential, never prompted
-# and never echoed. That directory is gitignored and is the same place teardown
-# and the bootstrap token fallback already read from. A missing one is reported by
-# path so it can be created once rather than retyped per run.
+# Credentials are read from the operator's store (~/.kamarkat/), one file per
+# credential, never prompted and never echoed. That directory is gitignored and
+# is the same place teardown reads from. A missing one is reported by path so it
+# can be created once rather than retyped per run. This harness exports each
+# credential under the name its consumer reads, because no consumer substitutes
+# another: a local bootstrap without GITOPS_REPO_WRITE_TOKEN now fails where it
+# once quietly borrowed the operator's own.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -86,7 +89,58 @@ if [[ -n "${TENANT_OVERRIDE:-}" && "$TENANT_OVERRIDE" != "$TENANT" ]]; then
     echo "  The tenant is derived from the domain. Change the domain." >&2
     exit 1
 fi
-CLUSTER="$TENANT-hub"
+# The box's names are MINTED by `kakt box init`, from the second it ran in, so
+# this harness cannot derive them -- it reads them back from the declaration the
+# box carries. Every phase resolves them the same way, which is also what lets
+# one phase run on its own against the box a previous run created.
+#
+# box_dir   the checkout, found by the one glob a box of this tenant matches
+# box_repo  its repository name
+# box_hub   the management cluster the box declares
+# Set by resolve_box, from the box's own declaration. Empty until then.
+CLUSTER=""
+BOX_DIR=""
+REPO=""
+
+box_dir() {
+    local hits=("$WORKSPACE/$TENANT-gitops-"*)
+    if [ ! -d "${hits[0]:-}" ]; then
+        echo "local-e2e: no box checkout under $WORKSPACE for tenant $TENANT." >&2
+        echo "  run the scaffold phase first, or point WORKSPACE at the run you mean." >&2
+        return 1
+    fi
+    if [ "${#hits[@]}" -gt 1 ]; then
+        echo "local-e2e: $WORKSPACE holds ${#hits[@]} boxes for tenant $TENANT:" >&2
+        printf '    %s\n' "${hits[@]}" >&2
+        echo "  a box's identity is minted per run; remove the ones you are done with." >&2
+        return 1
+    fi
+    printf '%s' "${hits[0]}"
+}
+
+box_repo() { basename "$(box_dir)"; }
+
+# resolve_box sets BOX_DIR, REPO and CLUSTER from the box this run operates on.
+#
+# Called by every phase that acts on one. CLUSTER is a global because the phases
+# below pass it to `kakt` and to the validators, and it is no longer derivable
+# from the tenant: the box minted it.
+resolve_box() {
+    BOX_DIR="$(box_dir)" || return 1
+    REPO="$(basename "$BOX_DIR")"
+    CLUSTER="$(box_hub)" || return 1
+}
+
+box_hub() {
+    local dir; dir="$(box_dir)" || return 1
+    local name
+    name="$(sed -n 's/^managementClusterName:[[:space:]]*//p' "$dir/registry/box.yaml" | tr -d '"')"
+    if [ -z "$name" ]; then
+        echo "local-e2e: $dir/registry/box.yaml declares no managementClusterName." >&2
+        return 1
+    fi
+    printf '%s' "$name"
+}
 # The stage the WORKLOAD cluster this run declares will serve. Not the hub's: the
 # management cluster declares no environment (ADR-111 Revision 7), so this reaches
 # `tenant add-cluster` and nothing else.
@@ -114,7 +168,9 @@ OWNER="${OWNER:-kamarkat}"
 # repository with its own remote, and `git add -A` here has swept one in before.
 WORKSPACE="${WORKSPACE:-$ROOT/.local-e2e}"
 
-SECRETS="${SECRETS:-$ROOT/k8-secrets}"
+# The operator's own store. SECRETS still overrides, for a developer who keeps a
+# separate set for local runs.
+SECRETS="${SECRETS:-${KAMARKAT_HOME:-$HOME/.kamarkat}}"
 
 usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
 
@@ -157,15 +213,17 @@ read_secret() {
 
 load_credentials() {
     HCLOUD_TOKEN="$(read_secret "$SECRETS/hetzner/token" "the Hetzner API token")"
-    GITOPS_TOKEN="$(read_secret "$SECRETS/github/github-pat-token" \
+    GITOPS_REPO_WRITE_TOKEN="$(read_secret "$SECRETS/github/github-pat-token" \
         "a GitHub token that can create the tenant repository and let Day-0 commit to it")"
-    # Two jobs, one token here. Scaffolding needs a credential to CREATE the
-    # repository -- resolved from GITHUB_APP_TOKEN, then GITHUB_TOKEN, then
-    # k8-secrets/ relative to the repo root (scaffold.go:545-552) -- while
-    # --gitops-token is what Day-0 later commits with. The file lookup is relative
-    # to wherever scaffold runs, and it runs from the workspace, so the env var is
-    # what makes the platform checkout's token reachable from there.
-    export GITHUB_TOKEN="$GITOPS_TOKEN"
+    # Two jobs, one token here, which is the only reason this is a single file.
+    # Scaffolding needs a credential to CREATE the repository, which it reads
+    # from GITHUB_ORG_SETUP_TOKEN, while Day-0 commits and ArgoCD reads with
+    # GITOPS_REPO_WRITE_TOKEN. In a real onboarding they are two credentials with
+    # two owners; in a local run one GitHub account owns both sides, so the same
+    # value plays both roles -- EXPORTED UNDER BOTH NAMES, because the code reads
+    # each one by name and falls back to neither.
+    export GITHUB_ORG_SETUP_TOKEN="$GITOPS_REPO_WRITE_TOKEN"
+    export GITOPS_REPO_WRITE_TOKEN
 
     # ADR-076 makes the escrow mandatory: RequireEscrow refuses a box that would
     # have nowhere to keep its master keys. All four or none -- three of four
@@ -221,7 +279,8 @@ load_credentials() {
     # run cannot finish without belongs in this function, where a missing one
     # stops the run before it spends a version or provisions anything.
     #
-    # k8-secrets/ghcr/ if present. Otherwise the GitHub PAT already loaded above,
+    # The store's ghcr/ pair if present. Otherwise the GitHub credential already
+    # loaded above,
     # which carries write:packages and therefore read, with the login taken from
     # gh. That is a convenience for THIS loop only: a tenant supplies a token
     # scoped to pulling their own images, and scaffolding collects it.
@@ -232,9 +291,9 @@ load_credentials() {
     [ -r "$SECRETS/ghcr/username" ] && GHCR_USERNAME="$(tr -d '\r\n' < "$SECRETS/ghcr/username")"
     [ -r "$SECRETS/ghcr/token" ]    && GHCR_TOKEN="$(tr -d '\r\n' < "$SECRETS/ghcr/token")"
     if [ -z "$GHCR_USERNAME" ]; then
-        GHCR_USERNAME="$(env -u GITHUB_TOKEN -u GH_TOKEN gh api user --jq .login 2>/dev/null || true)"
+        GHCR_USERNAME="$(env -u GITHUB_ORG_SETUP_TOKEN -u GITHUB_TOKEN -u GH_TOKEN gh api user --jq .login 2>/dev/null || true)"
     fi
-    [ -n "$GHCR_TOKEN" ] || GHCR_TOKEN="$GITOPS_TOKEN"
+    [ -n "$GHCR_TOKEN" ] || GHCR_TOKEN="$GITOPS_REPO_WRITE_TOKEN"
     if [ -z "$GHCR_USERNAME" ] || [ -z "$GHCR_TOKEN" ]; then
         echo "local-e2e: no registry credential for pulling this tenant's private images." >&2
         echo "  put a username and token under ${SECRETS}/ghcr/, or run: gh auth login" >&2
@@ -251,11 +310,10 @@ load_credentials() {
     # makes the run say up front what it will and will not configure, instead of
     # leaving an operator to notice afterwards that this box has no backups.
     #
-    # Exported rather than left to the CLI's own k8-secrets lookup. That lookup
-    # resolves against the platform checkout while Day-0 runs from the tenant's
-    # workspace, so it works by a path relationship rather than by anything this
-    # script states -- the same implicitness that let the registry credential go
-    # unnoticed until it failed mid-bootstrap.
+    # Exported rather than left to the CLI's own lookup, so the run states what it
+    # is passing instead of depending on where it happens to be run from -- the
+    # same implicitness that let the registry credential go unnoticed until it
+    # failed mid-bootstrap.
     local d
     # The prefix is GRAFANA, not GRAFANA_CLOUD: the files left in that directory are
     # the IRM integration URLs, and hub-bootstrap's SEED_SPECS reads them as
@@ -286,10 +344,10 @@ load_credentials() {
     fi
     # Exported, not only passed to scaffold.
     #
-    # bootstrap runs from the TENANT CLONE, and readTailscaleAuthkey reads
-    # "k8-secrets/tailscale/authkey" relative to the working directory -- which is
-    # the clone, not this checkout. The key sits in $ROOT/k8-secrets, so the file
-    # lookup missed it, the control plane was staged with an EMPTY authkey, and
+    # bootstrap runs from the TENANT CLONE, and readTailscaleAuthkey once read a
+    # path relative to the working directory -- which is the clone, not the
+    # operator's store the key actually sits in. The file lookup missed it, the
+    # control plane was staged with an EMPTY authkey, and
     # the ClusterClass's `if [ -s /etc/tailscale-hostname ]` guard skipped
     # `tailscale up` entirely. Both nodes came up Ready and pod traffic between
     # them died in one direction (ADR-046 invariant 6); the visible symptom was
@@ -332,7 +390,17 @@ require_ghcr_login() {
 # repository it was not given in the same variables it would have created them
 # from, so a stray CLUSTER= in the environment cannot point it at something real.
 do_clean() {
-    local repo="$TENANT-gitops"
+    # Resolved from the checkout, because the box's names are minted and the
+    # checkout is the only local record of them. Without one this phase cannot
+    # know which repository it would be deleting, and guessing is how a loop
+    # deletes a box somebody else is using.
+    if ! resolve_box; then
+        echo "  Nothing local names a box to remove. If a repository is left behind:" >&2
+        echo "    gh repo list $GIT_ORG --json name --jq '.[].name | select(startswith(\"$TENANT-gitops-\"))'" >&2
+        echo "  then delete the one you mean by name." >&2
+        return 1
+    fi
+    local repo="$REPO"
     say "removing what the last run left: cluster $CLUSTER, $GIT_ORG/$repo"
 
     # The cloud cluster first: teardown needs the kubeconfig the clone holds, so
@@ -399,7 +467,7 @@ do_clean() {
         echo "  removed $WORKSPACE/$repo"
     fi
 
-    if ! env -u GITHUB_TOKEN -u GH_TOKEN gh repo view "$GIT_ORG/$repo" --json name >/dev/null 2>&1; then
+    if ! env -u GITHUB_ORG_SETUP_TOKEN -u GITHUB_TOKEN -u GH_TOKEN gh repo view "$GIT_ORG/$repo" --json name >/dev/null 2>&1; then
         echo "  no repository $GIT_ORG/$repo"
         return 0
     fi
@@ -407,16 +475,17 @@ do_clean() {
     # phase here would leave the caller believing none of it did -- while the
     # only thing left is a repository name that the next scaffold will collide
     # with, which it says so about clearly.
-    # Without GITHUB_TOKEN, deliberately.
+    # With no credential of ours in the environment, deliberately.
     #
-    # load_credentials exports it from k8-secrets so scaffolding can create the
+    # load_credentials exports it from the operator's store so scaffolding can
+    # create the
     # repository, and gh prefers that variable over its own keyring token. The
     # PAT carries repo/workflow/write:packages and not delete_repo, so every
     # delete here failed with "Must have admin rights" while the same command in
     # a plain shell succeeded -- the message named a scope the operator had
     # already added, to a token gh was not using.
     local out
-    if out=$(env -u GITHUB_TOKEN -u GH_TOKEN gh repo delete "$GIT_ORG/$repo" --yes 2>&1); then
+    if out=$(env -u GITHUB_ORG_SETUP_TOKEN -u GITHUB_TOKEN -u GH_TOKEN gh repo delete "$GIT_ORG/$repo" --yes 2>&1); then
         echo "  deleted $GIT_ORG/$repo"
         return 0
     fi
@@ -477,16 +546,26 @@ do_cli() {
 # the clone. Preflight passed, scaffold ran, and the CLI refused on its own guard
 # ("already has commits") after the cli phase had rebuilt for nothing.
 workspace_is_clear() {
-    local repo="$TENANT-gitops" bad=""
+    local bad=""
 
-    if [ -e "$WORKSPACE/$repo" ]; then
-        echo "local-e2e: $WORKSPACE/$repo already exists." >&2
+    # ASSERTS THE ABSENCE OF A BOX, which is the opposite of resolve_box. A box
+    # mints its own names, so this cannot check one name: it checks that this
+    # tenant has no box here at all. Two boxes for one tenant are legitimate for
+    # a real replacement (ADR-111 Revision 9); in this loop one is a leftover.
+    local here=("$WORKSPACE/$TENANT-gitops-"*)
+    if [ -d "${here[0]:-}" ]; then
+        echo "local-e2e: $WORKSPACE already holds a box for $TENANT:" >&2
+        printf '    %s\n' "${here[@]}" >&2
         bad=1
     fi
-    if gh repo view "$GIT_ORG/$repo" --json name >/dev/null 2>&1; then
-        echo "local-e2e: $GIT_ORG/$repo already exists." >&2
-        echo "  Scaffolding produces a starting state, not a fork (ADR-062), so the" >&2
-        echo "  CLI refuses a repository that already has commits." >&2
+    local remote
+    remote="$(gh repo list "$GIT_ORG" --limit 200 --json name --jq \
+        ".[].name | select(startswith(\"$TENANT-gitops-\"))" 2>/dev/null || true)"
+    if [ -n "$remote" ]; then
+        echo "local-e2e: $GIT_ORG already holds a box repository for $TENANT:" >&2
+        printf '    %s\n' $remote >&2
+        echo "  A box is a starting state, not a fork (ADR-062), and this loop runs one" >&2
+        echo "  box at a time." >&2
         bad=1
     fi
     [ -n "$bad" ] || return 0
@@ -536,31 +615,53 @@ do_escrow() {
 }
 
 do_scaffold() {
-    local repo="$TENANT-gitops"
     mkdir -p "$WORKSPACE"
     workspace_is_clear || return 1
 
-    say "scaffolding $GIT_ORG/$repo against $VERSION"
-    ( cd "$WORKSPACE" && "$ROOT/bin/kakt" tenant scaffold --local \
+    # Two commands, because a box and its clusters are two things (ADR-111 §1).
+    # `box init` creates the repository with NO clusters and leaves a checkout;
+    # `tenant add-management` declares the first management cluster inside it.
+    say "creating a box for $TENANT in $GIT_ORG against $VERSION"
+    ( cd "$WORKSPACE" && "$ROOT/bin/kakt" box init --no-prompt \
         --tenant "$TENANT" --box "$GIT_ORG" --domain "$DOMAIN" \
-        --cluster "$CLUSTER" --provider "$PROVIDER" \
+        --provider "$PROVIDER" \
         --subdomain "$SUBDOMAIN" \
         --region "$REGION" \
         --bundle-version "$VERSION" \
         --bundle-registry "ghcr.io/$OWNER/charts" \
         --provider-token "$HCLOUD_TOKEN" \
-        --gitops-token "$GITOPS_TOKEN" \
+        --gitops-token "$GITOPS_REPO_WRITE_TOKEN" \
         --escrow-url "$ESCROW_URL" \
         --escrow-project-id "$ESCROW_PROJECT_ID" \
         --escrow-client-id "$ESCROW_CLIENT_ID" \
         --escrow-client-secret "$ESCROW_CLIENT_SECRET" \
         ${TAILSCALE_AUTHKEY:+--tailscale-authkey "$TAILSCALE_AUTHKEY"} )
 
+    # Read back, not derived: the box minted its own names a moment ago.
+    local repo hub dir
+    dir="$(box_dir)" || return 1
+    repo="$(basename "$dir")"
+    hub="$(box_hub)" || return 1
+    say "box $repo created; declaring management cluster $hub"
+
+    # No --name: a box's first management cluster takes the name the box
+    # declares, so the three minted names cannot drift apart here.
+    ( cd "$dir" && "$ROOT/bin/kakt" tenant add-management )
+
+    # Committed and pushed here rather than by the CLI: a declaration is the
+    # tenant's commit, and the bootstrap below reads the pushed tree.
+    ( cd "$dir" \
+        && git -c user.name=local-e2e -c user.email=local-e2e@local add . \
+        && git -c user.name=local-e2e -c user.email=local-e2e@local \
+             commit -qm "Declare management cluster $hub" \
+        && git push -q \
+             "https://x-access-token:${GITOPS_REPO_WRITE_TOKEN}@github.com/$GIT_ORG/$repo.git" main )
+
     # The assertion the whole exercise is for. A development build renders
     # `repoURL: https://github.com/...` with a `path:`; a released one renders the
     # OCI chart. Checked here rather than left to the eye, because the bootstrap
     # that follows takes twenty minutes to tell you the same thing.
-    local bundle="$WORKSPACE/$repo/registry/clusters/$CLUSTER/bundle.yaml"
+    local bundle="$dir/registry/clusters/$hub/bundle.yaml"
     if ! grep -q "ghcr.io/$OWNER/charts" "$bundle"; then
         echo "local-e2e: $bundle does not name the published registry." >&2
         echo "  this is the development shape, not the released one -- re-run the cli phase." >&2
@@ -646,7 +747,8 @@ EOF
 }
 
 do_bootstrap() {
-    local repo="$TENANT-gitops"
+    resolve_box || return 1
+    local repo="$REPO"
     [ -d "$WORKSPACE/$repo" ] || {
         echo "local-e2e: $WORKSPACE/$repo does not exist; run the scaffold phase first" >&2
         return 1
@@ -711,9 +813,10 @@ do_bootstrap() {
 # cluster that failed can be retried without rebuilding the management cluster,
 # which is thirty minutes and a fresh set of servers.
 do_workload() {
-    local repo="$TENANT-gitops"
+    resolve_box || return 1
+    local repo="$REPO"
     local ws="$WORKSPACE/$repo"
-    local kc="$ws/k8-secrets/kubeconfig/$CLUSTER.kubeconfig"
+    local kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/$CLUSTER.kubeconfig"
     [ -r "$kc" ] || {
         echo "local-e2e: no kubeconfig at $kc; the management cluster must exist first" >&2
         return 1
@@ -755,8 +858,9 @@ do_workload() {
 # converged" is an answer -- and long enough that normal settling is not reported
 # as failure. VERIFY_DEADLINE overrides it.
 do_verify() {
-    local repo="$TENANT-gitops"
-    local kc="$WORKSPACE/$repo/k8-secrets/kubeconfig/$CLUSTER.kubeconfig"
+    resolve_box || return 1
+    local repo="$REPO"
+    local kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/$CLUSTER.kubeconfig"
     [ -r "$kc" ] || {
         echo "local-e2e: no kubeconfig at $kc; bootstrap has not produced one" >&2
         return 1
@@ -829,7 +933,8 @@ do_verify() {
 # platform never created, and every check downstream of it fails against the
 # wrong object.
 workload_clusters() {
-    local repo="$WORKSPACE/$TENANT-gitops"
+    resolve_box || return 1
+    local repo="$BOX_DIR"
     local names=""
 
     if [ -d "$repo/registry/clusters" ]; then
@@ -865,8 +970,9 @@ spoke_pool_for() {
 # the one a run exists to settle. A box can converge perfectly while the bundle
 # names an unpublished chart or a capability switched off is still running.
 do_adr() {
-    local repo="$TENANT-gitops"
-    local kc="$WORKSPACE/$repo/k8-secrets/kubeconfig/$CLUSTER.kubeconfig"
+    resolve_box || return 1
+    local repo="$REPO"
+    local kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/$CLUSTER.kubeconfig"
     [ -r "$kc" ] || {
         echo "local-e2e: no kubeconfig at $kc; bootstrap has not produced one" >&2
         return 1
@@ -926,7 +1032,7 @@ preflight() {
         #
         # `domain` is the right half to compare anyway: DOMAIN names the zone.
         local declared=""
-        local box_values="$WORKSPACE/$TENANT-gitops/registry/clusters/$CLUSTER/values.yaml"
+        local box_values="$BOX_DIR/registry/clusters/$CLUSTER/values.yaml"
         if [[ -r "$box_values" ]]; then
             declared=$(grep -m1 '^domain:' "$box_values" 2>/dev/null | awk '{print $2}')
             # A box scaffolded before the split records only the joined value.
@@ -937,7 +1043,7 @@ preflight() {
         # until the public-endpoint gate failed on eleven hostnames twenty
         # minutes in.
         if [[ -n "$declared" && "$declared" != *"$DOMAIN"* ]]; then
-            echo "local-e2e: DOMAIN=$DOMAIN does not match the box at $WORKSPACE/$TENANT-gitops." >&2
+            echo "local-e2e: DOMAIN=$DOMAIN does not match the box at $BOX_DIR." >&2
             echo "  $CLUSTER publishes on $declared, fixed when it was scaffolded." >&2
             echo "  A box's domain cannot be changed afterwards: every certificate and" >&2
             echo "  DNS record derives from it." >&2
@@ -976,8 +1082,8 @@ preflight() {
     if wants scaffold; then
         wants clean || workspace_is_clear
     elif wants bootstrap || wants verify || wants adr; then
-        [ -d "$WORKSPACE/$TENANT-gitops" ] || {
-            echo "local-e2e: $WORKSPACE/$TENANT-gitops does not exist; run the scaffold phase first" >&2
+        resolve_box || {
+            echo "local-e2e: no box to act on; run the scaffold phase first" >&2
             return 1
         }
     fi
@@ -1007,9 +1113,9 @@ if wants bootstrap; then
 Tear down when finished. The management cluster goes last and refuses while a
 cluster it manages is still there, so name them:
 
-  $ROOT/bin/kakt teardown --name $CLUSTER --force --confirm --gitops-dir $WORKSPACE/$TENANT-gitops \
+  $ROOT/bin/kakt teardown --name <management cluster> --force --confirm --gitops-dir <checkout> \
       --destroy-managed <workload cluster>
-  rm -rf $WORKSPACE/$TENANT-gitops
-  gh repo delete $GIT_ORG/$TENANT-gitops --yes
+  rm -rf $WORKSPACE/$TENANT-gitops-*
+  gh repo delete $GIT_ORG/<repository> --yes
 EOF
 fi

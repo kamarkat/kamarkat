@@ -55,7 +55,7 @@ func TestSecretsAreCompleteOnlyWithBoth(t *testing.T) {
 func TestHandoverSaysWhatIsMissingAndHowToFinish(t *testing.T) {
 	spec := Spec{
 		TenantID: "acme", GitOrg: "acme-inc", Provider: "hetzner",
-		ClusterName: "acme-hub", BundleVersion: "0.1.9",
+		ClusterName: "acme-hub", BundleVersion: "0.1.9", GitopsRepo: "acme-gitops-1",
 	}
 
 	var buf bytes.Buffer
@@ -63,10 +63,10 @@ func TestHandoverSaysWhatIsMissingAndHowToFinish(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"acme-inc/acme-gitops",              // the repository that now exists
+		"acme-inc/acme-gitops-1",            // the repository that now exists
 		"0.1.9",                             // what it is pinned to
 		"HCLOUD_TOKEN",                      // the provider's own secret name
-		"GITOPS_TOKEN",                      // and the other one
+		"GITOPS_REPO_WRITE_TOKEN",           // and the other one
 		"gh workflow run bootstrap-cluster", // what completes it
 	} {
 		if !strings.Contains(out, want) {
@@ -79,7 +79,7 @@ func TestHandoverSaysWhatIsMissingAndHowToFinish(t *testing.T) {
 	// in the wrong place.
 	buf.Reset()
 	HandoverInstructions(spec, Secrets{ProviderToken: "set"}, bufio.NewWriter(&buf))
-	if !strings.Contains(buf.String(), "GITOPS_TOKEN is not set") {
+	if !strings.Contains(buf.String(), "GITOPS_REPO_WRITE_TOKEN is not set") {
 		t.Errorf("the handover must name the one that is missing:\n%s", buf.String())
 	}
 }
@@ -121,11 +121,12 @@ func TestHandoverNamesTheTailnetKeyOnlyWhereItIsRead(t *testing.T) {
 //
 // This is the defect the arrangement exists to prevent, and it is not
 // hypothetical: waypoint's bff published a chart on every commit for months and
-// pinned a version not once, because its deploy job read a GITOPS_TOKEN that
-// nothing had set. `publish` was green every time, so the workflow looked
-// healthy while the thing it existed to do never happened.
+// pinned a version not once, because its deploy job read a
+// GITOPS_REPO_WRITE_TOKEN that nothing had set. `publish` was green every time,
+// so the workflow looked healthy while the thing it existed to do never
+// happened.
 //
-// A repository-level secret cannot fix that, because `kakt tenant scaffold`
+// A repository-level secret cannot fix that, because `kakt box init`
 // knows exactly one repository -- <tenant>-gitops -- and applications are
 // created, renamed and retired by the tenant long afterwards. The platform must
 // not track that set (it would fall behind, silently); it publishes one
@@ -138,7 +139,7 @@ func TestGitopsTokenIsPublishedToTheOrganisationNotPerRepository(t *testing.T) {
 	s := string(src)
 
 	if !strings.Contains(s, `"--org", org, "--visibility", "all"`) {
-		t.Error("GITOPS_TOKEN must be set at the organisation with visibility all, " +
+		t.Error("GITOPS_REPO_WRITE_TOKEN must be set at the organisation with visibility all, " +
 			"so an application repository created after scaffolding inherits it")
 	}
 
@@ -156,7 +157,7 @@ func TestGitopsTokenIsPublishedToTheOrganisationNotPerRepository(t *testing.T) {
 		t.Error("a failure to set the organisation secret must be reported, not fatal: " +
 			"the cluster does not read this credential, a future application build does")
 	}
-	if !strings.Contains(body, "gh secret set GITOPS_TOKEN --org") {
+	if !strings.Contains(body, "gh secret set GITOPS_REPO_WRITE_TOKEN --org") {
 		t.Error("the failure path must print the one command that completes it by hand")
 	}
 }

@@ -9,8 +9,10 @@
 package tenant
 
 import (
-	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	"io"
 	"io/fs"
 	"sort"
 	"strconv"
@@ -34,11 +36,13 @@ import (
 // looks like one: a secret substituted here would be committed to the tenant's
 // repository and would survive in its history after any later correction.
 type Spec struct {
-	TenantID    string
-	GitOrg      string
-	Domain      string
-	Provider    string
-	Region      string
+	TenantID string
+	GitOrg   string
+	// PlatformAdmin is Infisical's id for the one human this box accepts.
+	PlatformAdmin string
+	Domain        string
+	Provider      string
+	Region        string
 	// Subdomain is the DNS label every hostname on this box sits under, or empty
 	// for the apex. Declared, never derived: see hubDomain.
 	Subdomain string
@@ -49,6 +53,12 @@ type Spec struct {
 	// hardware (ADR-075) -- and defaulting an unset flag to it would silently
 	// strip workers from a box that needs them.
 	Workers *int
+	// GitopsRepo is this box's repository name, inside GitOrg, and
+	// ManagementCluster is the name its first management cluster takes. Both are
+	// minted with BoxID by DeriveBoxIdentity for a new box, and read from the
+	// box's declaration for one that exists.
+	GitopsRepo        string
+	ManagementCluster string
 	// BoxID is the logical hub: this box, for as long as it exists (ADR-111 §1).
 	//
 	// Separate from ClusterName because the two have different lifetimes. The box
@@ -81,29 +91,60 @@ type Spec struct {
 	// scheme: ArgoCD pulls a scheme-less registry host as an OCI artefact and
 	// passes anything else to `helm pull --repo`, which does not speak OCI.
 	BundleRegistry string
+
+	// The box's escrow, as names: a url, a project and the organisation that
+	// issued it. Carried on the Spec rather than read from the operator's store
+	// inside the renderer, because a cluster declared later is rendered from
+	// what the BOX recorded (registry/box.yaml) and not from whatever the
+	// machine doing the declaring has in its own store. Creating a box fills
+	// them with WithEscrowCoordinates; declaring a cluster fills them from the
+	// box's declaration.
+	EscrowURL       string
+	EscrowProjectID string
+	EscrowOrgID     string
 	// Private controls repository visibility at creation.
 	Private bool
 }
 
 // RepoName is the repository this tenant's box reconciles from.
-func (s Spec) RepoName() string { return s.TenantID + "-gitops" }
+//
+// Read, never computed. It used to be `<tenant>-gitops`, which made two boxes of
+// one tenant impossible to hold in one organisation -- and a replacement box
+// needs its own repository (ADR-111 Revision 9 §4). The name is minted once with
+// the rest of the box's identity and recorded in the box's own declaration, so
+// every later command reads the same answer.
+func (s Spec) RepoName() string { return s.GitopsRepo }
 
 func (s Spec) repoURL() string {
 	return fmt.Sprintf("https://github.com/%s/%s", s.GitOrg, s.RepoName())
 }
 
-func (s Spec) validate() error {
+// Validate reports what this box cannot be created without.
+//
+// Exported so the command can ask BEFORE it collects credentials or reaches the
+// escrow: a run with no --tenant should say so at once, not after a network
+// round trip and a page of inventory.
+func (s Spec) Validate() error {
 	missing := []string{}
 	for name, v := range map[string]string{
 		"tenant": s.TenantID, "box": s.GitOrg, "domain": s.Domain,
-		"provider": s.Provider,
-		"cluster": s.ClusterName, "bundle-version": s.BundleVersion,
-		"platform-repo": s.PlatformRepoURL, "bundle-registry": s.BundleRegistry,
+		"provider": s.Provider, "region": s.Region,
+		// The minted names are NOT asked about here. They are not operator
+		// inputs: a new box derives them from one timestamp and a continuation
+		// reads them from the box's own declaration, so an empty one is a caller
+		// that skipped that step rather than a flag somebody forgot -- which
+		// RenderBox reports as what it is.
+		"bundle-version": s.BundleVersion,
+		"platform-repo":  s.PlatformRepoURL, "bundle-registry": s.BundleRegistry,
 	} {
 		if strings.TrimSpace(v) == "" {
 			missing = append(missing, name)
 		}
 	}
+	// Sorted, not map order. Go randomises map iteration, so two runs of the
+	// same mistake printed the same values in different orders -- which reads
+	// as the answer having changed between them.
+	sort.Strings(missing)
 	if len(missing) > 0 {
 		// The version is the one an unreleased build cannot supply, and the
 		// reason is worth stating: a developer running from source has no
@@ -148,14 +189,18 @@ func (s Secrets) RequireEscrow() error {
 	if s.hasEscrow() {
 		return nil
 	}
-	return fmt.Errorf("this box has no escrow, and will not be dispatched without one.\n\n" +
-		"hub-operator copies its Infisical master keys -- the root secret without\n" +
-		"which its secret store cannot be decrypted -- to an Infisical you control.\n" +
-		"The box's own cannot hold them: they are the keys that decrypt it.\n\n" +
-		"Infisical Cloud is the usual answer: https://app.infisical.com\n" +
-		"Create a project, add a machine identity with write access to it, and pass\n" +
-		"--escrow-url, --escrow-project-id, --escrow-client-id and\n" +
-		"--escrow-client-secret, or answer the prompts.")
+	return fmt.Errorf("this box has no escrow, and will not be dispatched without one.\n\n"+
+		"hub-operator copies its Infisical master keys -- the root secret without\n"+
+		"which its secret store cannot be decrypted -- to an Infisical you control.\n"+
+		"The box's own cannot hold them: they are the keys that decrypt it.\n\n"+
+		"Infisical Cloud is the usual answer: https://app.infisical.com\n\n"+
+		"Create one and these settings are recorded for you, so scaffolding finds\n"+
+		"them without any being passed:\n\n"+
+		"  kakt login\n"+
+		"  kakt escrow init --name <project-name>\n\n"+
+		"To use an escrow you already have, pass --escrow-url, --escrow-project-id,\n"+
+		"--escrow-client-id and --escrow-client-secret, or answer the prompts.%s",
+		escrow.MoveHint("INFISICAL_ESCROW_PROJECT_ID", "INFISICAL_ESCROW_CLIENT_ID"))
 }
 
 // VerifyEscrow proves the escrow works before a box is built on it.
@@ -203,6 +248,57 @@ func (s Secrets) VerifyEscrow() error {
 			"the cluster is gone (ADR-076).", err)
 	}
 	return nil
+}
+
+// WithAdminCredential fills the administrator of this box's OWN Infisical from
+// the box's escrow, generating it the first time. It reports whether this call
+// generated it.
+//
+// Not prompted, and the reasoning is in ADR-065 rather than in convenience. The
+// value has to exist in three places -- the escrow, the tenant's repository, and
+// eventually the cluster -- and in none of them is a human the source: Day-0
+// creates the account with it, re-enters Infisical with it on a re-run, and a
+// successor box restores a database whose user row already holds its hash. What a
+// prompt added was a password chosen under pressure and remembered nowhere.
+//
+// The escrow is read BEFORE anything is generated. A repository secret cannot be
+// read back, so a second scaffold run has no way to discover what the first one
+// chose; without this, re-running would mint a new password and push it over the
+// one the live Infisical was bootstrapped with, locking Day-0 out of the secret
+// store it is meant to administer.
+func (s Secrets) WithAdminCredential(ctx context.Context, boxID, clusterName, sessionEmail string) (Secrets, bool, error) {
+	for k, v := range map[string]string{
+		"INFISICAL_ESCROW_URL":           s.EscrowURL,
+		"INFISICAL_ESCROW_PROJECT_ID":    s.EscrowProjectID,
+		"INFISICAL_ESCROW_CLIENT_ID":     s.EscrowClientID,
+		"INFISICAL_ESCROW_CLIENT_SECRET": s.EscrowClientSecret,
+	} {
+		restore, err := setEnvFor(k, v)
+		if err != nil {
+			return s, false, err
+		}
+		defer restore()
+	}
+	store, err := escrow.NewEscrowClient(ctx, "")
+	if err != nil {
+		return s, false, err
+	}
+
+	// The environment's address wins over the session's, so an operator
+	// scaffolding a box somebody else administers can say so.
+	email := strings.TrimSpace(s.InfisicalAdminEmail)
+	if email == "" {
+		email = strings.TrimSpace(sessionEmail)
+	}
+
+	cred, generated, err := escrow.ResolveAdminCredential(ctx,
+		store, escrow.ForCluster(boxID, clusterName), email)
+	if err != nil {
+		return s, false, err
+	}
+	s.InfisicalAdminEmail = cred.Email
+	s.InfisicalAdminPassword = cred.Password
+	return s, generated, nil
 }
 
 // setEnvFor sets one variable and returns a function restoring what was there.
@@ -322,6 +418,53 @@ func (s Spec) tenantTokens() map[string]string {
 // the template held both, which it does not.
 const RegistryDir = "registry"
 
+// boxTokens are facts about the BOX, substituted into its own declaration and
+// into the workflows that act on it.
+//
+// They are what a cluster declared later is rendered from, which is why they are
+// written down rather than recomputed: `kakt tenant add-management` reads
+// registry/box.yaml and composes a cluster's values from it, so a second cluster
+// declared on another machine, months later, cannot pick up a different escrow,
+// a different platform branch or a different provider than the box it joins.
+func (s Spec) boxTokens() map[string]string {
+	return map[string]string{
+		"<BOX_ID>":             s.BoxID,
+		"<GITOPS_REPO>":        s.GitopsRepo,
+		"<MANAGEMENT_CLUSTER>": s.ManagementCluster,
+		"<DOMAIN>":             strings.TrimSpace(strings.TrimSuffix(s.Domain, ".")),
+		"<SUBDOMAIN>":          strings.TrimSpace(strings.Trim(s.Subdomain, ".")),
+		// Defaults a cluster declaration starts from, and the dispatch defaults
+		// of the workflow that bootstraps one.
+		"<CLOUD_PROVIDER>": s.Provider,
+		"<CLOUD_REGION>":   s.Region,
+		"<WORKER_COUNT>":   strconv.Itoa(s.workerCount()),
+		// The version the workflows pin the platform's reusable workflow to
+		// (ADR-072), and what a cluster's chart source is composed from.
+		"<BUNDLE_VERSION>":    s.BundleVersion,
+		"<PLATFORM_REVISION>": s.PlatformRevision,
+		// The box's escrow and its one human administrator, as NAMES. See
+		// clusterTokens for why committing them is what makes a box operable
+		// from more than the machine that created it.
+		"<ESCROW_URL>":              s.EscrowURL,
+		"<ESCROW_PROJECT_ID>":       s.EscrowProjectID,
+		"<ESCROW_ORG_ID>":           s.EscrowOrgID,
+		"<PLATFORM_ADMIN_IDENTITY>": strings.TrimSpace(s.PlatformAdmin),
+	}
+}
+
+// WithEscrowCoordinates fills in where this box's master keys are kept, from
+// this operator's own store (or the environment, which is how CI supplies it).
+//
+// One place reads the store: creating the box. Everything a box does afterwards
+// reads the coordinates the box itself recorded, which is what lets a second
+// workstation operate it -- see clusterTokens.
+func (s Spec) WithEscrowCoordinates() Spec {
+	s.EscrowURL = escrowCoordinate("INFISICAL_ESCROW_URL")
+	s.EscrowProjectID = escrowCoordinate("INFISICAL_ESCROW_PROJECT_ID")
+	s.EscrowOrgID = escrowCoordinate("INFISICAL_ESCROW_ORG_ID")
+	return s
+}
+
 // clusterTokens are facts about ONE cluster, and are substituted only into the
 // instance being hydrated.
 //
@@ -353,40 +496,22 @@ func (s Spec) clusterTokens() map[string]string {
 		// Infisical or which project holds the box's artefacts, and until now the
 		// answer existed only in k8-secrets/infisical/ on the machine that ran
 		// `kakt escrow init`. The credentials stay where they are.
-		"<ESCROW_URL>":        escrowCoordinate("INFISICAL_ESCROW_URL"),
-		"<ESCROW_PROJECT_ID>": escrowCoordinate("INFISICAL_ESCROW_PROJECT_ID"),
+		"<ESCROW_URL>":        s.EscrowURL,
+		"<ESCROW_PROJECT_ID>": s.EscrowProjectID,
+		// The organization the escrow project belongs to, and the one human the
+		// box accepts. Names, like the coordinates above: an id grants nothing,
+		// and Infisical decides what that identity may read.
+		"<ESCROW_ORG_ID>":           s.EscrowOrgID,
+		"<PLATFORM_ADMIN_IDENTITY>": strings.TrimSpace(s.PlatformAdmin),
 	}
 }
 
-// escrowCoordinate reads one of the box's escrow names from wherever this machine
-// keeps them, the way the escrow client itself reads them.
+// escrowCoordinate reads one escrow setting for the render.
 //
-// Empty is tolerated here and refused later, by the command that needs it: a box
-// scaffolded before its escrow exists is a supported order of operations (the
-// escrow is enrolled with `kakt escrow init`, and `kakt escrow enroll` fills the
-// rest in), while a scaffold that failed on an absent escrow would make the
-// escrow a precondition for having a repository at all.
-func escrowCoordinate(name string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
-	}
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for i := 0; i < 8; i++ {
-		b, err := os.ReadFile(filepath.Join(dir, "k8-secrets", "infisical", name))
-		if err == nil {
-			return strings.TrimSpace(string(b))
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
-}
+// From the operator's store under the home directory, or the environment --
+// never from the checkout this command happens to be run inside. See
+// internal/platform/escrow/store.go for why that changed.
+func escrowCoordinate(name string) string { return escrow.StoredValue(name) }
 
 // workerCount is how many cloud workers this box starts with.
 //
@@ -631,21 +756,61 @@ func secretish(v string) bool {
 	return false
 }
 
-// Render writes the tenant's repository content into dst.
+// RenderBox writes the tenant's repository content into dst: a box, with no
+// clusters.
 //
-// The shape it produces is the one this platform's reference implementation
-// arrived at: a template directory consumed once and removed, and one retained
-// for the clusters the tenant adds later. What is deliberately NOT copied is the
-// platform's own content. kubefirst copies it, which is why nothing propagates
-// to a rendered repository afterwards; here the bundle is sourced, so the
-// platform can keep maintaining it (ADR-063).
-func Render(templateDir, dst string, s Spec) error {
-	if err := s.validate(); err != nil {
+// WHY NO CLUSTERS. A box outlives every cluster in it (ADR-111 §1), so the box
+// is the thing that is created and a cluster is a declaration added to it --
+// `kakt tenant add-management` for the management cluster, `kakt tenant
+// add-cluster` for a workload one. This used to render the first management
+// cluster in the same pass, which made the box's own identity a field inside
+// that cluster's values file: a repository therefore could not exist without a
+// cluster, and the one fact that must outlive every cluster was stored in the
+// first one. registry/box.yaml holds it now.
+//
+// Three substitutions, by lifetime rather than by file:
+//
+//   - tenant facts everywhere, non-strict: the templates the tenant keeps are
+//     supposed to still contain the tokens they have not been asked about yet.
+//   - the box's own declaration, strict: it is what every later command reads,
+//     and an unresolved token there is a box that cannot be read at all.
+//   - the workflows, strict: they pin the platform's reusable workflow to this
+//     box's version, and an unsubstituted pin is a reference to a tag named
+//     "v<BUNDLE_VERSION>", which GitHub reports as a missing workflow rather
+//     than as a rendering fault.
+//
+// templates/mgmt is KEPT. It used to be consumed here and deleted, which left a
+// successor incarnation to be rendered by copying the predecessor's directory;
+// now it is the template the first management cluster is rendered from, and it
+// stays for the same reason templates/workload-cluster does -- a box whose
+// clusters have all been removed can declare another.
+//
+// What is deliberately NOT copied is the platform's own content. kubefirst
+// copies it, which is why nothing propagates to a rendered repository
+// afterwards; here the bundle is sourced, so the platform can keep maintaining
+// it (ADR-063).
+func RenderBox(templateDir, dst string, s Spec) error {
+	if err := s.Validate(); err != nil {
 		return err
 	}
-	for token, value := range s.allTokens() {
-		if secretish(value) {
-			return fmt.Errorf("refusing to render %s: value looks like secret material, and every token is an identifier or a location", token)
+	// The identity must already exist. A new box mints it with
+	// DeriveBoxIdentity, a continuation reads it with SpecFromDecl, and there is
+	// no third way to obtain one -- so an empty name here is a caller that
+	// skipped both, not an operator mistake.
+	for name, v := range map[string]string{
+		"boxId": s.BoxID, "gitopsRepo": s.GitopsRepo,
+		"managementClusterName": s.ManagementCluster,
+	} {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("this box has no identity: %s is empty, so nothing minted or read one", name)
+		}
+	}
+	tenantTokens, boxTokens := s.tenantTokens(), s.boxTokens()
+	for _, set := range []map[string]string{tenantTokens, boxTokens} {
+		for token, value := range set {
+			if secretish(value) {
+				return fmt.Errorf("refusing to render %s: value looks like secret material, and every token is an identifier or a location", token)
+			}
 		}
 	}
 
@@ -653,37 +818,156 @@ func Render(templateDir, dst string, s Spec) error {
 		return fmt.Errorf("copy template: %w", err)
 	}
 
-	// Hydrate the control plane from its template, then remove the template that
-	// produced it. It is consumed once, at onboarding; a tenant adding a cluster
-	// later renders templates/workload-cluster, which is why that one is kept.
-	src := filepath.Join(dst, "templates", "mgmt")
-	if err := copyDir(src, filepath.Join(dst, RegistryDir, "clusters", s.ClusterName)); err != nil {
-		return fmt.Errorf("hydrate control plane: %w", err)
-	}
-	if err := os.RemoveAll(src); err != nil {
-		return fmt.Errorf("remove consumed template: %w", err)
-	}
-
-	// Tenant facts everywhere; cluster facts only where a cluster is named. Only
-	// those places are checked for leftovers, because a retained template is
-	// supposed to still contain them.
-	if err := substitute(dst, s.tenantTokens(), false); err != nil {
+	if err := substitute(dst, tenantTokens, false); err != nil {
 		return err
 	}
-	if err := substitute(filepath.Join(dst, RegistryDir, "clusters", s.ClusterName), s.clusterTokens(), true); err != nil {
+	decl := filepath.Join(dst, RegistryDir, BoxDeclFile)
+	if _, err := os.Stat(decl); err != nil {
+		return fmt.Errorf("the template declares no box: %s is missing", filepath.Join(RegistryDir, BoxDeclFile))
+	}
+	if err := substitute(decl, boxTokens, true); err != nil {
+		return err
+	}
+	// Rewritten atomically, because this file is the box's identity and it is
+	// written before the first remote call. A declaration half-written by an
+	// interrupted run is a box that cannot be continued: the repository may
+	// already exist under a name nothing can now read back.
+	if err := rewriteAtomically(decl); err != nil {
 		return err
 	}
 
-	// The workflows too. They carry the first cluster's facts as dispatch
-	// defaults, and the bundle version as the pin on the platform workflow they
-	// call -- an unsubstituted pin is a workflow reference to a tag named
-	// "v<BUNDLE_VERSION>", which GitHub reports as a missing workflow rather than
-	// as a scaffolding fault.
 	workflows := filepath.Join(dst, ".github", "workflows")
 	if _, err := os.Stat(workflows); err == nil {
-		return substitute(workflows, s.clusterTokens(), true)
+		return substitute(workflows, boxTokens, true)
 	}
 	return nil
+}
+
+// templateWalk chooses which tree the template is read from.
+//
+// ADR-068's rule stands and is the default: a development build reads the
+// WORKING TREE, so an edit to the template takes effect without publishing.
+// THE EXCEPTION IS THIS ONE CALLER, and the reason is a conflict between two
+// rules that are both right.
+//
+// A box's checkout is created in the working directory, and a box is only
+// created in an EMPTY directory -- because anything else there ends up beside
+// the box, and inside a repository's checkout it becomes untracked content in
+// that repository. An empty directory cannot also contain the platform's
+// template. So a development build run the way it is meant to be run can never
+// resolve the template from the working tree, and the failure reads as a
+// missing file rather than as the two rules meeting.
+//
+// Every build carries the template, so the binary's own copy is the answer: for
+// a locally built CLI it is the template of the checkout it was built from, kept
+// current by the hook that verifies the embedded tree. The working tree still
+// wins when it is there, which keeps the development loop that ADR-068 protects:
+// edit the template, run from the checkout, see the change.
+//
+// Reported rather than silent -- TemplateOrigin is what the command prints.
+func templateSource(src string) (func(string, fs.WalkDirFunc) error, func(string) ([]byte, error)) {
+	if !filepath.IsAbs(src) && !platform.Exists(src) && platform.Carries(src) {
+		return platform.WalkCarried, platform.ReadCarried
+	}
+	return platform.WalkDir, platform.ReadFile
+}
+
+// TemplateOrigin says which tree a render will read the template from, for the
+// one line a command prints before rendering.
+func TemplateOrigin(src string) string {
+	switch {
+	case filepath.IsAbs(src):
+		return src
+	case !platform.Exists(src) && platform.Carries(src):
+		return src + " (the copy this binary carries; the working directory has none)"
+	default:
+		return src + " (the working directory)"
+	}
+}
+
+// rewriteAtomically replaces a file with its own contents through a temporary
+// file and a rename, so a reader sees either the whole file or the old one.
+func rewriteAtomically(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, info.Mode()); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// githubAPI is where repository calls go. GITHUB_API_URL is what a GitHub
+// Enterprise host sets, and what the Actions runner exports.
+func githubAPI() string {
+	if v := strings.TrimSpace(os.Getenv("GITHUB_API_URL")); v != "" {
+		return strings.TrimSuffix(v, "/")
+	}
+	return "https://api.github.com"
+}
+
+// RemoteHasCommits reports whether the box's repository already has history.
+//
+// Asked before a push and before a resume: an empty repository is one a run
+// created and did not finish, and a repository with history is either this box's
+// or somebody else's -- which RemoteBoxID is what distinguishes.
+func RemoteHasCommits(ctx context.Context, s Spec, cred Credential) (bool, error) {
+	remote := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git",
+		cred.Token, s.GitOrg, s.RepoName())
+	out, err := exec.CommandContext(ctx, "git", "ls-remote", "--heads", remote).CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git ls-remote: %w: %s", err,
+			strings.ReplaceAll(string(out), cred.Token, "***"))
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// RemoteBoxID reads the boxId the repository itself declares.
+//
+// The question a continuation has to answer before it writes anything: is the
+// repository under this name the box I am continuing? Read from the repository
+// rather than inferred from its name, because a name is not an identity -- two
+// boxes could be given one by accident, and the declaration is what says which
+// box a repository is.
+//
+// An empty answer is not a match. A repository that declares no box, or whose
+// declaration cannot be read, is one this command must not write to.
+func RemoteBoxID(ctx context.Context, s Spec, cred Credential) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s/%s",
+		githubAPI(), s.GitOrg, s.RepoName(), RegistryDir, BoxDeclFile)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	authorize(req, cred)
+	req.Header.Set("Accept", "application/vnd.github.raw")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("read %s/%s from %s/%s: %s",
+			RegistryDir, BoxDeclFile, s.GitOrg, s.RepoName(), resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	m := boxIDLine.FindSubmatch(body)
+	if m == nil {
+		return "", nil
+	}
+	return string(m[1]), nil
 }
 
 // copyTree copies the template, resolved through the platform package so a
@@ -695,7 +979,11 @@ func Render(templateDir, dst string, s Spec) error {
 // the scaffolder cannot acquire a dependency on being run inside a checkout --
 // which is what it had, and what made the published binary unusable.
 func copyPlatformTree(src, dst string) error {
-	return platform.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+	// ONE SOURCE for the whole copy: the walk and the reads must agree, or the
+	// walk lists the carried tree's files and each read looks for them in a
+	// working directory that does not have them.
+	walk, read := templateSource(src)
+	return walk(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -707,28 +995,22 @@ func copyPlatformTree(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		b, err := platform.ReadFile(p)
+		b, err := read(p)
 		if err != nil {
 			return err
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		// 0o644 rather than the source mode: an embedded FS reports its own
-		// permissions, not the repository's, so preserving them would give a
-		// released run different modes from a development one for the same file.
+		// 0o644 for everything, and no exception for shell scripts.
 		//
-		// Shell scripts are the exception, and are derived from the NAME rather
-		// than from the source mode for the same reason. A scaffolded script
-		// that arrives non-executable reads as broken -- the tenant runs
-		// ./scripts/<x>.sh, gets "permission denied", and has no reason to
-		// think that is their own filesystem rather than a defect in what they
-		// were given.
-		mode := os.FileMode(0o644)
-		if strings.HasSuffix(target, ".sh") {
-			mode = 0o755
-		}
-		return os.WriteFile(target, b, mode)
+		// An embedded FS reports its own permissions rather than the
+		// repository's, so preserving the source mode would give a released run
+		// different modes from a development one for the same file. The .sh
+		// exception that used to be here existed for one script the template
+		// shipped; a box's repository ships none, and nothing it carries is
+		// meant to be executed from it (TestScaffoldedRepoShipsNoScripts).
+		return os.WriteFile(target, b, 0o644)
 	})
 }
 
@@ -796,38 +1078,86 @@ func unresolvedToken(line string) string {
 // accepted because that is what exists before an App is registered, and it is
 // the same authority by a weaker route -- it should not outlive onboarding of
 // the first real tenant.
+//
+// BOTH ARRIVE IN ONE VARIABLE. GITHUB_ORG_SETUP_TOKEN names the access -- create
+// this tenant's repository in their organisation -- and the two implementations
+// of it are told apart from the token itself, below. Two variables asked an
+// operator to classify their own credential before the CLI would accept it, and
+// the classification changed nothing but a line of output.
+// There is no "is it an App token" field. It was set from which variable the
+// value arrived in, read in one place, and printed; Kind reads the token itself,
+// so nothing has to be told.
 type Credential struct {
 	Token  string
-	IsApp  bool
 	Source string
 }
 
+// Kind is what to call this credential in output, read from the token itself.
+//
+// GitHub prefixes an App installation token `ghs_`, and both personal access
+// token formats `ghp_` (classic) and `github_pat_` (fine-grained). An unknown
+// prefix is reported as neither rather than guessed: enterprise and proxy hosts
+// issue their own, and a confident wrong label is worse than a plain one.
+func (c Credential) Kind() string {
+	switch {
+	case strings.HasPrefix(c.Token, "ghs_"):
+		return "app installation token"
+	case strings.HasPrefix(c.Token, "ghp_"), strings.HasPrefix(c.Token, "github_pat_"):
+		return "personal access token"
+	default:
+		return "organisation setup credential"
+	}
+}
+
+// platformTokenPath is where this operator keeps that credential, under their
+// own store rather than beside a checkout (internal/kakt-cli/opstore).
+const platformTokenPath = "github/github-pat-token"
+
+// PlatformTokenEnv names the ACCESS, not its implementation: the credential that
+// creates this tenant's repository in their organisation. Deliberately not
+// GITHUB_TOKEN, which belongs to GitHub Actions inside a workflow and to tools
+// that demand that exact name -- a value of ours under that name is read by
+// whatever else happens to be in the environment.
+const PlatformTokenEnv = "GITHUB_ORG_SETUP_TOKEN"
+
 // TokenFromEnv resolves the credential the way the rest of the CLI does, so
 // onboarding needs no separate setup on a machine that can already bootstrap.
-func TokenFromEnv(repoRoot string) (Credential, error) {
-	if t := strings.TrimSpace(os.Getenv("GITHUB_APP_TOKEN")); t != "" {
-		return Credential{Token: t, IsApp: true, Source: "GITHUB_APP_TOKEN"}, nil
+//
+// Takes nothing. It used to take the repository root, because the file it read
+// was `<root>/k8-secrets/github/github-pat-token` -- a credential whose location
+// depended on which directory the command ran in, and which a deleted clone took
+// with it.
+func TokenFromEnv() (Credential, error) {
+	if t := strings.TrimSpace(os.Getenv(PlatformTokenEnv)); t != "" {
+		return Credential{Token: t, Source: PlatformTokenEnv}, nil
 	}
-	if t := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); t != "" {
-		return Credential{Token: t, Source: "GITHUB_TOKEN"}, nil
-	}
-	p := filepath.Join(repoRoot, "k8-secrets", "github", "github-pat-token")
+	// The operator's store (internal/kakt-cli/opstore), not a checkout.
+	p, _ := opstore.Path(platformTokenPath)
 	b, err := os.ReadFile(p)
 	if err != nil {
+		// A copy still sitting in a checkout is named, because the move to the
+		// store is the whole reason a machine that worked last week does not now.
+		// Named, not read: two copies go stale in one of them.
+		moved := ""
+		if old := opstore.LegacyLocation(platformTokenPath); old != "" {
+			moved = fmt.Sprintf("\n\nThere is one in %s, which is no longer read. Move it:\n\n"+
+				"  mkdir -p %s && mv %s %s", old, filepath.Dir(p), old, p)
+		}
 		// Says what to do, not only what is missing. Scaffolding is often the
 		// first command anyone runs against this platform, and an error naming a
 		// variable without saying where its value comes from is a support round
 		// trip.
 		return Credential{}, fmt.Errorf(
-			"no GitHub credential.\n\n"+
+			"no credential for setting up the tenant's organisation.\n\n"+
 				"Scaffolding creates a repository in the tenant's organisation, so it needs\n"+
-				"one of these, in order of preference:\n\n"+
-				"  GITHUB_APP_TOKEN  an installation token for the App the tenant granted.\n"+
-				"                    Preferred: the access is the tenant's to revoke (ADR-062).\n"+
-				"  GITHUB_TOKEN      a personal access token with repo scope.\n"+
-				"                    Create one at https://github.com/settings/tokens\n"+
-				"  %s\n"+
-				"                    the same token, read from disk.", p)
+				"a credential that may do that, in %s or in\n%s\n\n"+
+				"Either kind works and you do not have to say which it is:\n\n"+
+				"  an installation token for a GitHub App the tenant granted. Preferred,\n"+
+				"  because the access is then the tenant's to revoke (ADR-062).\n\n"+
+				"  a personal access token with the `repo` AND `workflow` scopes, from\n"+
+				"  https://github.com/settings/tokens\n"+
+				"  `workflow` is not implied by `repo`, and this repository carries the\n"+
+				"  workflow that bootstraps the box.%s", PlatformTokenEnv, p, moved)
 	}
 	return Credential{Token: strings.TrimSpace(string(b)), Source: p}, nil
 }
@@ -837,10 +1167,7 @@ func TokenFromEnv(repoRoot string) (Credential, error) {
 // creating the repository has to be able to continue rather than requiring the
 // operator to delete it first.
 func CreateRepo(ctx context.Context, s Spec, cred Credential) (existed bool, err error) {
-	api := "https://api.github.com"
-	if v := strings.TrimSpace(os.Getenv("GITHUB_API_URL")); v != "" {
-		api = strings.TrimSuffix(v, "/")
-	}
+	api := githubAPI()
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	get, _ := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -932,9 +1259,15 @@ func Publish(ctx context.Context, dir string, s Spec, cred Credential) error {
 		{"init", "-q", "-b", "main"},
 		{"add", "."},
 		{"-c", "user.name=zero-ops", "-c", "user.email=platform\nzero-ops.local",
-			"commit", "-q", "-m", "Scaffold " + s.RepoName()},
+			"commit", "-q", "-m", "Create box " + s.RepoName()},
 		{"remote", "add", "origin", remote},
 		{"push", "-q", "-u", "origin", "main"},
+		// The push URL carries the credential, and this directory is now a
+		// working checkout: the next command runs inside it to declare the box's
+		// first management cluster. Left as it was, the token would sit in
+		// .git/config of a directory nobody treats as secret.
+		{"remote", "set-url", "origin",
+			fmt.Sprintf("https://github.com/%s/%s.git", s.GitOrg, s.RepoName())},
 	}
 	for _, args := range steps {
 		cmd := exec.CommandContext(ctx, "git", args...)
@@ -943,11 +1276,61 @@ func Publish(ctx context.Context, dir string, s Spec, cred Credential) error {
 			// The remote carries the credential, so it is replaced rather than
 			// printed: a failing push would otherwise write the token into logs
 			// and into whatever collects them.
-			return fmt.Errorf("git %s: %w: %s", args[0], err,
-				strings.ReplaceAll(string(out), cred.Token, "***"))
+			clean := strings.ReplaceAll(string(out), cred.Token, "***")
+			if msg := workflowScopeRefusal(clean, s, dir); msg != "" {
+				return fmt.Errorf("%s", msg)
+			}
+			return fmt.Errorf("git %s: %w: %s", args[0], err, clean)
 		}
 	}
 	return nil
+}
+
+// workflowScopeRefusal recognises the one push failure that is a scope and not
+// a mistake, and answers it.
+//
+// A box's repository carries the workflow that bootstraps it (ADR-072), and
+// GitHub refuses to let a personal access token create any file under
+// .github/workflows/ unless the token carries the `workflow` scope -- a scope
+// that is not implied by `repo`. The raw refusal is a git error naming a path,
+// which reads as a repository problem rather than a credential one.
+//
+// Reported with what the state actually is: the repository exists and has no
+// commits, so nothing is lost and the continuation finishes the box.
+func workflowScopeRefusal(out string, s Spec, dir string) string {
+	if !strings.Contains(out, "without `workflow` scope") &&
+		!strings.Contains(out, "without 'workflow' scope") {
+		return ""
+	}
+	return fmt.Sprintf(`the credential cannot create this repository's workflows.
+
+GitHub refuses a personal access token that writes under .github/workflows/
+unless the token carries the `+"`workflow`"+` scope, and `+"`repo`"+` does not imply it. Your
+box's repository carries the workflow that bootstraps it (ADR-072), so the push
+stopped there.
+
+  %s/%s exists and has NO commits. Nothing was pushed and no secret was set.
+
+Give the credential the scope, then continue this box -- its identity is already
+written and is reused:
+
+  1. https://github.com/settings/tokens  ->  edit the token, check `+"`workflow`"+`
+     (or create a new one with `+"`repo`"+` and `+"`workflow`"+`, and put it in %s)
+  2. kakt box init --resume %s
+
+An App installation token avoids this: the App's Workflows permission is granted
+once by the organisation, and is preferred anyway (ADR-062).`,
+		s.GitOrg, s.RepoName(), mustStorePath(), dir)
+}
+
+// mustStorePath names where this operator keeps the platform credential, for a
+// message that is useless without it.
+func mustStorePath() string {
+	p, err := opstore.Path(platformTokenPath)
+	if err != nil {
+		return "~/.kamarkat/" + platformTokenPath
+	}
+	return p
 }
 
 // copyDir copies a directory already on disk.

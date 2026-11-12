@@ -113,7 +113,7 @@ e2e-clean:
 # Requires an authenticated helm -- the script does not log in, because the
 # credential belongs to whoever is running it:
 #
-#   echo $$GITHUB_TOKEN | helm registry login ghcr.io -u <you> --password-stdin
+#   echo $$CHART_PUBLISH_TOKEN | helm registry login ghcr.io -u <you> --password-stdin
 #
 # SKIP_PUSH=1 packages and gates without publishing, which spends no version.
 # Use it to find a packaging mistake before committing to an -rc number.

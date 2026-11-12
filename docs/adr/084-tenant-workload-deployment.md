@@ -162,7 +162,7 @@ that exists; `--repo owner/name` covers one.
 
 The discovered set is DERIVED, never enumerated, for the same reason this
 decision refuses to track application repositories: a repository needs the
-credential exactly when one of its workflows reads `secrets.GITOPS_TOKEN` and
+credential exactly when one of its workflows reads `secrets.GITOPS_REPO_WRITE_TOKEN` and
 names this box's GitOps repository, and that is readable from the workflows
 themselves. Publishing to every repository in the organisation would be the
 easier implementation and the wrong one -- most have nothing to do with this

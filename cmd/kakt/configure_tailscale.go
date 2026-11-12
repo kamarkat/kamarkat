@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/components"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/spf13/cobra"
 )
 
@@ -25,8 +25,9 @@ shared ClusterClass Tailscale pre-kubeadm hook (contentFrom.secret → the
 tailscale-hybrid-psk Secret in platform-capi). It is part of the hybrid
 bootstrap flow and must run before a hybrid workload cluster is provisioned.
 
-Values are read from k8-secrets/tailscale/{authkey,hostname} (gitignored),
-matching the hetzner/github Secret Zero pattern.
+Values are read from this operator's own store -- ~/.kamarkat/tailscale/{authkey,hostname},
+or $KAMARKAT_HOME -- so they are found from any directory and survive a checkout
+being deleted.
 
 After running this command:
 - hub-operator uploads tailscale-hybrid-psk to Infisical (CLISecretMappings)
@@ -35,17 +36,17 @@ After running this command:
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve defaults from k8-secrets (gitignored) before validation.
 			if authkey == "" {
-				authkey = readK8Secret("k8-secrets/tailscale/authkey")
+				authkey = opstore.ValueOrEnv("TS_AUTHKEY", "tailscale/authkey")
 			}
 			if hostname == "" {
-				hostname = readK8Secret("k8-secrets/tailscale/hostname")
+				hostname = opstore.Value("tailscale/hostname")
 			}
 
 			if authkey == "" {
-				return fmt.Errorf("--authkey is required (or set k8-secrets/tailscale/authkey)")
+				return opstore.Missing("Tailscale auth key", "tailscale/authkey")
 			}
 			if hostname == "" {
-				return fmt.Errorf("--hostname is required (or set k8-secrets/tailscale/hostname)")
+				return opstore.Missing("tailnet hostname for the control-plane node", "tailscale/hostname")
 			}
 
 			// Set default kubeconfig if not provided
@@ -69,8 +70,8 @@ After running this command:
 		},
 	}
 
-	cmd.Flags().StringVar(&authkey, "authkey", "", "Tailscale auth key (default: k8-secrets/tailscale/authkey)")
-	cmd.Flags().StringVar(&hostname, "hostname", "", "workload cluster CP tailnet hostname (default: k8-secrets/tailscale/hostname)")
+	cmd.Flags().StringVar(&authkey, "authkey", "", "Tailscale auth key (default: ~/.kamarkat/tailscale/authkey)")
+	cmd.Flags().StringVar(&hostname, "hostname", "", "workload cluster CP tailnet hostname (default: ~/.kamarkat/tailscale/hostname)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: ~/.kube/config)")
 
 	return cmd
@@ -98,14 +99,4 @@ func runConfigureTailscale(cmd *cobra.Command, authkey, hostname, kubeconfig str
 	fmt.Println("4. Run on-prem-join.sh on home nodes once that cluster's CP is Ready")
 
 	return nil
-}
-
-// readK8Secret reads a gitignored secret file, trimming whitespace. Returns ""
-// if the file is missing.
-func readK8Secret(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }

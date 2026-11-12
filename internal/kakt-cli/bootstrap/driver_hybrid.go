@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
 	"strings"
 
@@ -166,16 +167,12 @@ func readTailscaleAuthkey() (string, error) {
 	if key := strings.TrimSpace(os.Getenv("TAILSCALE_AUTHKEY")); key != "" {
 		return key, nil
 	}
-	const path = "k8-secrets/tailscale/authkey"
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("no tailnet auth key: TS_AUTHKEY is unset and %s is not readable: %w", path, err)
+	// This operator's own store, not a checkout (internal/kakt-cli/opstore):
+	// the key is found from any directory and survives a clone being deleted.
+	if key := opstore.Value("tailscale/authkey"); key != "" {
+		return key, nil
 	}
-	key := strings.TrimSpace(string(raw))
-	if key == "" {
-		return "", fmt.Errorf("tailscale authkey at %s is empty", path)
-	}
-	return key, nil
+	return "", opstore.Missing("tailnet auth key, and TS_AUTHKEY is unset", "tailscale/authkey")
 }
 
 func (d *HybridDriver) OnPlatformPreReqs(ctx context.Context, kubeconfig string) error {

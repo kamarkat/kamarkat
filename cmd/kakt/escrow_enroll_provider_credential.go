@@ -120,7 +120,11 @@ func runEnrollProviderCredential(ctx context.Context, o enrollProviderOpts, in i
 		coords.EscrowProjectID = escrowEnvValue("INFISICAL_ESCROW_PROJECT_ID")
 	}
 
-	access, err := hubaccess.Open(ctx, coords)
+	// Establishing, not merely opening: a first enrolment is where this box's
+	// escrow is established, so an unbound project is bound in the same authorized
+	// act. A project already bound to different coordinates is still refused --
+	// moving a bound box is a rebind.
+	access, err := hubaccess.OpenEstablishing(ctx, coords)
 	if err != nil {
 		return err
 	}

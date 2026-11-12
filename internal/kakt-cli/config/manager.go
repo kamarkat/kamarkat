@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,37 +20,36 @@ type Manager struct {
 // SaveKubeconfig retrieves and saves kubeconfig locally
 func (m *Manager) SaveKubeconfig(ctx context.Context) (string, error) {
 	secretName := fmt.Sprintf("%s-kubeconfig", m.ClusterName)
-	
+
 	cmd := exec.CommandContext(ctx, "kubectl",
 		"--kubeconfig", m.BootstrapKubeconfig,
 		"get", "secret", secretName,
 		"-n", m.Namespace,
 		"-o", "jsonpath={.data.value}",
 	)
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
-	
+
 	decoded, err := base64.StdEncoding.DecodeString(string(output))
 	if err != nil {
 		return "", fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
-	
-	// Save to k8-secrets/kubeconfig directory
-	dir := filepath.Join("k8-secrets", "kubeconfig")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create kubeconfig directory: %w", err)
+
+	// The operator's private runtime path (internal/kakt-cli/opstore), never a
+	// checkout. KubeconfigPath creates the directory 0700: this file is
+	// cluster-admin for as long as it exists.
+	path, err := opstore.KubeconfigPath(m.ClusterName)
+	if err != nil {
+		return "", err
 	}
-	
-	filename := fmt.Sprintf("%s.kubeconfig", m.ClusterName)
-	path := filepath.Join(dir, filename)
-	
+
 	if err := os.WriteFile(path, decoded, 0600); err != nil {
 		return "", fmt.Errorf("failed to write kubeconfig: %w", err)
 	}
-	
+
 	return path, nil
 }
 
@@ -59,32 +59,32 @@ func (m *Manager) MergeKubeconfig(ctx context.Context, sourcePath string) error 
 	if err != nil {
 		return err
 	}
-	
+
 	homeKubeconfig := filepath.Join(homeDir, ".kube", "config")
-	
+
 	// Backup existing kubeconfig
 	backupPath := fmt.Sprintf("%s.backup-%d", homeKubeconfig, os.Getpid())
 	if err := m.copyFile(homeKubeconfig, backupPath); err != nil {
 		return fmt.Errorf("failed to backup kubeconfig: %w", err)
 	}
-	
+
 	// Merge configs
 	cmd := exec.CommandContext(ctx, "kubectl", "config", "view",
 		"--kubeconfig", homeKubeconfig,
 		"--kubeconfig", sourcePath,
 		"--flatten",
 	)
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to merge kubeconfig: %w", err)
 	}
-	
+
 	// Write merged config
 	if err := os.WriteFile(homeKubeconfig, output, 0600); err != nil {
 		return fmt.Errorf("failed to write merged kubeconfig: %w", err)
 	}
-	
+
 	return nil
 }
 

@@ -36,6 +36,13 @@ func TestSelectedCapabilitiesAreRequired(t *testing.T) {
 		if c.Tier != tierCapability {
 			continue
 		}
+		// A DERIVED credential is exempt, because it is not the operator's to
+		// supply: the box Infisical administrator is generated and escrowed when
+		// the management cluster is declared, so at the moment this gate runs it
+		// does not exist yet and refusing for its absence refused every box.
+		if c.Derived {
+			continue
+		}
 		t.Run(c.Secret, func(t *testing.T) {
 			s := withEverything(spec)
 			*c.Field(&s) = ""

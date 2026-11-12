@@ -73,8 +73,16 @@ const maxEncodedBytes = 3072
 // organization are carried so `kakt whoami` can answer "as whom" without a round
 // trip, since a token alone reveals neither.
 type Session struct {
-	Domain    string    `json:"domain"`
-	Token     string    `json:"token"`
+	Domain string `json:"domain"`
+	Token  string `json:"token"`
+	// UserID is Infisical's own identifier for the authenticated human, and it is
+	// what authorization compares against.
+	//
+	// The email is for display and nothing else. An address can be changed, and
+	// on some providers re-assigned, so a box that named its administrator by
+	// email would transfer that authority to whoever next holds the address --
+	// silently, and in the one place where silence is least affordable.
+	UserID    string    `json:"userId"`
 	Email     string    `json:"email"`
 	OrgID     string    `json:"orgId"`
 	ExpiresAt time.Time `json:"expiresAt,omitempty"`

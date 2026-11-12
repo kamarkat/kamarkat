@@ -105,9 +105,9 @@ Zero-Ops.
   - the cloud API token clusters are created with — `HCLOUD_TOKEN` for Hetzner;
   - a token with write access to `<tenant>-gitops`, so Day-0 can commit what it generates there.
 
-### Scaffold
+### Create the box, then its management cluster
 
-Download the CLI from a release and run it once:
+Download the CLI from a release and run two commands:
 
 ```
 # the latest release, for this machine
@@ -115,19 +115,36 @@ gh release download --repo kamarkat/kamarkat \
   --pattern "kakt-$(uname -s | tr 'A-Z' 'a-z')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
   --output kakt && chmod +x kakt
 
-./kakt tenant scaffold \
-  --tenant acme --box acme-inc --domain acme.example
+# the box: a repository in acme-inc, with no clusters
+./kakt box init --tenant acme --box acme-inc --domain acme.example
+
+# its management cluster, declared inside the checkout box init left behind
+cd acme-gitops-* && ../kakt tenant add-management
 ```
 
-The version a box starts on is the version of the binary that scaffolded it, so
+A box outlives every cluster in it (ADR-111 §1), so the box is what is created
+and a cluster is a declaration added to it. `box init` asks for the credentials
+it needs one at a time, creates the repository, sets those credentials as its
+Actions secrets, and writes what the box IS to `registry/box.yaml` — its names,
+its domain, its escrow, and the defaults its clusters are declared from. Nothing
+is created until the credential set is complete.
+
+A box names itself. One timestamp, taken when it is initialized, gives its box id,
+its repository and the name its first management cluster will take -- so one
+organisation can hold a replacement box beside the box it replaces. The command
+prints all three, and a run that stops part-way is continued with
+`kakt box init --resume <checkout>`, which reuses them.
+
+The version a box starts on is the version of the binary that created it, so
 downloading the latest release is how a tenant starts current. `kakt
 bundle-version` says which one a binary carries.
 
-Three inputs. The platform version comes from the binary, the control plane is named for the tenant, and the rest is defaulted — `--help` lists what can be overridden.
+Three inputs. The platform version comes from the binary, the box is named for the tenant, and the rest is defaulted — `--help` lists what can be overridden.
 
-It creates `acme-inc/acme-gitops`, asks for the two credentials, sets them as secrets on that repository, and starts the bootstrap. Pass `--provider-token` and `--gitops-token` to skip the prompts, or supply neither and the run stops after creating the repository and prints what remains.
+Commit the declaration and dispatch the repository's `bootstrap-cluster`
+workflow with that cluster name; Day-0 builds it from there.
 
-Use a released binary. A build from source carries no published version to pin, and refuses rather than scaffolding a repository that cannot bootstrap.
+Use a released binary. A build from source carries no published version to pin, and refuses rather than creating a box that cannot bootstrap.
 
 ### What runs, and where
 

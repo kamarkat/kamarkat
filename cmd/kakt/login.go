@@ -8,13 +8,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/browser"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/session"
 )
 
@@ -80,13 +79,13 @@ command prefers when present:
 			// Proved, not assumed. A token that cannot read the user's own
 			// organizations is not a session, and failing here names the login
 			// rather than surfacing as an authorization error against a box later.
-			email, orgID, err := verifySession(cmd.Context(), domain, token, org)
+			userID, email, orgID, err := verifySession(cmd.Context(), domain, token, org)
 			if err != nil {
 				return err
 			}
 
 			if err := store.Save(session.Session{
-				Domain: domain, Token: token, Email: email, OrgID: orgID,
+				Domain: domain, Token: token, UserID: userID, Email: email, OrgID: orgID,
 			}); err != nil {
 				return err
 			}
@@ -201,7 +200,7 @@ func browserLogin(ctx context.Context, domain string, timeout time.Duration) (st
 	defer srv.Close()
 
 	fmt.Printf("Opening %s\n", loginURL)
-	if err := openBrowser(loginURL); err != nil {
+	if err := browser.Open(loginURL); err != nil {
 		fmt.Printf("Could not open a browser (%v). Open that address yourself.\n", err)
 	}
 	fmt.Printf("Waiting for the browser to finish, up to %s. Ctrl-C cancels.\n", timeout)
@@ -229,19 +228,6 @@ func browserLogin(ctx context.Context, domain string, timeout time.Duration) (st
 }
 
 // openBrowser asks the desktop to open a URL, with no dependency to do it.
-func openBrowser(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Start()
-	case "linux":
-		return exec.Command("xdg-open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	default:
-		return fmt.Errorf("no browser opener for %s", runtime.GOOS)
-	}
-}
-
 // verifySession proves the token is a usable session and returns who it belongs
 // to.
 //
@@ -253,28 +239,28 @@ func openBrowser(url string) error {
 //
 // The first exists because the second does not return an address, and "logged in
 // as session on <org slug>" is not an answer to "as whom".
-func verifySession(ctx context.Context, domain, token, wantOrg string) (email, orgID string, err error) {
-	email, err = currentUserEmail(ctx, domain, token)
+func verifySession(ctx context.Context, domain, token, wantOrg string) (userID, email, orgID string, err error) {
+	userID, email, err = currentUserIdentity(ctx, domain, token)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, domain+"/api/v1/organization", nil)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("could not reach %s: %w", domain, err)
+		return "", "", "", fmt.Errorf("could not reach %s: %w", domain, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return "", "", fmt.Errorf("%s refused the token: it is not a valid session.\n\n"+
+		return "", "", "", fmt.Errorf("%s refused the token: it is not a valid session.\n\n"+
 			"If you pasted it, check it is the whole token; if the browser posted it, log in again", domain)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", fmt.Errorf("%s answered %d when asked which organizations this session can see",
+		return "", "", "", fmt.Errorf("%s answered %d when asked which organizations this session can see",
 			domain, resp.StatusCode)
 	}
 	var body struct {
@@ -285,10 +271,10 @@ func verifySession(ctx context.Context, domain, token, wantOrg string) (email, o
 		} `json:"organizations"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", "", fmt.Errorf("could not read the organizations response: %w", err)
+		return "", "", "", fmt.Errorf("could not read the organizations response: %w", err)
 	}
 	if len(body.Organizations) == 0 {
-		return "", "", fmt.Errorf("this session belongs to no organization, so it can read no escrow")
+		return "", "", "", fmt.Errorf("this session belongs to no organization, so it can read no escrow")
 	}
 	chosen := body.Organizations[0]
 	if wantOrg != "" {
@@ -304,57 +290,72 @@ func verifySession(ctx context.Context, domain, token, wantOrg string) (email, o
 			for _, o := range body.Organizations {
 				names = append(names, o.Slug)
 			}
-			return "", "", fmt.Errorf("this session sees no organization %q; it sees: %s",
+			return "", "", "", fmt.Errorf("this session sees no organization %q; it sees: %s",
 				wantOrg, strings.Join(names, ", "))
 		}
 	}
-	return email, chosen.ID, nil
+	return userID, email, chosen.ID, nil
 }
 
-// currentUserEmail asks who the session belongs to, and is also the proof that
+// currentUserIdentity asks who the session belongs to, and is also the proof that
 // the token is a session at all.
 //
 // A 401 here is the one failure worth distinguishing: everything else this
 // command does afterwards would report it as an authorization problem against a
 // box, which sends the operator to ask for permissions they already have.
-func currentUserEmail(ctx context.Context, domain, token string) (string, error) {
+func currentUserIdentity(ctx context.Context, domain, token string) (userID, email string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, domain+"/api/v2/users/me", nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("could not reach %s: %w", domain, err)
+		return "", "", fmt.Errorf("could not reach %s: %w", domain, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return "", fmt.Errorf("%s refused the token: it is not a valid session.\n\n"+
+		return "", "", fmt.Errorf("%s refused the token: it is not a valid session.\n\n"+
 			"If you pasted it, check it is the whole token; if the browser posted it, log in again", domain)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("%s answered %d when asked whose session this is", domain, resp.StatusCode)
+		return "", "", fmt.Errorf("%s answered %d when asked whose session this is", domain, resp.StatusCode)
 	}
 	var body struct {
 		User struct {
+			ID        string `json:"id"`
 			Email     string `json:"email"`
 			FirstName string `json:"firstName"`
 			LastName  string `json:"lastName"`
 		} `json:"user"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", fmt.Errorf("could not read the identity response: %w", err)
+		return "", "", fmt.Errorf("could not read the identity response: %w", err)
 	}
-	if e := strings.TrimSpace(body.User.Email); e != "" {
-		return e, nil
+
+	// The id is required, because it is what authorization is decided on. A
+	// session without one cannot be checked against the box's declared
+	// administrator, and accepting it would mean storing a session that every
+	// later command has to treat as unidentified.
+	userID = strings.TrimSpace(body.User.ID)
+	if userID == "" {
+		return "", "", fmt.Errorf("%s returned a session with no user id. Authorization is "+
+			"decided on that id rather than on an address, so there is nothing to check this "+
+			"session against", domain)
 	}
-	// An account with no address on it is unusual rather than broken -- an SSO
-	// identity can carry a name and no mail -- and refusing the login for it
-	// would be refusing a session the server accepts.
-	if name := strings.TrimSpace(body.User.FirstName + " " + body.User.LastName); name != "" {
-		return name, nil
+
+	email = strings.TrimSpace(body.User.Email)
+	if email == "" {
+		// An account with no address on it is unusual rather than broken -- an SSO
+		// identity can carry a name and no mail -- and refusing the login for it
+		// would be refusing a session the server accepts. Display only.
+		if name := strings.TrimSpace(body.User.FirstName + " " + body.User.LastName); name != "" {
+			email = name
+		} else {
+			email = "this session"
+		}
 	}
-	return "this session", nil
+	return userID, email, nil
 }
 
 // newWhoamiCmd says which identity this machine would use, and where it is kept.
@@ -389,10 +390,14 @@ func newWhoamiCmd() *cobra.Command {
 			// brief's four outcomes (logged in, authorized, credential retrieved,
 			// cluster reachable) start with this one. It also means a session whose
 			// stored identity predates a change still reports the truth.
-			live, liveErr := currentUserEmail(cmd.Context(), s.Domain, s.Token)
+			liveID, live, liveErr := currentUserIdentity(cmd.Context(), s.Domain, s.Token)
 			switch {
 			case liveErr == nil:
 				fmt.Printf("%s at %s\n", live, s.Domain)
+				// The id, because it is what a box declares as its platform
+				// administrator and what authorization is decided on. An address
+				// can be changed; this cannot.
+				fmt.Printf("  identity      %s\n", liveID)
 			case strings.Contains(liveErr.Error(), "not a valid session"):
 				return fmt.Errorf("%s no longer accepts this session.\n\nRun: kakt login --domain %s",
 					s.Domain, s.Domain)
@@ -405,6 +410,8 @@ func newWhoamiCmd() *cobra.Command {
 			if s.OrgID != "" {
 				fmt.Printf("  organization  %s\n", s.OrgID)
 			}
+			fmt.Println("\nTo authorize this identity for a box, declare it in that box's")
+			fmt.Println("registry/clusters/<cluster>/values.yaml as platformAdminIdentity.")
 			fmt.Printf("  session kept in %s\n", store.Name())
 			fmt.Println("\nWhether this identity can reach a given box is decided by its permissions")
 			fmt.Println("on that box's escrow project, not by being logged in.")

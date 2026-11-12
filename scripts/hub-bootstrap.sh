@@ -26,8 +26,8 @@ set -euo pipefail
 #
 # They were one variable (ZERO_OPS_DIR=$(dirname $SCRIPT_DIR)), which silently
 # made every workspace path relative to wherever the script happened to sit. Run
-# from a temp directory that is true and useless: k8-secrets, .zero-ops and
-# bin/kakt would all resolve under the temp copy.
+# from a temp directory that is true and useless: .zero-ops and bin/kakt would
+# all resolve under the temp copy.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The workspace. An explicit ZERO_OPS_DIR wins; otherwise fall back to the
@@ -49,12 +49,23 @@ PROJECT_ROOT="$ZERO_OPS_DIR"
 # box, while the binary and the credentials that create it do not.
 PLATFORM_DIR="$(cd "$(dirname "$SCRIPT_DIR")" && pwd)"
 
+# owned_secret <relative-path> -> the one place an operator's credentials live.
+#
+# ${KAMARKAT_HOME:-~/.kamarkat}/<rel>, reachable from any directory and outliving
+# every clone (internal/kakt-cli/opstore). ONE SPELLING, so a credential is
+# logged, grepped and discussed under the name it has on disk: call sites give
+# the path inside the store and nothing translates anything into it.
+owned_secret() {
+    printf '%s' "${KAMARKAT_HOME:-$HOME/.kamarkat}/$1"
+}
+
 # resolve_owned <relative-path> -> the first of workspace, platform that has it.
 #
+# REPOSITORY CONTENT ONLY: manifests, scripts, validators, the built binary.
+# Credentials are not repository content and go through owned_secret.
+#
 # Workspace first, platform second: the same order the CLI uses for the same files
-# (orchestrator.go: "ZERO_OPS_DIR first, then the executable's directory"). A real
-# tenant box carries its own credentials in its own repository and finds them
-# there; a developer's checkout carries them once and every workspace finds them.
+# (orchestrator.go: "ZERO_OPS_DIR first, then the executable's directory").
 # Falls back to the workspace path so a missing file is reported against the place
 # it is expected to be.
 resolve_owned() {
@@ -697,20 +708,18 @@ check_prerequisites() {
     fi
 
     # --- Secret files ---
-    if [[ "$PROVIDER" == "hetzner" || "$PROVIDER" == "hybrid" ]]; then
-        if [[ ! -f "$(resolve_owned k8-secrets/hetzner/token)" ]]; then
-            log "ERROR: Hetzner token file not found at k8-secrets/hetzner/token"
-            failed=1
-        else
-            log "  ✓ k8-secrets/hetzner/token found"
-        fi
-    fi
+    # No check for a local Hetzner token. Nothing reads one: the provider
+    # credential is the box's, held in its escrow, and a file beside this checkout
+    # is only ever the INPUT to an enrolment -- `kakt escrow
+    # enroll-provider-credential --gitops-dir . --cluster <c> < token`. Requiring
+    # the file here would fail a box that is correctly enrolled, and passing on it
+    # would say nothing about whether the box has a credential at all.
 
-    if [[ ! -f "$(resolve_owned k8-secrets/github/github-pat-token)" ]]; then
-        log "ERROR: GitHub token file not found at k8-secrets/github/github-pat-token"
+    if [[ ! -f "$(owned_secret github/github-pat-token)" ]]; then
+        log "ERROR: GitHub token not found at $(owned_secret github/github-pat-token)"
         failed=1
     else
-        log "  ✓ k8-secrets/github/github-pat-token found"
+        log "  ✓ GitHub token found in this operator's store"
     fi
 
     # --- AWS profile ---
@@ -739,7 +748,7 @@ read_kubeconfig_from_state() {
     # ZERO_OPS_DIR names).
     #
     # There were three sources before -- this path, a legacy .zero-ops/state one,
-    # and a convention-based guess at k8-secrets/kubeconfig/<cluster>.kubeconfig
+    # and a convention-based guess at a kubeconfig named after the cluster
     # if neither answered. The guess is what made the rest untestable: it is
     # usually right, so a state file that was missing or held a different path
     # produced a working run against a kubeconfig nobody had chosen, and the two
@@ -778,11 +787,10 @@ read_kubeconfig_from_state() {
 # Each of these used to be `export X=$(cat "$ZERO_OPS_DIR/...")`, which is the
 # opposite precedence and silently destructive: `cat` on a missing file prints
 # nothing, `export` masks its exit code, and a correctly supplied credential was
-# replaced with an empty string. The tenant's repository has no k8-secrets/ --
-# it is the OPERATOR's directory, and gitignored in a tenant repo precisely so it
-# never appears there -- so the file was always absent on the tenant path and the
-# clobber always fired. It surfaced as "--ghcr-pat is required" from a command
-# invoked with a credential the caller had provided correctly.
+# replaced with an empty string. These credentials are the OPERATOR's and have
+# never lived in a repository, so the file was always absent on the tenant path
+# and the clobber always fired. It surfaced as "--ghcr-pat is required" from a
+# command invoked with a credential the caller had provided correctly.
 #
 # Refuses rather than proceeding empty: every step below treats the value as
 # present, and an empty credential fails several commands later with an error
@@ -792,7 +800,7 @@ require_credential() {
     if [[ -n "${!var:-}" ]]; then
         return 0
     fi
-    local path; path="$(resolve_owned "$rel")"
+    local path; path="$(owned_secret "$rel")"
     if [[ -r "$path" ]]; then
         printf -v "$var" '%s' "$(tr -d '\r\n' < "$path")"
         export "${var?}"
@@ -903,7 +911,19 @@ step1_bootstrap_hub() {
         fi
     fi
 
-    require_credential HCLOUD_TOKEN "k8-secrets/hetzner/token" "the Hetzner API token"
+    # NOT required here any more. The provider credential is the box's, held in
+    # its escrow, and `kakt bootstrap` reads it from there -- a token exported in
+    # this shell would authenticate against whichever provider project issued it,
+    # which is how a box gets built against the wrong account. Enrol it once with
+    # `kakt escrow enroll-provider-credential` and this script needs nothing.
+    # Required here, and nowhere else can stand in for it. The bootstrap gives
+    # ArgoCD the credential it reads this box's own repository with, and it reads
+    # that one credential by name: no operator credential, and no Actions token,
+    # substitutes for the box owner's (ADR-065). Demanded before the cluster is
+    # created rather than ten minutes in, where the box is already half built.
+    require_credential GITOPS_REPO_WRITE_TOKEN "github/github-pat-token" \
+        "a credential with write access to this box's GitOps repository"
+
     local gating_flag="--gating=${GATING}"
     local gitops_flag=""
     [[ -n "$GITOPS_DIR" ]] && gitops_flag="--gitops-dir=${GITOPS_DIR}"
@@ -961,7 +981,7 @@ step1_bootstrap_hub() {
 }
 
 # Step 1c: Configure Tailscale credentials (hybrid only)
-# Creates platform-capi/tailscale-hybrid-psk from k8-secrets/tailscale/*
+# Creates platform-capi/tailscale-hybrid-psk from the operator's store (~/.kamarkat/tailscale/*)
 # (gitignored), mirroring the hetzner/github Secret Zero pattern. hub-operator
 # uploads it to Infisical via CLISecretMappings and ESO syncs it back, so
 # ArgoCD never resets it to empty. Required before a hybrid spoke provisions
@@ -989,18 +1009,18 @@ step1c_configure_tailscale() {
     # workers dies in one direction.
     #
     # This looked only in ZERO_OPS_DIR and WARNED. ZERO_OPS_DIR is the TENANT's
-    # checkout, and k8-secrets/ is the platform operator's own gitignored
-    # directory, so the file was never there on the tenant path and the step
+    # checkout, and this credential is the platform operator's own, in their
+    # store, so the file was never there on the tenant path and the step
     # always skipped. readTailscaleAuthkey in driver_hybrid.go carries the same
     # fix and records what the warning cost: a control plane that never joined
     # the tailnet, discovered when traffic to the home workers died.
     #
     # Same precedence as the Go driver -- environment first, the operator's file
     # second -- so both halves of a hybrid bootstrap enrol from one credential.
-    require_credential TS_AUTHKEY "k8-secrets/tailscale/authkey" "a Tailscale auth key"
+    require_credential TS_AUTHKEY "tailscale/authkey" "a Tailscale auth key"
     # DERIVED from the SpokePool, not a credential. It is the control plane's
     # MagicDNS name, which is definitionally "<pool>-cp" -- the operator's
-    # k8-secrets/tailscale/hostname held exactly that. Deriving it means a tenant
+    # tailscale/hostname file held exactly that. Deriving it means a tenant
     # needs no secret for a value that is already determined by the pool they
     # declared, and it cannot drift from the pool the way a second copy can.
     TS_HOSTNAME="${TS_HOSTNAME:-${SPOKEPOOL_NAME}-cp}"
@@ -1009,9 +1029,9 @@ step1c_configure_tailscale() {
     fi
     export TS_HOSTNAME
 
-    # Passed explicitly. The CLI's own defaults read k8-secrets/ relative to its
-    # WORKING DIRECTORY, which here is the tenant's checkout -- so resolving the
-    # paths above and then letting it look them up again would find nothing.
+    # Passed explicitly rather than left to the CLI's own lookup, so one
+    # resolution decides both halves of a hybrid bootstrap and the value the
+    # script reported is the value the command received.
     "$KAKT_BINARY" configure-tailscale \
         --authkey="$TS_AUTHKEY" \
         --hostname="$TS_HOSTNAME" \
@@ -1070,13 +1090,18 @@ step3_configure_github() {
 
     log "Step 3: Configuring GitHub Access..."
 
-    require_credential GITHUB_TOKEN "k8-secrets/github/github-pat-token" "a GitHub PAT"
+    # Named for what it is for -- pulling this box's images -- rather than for
+    # how it happens to be issued. Not GITHUB_TOKEN: that name belongs to GitHub
+    # Actions and to tools that demand it, and a credential of ours parked there
+    # is read by whatever else is in the environment.
+    require_credential GHCR_TOKEN "github/github-pat-token" \
+        "a credential that can pull this box's images"
 
     local org_url; org_url="$(box_org_url)"
 
-    log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=\$GITHUB_TOKEN --org-url=$org_url"
+    log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=\$GHCR_TOKEN --org-url=$org_url"
     "$KAKT_BINARY" configure-github-access \
-        --ghcr-pat="$GITHUB_TOKEN" \
+        --ghcr-pat="$GHCR_TOKEN" \
         --org-url="$org_url" \
         --kubeconfig="$KUBECONFIG_PATH" || error_exit "configure-github-access failed"
 
@@ -1222,7 +1247,7 @@ step6_wait_infisical() {
 # CreateContainerConfigError, and neither named the missing key or its owner.
 #
 # This step turns that folklore into a declared, repeatable phase. Each entry below
-# maps a directory under k8-secrets/ (gitignored) to one Kubernetes Secret; the
+# maps a directory in the operator's store to one Kubernetes Secret; the
 # hub-operator's CLISecretMappings then uploads it to Infisical and ESO syncs it
 # back out — the same Secret Zero path already used for hetzner, github and
 # tailscale. Nothing new writes to Infisical directly.
@@ -1232,14 +1257,14 @@ step6_wait_infisical() {
 # still empty is NOT turned into a Secret: the uploader rejects empty values, and a
 # half-populated Secret is worse than an absent one.
 #
-# Format: <k8-secrets subdir>|<target namespace>/<secret name>|<file>=<secret key>,...
+# Format: <store subdir>|<target namespace>/<secret name>|<file>=<secret key>,...
 # subdir | namespace/secret | file=key=ENV_VAR,...
 #
 # The environment variable is declared beside the file because both are real
 # sources and they must not drift: these are the same credentials, with the same
 # names, that secrets_platform.go reads env-first. This step read the FILE only,
-# under the tenant's checkout -- where k8-secrets/ does not exist -- so on the
-# tenant path it wrote empty placeholders into the tenant's repository and seeded
+# under the tenant's checkout -- where an operator's store does not exist -- so
+# on the tenant path it wrote empty placeholders into the tenant's repository and seeded
 # nothing, while the values sat in the environment the whole time.
 SEED_SPECS=(
     "s3|platform-ops/s3-object-storage|access-key-id=access-key-id=S3_ACCESS_KEY_ID,secret-access-key=secret-access-key=S3_SECRET_ACCESS_KEY"
@@ -1262,7 +1287,7 @@ step6b_seed_external_credentials() {
         name="${target##*/}"
 
         # Environment first, then the operator's own file -- the precedence the
-        # Go path uses, and the reason is the same: k8-secrets/ belongs to an
+        # Go path uses, and the reason is the same: the store belongs to an
         # operator's laptop, while a tenant's Day-0 runs in CI under the tenant's
         # secrets (ADR-072), where that directory does not exist and never will.
         #
@@ -1282,12 +1307,12 @@ step6b_seed_external_credentials() {
 
             value="${!env_name:-}"
             if [[ -z "$value" ]]; then
-                local path; path="$(resolve_owned "k8-secrets/$subdir/$file")"
+                local path; path="$(owned_secret "$subdir/$file")"
                 [[ -s "$path" ]] && value="$(tr -d '\r\n' < "$path")"
             fi
 
             if [[ -z "$value" ]]; then
-                log "  $target: no $env_name in the environment and no value in k8-secrets/$subdir/$file"
+                log "  $target: no $env_name in the environment and no value at $path"
                 missing=1
             else
                 args+=("--from-literal=$key=$value")
@@ -2091,8 +2116,8 @@ main() {
     # Export KUBECONFIG so the Go bootstrap binary's internal bare-kubectl calls
     # (e.g. infisical bootstrap pod discovery) resolve the same cluster instead
     # of a stale default context. The path is deterministic per cluster name.
-    if [[ -f "$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig" ]]; then
-        export KUBECONFIG="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
+    if [[ -f "${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig" ]]; then
+        export KUBECONFIG="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
     fi
 
     # --teardown destroys the environment and exits. It deliberately does NOT fall
@@ -2104,12 +2129,12 @@ main() {
     fi
 
     # --seed-only runs step 6b alone, for the normal case: the placeholders under
-    # k8-secrets/ were empty on the first run, they have since been filled, and the
-    # values need to reach Infisical without rebuilding anything. The operator
+    # the operator's store were empty on the first run, they have since been
+    # filled, and the values need to reach Infisical without rebuilding anything. The operator
     # uploads them on its next reconcile.
     if [[ "$SEED_ONLY" == "true" ]]; then
         if [[ -z "${KUBECONFIG_PATH:-}" || ! -f "$KUBECONFIG_PATH" ]]; then
-            KUBECONFIG_PATH="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
+            KUBECONFIG_PATH="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
         fi
         [[ -f "$KUBECONFIG_PATH" ]] || error_exit "kubeconfig not found at $KUBECONFIG_PATH — pass --name for the cluster to seed"
         log "Seeding externally-issued credentials only (--seed-only)"
@@ -2283,7 +2308,7 @@ main() {
     # while leaving a platform that does not work.
     #
     # KUBECONFIG is passed explicitly. The script used to default it to
-    # k8-secrets/kubeconfig/hub.kubeconfig -- a cluster named "hub" -- so a box
+    # a kubeconfig named for a cluster called "hub" -- so a box
     # named anything else was validated against another cluster's kubeconfig, or
     # a deleted one.
     if ! KUBECONFIG="$KUBECONFIG_PATH" \

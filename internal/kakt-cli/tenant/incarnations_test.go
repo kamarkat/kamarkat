@@ -44,6 +44,16 @@ func TestIncarnationsOutliveTheirDeclaration(t *testing.T) {
 	}
 
 	git("init", "-q", "-b", "main")
+	// The box declares itself, as `kakt box init` writes it. Its identity is not
+	// read out of a cluster any more, which is what lets this test remove the
+	// first incarnation's directory and still have a box.
+	if err := os.MkdirAll(filepath.Join(dir, RegistryDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, RegistryDir, BoxDeclFile),
+		[]byte("boxId: acme-hub\ntenantId: acme\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	declare("acme-hub")
 	git("add", ".")
 	git("commit", "-qm", "first incarnation")

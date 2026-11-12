@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Seed the externally-sourced Infisical keys — the ones no controller can
-# regenerate — from the local k8-secrets/ tree.
+# regenerate — from this operator's own store (~/.kamarkat/).
 #
 # WHY THIS EXISTS
 #
@@ -10,7 +10,7 @@
 #   they are issued by third parties — Hetzner, the IRM, GitHub. When
 #   Infisical is reinitialised those keys are simply gone, every ExternalSecret
 #   that reads one reports "could not get secret data from provider", and nothing
-#   in the platform can recover them. They live in k8-secrets/ and have to be put
+#   in the platform can recover them. They live in the operator's store and have to be put
 #   back by hand. This script is that by-hand step, made repeatable.
 #
 #   The key -> file mapping is the same one recorded in
@@ -38,7 +38,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SECRETS_DIR="${SECRETS_DIR:-${REPO_ROOT}/k8-secrets}"
+# The operator's own store, not a checkout: these credentials outlive every clone
+# (internal/kakt-cli/opstore). SECRETS_DIR still overrides.
+SECRETS_DIR="${SECRETS_DIR:-${KAMARKAT_HOME:-$HOME/.kamarkat}}"
 # No default. The one that was here pointed at the PLATFORM's Infisical, so a
 # tenant running this seeded the platform's secret store instead of their own
 # (ADR-065). It is this box's instance -- infisical.<the box's domain> -- or a
@@ -124,7 +126,7 @@ for entry in "${MAPPINGS[@]}"; do
   SRC="${SECRETS_DIR}/${FILE}"
 
   if [[ ! -f "$SRC" ]]; then
-    log "  MISSING  ${KEY}  (no ${FILE} in k8-secrets)"
+    log "  MISSING  ${KEY}  (no ${FILE} in ${SECRETS_DIR})"
     missing=$((missing+1)); continue
   fi
 

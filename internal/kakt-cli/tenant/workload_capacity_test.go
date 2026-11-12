@@ -35,7 +35,7 @@ func TestWorkloadClusterCapacityIsProviderSpecific(t *testing.T) {
 		},
 		{
 			// The case the first version of this guard got wrong.
-			name: "hybrid with zero cloud workers is CORRECT, not an error",
+			name:     "hybrid with zero cloud workers is CORRECT, not an error",
 			provider: "hybrid", workers: 0, wantRefus: false,
 		},
 	} {

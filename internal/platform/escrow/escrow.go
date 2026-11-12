@@ -15,9 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -234,6 +232,23 @@ func ProviderCredentialArtifact(provider string) string {
 
 const ArtifactBackupSSECKey = "backup-ssec-key"
 
+// ArtifactEscrowDestination records WHICH escrow this box was bound to, inside
+// that escrow.
+//
+// The box's repository declares its escrow url and project id, and those are
+// names rather than credentials -- which is why they are committed. But a
+// committed field is editable, and an edited one would send the next privileged
+// write to a project the editor controls: a redirect, not a leak, and invisible
+// because every later read would succeed against the new destination.
+//
+// So the destination is also recorded in the destination, by the authorized
+// enrolment that establishes it. A declaration that does not match what its own
+// escrow says about itself is refused, and a redirect to another project finds no
+// record there at all. Neither can be produced by editing Git alone.
+//
+// Box-scoped: the binding belongs to the box and outlives every cluster in it.
+const ArtifactEscrowDestination = "escrow-destination"
+
 // SpokePKIPurposes are the trust roots Cluster API generates for a cluster, by the
 // suffix it names their Secrets with: `<cluster>-ca`, `-etcd`, `-sa`, `-proxy`
 // (sigs.k8s.io/cluster-api/util/secret, Purpose constants at the deployed v1.10.0).
@@ -272,10 +287,15 @@ const ArtifactBackupStoreCredential = "backup-store-credential"
 // default. The default still exists, for the per-application credentials the
 // secret uploader names at runtime; it must never be what places a key.
 var boxScoped = map[string]bool{
+	ArtifactEscrowDestination:     true,
 	escrowSecretName:              true, // infisical-master-keys
 	ArtifactZitadelMasterkey:      true,
 	ArtifactBackupSSECKey:         true,
 	ArtifactBackupStoreCredential: true,
+	// One Infisical per box, administered by one account. Keyed to the box
+	// because a successor hub inherits that instance's database, and with it the
+	// user row this credential logs in as.
+	ArtifactInfisicalAdmin: true,
 }
 
 // Scope is which identity an artefact is keyed to.
@@ -335,66 +355,12 @@ func legacyPath(clusterName string) string {
 // inside the thing it protects is unreachable exactly when it is needed, and this
 // refuses that configuration rather than appearing to work. Callers with no cluster
 // to compare against -- the CLI retrieving a copy -- pass "".
-// escrowValue reads one escrow setting from the environment, or from the checkout
-// that scaffolding wrote it into.
+// escrowValue reads one escrow setting: the environment, then this operator's
+// store under the home directory.
 //
-// # WHY A FILE AND NOT ONLY AN ENVIRONMENT VARIABLE
-//
-// Scaffolding writes these four to `k8-secrets/infisical/`, one file per setting,
-// each named exactly after its variable. Nothing read them. So every command needing
-// an escrow required four exports that the operator had already supplied once, and
-// the files sat there looking like configuration while being inert -- which is how
-// an operator ends up pasting a client secret into a shell on a regular basis.
-//
-// The environment still wins, because that is what an in-cluster caller has: the
-// operator runs with these projected from a Secret and no checkout to read. The file
-// is the fallback for a CLI run from the repository.
-//
-// Absent file, absent directory and unreadable file are all treated as "not set".
-// That is NOT swallowing an error: a missing value is reported by the all-or-nothing
-// check in the caller, which names every setting it could not find. Reporting a
-// read failure here instead would make a box with no checkout -- the normal case in
-// cluster -- fail on the absence of something it was never meant to have.
-func escrowValue(name string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
-	}
-	dir := escrowSecretsDir()
-	if dir == "" {
-		return ""
-	}
-	b, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-// escrowSecretsDir finds `k8-secrets/infisical` by walking up from the working
-// directory.
-//
-// Walked rather than assumed, because a CLI is run from wherever the operator
-// happens to be inside the checkout, and a path relative to the process would work
-// from the repository root and nowhere else. Bounded, so a process started outside
-// any checkout stops instead of climbing to the filesystem root.
-func escrowSecretsDir() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for i := 0; i < 8; i++ {
-		candidate := filepath.Join(dir, "k8-secrets", "infisical")
-		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
-			return candidate
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
-}
+// The walk up the working directory for `k8-secrets/infisical` is gone, and with
+// it the assumption that a command runs inside a checkout. See store.go.
+func escrowValue(name string) string { return StoredValue(name) }
 
 func NewEscrowClient(ctx context.Context, inClusterURL string) (EscrowClient, error) {
 	url := escrowValue("INFISICAL_ESCROW_URL")

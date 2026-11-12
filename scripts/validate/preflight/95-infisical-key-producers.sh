@@ -24,20 +24,20 @@ import glob, os, re, yaml
 
 # Credentials issued by systems OUTSIDE the platform, so nothing here can generate
 # them. They are no longer hand-seeded: hub-bootstrap.sh step 6b builds a Secret
-# from k8-secrets/<dir>/ and the operator's CLISecretMappings upload it. They stay
+# from the operator's store (~/.kamarkat/<dir>/) and the operator's CLISecretMappings upload it. They stay
 # listed so every run prints the set that needs real values on disk — an empty file
 # is skipped rather than uploaded blank, and that skip is easy to miss.
 EXTERNAL = {
-    "S3_ACCESS_KEY_ID":              "k8-secrets/s3/access-key-id — Hetzner Object Storage key (starts 0A…, NOT the hcloud-token)",
-    "S3_SECRET_ACCESS_KEY":          "k8-secrets/s3/secret-access-key — Hetzner Object Storage secret (CNPG Barman backups)",
-    "GRAFANA_IRM_ALERTMANAGER_URL":  "k8-secrets/grafana-cloud/irm-alertmanager-url — IRM Alertmanager integration URL",
-    "GRAFANA_IRM_HEARTBEAT_URL":     "k8-secrets/grafana-cloud/irm-heartbeat-url (hub) and irm-heartbeat-url-<cell> (each spoke) — one IRM heartbeat per cluster",
+    "S3_ACCESS_KEY_ID":              "~/.kamarkat/s3/access-key-id — Hetzner Object Storage key (starts 0A…, NOT the hcloud-token)",
+    "S3_SECRET_ACCESS_KEY":          "~/.kamarkat/s3/secret-access-key — Hetzner Object Storage secret (CNPG Barman backups)",
+    "GRAFANA_IRM_ALERTMANAGER_URL":  "~/.kamarkat/grafana-cloud/irm-alertmanager-url — IRM Alertmanager integration URL",
+    "GRAFANA_IRM_HEARTBEAT_URL":     "~/.kamarkat/grafana-cloud/irm-heartbeat-url (hub) and irm-heartbeat-url-<cell> (each spoke) — one IRM heartbeat per cluster",
     # Uploaded from the zitadel-smtp Secret as the URL's PASSWORD, at the root,
     # for every cluster's Alertmanager; hub-operator copies it into each cell.
-    "ALERT_SMTP_PASSWORD":           "k8-secrets/smtp/resend (or ZITADEL_SMTP_URL) — the same SMTP URL; its password",
+    "ALERT_SMTP_PASSWORD":           "~/.kamarkat/smtp/resend (or ZITADEL_SMTP_URL) — the same SMTP URL; its password",
     # Uploaded from the zitadel-smtp Secret as the URL's PASSWORD only, to the
     # owner's /<tenant>-mgmt folder (CLISecretMappings, TransformURLPassword).
-    "zitadel_smtp_password":         "k8-secrets/smtp/resend (or ZITADEL_SMTP_URL) — the Resend SMTP URL, smtps://resend:<api-key>@smtp.resend.com:465",
+    "zitadel_smtp_password":         "~/.kamarkat/smtp/resend (or ZITADEL_SMTP_URL) — the Resend SMTP URL, smtps://resend:<api-key>@smtp.resend.com:465",
 }
 
 # Known-missing producers awaiting a decision, reported as a WARNING rather than a
@@ -262,7 +262,7 @@ PY
         note "per-cell external credential '$a' — $b"
     done <<< "$out"
 
-    note "externally issued — seeded by hub-bootstrap step 6b from k8-secrets/:"
+    note "externally issued — seeded by hub-bootstrap step 6b from the operator store:"
     while IFS=$'\t' read -r tag a b; do
         [[ "$tag" == "SEED" ]] || continue
         note "  $a — $b"

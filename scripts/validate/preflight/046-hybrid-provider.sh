@@ -62,9 +62,9 @@ validate_hetzner_capacity() {
     section "Hetzner project capacity (ADR-046 §23)"
 
     local token
-    token=$(cat "$VALIDATE_ROOT/k8-secrets/hetzner/token" 2>/dev/null | tr -d '[:space:]')
+    token=$(cat "${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token" 2>/dev/null | tr -d '[:space:]')
     if [[ -z "$token" ]]; then
-        warn "no k8-secrets/hetzner/token — skipping capacity check"
+        warn "no hetzner/token in this operator's store — skipping capacity check"
         return 0
     fi
 

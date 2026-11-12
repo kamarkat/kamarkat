@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kamarkat/kamarkat/internal/platform/embedded"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
+	"github.com/kamarkat/kamarkat/internal/platform/embedded"
 )
 
 // ReadFile returns platform content by its repository-relative path, for
@@ -139,4 +139,34 @@ func WalkDir(root string, fn fs.WalkDirFunc) error {
 		}
 		return fn(rel, d, nil)
 	})
+}
+
+// Carries reports whether the binary's own embedded tree holds this path.
+//
+// Every build carries the tree -- `go:embed` compiles it in whatever the
+// version says -- so this answers a question about the BINARY, where
+// IsReleaseBuild answers one about policy. The two differ for exactly one
+// caller: content a development build needs when it is not running inside a
+// checkout.
+func Carries(path string) bool {
+	f, err := embedded.FS.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+// ReadCarried reads one file from the tree the binary carries.
+func ReadCarried(path string) ([]byte, error) {
+	return embedded.FS.ReadFile(path)
+}
+
+// WalkCarried walks the tree the binary carries, whatever build it is.
+//
+// Named apart from WalkDir so that choosing it is visible at the call site. A
+// caller that wants ADR-068's rule -- a development build reads the working
+// tree, so an unpublished change takes effect -- uses WalkDir and gets it.
+func WalkCarried(root string, fn fs.WalkDirFunc) error {
+	return fs.WalkDir(embedded.FS, root, fn)
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/health"
@@ -22,6 +24,8 @@ import (
 // can act on; a check that waits forever is a hung workflow, and one that
 // samples once at the end of bootstrap reports failures that fix themselves a
 // minute later.
+var verifyGitops string
+
 func newVerifyCmd() *cobra.Command {
 	var (
 		clusterName string
@@ -43,12 +47,16 @@ func newVerifyCmd() *cobra.Command {
 					return fmt.Errorf("--cluster or --kubeconfig is required: there is " +
 						"no default hub to verify")
 				}
-				kubeconfig = filepath.Join("k8-secrets", "kubeconfig", clusterName+".kubeconfig")
-			}
-			if _, err := os.Stat(kubeconfig); err != nil {
-				return fmt.Errorf("no kubeconfig at %s: %w.\n"+
-					"Day-0 writes it there; verify runs after bootstrap, not instead of it",
-					kubeconfig, err)
+				// Read with your own identity, from the box's escrow -- or from
+				// Day-0's working copy while a bootstrap is still running.
+				resolved, cleanup, err := escrowKubeconfig(cmd.Context(), verifyGitops, clusterName)
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+				kubeconfig = resolved
+			} else if _, err := os.Stat(kubeconfig); err != nil {
+				return fmt.Errorf("no kubeconfig at %s: %w", kubeconfig, err)
 			}
 
 			fmt.Printf("[verify] watching %s for up to %v\n", kubeconfig, timeout)
@@ -68,11 +76,48 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&clusterName, "cluster", "", "cluster to verify; its kubeconfig is read from k8-secrets/kubeconfig/<cluster>.kubeconfig")
+	cmd.Flags().StringVar(&clusterName, "cluster", "", "cluster to verify; its kubeconfig is read from the box's escrow with your own identity")
+	cmd.Flags().StringVar(&verifyGitops, "gitops-dir", ".", "the box's repository, which declares its escrow")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to the hub kubeconfig, when it is not where Day-0 puts it")
 	// Fifteen minutes because that is what convergence has actually taken: images
 	// pull, ESO retries on its own interval, and ArgoCD's reconciliation is not
 	// instant. Shorter budgets reported failure on clusters that were fine.
 	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "how long to wait before reporting what is still outstanding")
 	return cmd
+}
+
+// escrowKubeconfig resolves a management cluster's kubeconfig the way an operator
+// reaches a box: `kakt login`, then the escrowed copy, with their own identity.
+//
+// The normal path, and the only one that works from a machine that never
+// bootstrapped the box. Day-0's working copy under ~/.kamarkat/run/ is tried
+// first because during a bootstrap it is the only one that exists yet -- the
+// escrow copy is written once the cluster is up -- and it is a file this CLI put
+// there, not a credential discovered in a checkout.
+//
+// The caller owns the cleanup: holding cluster-admin is not something to leave on
+// a workstation, and the one thing that knows when the command is finished is the
+// command.
+func escrowKubeconfig(ctx context.Context, gitopsDir, cluster string) (path string, cleanup func(), err error) {
+	cleanup = func() {}
+	if working, perr := opstore.KubeconfigPath(cluster); perr == nil {
+		if _, serr := os.Stat(working); serr == nil {
+			return working, cleanup, nil
+		}
+	}
+	coords, err := hubaccess.Declaration(gitopsDir, cluster)
+	if err != nil {
+		return "", cleanup, err
+	}
+	access, err := hubaccess.Open(ctx, coords)
+	if err != nil {
+		return "", cleanup, err
+	}
+	_, p, remove, err := access.Kubernetes(ctx, hubaccess.Identity{
+		BoxID: coords.BoxID, ClusterName: coords.ClusterName,
+	})
+	if err != nil {
+		return "", cleanup, err
+	}
+	return p, remove, nil
 }

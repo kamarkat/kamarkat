@@ -51,6 +51,14 @@ type platformCredential struct {
 	// Needed reports whether this box asks for it at all. A credential nobody's
 	// configuration calls for is not missing.
 	Needed func(Spec, Secrets) bool
+	// Derived marks a value the CLI resolves itself and never asks for. It is
+	// still listed here, and still checked for presence, because it is required
+	// -- what changes is only who supplies it.
+	Derived bool
+	// Store is where this operator stages the value between `kakt box init` and
+	// the scaffold that delivers it (internal/kakt-cli/opstore). Empty for a
+	// derived value, which is never staged because it is never typed.
+	Store string
 }
 
 func platformCredentials() []platformCredential {
@@ -100,6 +108,10 @@ func platformCredentials() []platformCredential {
 			Prompt:     "INFISICAL_ADMIN_EMAIL (the administrator of this box's Infisical): ",
 			Field:      func(s *Secrets) *string { return &s.InfisicalAdminEmail },
 			Needed:     always,
+			// The signed-in session's address. You proved who you are with
+			// `kakt login`, so asking again is asking you to copy a value the
+			// CLI is holding.
+			Derived: true,
 		},
 		{
 			Secret: "INFISICAL_ADMIN_PASSWORD", Tier: tierCapability,
@@ -107,6 +119,11 @@ func platformCredentials() []platformCredential {
 			Prompt:     "INFISICAL_ADMIN_PASSWORD: ",
 			Field:      func(s *Secrets) *string { return &s.InfisicalAdminPassword },
 			Needed:     always,
+			// Generated and escrowed, never asked for. A human invents a worse
+			// password than crypto/rand does and remembers it less reliably, for
+			// an account whose everyday user is Day-0; the escrow is where it is
+			// recovered from (internal/platform/escrow/admin_credential.go).
+			Derived: true,
 		},
 		{
 			Secret: "S3_ACCESS_KEY_ID", Tier: tierCapability,
@@ -114,6 +131,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "S3_ACCESS_KEY_ID (object storage for database backups): ",
 			Field:      func(s *Secrets) *string { return &s.S3AccessKeyID },
 			Needed:     backupsWanted,
+			Store:      "s3/access-key-id",
 		},
 		{
 			Secret: "S3_SECRET_ACCESS_KEY", Tier: tierCapability,
@@ -121,6 +139,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "S3_SECRET_ACCESS_KEY: ",
 			Field:      func(s *Secrets) *string { return &s.S3SecretAccessKey },
 			Needed:     backupsWanted,
+			Store:      "s3/secret-access-key",
 		},
 		{
 			Secret: "GHCR_USERNAME", Tier: tierCapability,
@@ -128,6 +147,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "GHCR_USERNAME (to pull your private images): ",
 			Field:      func(s *Secrets) *string { return &s.GHCRUsername },
 			Needed:     privateImages,
+			Store:      "ghcr/username",
 		},
 		{
 			Secret: "GHCR_TOKEN", Tier: tierCapability,
@@ -135,6 +155,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "GHCR_TOKEN (a token with read:packages): ",
 			Field:      func(s *Secrets) *string { return &s.GHCRToken },
 			Needed:     privateImages,
+			Store:      "ghcr/token",
 		},
 		{
 			Secret: "GRAFANA_IRM_ALERTMANAGER_URL", Tier: tierDestination,
@@ -142,6 +163,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "GRAFANA_IRM_ALERTMANAGER_URL (your IRM Alertmanager integration's URL): ",
 			Field:      func(s *Secrets) *string { return &s.GrafanaIRMAlertmanagerURL },
 			Needed:     always,
+			Store:      "grafana/irm-alertmanager-url",
 		},
 		{
 			Secret: "GRAFANA_IRM_HEARTBEAT_URL", Tier: tierDestination,
@@ -149,6 +171,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "GRAFANA_IRM_HEARTBEAT_URL (the same integration's heartbeat URL): ",
 			Field:      func(s *Secrets) *string { return &s.GrafanaIRMHeartbeatURL },
 			Needed:     always,
+			Store:      "grafana/irm-heartbeat-url",
 		},
 		{
 			// A destination: the issuer runs without it, and simply cannot send
@@ -158,6 +181,7 @@ func platformCredentials() []platformCredential {
 			Prompt:     "ZITADEL_SMTP_URL (smtps://resend:<api-key>@smtp.resend.com:465): ",
 			Field:      func(s *Secrets) *string { return &s.ZitadelSMTPURL },
 			Needed:     always,
+			Store:      "zitadel/smtp-url",
 		},
 	}
 }
@@ -166,6 +190,16 @@ func (s Secrets) missingInTier(spec Spec, t tier) []platformCredential {
 	var missing []platformCredential
 	for _, c := range platformCredentials() {
 		if c.Tier != t || !c.Needed(spec, s) {
+			continue
+		}
+		// A DERIVED credential is never missing from the operator, because it was
+		// never theirs to supply: the CLI resolves it. The box Infisical
+		// administrator is the case -- its address comes from the session and its
+		// password is generated and escrowed when the management cluster is
+		// declared, which is the first moment its escrow artefact has a cluster to
+		// be keyed by. Counted as missing here, `kakt box init` refused to create
+		// a box for want of a value that does not exist yet and cannot be typed.
+		if c.Derived {
 			continue
 		}
 		if strings.TrimSpace(*c.Field(&s)) == "" {
@@ -200,7 +234,7 @@ func (s Secrets) RequireSelectedCapabilities(spec Spec) error {
 		"Missing: %s\n\n"+
 		"These are not platform defaults you can ignore -- they are the\n"+
 		"dependencies of something this box is configured to do. Either supply\n"+
-		"them, or turn the capability off and scaffold without it.",
+		"them, or turn the capability off and create the box without it.",
 		strings.Join(why, "\n"), strings.Join(names, ", "))
 }
 

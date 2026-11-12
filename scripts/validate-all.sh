@@ -160,7 +160,10 @@ fi
 # ─── preflight: before a cluster exists ──────────────────────────────────────
 if wants preflight; then
     if [[ -z "${HCLOUD_TOKEN:-}" ]]; then
-        skip preflight "HCLOUD_TOKEN is not set; the preflight checks query the cloud account"
+        # A platform-developer phase, not a box command: these checks query a cloud
+        # account directly, before any box exists to hold a credential, so the one
+        # they use is supplied here. No box lifecycle command reads this variable.
+        skip preflight "HCLOUD_TOKEN is not set; these pre-cluster checks query a cloud account directly"
     else
         run_phase preflight "$LOG_DIR/validation-preflight.log" \
             bash "$PLATFORM_DIR/scripts/validate/run.sh" preflight
@@ -178,7 +181,7 @@ if wants platform; then
     fi
     kubeconfig="${KUBECONFIG:-}"
     if [[ -z "$kubeconfig" && -n "$CLUSTER_NAME" ]]; then
-        kubeconfig="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
+        kubeconfig="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
     fi
     if [[ -z "$kubeconfig" || ! -r "$kubeconfig" ]]; then
         skip platform "no readable kubeconfig (set KUBECONFIG, or CLUSTER_NAME for the conventional path)"
@@ -217,7 +220,7 @@ if wants adr; then
     adr_script="$PLATFORM_DIR/scripts/dev/adr-acceptance.sh"
     kubeconfig="${KUBECONFIG:-}"
     if [[ -z "$kubeconfig" && -n "$CLUSTER_NAME" ]]; then
-        kubeconfig="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${CLUSTER_NAME}.kubeconfig"
+        kubeconfig="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
     fi
     if [[ ! -x "$adr_script" ]]; then
         skip adr "adr-acceptance.sh is not present at $adr_script"

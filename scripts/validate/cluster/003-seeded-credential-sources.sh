@@ -79,7 +79,7 @@ for (namespace, name), keys in sorted(wanted.items()):
     if missing:
         print("FAIL %s/%s exists but is missing %s -- the uploader fails this on every "
               "reconcile with 'source secret missing key', and the Infisical value is "
-              "whatever was seeded last. Re-apply it from k8-secrets/ (hub-bootstrap "
+              "whatever was seeded last. Re-apply it from the operator store (hub-bootstrap "
               "step 6b)" % (namespace, name, ", ".join(sorted(missing))))
     if empty:
         print("FAIL %s/%s has empty value(s) for %s -- the uploader rejects empty, so "

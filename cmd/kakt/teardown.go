@@ -80,7 +80,7 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 	// gone, which is precisely when a teardown needs it.
 	cmd.Flags().StringVar(&teardownKubeconfig, "kubeconfig", "",
 		"use this kubeconfig instead of reading the escrowed one (for a box that never "+
-			"finished bootstrapping; requires HCLOUD_TOKEN)")
+			"finished bootstrapping; the provider credential still comes from the box's escrow)")
 	// --tenant IS GONE, deliberately and loudly: an unknown flag is an error, so a
 	// script that passed it stops rather than quietly losing the scope it thought
 	// it had. It named the box's prefix, and because a box's clusters share that
@@ -256,7 +256,11 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 	// The provider credential is read from the environment first for the same
 	// reason the machine identity is: a pipeline that exports it must behave the
 	// way it always has, and an operator overriding it is being explicit.
-	providerToken = strings.TrimSpace(os.Getenv("HCLOUD_TOKEN"))
+	// NOT from the environment. A token exported in a shell authenticates
+	// perfectly against a DIFFERENT provider project, where this box owns nothing
+	// -- so a teardown would delete nothing and report success. The box's own
+	// credential is the only one that can answer what the box owns.
+	providerToken = ""
 
 	if infraOnly && strings.TrimSpace(explicitKubeconfig) != "" {
 		return "", "", cleanup, fmt.Errorf("--kubeconfig and --infrastructure-only ask for " +
@@ -268,8 +272,8 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 		}
 		if providerToken == "" {
 			return "", "", cleanup, fmt.Errorf("--kubeconfig names a file, but there is no provider " +
-				"credential: set HCLOUD_TOKEN for this run, or drop --kubeconfig so both are read " +
-				"from the box's escrow")
+				"credential: drop --kubeconfig so both are read from the box's escrow, which " +
+				"is where this box's own credential lives")
 		}
 		return explicitKubeconfig, providerToken, cleanup, nil
 	}

@@ -24,56 +24,25 @@
 # to this environment's names, because "teardown succeeded" with servers still
 # billing is the failure mode being fixed.
 
-# ─── Hetzner inventory ───────────────────────────────────────────────────────
-# Everything is scoped by exact name prefix (hub name, spoke name), never by a
-# loose substring, so a teardown of dev can never reach stg or prod.
-_hcloud_api() {
-    local path="$1"
-    curl -sS -m 30 -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
-        "https://api.hetzner.cloud/v1/${path}" 2>/dev/null
-}
-
-# Prints: <type>\t<id>\t<name>\t<scope>   (scope = hub | spoke | other)
-_hcloud_inventory() {
-    local hub="$1" spoke="$2"
-    local kind
-    for kind in servers load_balancers volumes firewalls networks placement_groups; do
-        _hcloud_api "${kind}?per_page=100" | python3 -c "
-import json, sys
-kind = sys.argv[1]; hub = sys.argv[2]; spoke = sys.argv[3]
-try:
-    payload = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for item in payload.get(kind, []) or []:
-    name = item.get('name') or ''
-    labels = item.get('labels') or {}
-    blob = name + ' ' + ' '.join('%s=%s' % kv for kv in labels.items())
-    if hub and (name.startswith(hub) or ('caph-cluster-' + hub) in blob):
-        scope = 'kakt'
-    elif spoke and (name.startswith(spoke) or ('caph-cluster-' + spoke) in blob):
-        scope = 'spoke'
-    elif name.startswith('spoke-pool-') or 'caph-cluster-spoke-pool-' in blob:
-        scope = 'other'      # a spoke, but not this environment's
-    else:
-        continue
-    print('\t'.join([kind, str(item.get('id')), name, scope]))
-" "$kind" "$hub" "$spoke"
-    done
-}
-
-_print_inventory() {
-    local inv="$1" label="$2"
-    if [[ -z "$inv" ]]; then
-        log "  ($label: nothing found)"
-        return
-    fi
-    local kind id name scope
-    while IFS=$'\t' read -r kind id name scope; do
-        [[ -z "$kind" ]] && continue
-        log "  [$scope] ${kind%s}: $name (id $id)"
-    done <<< "$inv"
-}
+# ─── No provider API in this script ──────────────────────────────────────────
+#
+# This library used to take its own Hetzner inventory and delete its own
+# leftovers, with curl and a token read from k8-secrets. That made it a SECOND
+# implementation of the two things that have to be exact -- which resources belong
+# to this cluster, and in what order they may be deleted -- and it ran on a
+# credential from this workstation, which authenticates perfectly against whichever
+# provider project issued it and then reports that the box owns nothing.
+#
+# Both now come from `kakt`, with the box's own escrowed credential:
+#
+#   kakt teardown --destroy-managed       the ordered deletion, through the platform
+#   kakt teardown --infrastructure-only   the ownership-scoped sweep, and the verdict
+#
+# The sweep deletes strictly by CAPH's exact ownership label
+# (caph-cluster-<name>=owned), reports resources it did not claim, and exits
+# non-zero while anything it was asked to destroy is still there. That is the
+# verification this script used to do by name prefix, now done by the authority
+# that owns the rule.
 
 # ─── Resolve which cluster we are tearing down ───────────────────────────────
 # NAMED, never derived (ADR-111 Revision 7).
@@ -143,42 +112,6 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
 # Application and then deletes each cluster's Applications with ArgoCD's cascade,
 # so the controllers that own the cluster deprovision it, including the load
 # balancers only the in-cluster controller can.
-
-# ─── Delete whatever the CLI left behind ─────────────────────────────────────
-# Dependency order matters: a network cannot be deleted while servers or load
-# balancers still attach to it, and a volume cannot be deleted while attached.
-_sweep_leftovers() {
-    local hub="$1" spoke="$2"
-    local inv
-    inv=$(_hcloud_inventory "$hub" "$spoke" | grep -v $'\tother$' || true)
-    [[ -z "$inv" ]] && { log "  nothing left in Hetzner for this environment"; return 0; }
-
-    log "  the CLI left these behind — deleting directly:"
-    _print_inventory "$inv" "leftovers"
-
-    local kind id name scope
-    for pass in servers load_balancers volumes firewalls placement_groups networks; do
-        while IFS=$'\t' read -r kind id name scope; do
-            [[ "$kind" == "$pass" ]] || continue
-            # A volume still attached to a (now deleted) server needs detaching first.
-            if [[ "$kind" == "volumes" ]]; then
-                curl -sS -m 30 -X POST -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
-                    "https://api.hetzner.cloud/v1/volumes/${id}/actions/detach" >/dev/null 2>&1 || true
-                sleep 2
-            fi
-            local code
-            code=$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X DELETE \
-                -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
-                "https://api.hetzner.cloud/v1/${kind}/${id}")
-            if [[ "$code" =~ ^(200|204)$ ]]; then
-                log "    ✓ deleted ${kind%s} $name"
-            else
-                log "    ⚠️  ${kind%s} $name — HTTP $code (may have dependents; re-run to retry)"
-            fi
-        done <<< "$inv"
-    done
-}
-
 
 # ─── Home-lab worker VMs (ADR-046 hybrid provider) ───────────────────────────
 # The Hyper-V workers are provisioned out-of-band by provision-flatcar-worker.sh
@@ -343,12 +276,12 @@ _local_cleanup() {
 
     # Kubeconfigs are archived rather than deleted: they are the only record of
     # what was running if the teardown has to be investigated afterwards.
-    local archive="$ZERO_OPS_DIR/k8-secrets/kubeconfig/archived"
+    local archive="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/archived"
     mkdir -p "$archive"
     local f stamp
     stamp="$(date +%Y%m%d-%H%M%S)"
     for f in "$CLUSTER_NAME" "$SPOKEPOOL_NAME"; do
-        local kc="$ZERO_OPS_DIR/k8-secrets/kubeconfig/${f}.kubeconfig"
+        local kc="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${f}.kubeconfig"
         if [[ -f "$kc" ]]; then
             mv "$kc" "${archive}/${f}.kubeconfig.${stamp}"
             log "  archived ${f}.kubeconfig"
@@ -367,10 +300,11 @@ run_full_teardown() {
             || error_exit "could not build bin/kakt; teardown needs it"
     fi
 
-    export HCLOUD_TOKEN="${HCLOUD_TOKEN:-$(cat "$ZERO_OPS_DIR/k8-secrets/hetzner/token" 2>/dev/null | tr -d '\n')}"
-    [[ -z "$HCLOUD_TOKEN" ]] && error_exit "HCLOUD_TOKEN not set and k8-secrets/hetzner/token is unreadable — teardown cannot delete cloud resources"
-
-    # After the token, because resolving the hub name may have to ask Hetzner.
+    # No provider credential is resolved here. `kakt` reads the box's own from its
+    # escrow, as the operator; a token on this workstation is not consulted and
+    # cannot point the deletion at another provider project.
+    #
+    # The targets come from the box's declarations in Git, not from the provider.
     _resolve_teardown_targets
 
 
@@ -381,23 +315,9 @@ run_full_teardown() {
     log "═══════════════════════════════════════════════════════════"
 
     log ""
-    log "Taking a Hetzner inventory before deleting anything..."
-    local inv
-    inv=$(_hcloud_inventory "$CLUSTER_NAME" "$SPOKEPOOL_NAME" || true)
-    _print_inventory "$inv" "inventory"
-
-    # Resources belonging to a workload cluster that is not this box's. Reported,
-    # and nothing more: deletion is by this cluster's CAPH ownership label, so a
-    # workload cluster belonging to another box is never reached.
-    #
-    local foreign
-    foreign=$(grep $'\tother$' <<< "$inv" | awk -F'\t' '{print $3}' | sort -u || true)
-    if [[ -n "$foreign" ]]; then
-        log ""
-        log "ℹ️  Resources of other workload clusters are present in this Hetzner project:"
-        while IFS= read -r n; do log "     $n"; done <<< "$foreign"
-        log "   They are not touched: deletion is by this cluster's ownership label."
-    fi
+    log "The inventory, the ownership check and the report of resources belonging to"
+    log "other clusters all come from the CLI runs below, which read the provider with"
+    log "this box's own escrowed credential."
 
     if [[ "${TEARDOWN_YES:-0}" != "1" ]]; then
         log ""
@@ -436,7 +356,19 @@ run_full_teardown() {
 
     log ""
     log "── 3/4 verification sweep ──"
-    _sweep_leftovers "$CLUSTER_NAME" "$SPOKEPOOL_NAME"
+    #
+    # The recovery form of the same command: it re-reads the provider and deletes
+    # strictly what carries this cluster's exact ownership label, workload
+    # clusters first and the management cluster last. Anything it did not claim is
+    # reported rather than deleted, and it exits non-zero while anything it was
+    # asked to destroy is still there -- which is this script's verdict too.
+    local sweep_scope="$CLUSTER_NAME"
+    [[ -n "$SPOKEPOOL_NAME" ]] && sweep_scope="$CLUSTER_NAME,$SPOKEPOOL_NAME"
+    if ! "$KAKT_BINARY" teardown --name="$CLUSTER_NAME" --confirm --force \
+        --gitops-dir "$ZERO_OPS_DIR" \
+        --infrastructure-only "$sweep_scope" 2>&1 | sed 's/^/  /'; then
+        SWEEP_INCOMPLETE=1
+    fi
 
     log ""
     log "── 4/4 local artifacts ──"
@@ -444,20 +376,20 @@ run_full_teardown() {
 
     log ""
     log "── final verification ──"
-    local remaining
-    remaining=$(_hcloud_inventory "$CLUSTER_NAME" "$SPOKEPOOL_NAME" | grep -v $'\tother$' || true)
-    if [[ -z "$remaining" ]]; then
-        log "✅ No Hetzner resources remain for '$CLUSTER_NAME'."
-    else
-        log "❌ Resources still present after teardown:"
-        _print_inventory "$remaining" "remaining"
+    #
+    # The sweep above IS the verification: it re-read the provider after deleting
+    # and failed if anything it was asked to destroy survived. Re-checking here
+    # with a second inventory would be a second implementation of the ownership
+    # rule, and the two could disagree.
+    if [[ "${SWEEP_INCOMPLETE:-0}" == "1" ]]; then
+        log "❌ The sweep reported resources still present for '$CLUSTER_NAME'."
         log ""
         log "Re-run the teardown — deletions that fail on dependencies usually succeed"
         log "on a second pass once their dependents are gone."
         return 1
     fi
+    log "✅ The sweep reported nothing remaining for '$CLUSTER_NAME'."
 
-    log ""
     log "Out-of-band cleanup this script deliberately does not touch:"
     log "  • Tailscale devices (flatcar-hub-node-1 on box-b, flatcar-spoke-node-{1,2} on box-a) — remove in the admin console"
     log "  • AWS Secrets Manager: delete the old ENCRYPTION_KEY / AUTH_SECRET entries."

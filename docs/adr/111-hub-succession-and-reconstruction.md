@@ -20,7 +20,11 @@ mechanisms. Sequencing, rehearsals and their evidence live in
 `docs/plans/k8s-cnpg-upgrade-and-restore-drill.md`; this ADR sets no acceptance or release
 condition. Revision 7 (2026-11-06): the hub is environment-independent -- management identity,
 management secret scope, management availability and workload environment are four separate
-concerns, and the hub declares no `environmentSlug`.*
+concerns, and the hub declares no `environmentSlug`. Revision 8 (2026-11-09): a box has at most
+one management cluster holding infrastructure, and the provider's inventory is the authority
+that decides. Revision 9 (2026-11-12): a major release replaces the box -- a fresh box with a
+distinct `boxId`, prepared beside the predecessor and cut over to, because §9 already forbids
+restoring across a contract change.*
 
 ## Context
 
@@ -1290,6 +1294,14 @@ the names they already hold.
 
 ### 5. What this revision does not change
 
+One dependency arrived with it, recorded in ADR-076's amendment of 2026-11-10: admission
+reads the provider inventory with the **box's own** escrowed credential, resolved through
+`hubaccess.ProviderToken`, and no longer with whatever token a workstation exported. A
+credential for another provider project authenticates perfectly and reports that this box
+owns nothing, which would admit the second management cluster this revision exists to
+refuse. Bootstrap resolves it once, before admission, so the gate and the provisioning
+that follows cannot be answering about different infrastructure.
+
 Disaster reconstruction (§5 of the original decision) is explicitly **not** addressed here.
 Admission refuses an ordinary creation while workload clusters still own infrastructure, which is
 correct for deliberate replacement and means a management cluster lost while its workload clusters
@@ -1310,3 +1322,118 @@ One correction shipped with it: the gitops template rendered `dns.ownerId` from
 that a successor *adopts* the zone's records rather than re-keying them. Identical for a
 box's first incarnation and therefore invisible until a second one existed. The template now
 renders `boxId`, and the rendered value is unchanged for every box that exists today.
+
+## Revision 9 (2026-11-12): a major release replaces the box
+
+Two decisions already in force leave a release with nowhere to go. §9 pins the compatibility
+chain link by link and states that **a Class M backup is only restorable into a successor
+serving the same contract version** — restoring `v1beta1` objects into a hub whose providers
+have moved on is "a conversion problem, not a restore". Revision 8 then made two incarnations
+of one box mutually exclusive: at most one management cluster holds infrastructure, and the
+provider's inventory decides. So a release that moves the Cluster API contract cannot be
+reached by restore, and cannot be reached by a succession that requires the predecessor's
+object graph to be transferred intact. That route was never named as closed, which left
+"upgrade the box" meaning different things to different readers.
+
+It is closed, and this is the journey that replaces it.
+
+### 1. Three journeys, and only the third is new
+
+| Journey | What changes | Route |
+|---|---|---|
+| Compatible-version upgrade | platform components, Kubernetes patch or minor within the contract the bundle serves | the existing per-cluster bundle promotion (ADR-064). Routine, unchanged, and deliberately kept separate from this revision |
+| Hub succession | the management cluster, within one box and one contract | §4: `clusterctl move`, narrowed by Revision 8 to one owner at a time. **A design contract, not an implemented workflow** — see below |
+| **Box replacement** | the bundle's supported Kubernetes and provider versions, including the Cluster API contract | **a fresh box with a distinct `boxId`**, prepared beside the predecessor and cut over to |
+
+**Succession is a contract, not a workflow.** §4 describes `clusterctl move` between a live
+predecessor and a live successor, and Revision 8's admission refuses to *build* a second
+management cluster while any other incarnation of the box still owns provider resources. The
+declaration is implemented (`kakt tenant add-management`) and the invariant is enforced; the
+overlapping-bootstrap sequence that would stand both clusters up at once is not, and nothing in
+this revision implements it. A succession today is therefore declared and then performed under
+the admission rule, not driven by tooling.
+
+Preserving the same running workload clusters across a box replacement is **outside** this
+journey. A replacement box provisions its own clusters from the declarations in the customer's
+repository; adopting a predecessor's live workload clusters into a successor serving a
+different contract is the conversion problem §9 excludes, and naming it here as unsupported is
+the point.
+
+### 2. What a box replacement is
+
+A fresh box on the target bundle, with a distinct `boxId`, prepared while the predecessor keeps
+serving:
+
+1. The new bundle and the customer's own Git declarations reconstruct the desired
+   infrastructure and platform state. Nothing is copied from the predecessor's management
+   cluster.
+2. Durable business state moves by the mechanism that owns it — database replication or
+   backups for application data (ADR-112), the escrow for what cannot be regenerated (§2's
+   recovery-state contract).
+3. **An incompatible management object graph is never transplanted.** This is Revision 6 §3
+   applied to a release change rather than to a disaster: what another authority recreates is
+   not carried across, and under a changed contract the predecessor's CAPI and provider objects
+   are exactly that.
+4. Authority over applications and infrastructure is cut over explicitly (§4 below).
+5. The predecessor is retired through the existing teardown contract (ADR-114), after the
+   cutover and any retention obligation.
+
+### 3. The bundle owns compatibility; the box records which bundle it uses
+
+The released bundle is authoritative for the platform component, Kubernetes and provider
+versions it supports (ADR-063). The box records the bundle it was created on and the bundle
+each of its clusters runs; it does not restate what those versions are.
+
+Compatibility policy is therefore **not duplicated across independently editable
+declarations** — two places stating which Kubernetes a release supports is two places to
+disagree, and the disagreement surfaces during a migration. Where an actual migration
+operation needs to know which predecessor it can succeed, that relationship is recorded in the
+release's own metadata. No general compatibility framework is built to document the concept.
+
+### 4. What a distinct `boxId` fences, and what it does not
+
+A distinct `boxId` isolates what is keyed **by the box**: the escrow paths holding its master
+keys, and the DNS owner id its records carry. That is the extent of it, and the limit matters
+more than the guarantee.
+
+**`boxId` does not isolate what other identifiers key.** §1 divides them deliberately — the box
+owns the escrow path and the DNS ownership, the cluster owns the CAPI object names and its
+database's WAL archive prefix, which §6 states is derived from `clusterName`. So a replacement
+box is separated from its predecessor only when three things hold together:
+
+| Must be independent | Keyed by | What a collision costs |
+|---|---|---|
+| escrow scope and recovery artefacts | `boxId` | a successor overwriting the recovery material of the box still serving |
+| DNS record ownership | `boxId` | two owners of one zone's TXT records under `--policy=sync` (§4) |
+| GitOps infrastructure ownership | the repository's own `registry/clusters/` claims | two boxes reconciling one set of claims — Revision 8's hazard, reached from a different direction: a replacement box pointed at the predecessor's repository provisions the predecessor's clusters |
+| cluster and archive identities | `clusterName` | barman refusing a prefix that already holds another database's segments, which is why a name a box has used is never reused |
+
+A box replacement therefore takes its own repository, its own cluster names and its own escrow
+scope, not merely its own `boxId`.
+
+Beyond those, identity fences nothing. **Shared production data and public hostnames are not
+isolated by identity**: one database serving both boxes, or one hostname pointing at one of
+them, is a single resource whichever box is asking. The fences for those remain §6's —
+credential revocation and rotation, with CNPG admitting one primary, and the sequenced
+withdraw-then-publish of DNS ownership in §4.
+
+The cutover contract must therefore state, for each shared authority, **when the old writer
+stops and the new one begins**. Rollback is bounded by that sequence: once Box B has taken a
+durable write, returning to A is a data decision rather than a routing one.
+
+### 5. What this revision does not change, and does not introduce
+
+No mechanism is authorized by this decision. Specifically **not** introduced: a deprecated-API
+upgrade gate, a fleet rollout framework, machine-readable migration manifests, an activation
+state machine or its validating webhook, backup-schedule collision detection, a replacement for
+the backup operator, general Cluster API contract conversion, and same-box active/passive
+management succession. The ACM and Qovery analyses that informed this revision are research,
+not a plan: Qovery upgrades a provider-managed control plane in place and owns no object graph,
+and ACM's activation field governs a fleet-adoption restore, neither of which is this platform's
+problem.
+
+The identity scopes of §1, the recovery-state contract of §2, the adoption pause of §3,
+`clusterctl move` as the planned transfer in §4, the reconstruction order of §5, exclusive
+ownership in §6 and the version compatibility chain of §9 are untouched. Revision 8's admission
+check is what already makes a same-`boxId` side-by-side box unreachable, so nothing new enforces
+this revision. No operator, controller, reconciler, release gate or workflow changes.

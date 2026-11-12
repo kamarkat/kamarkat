@@ -84,8 +84,11 @@ main() {
     check "docker_daemon" "docker daemon" bash -c "docker info >/dev/null 2>&1" || failed=1
     check "kakt_binary" "kakt binary" test -f "$ZERO_OPS_DIR/bin/kakt" || failed=1
 
-    check "hetzner_token" "Hetzner token" test -f "$ZERO_OPS_DIR/k8-secrets/hetzner/token" || { log "  Fix: create k8-secrets/hetzner/token"; failed=1; }
-    check "github_pat" "GitHub PAT" test -f "$ZERO_OPS_DIR/k8-secrets/github/github-pat-token" || { log "  Fix: create k8-secrets/github/github-pat-token"; failed=1; }
+    # The file is the input to an enrolment, not a source the platform reads.
+    # The operator's own store, not a checkout: these outlive every clone.
+    KAMARKAT_STORE="${KAMARKAT_HOME:-$HOME/.kamarkat}"
+    check "hetzner_token" "Hetzner token to enrol" test -f "$KAMARKAT_STORE/hetzner/token" || { log "  Fix: put the token in $KAMARKAT_STORE/hetzner/token, then enrol it: kakt escrow enroll-provider-credential --gitops-dir . --cluster <cluster> < $KAMARKAT_STORE/hetzner/token"; failed=1; }
+    check "github_pat" "GitHub PAT" test -f "$KAMARKAT_STORE/github/github-pat-token" || { log "  Fix: create $KAMARKAT_STORE/github/github-pat-token"; failed=1; }
     check "aws_profile" "AWS profile" bash -c "aws configure list --profile zerotouch-platform-admin >/dev/null 2>&1" || { log "  Fix: aws configure --profile zerotouch-platform-admin"; failed=1; }
 
     [[ $failed -ne 0 ]] && error_exit "Missing prerequisites. Fix and re-run."

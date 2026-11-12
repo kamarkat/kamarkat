@@ -211,7 +211,7 @@ so the node must re-register.
 ./scripts/hybrid/rejoin-tailnet.sh --node flatcar-spoke-node-1 --cluster spoke
 
 # Non-interactive, and a no-op dry run that changes nothing
-./scripts/hybrid/rejoin-tailnet.sh --node <n> --authkey-file k8-secrets/tailscale/authkey
+./scripts/hybrid/rejoin-tailnet.sh --node <n> --authkey-file ~/.kamarkat/tailscale/authkey
 ./scripts/hybrid/rejoin-tailnet.sh --node <n> --dry-run
 ```
 

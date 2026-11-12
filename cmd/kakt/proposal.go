@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/proposal"
 	"github.com/spf13/cobra"
@@ -50,7 +49,13 @@ func newProposalPreflightCmd() *cobra.Command {
 			}
 			o.Cluster = clusterArg
 			if o.Kubeconfig == "" && o.Cluster != "" {
-				o.Kubeconfig = filepath.Join("k8-secrets", "kubeconfig", o.Cluster+".kubeconfig")
+				// The box's escrow, with your own identity.
+				resolved, cleanup, err := escrowKubeconfig(cmd.Context(), o.GitopsDir, o.Cluster)
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+				o.Kubeconfig = resolved
 			}
 
 			v := proposal.Run(cmd.Context(), o)
@@ -95,8 +100,11 @@ func newProposalPreflightCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&o.Candidate, "candidate", "", "the bundle version being proposed (required)")
 	f.StringVar(&clusterArg, "cluster", "", "the cluster the proposal targets")
-	f.StringVar(&o.Kubeconfig, "kubeconfig", "", "kubeconfig for that cluster (default: k8-secrets/kubeconfig/<cluster>.kubeconfig)")
-	f.StringVar(&o.GitopsDir, "gitops-dir", ".", "the tenant repository the proposal is against")
+	f.StringVar(&o.Kubeconfig, "kubeconfig", "", "kubeconfig for that cluster (default: read from the box's escrow with your own identity)")
+	// One --gitops-dir. It is the same repository in both readings: the one the
+	// proposal is against, and the one that declares the box's escrow.
+	f.StringVar(&o.GitopsDir, "gitops-dir", ".",
+		"the tenant repository the proposal is against, which also declares the box's escrow")
 	f.StringVar(&o.Registry, "registry", "", "registry the candidate would be pulled from, no scheme. Empty skips that check rather than verifying a source this box does not use")
 	f.StringVar(&o.MinimumFrom, "minimum-from", "", "the release's declared minimum version this may be taken from")
 	f.StringVar(&outPath, "out", "", "write the markdown verdict here instead of stdout")

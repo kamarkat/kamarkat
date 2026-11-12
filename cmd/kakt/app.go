@@ -557,9 +557,9 @@ func newAppSecretsTemplateCmd() *cobra.Command {
 		Long: `Generate the file that ` + "`import`" + ` reads, with one empty entry per declared
 secret and the capability each serves as its comment.
 
-It carries no values, so it is committed as environments/<env>/<app>/.env.example:
-scripts/seed-secrets.sh copies it to .env for the values, and refuses an example
-that no longer matches this output.`,
+It carries no values, so it is committed as environments/<env>/<app>/.env.example.
+Copy it to .env beside it for the values, then supply them with
+` + "`kakt app secrets import`" + `.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := app.Load(appRepoRoot, args[0], args[1])
@@ -579,10 +579,12 @@ that no longer matches this output.`,
 			fmt.Fprintf(out, "#\n")
 			fmt.Fprintf(out, "# To supply them, from the repository root:\n")
 			fmt.Fprintf(out, "#\n")
-			fmt.Fprintf(out, "#     ./scripts/seed-secrets.sh %s %s             copies this to .env beside it\n", app, env)
+			fmt.Fprintf(out, "#     cp environments/%s/%s/.env.example environments/%s/%s/.env\n", env, app, env, app)
 			fmt.Fprintf(out, "#     (fill in the values in .env)\n")
-			fmt.Fprintf(out, "#     ./scripts/seed-secrets.sh %s %s             shows what would be written\n", app, env)
-			fmt.Fprintf(out, "#     ./scripts/seed-secrets.sh %s %s --confirm   writes it\n", app, env)
+			fmt.Fprintf(out, "#     kakt app secrets import %s %s --from-env environments/%s/%s/.env\n", env, app, env, app)
+			fmt.Fprintf(out, "#               shows what would be written\n")
+			fmt.Fprintf(out, "#     kakt app secrets import %s %s --from-env environments/%s/%s/.env --confirm\n", env, app, env, app)
+			fmt.Fprintf(out, "#               writes it\n")
 			fmt.Fprintf(out, "#\n")
 			fmt.Fprintf(out, "# Then delete .env: once imported, the values live where the declaration\n")
 			fmt.Fprintf(out, "# says they do, and a copy there is one nothing rotates. An empty entry is\n")
