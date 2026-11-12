@@ -176,10 +176,10 @@ type ManagementCluster struct {
 // clusters to be DECLARED and at most one to hold infrastructure, and the
 // bootstrap's own admission check is what enforces that -- so a successor
 // declared here cannot be stood up beside a predecessor that still owns servers.
-func (m ManagementCluster) Add() ([]string, error) {
+func (m ManagementCluster) Add() (string, []string, error) {
 	box, err := DiscoverBox(m.GitopsDir)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if len(box.Management) == 0 {
 		// The FIRST cluster's name is the one the box minted with its own
@@ -191,14 +191,14 @@ func (m ManagementCluster) Add() ([]string, error) {
 			m.Name = box.Decl.ManagementCluster
 		}
 		if strings.TrimSpace(m.Name) == "" {
-			return nil, fmt.Errorf("%s declares no managementClusterName, so there is no name "+
+			return "", nil, fmt.Errorf("%s declares no managementClusterName, so there is no name "+
 				"to give this box's first management cluster. Pass --name.",
 				filepath.Join(RegistryDir, BoxDeclFile))
 		}
 		return m.addFirst(box)
 	}
 	if strings.TrimSpace(m.Name) == "" {
-		return nil, fmt.Errorf("--name is required: box %s already declares %s, so a new\n"+
+		return "", nil, fmt.Errorf("--name is required: box %s already declares %s, so a new\n"+
 			"management cluster needs a name of its own -- and never one this box has used.",
 			box.ID, strings.Join(box.Management, ", "))
 	}
@@ -208,7 +208,7 @@ func (m ManagementCluster) Add() ([]string, error) {
 	case from == "" && len(box.Management) == 1:
 		from = box.Management[0]
 	case from == "":
-		return nil, fmt.Errorf("box %s declares %d management clusters (%s), so --from must\n"+
+		return "", nil, fmt.Errorf("box %s declares %d management clusters (%s), so --from must\n"+
 			"name the one this incarnation succeeds.",
 			box.ID, len(box.Management), strings.Join(box.Management, ", "))
 	default:
@@ -219,19 +219,19 @@ func (m ManagementCluster) Add() ([]string, error) {
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("--from %s is not a management cluster of box %s (%s)",
+			return "", nil, fmt.Errorf("--from %s is not a management cluster of box %s (%s)",
 				from, box.ID, strings.Join(box.Management, ", "))
 		}
 	}
 
 	if m.Name == from {
-		return nil, fmt.Errorf("%s is the incarnation this would be rendered from.\n"+
+		return "", nil, fmt.Errorf("%s is the incarnation this would be rendered from.\n"+
 			"A new one needs a name the box has not used: its WAL archive prefix is keyed\n"+
 			"on it, and barman refuses a prefix already holding another database's segments.",
 			m.Name)
 	}
 	if m.Name == box.ID {
-		return nil, fmt.Errorf("%s is this box's boxId, which the first incarnation already\n"+
+		return "", nil, fmt.Errorf("%s is this box's boxId, which the first incarnation already\n"+
 			"took. Name the cluster, not the box -- the box is %s and stays %s.",
 			m.Name, box.ID, box.ID)
 	}
@@ -239,25 +239,25 @@ func (m ManagementCluster) Add() ([]string, error) {
 	src := filepath.Join(m.GitopsDir, RegistryDir, "clusters", from)
 	dst := filepath.Join(m.GitopsDir, RegistryDir, "clusters", m.Name)
 	if _, err := os.Stat(dst); err == nil {
-		return nil, fmt.Errorf("%s is already declared, so this would replace a declaration a\n"+
+		return "", nil, fmt.Errorf("%s is already declared, so this would replace a declaration a\n"+
 			"cluster may be reconciling. Pick a name the box has not used.",
 			filepath.Join(RegistryDir, "clusters", m.Name))
 	}
 
 	written, err := renderIncarnation(src, dst, from, m.Name)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	sort.Strings(written)
 	rel := make([]string, 0, len(written))
 	for _, p := range written {
 		r, err := filepath.Rel(m.GitopsDir, p)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		rel = append(rel, r)
 	}
-	return rel, nil
+	return m.Name, rel, nil
 }
 
 // renderIncarnation copies a management cluster's declaration under a new name.
@@ -407,32 +407,60 @@ func IncarnationsEverDeclared(ctx context.Context, gitopsDir string) ([]string, 
 // Rendered strictly: every cluster token must resolve, because this directory is
 // what the box's root Application reconciles and an unsubstituted token in it is
 // a cluster that reports healthy while reconciling a literal `<CLUSTER_NAME>`.
-func (m ManagementCluster) addFirst(box Box) ([]string, error) {
+func (m ManagementCluster) addFirst(box Box) (string, []string, error) {
 	if strings.TrimSpace(m.From) != "" {
-		return nil, fmt.Errorf("--from %s names an incarnation to succeed, and box %s has no\n"+
+		return "", nil, fmt.Errorf("--from %s names an incarnation to succeed, and box %s has no\n"+
 			"management cluster yet. This is its first; drop --from.", m.From, box.ID)
 	}
 
 	src := filepath.Join(m.GitopsDir, "templates", "mgmt")
 	if _, err := os.Stat(src); err != nil {
-		return nil, fmt.Errorf("%s has no templates/mgmt to render a management cluster from.\n\n"+
+		return "", nil, fmt.Errorf("%s has no templates/mgmt to render a management cluster from.\n\n"+
 			"A box created by `kakt box init` carries it. A repository scaffolded before the\n"+
 			"box and its clusters were separated does not, and declares its management\n"+
 			"cluster already.", m.GitopsDir)
 	}
 	dst := filepath.Join(m.GitopsDir, RegistryDir, "clusters", m.Name)
+
+	// ALREADY RENDERED IS A CONTINUATION, not a collision.
+	//
+	// Declaring the first management cluster does two things -- it renders the
+	// declaration, then it generates and escrows this box's Infisical
+	// administrator. The second can fail on its own, and it leaves the first
+	// done: re-running then refused for a directory this command had just
+	// written, and the only way forward was to delete it by hand.
+	//
+	// Continued only when the declaration is THIS box's own: the name the box
+	// declares, carrying the box's id. Anything else is a cluster this command
+	// did not write, and is refused.
+	resuming := false
 	if _, err := os.Stat(dst); err == nil {
-		return nil, fmt.Errorf("%s is already declared, so this would replace a declaration a\n"+
-			"cluster may be reconciling. Pick a name the box has not used.",
-			filepath.Join(RegistryDir, "clusters", m.Name))
+		if m.Name != box.Decl.ManagementCluster {
+			return "", nil, fmt.Errorf("%s is already declared, so this would replace a declaration a\n"+
+				"cluster may be reconciling. Pick a name the box has not used.",
+				filepath.Join(RegistryDir, "clusters", m.Name))
+		}
+		declared, err := os.ReadFile(filepath.Join(dst, "values.yaml"))
+		if err != nil {
+			return "", nil, fmt.Errorf("%s exists and cannot be read, so this run will not write to "+
+				"it: %w", filepath.Join(RegistryDir, "clusters", m.Name), err)
+		}
+		if mm := boxIDLine.FindSubmatch(declared); mm == nil || string(mm[1]) != box.ID {
+			return "", nil, fmt.Errorf("%s is already declared and does not belong to box %s.\n"+
+				"Nothing was written. Inspect it before reusing either.",
+				filepath.Join(RegistryDir, "clusters", m.Name), box.ID)
+		}
+		resuming = true
 	}
 
-	if err := copyDir(src, dst); err != nil {
-		return nil, fmt.Errorf("render %s from the template: %w", m.Name, err)
-	}
-	spec := box.Decl.specFor(m.Name, m.Overrides)
-	if err := substitute(dst, spec.clusterTokens(), true); err != nil {
-		return nil, err
+	if !resuming {
+		if err := copyDir(src, dst); err != nil {
+			return "", nil, fmt.Errorf("render %s from the template: %w", m.Name, err)
+		}
+		spec := box.Decl.specFor(m.Name, m.Overrides)
+		if err := substitute(dst, spec.clusterTokens(), true); err != nil {
+			return "", nil, err
+		}
 	}
 
 	var written []string
@@ -447,8 +475,8 @@ func (m ManagementCluster) addFirst(box Box) ([]string, error) {
 		written = append(written, rel)
 		return nil
 	}); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	sort.Strings(written)
-	return written, nil
+	return m.Name, written, nil
 }

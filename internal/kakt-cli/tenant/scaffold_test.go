@@ -29,7 +29,7 @@ func init() {
 var (
 	testBoxID = "acme-" + testSuffix
 	testRepo  = "acme-gitops-" + testSuffix
-	testHub   = "acme-hub-" + testSuffix
+	testMgmt  = "acme-mgmt-" + testSuffix
 )
 
 func testSpec() Spec {
@@ -62,7 +62,7 @@ func renderInto(t *testing.T, dst string, s Spec) string {
 		t.Fatalf("RenderBox: %v", err)
 	}
 	if s.ManagementCluster != "" {
-		if _, err := (ManagementCluster{GitopsDir: dst}).Add(); err != nil {
+		if _, _, err := (ManagementCluster{GitopsDir: dst}).Add(); err != nil {
 			t.Fatalf("declare the first management cluster: %v", err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestRender_RetainedTemplateKeepsPerClusterTokens(t *testing.T) {
 				t.Errorf("templates/workload-cluster/%s lost %s; it is no longer a template", f, token)
 			}
 		}
-		if strings.Contains(got, testHub) {
+		if strings.Contains(got, testMgmt) {
 			t.Errorf("templates/workload-cluster/%s was rendered against the control plane", f)
 		}
 	}
@@ -123,7 +123,7 @@ func TestRender_RetainedTemplateHasTenantFactsFilled(t *testing.T) {
 
 func TestRender_HydratesControlPlaneAndKeepsItsTemplate(t *testing.T) {
 	dst := render(t, testSpec())
-	if _, err := os.Stat(filepath.Join(dst, "registry", "clusters", testHub, "bundle.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(dst, "registry", "clusters", testMgmt, "bundle.yaml")); err != nil {
 		t.Fatalf("control plane not hydrated: %v", err)
 	}
 	// KEPT, where it used to be consumed and deleted. The box is created before
@@ -133,7 +133,7 @@ func TestRender_HydratesControlPlaneAndKeepsItsTemplate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dst, "templates", "mgmt")); err != nil {
 		t.Errorf("the management template must survive the box that carries it: %v", err)
 	}
-	got := read(t, dst, "registry", "clusters", testHub, "bundle.yaml")
+	got := read(t, dst, "registry", "clusters", testMgmt, "bundle.yaml")
 	if strings.Contains(got, "<") && strings.Contains(got, ">") {
 		for _, line := range strings.Split(got, "\n") {
 			if tok := unresolvedToken(line); tok != "" {
@@ -171,7 +171,7 @@ func TestRender_RefusesToLeaveATokenInTheInstance(t *testing.T) {
 	}
 	// The refusal moved with the content: cluster tokens are substituted when the
 	// cluster is declared, so that is where a token nothing resolves is caught.
-	_, err := (ManagementCluster{GitopsDir: out, Name: testHub}).Add()
+	_, _, err := (ManagementCluster{GitopsDir: out, Name: testMgmt}).Add()
 	if err == nil || !strings.Contains(err.Error(), "<NOT_A_REAL_TOKEN>") {
 		t.Fatalf("expected the unsubstituted token to be named, got %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSpec_RepoNameAndValidation(t *testing.T) {
 func TestRender_BundleResolvesTheRegistryAndTheTenantsOwnValues(t *testing.T) {
 	dir := renderInto(t, t.TempDir(), testSpec())
 
-	raw, err := os.ReadFile(filepath.Join(dir, "registry", "clusters", testHub, "bundle.yaml"))
+	raw, err := os.ReadFile(filepath.Join(dir, "registry", "clusters", testMgmt, "bundle.yaml"))
 	if err != nil {
 		t.Fatalf("reading the hydrated bundle: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestRender_RenovateManagerMatchesTheBundleItProposesAgainst(t *testing.T) {
 		t.Errorf("an OCI chart is a docker datasource, got %q", m.DatasourceTemplate)
 	}
 
-	bundle, err := os.ReadFile(filepath.Join(dir, "registry", "clusters", testHub, "bundle.yaml"))
+	bundle, err := os.ReadFile(filepath.Join(dir, "registry", "clusters", testMgmt, "bundle.yaml"))
 	if err != nil {
 		t.Fatalf("reading the hydrated bundle: %v", err)
 	}

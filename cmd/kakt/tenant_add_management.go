@@ -81,13 +81,17 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	}
 	first := len(box.Management) == 0
 
-	written, err := m.Add()
+	// The NAME Add RESOLVED, not the flag. Add defaults the first cluster's name
+	// from the box's declaration, and it has a value receiver -- so the default
+	// never reached this function, which printed an empty name and then asked
+	// the escrow for an artefact keyed by no cluster.
+	name, written, err := m.Add()
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("box %s\n", box.ID)
-	fmt.Printf("declared management cluster %s:\n", m.Name)
+	fmt.Printf("declared management cluster %s:\n", name)
 	for _, p := range written {
 		fmt.Printf("  %s\n", p)
 	}
@@ -99,7 +103,7 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		// never asked for: the address comes from the session that created the
 		// box, the password is generated, and the escrow is where it is
 		// recovered from on a re-run.
-		if err := deliverAdminCredential(ctx, box, m.Name); err != nil {
+		if err := deliverAdminCredential(ctx, box, name); err != nil {
 			return err
 		}
 	} else {
@@ -112,7 +116,7 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	}
 
 	fmt.Println("\nCommit and push, then create it:")
-	fmt.Printf("  gh workflow run bootstrap-cluster -f cluster=%s\n", m.Name)
+	fmt.Printf("  gh workflow run bootstrap-cluster -f cluster=%s\n", name)
 	fmt.Println("\nCommitting declares it. The cluster is built by that workflow, which costs")
 	fmt.Println("money and takes hours, so no push creates one.")
 

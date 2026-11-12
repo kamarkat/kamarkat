@@ -166,7 +166,8 @@ var boxClock = time.Now
 //     its own (ADR-111 Revision 9 §4).
 //   - the management cluster's name keys its own objects and its database's WAL
 //     archive prefix (ADR-082), which collides between two boxes sharing one
-//     object store.
+//     object store. `-mgmt-`, not `-hub-`: the platform's vocabulary is a
+//     management cluster and managed clusters, and "hub" is not in it.
 //
 // The git organisation and the tenant are NOT derived. The organisation exists
 // and is not ours to name; the tenant is the customer.
@@ -195,7 +196,7 @@ func DeriveBoxIdentity(tenantID string) BoxIdentity {
 		Suffix:            suffix,
 		BoxID:             t + "-" + suffix,
 		Repo:              t + "-gitops-" + suffix,
-		ManagementCluster: t + "-hub-" + suffix,
+		ManagementCluster: t + "-mgmt-" + suffix,
 	}
 }
 
