@@ -524,7 +524,18 @@ def scan_upstream_charts(inv: Inventory, repo: Path, cache: Path, helm: str) -> 
                 capture_output=True, text=True,
             )
             if out.returncode != 0:
-                sys.exit(f"inventory: cannot render {c['chart']} {c['version']}: {out.stderr.strip()}")
+                err = out.stderr.strip()
+                # NAME THE REAL CAUSE. Helm loads the whole repository
+                # configuration to resolve --repo, so a DIFFERENT repo with no
+                # cached index fails this render -- and reporting it as "cannot
+                # render <this chart>" sent the reader to the chart, the version
+                # and the values, none of which were wrong.
+                if "no cached repo found" in err:
+                    sys.exit(f"inventory: cannot render {c['chart']} {c['version']} because a "
+                             f"configured Helm repository has no cached index. The chart, its "
+                             f"version and its values are not the problem:\n\n  {err}\n\n"
+                             f"Run `helm repo update` and try again (SKILL.md, Prepare 9).")
+                sys.exit(f"inventory: cannot render {c['chart']} {c['version']}: {err}")
             atomic_write(rendered, out.stdout.encode())
         found = 0
         for doc in load_docs(rendered.read_text(), f"{c['chart']} {c['version']}"):

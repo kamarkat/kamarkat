@@ -97,6 +97,18 @@ after minutes of packaging, or something no gate catches at all.
    cluster is on one `environmentRevision`.
 9. **Tools.** Helm 3 (Helm 4 breaks kustomize's chart inflation), `kustomize`,
    `yq`, `gh` authenticated, `helm registry login ghcr.io`, Python with PyYAML.
+   **And `helm repo update`.** The inventory renders remote charts with
+   `helm template --repo`, and Helm loads the whole repository configuration to
+   do it: ONE configured repo with no cached index fails the render of an
+   unrelated chart. The rehearsal caches renders by chart version, values and
+   Kubernetes version, so a stale cache hides this until a version moves and
+   then it surfaces as a packaging failure — "cannot render kyverno 3.10.0",
+   caused by a missing `hcloud-index.yaml` (2026-11-14). Check it rather than
+   discover it:
+
+   ```bash
+   helm repo update
+   ```
 10. **Rehearse, and check every component behind latest has a reason.**
     ```bash
     kakt release check
