@@ -110,6 +110,7 @@ trap 'rm -f "$rendered"' EXIT
 
 helm template cell-id-contract "$repo_root/manifests/argocd/environment-manager" \
   --set environmentSlug=dev --set boxId=example-box \
+  --set management.infisicalEnvironmentSlug=management \
   --set provider=hybrid \
   --set instanceRepoURL=https://github.com/example-org/example-gitops \
   --set hubDomain=dev.example.test \

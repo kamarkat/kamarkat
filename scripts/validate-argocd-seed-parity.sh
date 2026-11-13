@@ -62,6 +62,7 @@ stage_bundle_chart "$env_mgr" "$staged_root/environment-manager"
 
 helm template seed-parity "$staged_root/environment-manager" \
   --set environmentSlug=dev --set boxId=example-box \
+  --set management.infisicalEnvironmentSlug=management \
   --set provider=hybrid \
   --set instanceRepoURL=https://github.com/example-org/example-gitops \
   --set hubDomain=dev.example.test \

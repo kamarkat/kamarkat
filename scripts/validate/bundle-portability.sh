@@ -19,11 +19,22 @@ VERSION="${1:-0.0.0-audit}"
 CHART=$(mktemp -d)/platform-bundle
 scripts/package/bundle-chart.sh "$VERSION" "$(dirname "$CHART")" >/dev/null
 
-helm template platform-bundle "$CHART" \
+# A FAILED RENDER IS NOT A CLEAN BUNDLE. This piped into the checker with
+# stderr discarded, so a render that could not run at all produced an empty
+# stream, the checker found no portability reference in it, and the gate passed
+# -- reporting the one thing it exists to disprove. Rendered to a file first, so
+# the failure is the script's.
+rendered=$(mktemp)
+trap 'rm -f "$rendered"' EXIT
+if ! helm template platform-bundle "$CHART" \
     --set environmentSlug=dev --set boxId=example-box --set provider=hybrid \
+    --set management.infisicalEnvironmentSlug=management \
     --set instanceRepoURL=https://github.com/example-org/example-gitops \
     --set hubDomain=dev.example.test \
     --set previewDomain=example-preview.test \
     --set 'alerting.emailTo[0]=alerts@example.test' \
-    --set publicTlsIssuer=letsencrypt-prod --set bundleVersion="$VERSION" 2>/dev/null \
-| python3 scripts/validate/bundle-portability.py
+    --set publicTlsIssuer=letsencrypt-prod --set bundleVersion="$VERSION" >"$rendered"; then
+    echo "bundle-portability: the bundle did not render, so nothing was checked" >&2
+    exit 1
+fi
+python3 scripts/validate/bundle-portability.py <"$rendered"

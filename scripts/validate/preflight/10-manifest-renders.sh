@@ -32,6 +32,7 @@ validate_manifest_renders() {
     # must be given the environment values the seed Application carries.
     # publicTlsIssuer deliberately has no default (ADR-051) and must be named.
     local em_values=(--set environmentSlug=prod --set boxId=example-box --set provider=hetzner
+                     --set management.infisicalEnvironmentSlug=management
                      --set topology=single --set publicTlsIssuer=letsencrypt-prod
                      --set environmentRevision=main \
                      --set instanceRepoURL=https://github.com/example-org/example-gitops --set hubDomain=dev.example.test --set previewDomain=example-preview.test --set 'alerting.emailTo[0]=alerts@example.test')

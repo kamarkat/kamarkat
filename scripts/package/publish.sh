@@ -212,6 +212,7 @@ while read -r env provider; do
         # shellcheck disable=SC2086 # $optional is a list of --set flags
         helm template platform-bundle dist/charts/platform-bundle \
             --set environmentSlug="$env" --set boxId=example-box --set provider="$provider" \
+            --set management.infisicalEnvironmentSlug=management \
             --set publicTlsIssuer=letsencrypt-prod --set hubIngressAddress=127.0.0.1 \
             --set instanceRepoURL=https://github.com/example-org/example-gitops \
             --set hubDomain=dev.example.test \

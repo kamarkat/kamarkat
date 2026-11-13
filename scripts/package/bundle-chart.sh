@@ -153,8 +153,16 @@ PY
 # A released render must produce the boundaries. The chart fails loudly when its
 # descriptors are missing, so this proves they were copied AND that the released
 # path renders at all -- neither of which the development path exercises.
+# management.infisicalEnvironmentSlug is supplied like every other required
+# value here: `management` is what a box declares (gitops-template's
+# templates/mgmt/values.yaml) and what Day-0 seeds, so the smoke test renders
+# what ships. It has no chart default on purpose -- ADR-111 Revision 7 refuses to
+# guess which environment someone else's secrets are in, because guessing wrong
+# resolves silently from the wrong scope -- and a gate that renders without it is
+# testing a shape no box ever has.
 if ! helm template platform-bundle "$CHART" \
         --set environmentSlug=dev --set boxId=example-box --set provider=hybrid --set publicTlsIssuer=letsencrypt-prod \
+        --set management.infisicalEnvironmentSlug=management \
         --set instanceRepoURL=https://github.com/example-org/example-gitops \
         --set hubDomain=dev.example.test \
         --set previewDomain=example-preview.test \
