@@ -59,6 +59,61 @@ Replacing one of these is a re-vendor, not an edit: see
 `references/revendoring.md`, and reproduce the current version before you
 replace it.
 
+**Only two have a recorded recipe.** `scripts/renovate/revendor-kyverno.sh` and
+`scripts/renovate/revendor-cnpg.sh` regenerate their artefact and write a
+provenance digest; everything else in that list was rendered by hand with flags
+nobody wrote down, so reproduce-first is not possible for it until you recover
+the recipe. When you do recover one, **record it as a script** — otherwise the
+next upgrade pays the same cost. CloudNativePG's was recovered in one pass by
+rendering the pinned chart with defaults and diffing object by object; the only
+local change was one annotation.
+
+**Two versions of each artefact are declared, and a split is silent.** The hub
+pulls the chart by `targetRevision`; the spokes apply a render of that chart. The
+pair is checked by `scripts/validate/verify-vendor-digest.sh`, which also hashes
+each vendored file — but it checks only kyverno and cloudnative-pg. For any other
+component, moving the hub pin leaves every spoke on the old render and nothing
+reports it.
+
+## The third delivery path: the CLI's own Day-0 assets
+
+The chart/vendored-render split above is two paths. There is a third, and it is
+the one that hides version drift longest:
+
+```bash
+grep -rn "image:" internal/assets/catalog internal/assets/manifests | grep -v embedded
+```
+
+These are applied by the CLI during Day-0, **before** GitOps exists, and are then
+adopted by whatever the catalog reconciles. A component delivered both ways
+carries two pins, and the inventory shows it as one component at two versions —
+`where: ['infrastructure-provider', 'installed by the kakt CLI']` is the
+signature.
+
+Found this way on 2026-11-14: the Hetzner CSI stack was split across **five**
+pairs — driver v2.13.0/v2.24.1, attacher v4.8.1/v4.13.0, provisioner
+v5.2.0/v6.4.0, resizer v1.13.2/v2.3.0, livenessprobe v2.15.0/v2.20.0 — with the
+Day-0 asset on the older half of every one. Gate 13 (seed parity) covers only
+Argo CD and cert-manager, so none of it was reported.
+
+## Is the artefact delivered at all?
+
+An artefact in `manifests/` is not necessarily applied. Before upgrading one,
+confirm something references it:
+
+```bash
+# a spoke-catalog file must be in its kustomization
+grep -n "<file>.yaml" manifests/spoke/spoke-catalog/infra/kustomization.yaml
+# a CAPI bootstrap template must be in a ClusterResourceSet's resource list
+grep -n "name: <template-name>" manifests/providers/*/k8s/spokepool-*composition.yaml
+```
+
+Two were found unreferenced on 2026-11-14: `kyverno-burst-placement.yaml`, whose
+policies ADR-052 and a preflight both cited while no kustomization listed it, so
+neither was ever in force; and `cnpg-crds-template.yaml`, a 13k-line Secret no
+ClusterResourceSet consumed, which was deleted. An upgrade that moves an
+undelivered artefact changes nothing and reports success.
+
 ## Upstream release manifests, applied whole
 
 Not charts — a release artefact downloaded and committed, or applied from a URL:

@@ -181,13 +181,19 @@ done
 # a Kustomize block together, which ArgoCD refuses outright. Each rendered
 # perfectly.
 #
-# The combinations are READ from supportedMatrix, not listed here. They were
-# listed -- "dev hybrid", "stg hybrid", "prod hetzner" -- and the list is a copy
-# of a decision made elsewhere, so it went stale the moment the matrix changed:
-# moving stg from hybrid to hetzner left this loop rendering stg+hybrid, which
-# the chart now refuses by design, and the publish failed on its own gate having
-# found exactly what it was supposed to find. A gate that has to be edited in
-# lockstep with the thing it checks is a second source of truth.
+# RENDERED AS A MANAGEMENT CLUSTER RENDERS IT: per provider, with no workload
+# environment. This crossed supportedMatrix's environments with its providers and
+# passed `--set environmentSlug=<env>`, which asks this chart about something it
+# does not own -- ADR-111 Revision 7 made the hub one shared,
+# environment-independent management cluster, and a managed cluster declares its
+# own environment. Four renders of an identical chart claimed to have tested four
+# workload combinations.
+#
+# `provider` stays, because the management cluster does declare it and it changes
+# what the bundle deploys: the hybrid render names one chart the hetzner render
+# does not. Which environment/provider pairs are SUPPORTED is asserted where a
+# workload cluster is declared -- scripts/validate/support-matrix.sh runs that
+# contract.
 #
 # Each combination is rendered twice: as a box gets it by default, and with every
 # optional component on. Only an Application that renders is checked, so a
@@ -205,28 +211,32 @@ def walk(o, p):
         yield from walk(v, f'{p}{k}.')
 print(' '.join(walk(yaml.safe_load(open('manifests/argocd/environment-manager/values.yaml')), '')))
 ")"
-while read -r env provider; do
-    [ -n "$env" ] || continue
+rendered_bundle=$(mktemp)
+trap 'rm -f "$rendered_bundle"' EXIT
+while read -r provider; do
+    [ -n "$provider" ] || continue
     for optional in "" "$every_optional"; do
-        echo "  $env+$provider${optional:+, every optional component on}"
+        echo "  provider=$provider${optional:+, every optional component on}"
+        # A FAILED RENDER IS NOT A CLEAN SPEC. Piped straight into the checker,
+        # a render that could not run produced an empty stream and the checker
+        # found nothing wrong with nothing.
         # shellcheck disable=SC2086 # $optional is a list of --set flags
-        helm template platform-bundle dist/charts/platform-bundle \
-            --set environmentSlug="$env" --set boxId=example-box --set provider="$provider" \
+        if ! helm template platform-bundle dist/charts/platform-bundle \
+            --set boxId=example-box --set provider="$provider" \
             --set management.infisicalEnvironmentSlug=management \
             --set publicTlsIssuer=letsencrypt-prod --set hubIngressAddress=127.0.0.1 \
             --set instanceRepoURL=https://github.com/example-org/example-gitops \
             --set hubDomain=dev.example.test \
             --set previewDomain=example-preview.test \
             --set 'alerting.emailTo[0]=alerts@example.test' \
-            --set bundleVersion="$VERSION" $optional \
-        | python3 scripts/validate/application-specs.py dist/charts
+            --set bundleVersion="$VERSION" $optional >"$rendered_bundle"; then
+            echo "application specs: the bundle did not render on $provider, so nothing was checked" >&2
+            exit 1
+        fi
+        python3 scripts/validate/application-specs.py dist/charts <"$rendered_bundle"
     done
 done <<EOF
-$(python3 -c "
-import yaml
-m = yaml.safe_load(open('manifests/argocd/environment-manager/values.yaml')).get('supportedMatrix') or {}
-print('\n'.join(f'{e} {p}' for e, ps in m.items() for p in ps))
-")
+$(ls -d manifests/providers/*/ 2>/dev/null | xargs -n1 basename)
 EOF
 
 # Asserts the whole support matrix, both halves. Every environment crossed with

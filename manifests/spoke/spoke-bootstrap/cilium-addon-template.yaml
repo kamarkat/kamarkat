@@ -10,7 +10,7 @@
 # at render time and stored here, so every spoke from one bundle shared one CA and one key.
 #
 # Re-vendored with:
-#   helm template cilium cilium/cilium --version 1.20.4 -n kube-system --kube-version 1.35.10 \
+#   helm template cilium cilium/cilium --version 1.20.4 -n kube-system --kube-version 1.36.6 \
 #     --set gatewayAPI.enabled=true --set envoy.enabled=false \
 #     --set hubble.tls.auto.enabled=true --set hubble.tls.auto.method=cronJob
 # then: drop the cilium-config ConfigMap, append the KUBERNETES_SERVICE_HOST/PORT env pair to the
@@ -14663,7 +14663,7 @@ stringData:
           # and not yet serving, which is the window the race actually lives in.
           initContainers:
           - name: wait-for-gateway-api-crds
-            image: registry.k8s.io/kubectl:v1.35.10@sha256:4e1d541a3d62f74637974e4c71f3cea91b9a36ffd059ab45e355648898783837
+            image: registry.k8s.io/kubectl:v1.36.6@sha256:0650805141538d13ccbb6bb9e0dd647bc415bc002898357970211c4d47224396
             imagePullPolicy: IfNotPresent
             args:
             - wait

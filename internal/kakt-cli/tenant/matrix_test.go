@@ -3,6 +3,7 @@ package tenant
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -111,4 +112,56 @@ func repoRootForTest(t *testing.T) string {
 	}
 	t.Fatal("could not find the repository root")
 	return ""
+}
+
+// THE SUPPORT POLICY IS ENFORCED WHERE A WORKLOAD CLUSTER IS DECLARED.
+//
+// ADR-111 Revision 7 moved this question off the management chart: the hub is one
+// shared, environment-independent cluster and declares no workload environment, so
+// a render of its bundle cannot answer which environment/provider pairs are
+// supported. `supportedCombination` is the only thing that does, and it is asked
+// once, when the cluster is declared, before anything is built.
+//
+// Both halves are asserted. A policy that only accepts is not a policy: the
+// release gate used to claim it checked unsupported combinations while checking
+// none, and the parity test above cannot notice that -- it compares two copies of
+// the same matrix and says nothing about what either refuses.
+func TestSupportedCombinationAcceptsTheMatrixAndRefusesTheRest(t *testing.T) {
+	accepted := 0
+	for env, providers := range supportedMatrix {
+		for _, p := range providers {
+			if err := supportedCombination(env, p); err != nil {
+				t.Errorf("%s+%s is declared supported and was refused: %v", env, p, err)
+				continue
+			}
+			accepted++
+		}
+	}
+	if accepted != 4 {
+		t.Errorf("accepted %d supported combination(s), want the four the matrix "+
+			"declares (dev+hetzner, dev+hybrid, stg+hetzner, prod+hetzner)", accepted)
+	}
+
+	// Named rather than derived. A case list generated from the same matrix
+	// would go empty the day the matrix grew, and an empty loop passes.
+	for _, tc := range []struct{ env, provider, because string }{
+		{"prod", "hybrid", "hybrid is development-only; production runs on hetzner"},
+		{"stg", "hybrid", "staging rehearses production, and production is hetzner"},
+		{"management", "hetzner", "the hub's own overlay is not a workload environment (ADR-111 Revision 7)"},
+		{"ephemeral", "hetzner", "preview environments are not a workload cluster's environment"},
+		{"dev", "aws", "there is no such provider"},
+		{"", "hetzner", "an absent environment is not a supported one"},
+	} {
+		err := supportedCombination(tc.env, tc.provider)
+		if err == nil {
+			t.Errorf("%s+%s was accepted, and %s. A combination with no topology behind it "+
+				"builds from sources nobody maintains", tc.env, tc.provider, tc.because)
+			continue
+		}
+		// The refusal has to name the combination it refused: the caller is a
+		// person choosing flags, not a log nobody reads.
+		if !strings.Contains(err.Error(), tc.env) && tc.env != "" {
+			t.Errorf("the refusal of %s+%s does not name the environment: %v", tc.env, tc.provider, err)
+		}
+	}
 }

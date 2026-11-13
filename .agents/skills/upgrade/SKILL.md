@@ -42,6 +42,29 @@ reason gets "helpfully" bumped by the next person.
 Being behind `latest` is a normal, permanent state for several components. The
 inventory will keep reporting them as not current. That is correct, not a gap.
 
+## 0. Know what the last upgrade established
+
+Two things are settled and should not be re-derived:
+
+**The destination is Kubernetes 1.36.6**, for the management cluster and both
+spoke providers, set by CloudNativePG 1.30 (1.34-1.36), Cilium 1.20 (1.33-1.36)
+and the Hetzner provider's v1.1.x line (1.32-1.36). Kyverno 1.20 reaches 1.37 and
+Cluster API v1.13.7 reaches 1.37, so neither binds. 1.37 is published and three
+components do not support it. `docs/plans/k8s-cnpg-upgrade-and-restore-drill.md`
+records the decision.
+
+**Three gates now assert parity that nothing used to.** Run them before and after
+any version change, and read their failures as real:
+
+```bash
+bash scripts/validate/verify-vendor-digest.sh      # 4 digests + 2 hub-pin/vendored pairs
+bash scripts/validate-cluster-name-contract.sh     # the three published cluster labels
+go test ./internal/kakt-cli/versions/...           # CLI constants vs provider manifests
+```
+
+The last one catches a half-moved version authority; it caught CAPH on
+2026-11-14 within seconds of the constant being bumped.
+
 ## 1. Find the ceiling before you edit anything
 
 One component usually caps the whole stack. Identify it first, from upstream's

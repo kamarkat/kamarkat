@@ -253,14 +253,24 @@ if burst_doc is not None:
             "somewhere the node can reach without the cloud provider, or this "
             "reintroduces the dependency it exists to remove." % burst_ref)
 
-# ── 4. the priority class value, in the two places it is written ──────────
+# ── 4. the priority class value, in the THREE places it is written ───────
 #
-# Kyverno must set spec.priority alongside priorityClassName on sandbox pods:
-# the upstream sandbox controller populates spec.priority, and the Priority
-# admission plugin REJECTS a pod whose spec.priority disagrees with the value it
-# computes from the class name. A disagreement here does not misplace the
-# sandbox — it prevents the controller from creating the pod at all, and it
-# retries forever.
+# Kyverno must set spec.priority alongside priorityClassName on sandbox pods.
+# The in-tree Priority admission plugin runs BEFORE MutatingAdmissionPolicy, so
+# it resolves the class present in the submitted object and never sees the one
+# the policy adds; nothing re-checks the pair afterwards. Writing only the class
+# name would persist burst-tenant beside priority 0 -- admitted, and scheduled at
+# the wrong preemption order with nothing reporting it.
+#
+# Three places now, not two: the mutation writes the values, the companion
+# ValidatingPolicy requires them on the final pod, and the PriorityClass defines
+# them. A disagreement between the mutation and the validation is worse than
+# either being wrong alone -- the platform would place a sandbox and then deny
+# it, and the sandbox controller would retry forever.
+#
+# The policies are CEL, so the values are asserted by their presence in the
+# expressions rather than by walking a patch structure. That is the drift this
+# check exists to catch: the same literals in more than one file.
 PRIORITYCLASS = "manifests/spoke/spoke-catalog/infra/burst-priorityclass.yaml"
 POLICY        = "manifests/spoke/spoke-catalog/infra/kyverno-burst-placement.yaml"
 
@@ -268,31 +278,73 @@ pc = yaml.safe_load(io.open(PRIORITYCLASS, encoding="utf-8"))
 pc_name, pc_value = pc["metadata"]["name"], pc["value"]
 
 pol = [d for d in yaml.safe_load_all(io.open(POLICY, encoding="utf-8")) if d]
-mut = next((d for d in pol if d["metadata"]["name"] == "burst-placement-sandbox"), None)
-if mut is None:
-    errors.append("burst-placement-sandbox policy not found in %s" % POLICY)
-else:
-    spec = mut["spec"]["rules"][0]["mutate"]["patchStrategicMerge"]["spec"]
-    if spec.get("priorityClassName") != pc_name:
-        errors.append("mutation sets priorityClassName=%r but the PriorityClass is %r"
-                      % (spec.get("priorityClassName"), pc_name))
-    if "priority" not in spec:
-        errors.append(
-            "mutation sets priorityClassName without spec.priority. The upstream "
-            "sandbox controller populates spec.priority, so the Priority admission "
-            "plugin will reject every sandbox pod: 'the integer value of priority "
-            "(0) must not be provided in pod spec'. The sandbox is then never "
-            "created at all, not merely misplaced.")
-    elif spec["priority"] != pc_value:
-        errors.append("mutation sets priority=%r but PriorityClass %s has value %r"
-                      % (spec["priority"], pc_name, pc_value))
+mut = next((d for d in pol if d.get("kind") == "MutatingPolicy"
+            and d["metadata"]["name"] == "burst-placement-sandbox"), None)
+val = next((d for d in pol if d.get("kind") == "ValidatingPolicy"
+            and d["metadata"]["name"] == "burst-placement-authorization"), None)
 
-    # The mutation's toleration must match the node's taint too.
-    tols = spec.get("tolerations") or []
-    mt = ["%s=%s:%s" % (t.get("key"), t.get("value"), t.get("effect")) for t in tols]
-    if node_taints and node_taints not in mt:
-        errors.append("KYVERNO/NODE DRIFT — mutation tolerates %s, node registers %s"
-                      % (mt or "(none)", node_taints))
+# DELIVERED, not merely authored. Both policies lived in this file for months
+# while no kustomization included them, so nothing applied them to a spoke and
+# every assertion below passed against a file with no effect.
+KUSTOMIZATION = "manifests/spoke/spoke-catalog/infra/kustomization.yaml"
+kz = io.open(KUSTOMIZATION, encoding="utf-8").read()
+if "kyverno-burst-placement.yaml" not in kz:
+    errors.append(
+        "BURST POLICIES NOT DELIVERED — %s does not list kyverno-burst-placement.yaml.\n"
+        "        Effect: the mutation and its companion validation exist in source and "
+        "are never applied, so burst placement is neither written nor enforced."
+        % KUSTOMIZATION)
+
+if mut is None:
+    errors.append("burst-placement-sandbox MutatingPolicy not found in %s" % POLICY)
+else:
+    patch = " ".join(m.get("jsonPatch", {}).get("expression", "")
+                     for m in mut["spec"].get("mutations") or [])
+    tol = next((v["expression"] for v in mut["spec"].get("variables") or []
+                if v["name"] == "burstToleration"), "")
+    if pc_name not in patch:
+        errors.append("mutation does not set priorityClassName=%r (the PriorityClass name)" % pc_name)
+    if str(pc_value) not in patch:
+        errors.append(
+            "mutation does not write priority %r. The Priority admission plugin runs "
+            "before the policy, so an unwritten integer persists as 0 beside class %r "
+            "and the pod is scheduled at the wrong preemption order."
+            % (pc_value, pc_name))
+    if node_taints:
+        key, rest = node_taints.split("=", 1)
+        value, effect = rest.split(":", 1)
+        if not (key in tol and value in tol and effect in tol):
+            errors.append("KYVERNO/NODE DRIFT — mutation tolerates %r, node registers %r"
+                          % (tol or "(none)", node_taints))
+
+if val is None:
+    errors.append("burst-placement-authorization ValidatingPolicy not found in %s" % POLICY)
+else:
+    placed = next((v["expression"] for v in val["spec"].get("variables") or []
+                   if v["name"] == "placedOnBurst"), "")
+    if not placed:
+        errors.append("burst-placement-authorization declares no placedOnBurst variable, so "
+                      "it cannot require the placement the mutation writes")
+    else:
+        if pc_name not in placed:
+            errors.append("MUTATION/VALIDATION DRIFT — the validation does not require "
+                          "priorityClassName %r" % pc_name)
+        if str(pc_value) not in placed:
+            errors.append("MUTATION/VALIDATION DRIFT — the validation does not require "
+                          "priority %r" % pc_value)
+        if node_taints and node_taints.split("=", 1)[0] not in placed:
+            errors.append("MUTATION/VALIDATION DRIFT — the validation does not require the "
+                          "%s toleration the mutation adds" % node_taints.split("=", 1)[0])
+    # CREATE only: request.userInfo names the current caller, not the creator, so an
+    # update by another controller would fail the identity test on a legitimate pod.
+    ops = [o for r in val["spec"]["matchConstraints"]["resourceRules"]
+           for o in r.get("operations") or []]
+    if sorted(set(ops)) != ["CREATE"]:
+        errors.append(
+            "burst-placement-authorization matches %s. It must match CREATE only: "
+            "request.userInfo identifies the current request, so on UPDATE a legitimate "
+            "sandbox pod would enter the ordinary-caller branch and be refused for "
+            "carrying the placement the platform gave it." % sorted(set(ops)))
 
 if errors:
     for e in errors:

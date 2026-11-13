@@ -73,10 +73,16 @@ and is not published to a chart registry, so a Helm chart cannot depend on it.
 
 Two observations from the running platform, rather than from documents.
 
-The constraints ADR-022 lists are also enforced at admission by a Kyverno
-ClusterPolicy on each workload cluster: container images must match a digest
-pattern, pods must run as non-root, and workloads must carry cost labels. A
-manifest that weakens one is refused by the cluster.
+The constraints ADR-022 lists are also enforced at admission by Kyverno
+ValidatingPolicies on each workload cluster: container images must reference a
+digest -- regular, init and ephemeral containers alike -- pods must run as
+non-root, and workloads must carry cost labels. A manifest that weakens one is
+refused by the cluster.
+
+These were `kyverno.io/v1` ClusterPolicies until Kyverno 1.20 stopped executing
+that type. They are now `policies.kyverno.io/v1` ValidatingPolicies, split by the
+resource each governs, with pod-controller autogeneration disabled so each
+policy's scope is the one written in it.
 
 An application build that must write to the tenant's GitOps repository needs a
 credential to do it. Before this ADR no such credential existed for any

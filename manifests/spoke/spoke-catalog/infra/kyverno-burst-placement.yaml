@@ -1,20 +1,57 @@
-# ADR-052 §4: placement for the one pod the platform does not author.
-#
-# The job path needs nothing here. Its controller writes the entire batch/v1 Job
-# and supplies placement directly, so there is no window in which an unplaced
-# job pod exists and no policy whose absence would create one.
-#
-# The Sandbox path cannot work that way. Its CRD is vendored and must not be
-# forked (ADR-019, ADR-052 constraint 1), and the upstream controller authors
-# the pod from spec.podTemplate — so the platform's only insertion point is
-# admission. That is a weaker guarantee than authorship and is accepted only
-# because the alternative is forking upstream: if this policy is absent,
-# disabled or mis-scoped, sandbox pods are admitted unplaced and land on
-# home-lab capacity silently. Nothing errors. That is the failure mode
-# ADR-052 §4 describes when it calls authorship the stronger property.
 ---
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+# ADR-052 burst placement, as two native Kyverno policies.
+#
+# WHY TWO. Mutation and refusal are different remedies. A sandbox that fails to
+# match must not be stopped from being created -- it must be stopped from being
+# UNPLACED. So one policy writes placement and the other refuses a pod whose
+# placement is wrong, and the second one is what makes the first fail closed:
+# admission evaluates every mutating policy before any validating one, so the
+# validation sees the post-mutation pod and denies a sandbox the mutation did
+# not reach.
+#
+# WHY THE MUTATION WRITES spec.priority AS WELL AS THE CLASS NAME.
+#
+# The in-tree Priority admission plugin runs BEFORE MutatingAdmissionPolicy and
+# MutatingAdmissionWebhook -- Kubernetes v1.36.6,
+# pkg/kubeapiserver/options/plugins.go: Priority, then
+# MutatingAdmissionPolicy, then MutatingAdmissionWebhook, then the validating
+# pair. On create it resolves the class present in the SUBMITTED object, errors
+# if spec.priority disagrees with what it computed, and then sets spec.priority
+# itself:
+#
+#   if pod.Spec.Priority != nil && *pod.Spec.Priority != priority {
+#       return admission.NewForbidden(a, fmt.Errorf("the integer value of
+#       priority (%d) must not be provided in pod spec; priority admission
+#       controller computed %d from the given PriorityClass name", ...))
+#   }
+#   pod.Spec.Priority = &priority
+#
+# So it never sees the class this policy adds, and nothing re-checks the pair
+# afterwards. Writing only priorityClassName would persist `burst-tenant`
+# beside `priority: 0` -- admitted, and scheduled at the wrong preemption order
+# with nothing reporting it. Both fields are written together, and the coupling
+# to the PriorityClass value is asserted by
+# scripts/validate/preflight/86-burst-node-identity.sh.
+#
+# An earlier comment here explained this as Priority running AFTER the policy
+# and rejecting the conflict. That is not what the API server does; the remedy
+# was right and the mechanism was not.
+#
+# WHY JSONPatch AND NOT ApplyConfiguration. Apply configurations may not modify
+# atomic structs, maps or arrays, and both fields this writes are atomic in the
+# Pod API: spec.nodeSelector is +mapType=atomic and spec.tolerations is
+# +listType=atomic. JSONPatch is the only patch type that can write them.
+#
+# WHY CREATE ONLY. request.userInfo identifies the CURRENT request, not the
+# pod's original creator, so an update by another controller would fail the
+# identity test and be refused for carrying placement it legitimately has. It
+# is safe to stop at create because the fields cannot be assembled later:
+# ValidatePodUpdate permits only image changes, activeDeadlineSeconds, resize
+# fields and ADDED tolerations, so nodeSelector, priorityClassName and priority
+# are immutable after creation -- and a toleration appended to an
+# already-scheduled pod does not relocate it.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
 metadata:
   name: burst-placement-sandbox
   annotations:
@@ -25,145 +62,193 @@ metadata:
       platform has enabled burst compute. Tenant execution runs on elastic cloud
       capacity; home-lab capacity is reserved for platform infrastructure.
 spec:
-  # Mutation only. This policy never rejects — a failure to match must not stop
-  # a tenant's sandbox from being created, it must stop it from being unplaced,
-  # and those are different remedies. Rejection lives in the companion policy.
-  admission: true
-  background: false
-  rules:
-    - name: place-sandbox-on-burst
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              # Selected on a label the UPSTREAM CONTROLLER sets, not one the
-              # fleet puts in the CR.
-              #
-              # The SDK does set agents.x-k8s.io/sandbox: "true" in the Sandbox
-              # CR's podTemplate, and it does NOT survive: the controller owns
-              # the agents.x-k8s.io/ label space and replaces it with
-              # agents.x-k8s.io/sandbox-name-hash on the pod it creates.
-              # Verified on a live sandbox — CR podTemplate carries
-              # {agents.x-k8s.io/sandbox: "true"}, the resulting pod carries
-              # {agents.x-k8s.io/sandbox-name-hash: <hash>}.
-              #
-              # Selecting on the controller's own label is also the stronger
-              # choice: it exists by virtue of the pod being a sandbox, so it
-              # cannot be omitted by a fleet that would rather not be placed,
-              # and it is fleet-agnostic — waypoint-sandbox-name would match
-              # only one fleet's sandboxes.
-              selector:
-                matchExpressions:
-                  - key: agents.x-k8s.io/sandbox-name-hash
-                    operator: Exists
-              # Capability opt-in, platform-rendered (ADR-047 Tier 2). A fleet
-              # declares the request; the platform labels the namespace. A fleet
-              # cannot grant itself burst capacity by labelling its own pods.
-              namespaceSelector:
-                matchLabels:
-                  compute.nutgraf.in/burst-compute: enabled
-      mutate:
-        patchStrategicMerge:
-          spec:
-            nodeSelector:
-              # ADR-046 §11: workload-location is never sufficient on its own.
-              # Without the worker role a burst pod can land on a control-plane
-              # node that happens to carry the location label.
-              workload-location: hetzner
-              node-role.kubernetes.io/worker: ""
-            tolerations:
-              # MUST match register-with-taints in spokepool-burst-bootstrap-v1
-              # and the capacity.cluster-autoscaler.kubernetes.io/taints
-              # annotation on the burst MachineDeployment. Asserted by
-              # scripts/validate/preflight/86-burst-node-identity.sh.
-              - key: workload-class
-                operator: Equal
-                value: burst
-                effect: NoSchedule
-            # Both the preemption order and the scope the per-fleet
-            # ResourceQuota selects on (ADR-052 §5).
-            priorityClassName: burst-tenant
-            # `priority` MUST be set here as well, and MUST equal the value of
-            # the burst-tenant PriorityClass.
-            #
-            # This is not redundancy. The upstream sandbox controller populates
-            # spec.priority (observed: 0) on the pod it builds. The Priority
-            # admission plugin then computes -1000 from the class name this
-            # policy just added, finds a conflicting integer already in the
-            # spec, and REJECTS the pod outright:
-            #
-            #   pods "<name>" is forbidden: the integer value of priority (0)
-            #   must not be provided in pod spec; priority admission controller
-            #   computed -1000 from the given PriorityClass name
-            #
-            # The consequence is worse than an unplaced pod. The sandbox
-            # controller cannot create its pod at all and retries forever, so a
-            # policy meant to relocate the workload instead prevents it from
-            # existing. Verified on a live cluster before this line was added.
-            #
-            # The coupling to the PriorityClass value is asserted by
-            # scripts/validate/preflight/86-burst-node-identity.sh.
-            priority: -1000
+  # A mutation that cannot be evaluated must not admit an unplaced pod.
+  failurePolicy: Fail
+  # Admission only. There is nothing to mutate in a background scan, and
+  # request.userInfo -- the authorization below -- exists only at admission.
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+  # Scope is declared here, never generated. Autogen defaults to true and would
+  # synthesise rules for every pod controller, which is not what this governs.
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+    # Capability opt-in, platform-rendered (ADR-047 Tier 2). A fleet declares
+    # the request; the platform labels the namespace. A fleet cannot grant
+    # itself burst capacity by labelling its own pods.
+    namespaceSelector:
+      matchLabels:
+        compute.nutgraf.in/burst-compute: enabled
+    # Selected on a label the UPSTREAM CONTROLLER sets, not one the fleet puts
+    # in the CR. The SDK sets agents.x-k8s.io/sandbox: "true" in the Sandbox
+    # CR's podTemplate and it does NOT survive: the controller owns the
+    # agents.x-k8s.io/ label space and replaces it with
+    # agents.x-k8s.io/sandbox-name-hash on the pod it creates.
+    objectSelector:
+      matchExpressions:
+        - key: agents.x-k8s.io/sandbox-name-hash
+          operator: Exists
+  matchConditions:
+    # THE AUTHORIZATION BOUNDARY. The label above says WHICH pods to place; it
+    # does not establish WHO created them, and it cannot: a tenant's own
+    # repository can carry any podTemplate label, ArgoCD applies it, and the
+    # ReplicaSet controller stamps it onto the pods it creates. The one field no
+    # manifest can set is the authenticated caller.
+    - name: created-by-the-sandbox-controller
+      expression: >-
+        request.userInfo.username ==
+        'system:serviceaccount:agent-sandbox-system:agent-sandbox-controller'
+  variables:
+    # The toleration must match register-with-taints in
+    # spokepool-burst-bootstrap-v1 and the
+    # capacity.cluster-autoscaler.kubernetes.io/taints annotation on the burst
+    # MachineDeployment. Asserted by 86-burst-node-identity.sh.
+    - name: burstToleration
+      expression: >-
+        {'key': 'workload-class', 'operator': 'Equal', 'value': 'burst',
+         'effect': 'NoSchedule'}
+    # THE COMPLETE TOLERATION, not just its key. Skipping the append because
+    # some workload-class toleration exists would accept one with a different
+    # operator, value or effect as satisfying the burst contract -- it does not
+    # tolerate the burst taint, so the pod would carry placement it cannot use
+    # and never schedule onto burst capacity. A conflicting entry is left where
+    # it is and the correct one is appended beside it; tolerations are additive,
+    # and the companion validation requires an exactly matching entry.
+    - name: hasBurstToleration
+      expression: >-
+        has(object.spec.tolerations) &&
+        object.spec.tolerations.exists(t,
+          has(t.key) && t.key == 'workload-class'
+          && has(t.operator) && t.operator == 'Equal'
+          && has(t.value) && t.value == 'burst'
+          && has(t.effect) && t.effect == 'NoSchedule')
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        # Conditional and idempotent. `add` fails when a path's parent is
+        # absent, so the map and the list are each created when missing and
+        # added to when present, and a pod that already carries the burst
+        # toleration is not given a second one.
+        #
+        # The toleration is APPENDED rather than replacing the list. The legacy
+        # strategic merge replaced it, which would discard tolerations
+        # Kubernetes itself may have added before this runs; nothing about the
+        # placement boundary depends on the list being ours alone, and the
+        # validating policy below confirms the required entry is present.
+        expression: >-
+          (has(object.spec.nodeSelector)
+            ? [
+                JSONPatch{op: "add", path: "/spec/nodeSelector/workload-location", value: "hetzner"},
+                JSONPatch{op: "add", path: "/spec/nodeSelector/" + jsonpatch.escapeKey("node-role.kubernetes.io/worker"), value: ""}
+              ]
+            : [
+                JSONPatch{op: "add", path: "/spec/nodeSelector",
+                          value: {"workload-location": "hetzner", "node-role.kubernetes.io/worker": ""}}
+              ])
+          +
+          (!has(object.spec.tolerations)
+            ? [ JSONPatch{op: "add", path: "/spec/tolerations", value: [variables.burstToleration]} ]
+            : (variables.hasBurstToleration
+                ? []
+                : [ JSONPatch{op: "add", path: "/spec/tolerations/-", value: variables.burstToleration} ]))
+          +
+          [
+            JSONPatch{op: "add", path: "/spec/priorityClassName", value: "burst-tenant"},
+            JSONPatch{op: "add", path: "/spec/priority", value: -1000}
+          ]
 ---
-# The companion validating policy (ADR-052 §4).
+# The companion validating policy (ADR-052 §4), and the reason the mutation
+# fails closed.
 #
-# Scoping is the whole difficulty. Admission runs mutating webhooks before
-# validating ones, so by the time this policy sees a sandbox pod it already
-# carries the burst priority class and toleration the policy above just wrote —
-# a naive rule would reject the platform's own mutation. It therefore matches
-# only pods the platform does NOT place, which is what "fleet-authored" means
-# operationally.
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+# It runs after every mutating policy, so it sees the pod as it will be
+# persisted. Three branches, keyed on the AUTHENTICATED caller rather than on a
+# label:
+#
+#   the sandbox controller   must have produced a completely placed pod. If the
+#                            mutation was absent, disabled or did not match, the
+#                            pod arrives bare and is DENIED rather than admitted
+#                            onto home-lab capacity.
+#   the EphemeralJob         exempt. Its placement was written by the operator
+#   operator                 that authored the Job, which is platform code.
+#   anyone else              may not declare platform-owned burst placement.
+#
+# The previous design excluded label-bearing pods from this check, so a tenant
+# that copied either label into its own podTemplate was exempted outright. A
+# label may select which rule applies; it must not grant an exemption.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
 metadata:
-  name: burst-placement-not-fleet-declarable
+  name: burst-placement-authorization
   annotations:
-    policies.kyverno.io/title: Burst placement is not fleet-declarable
+    policies.kyverno.io/title: Burst placement is platform-supplied
     policies.kyverno.io/subject: Pod
 spec:
-  validationFailureAction: Enforce
-  admission: true
-  background: false
-  rules:
-    - name: reject-fleet-authored-burst-placement
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              # Same capability scope as the mutating policy: within namespaces
-              # where the platform has enabled burst compute, nothing but the
-              # platform may claim burst placement.
-              namespaceSelector:
-                matchLabels:
-                  compute.nutgraf.in/burst-compute: enabled
-      exclude:
-        any:
-          # Pods the platform places itself. Excluding them is not a loophole:
-          # a fleet cannot set this label to escape the rule, because setting it
-          # is what causes the mutating policy above to place the pod on burst
-          # capacity — the label buys placement, never exemption from it.
-          - resources:
-              selector:
-                matchExpressions:
-                  - key: agents.x-k8s.io/sandbox-name-hash
-                    operator: Exists
-          # Pods owned by an EphemeralJob. Their placement was written by the
-          # operator that authored the Job, which is platform code.
-          - resources:
-              selector:
-                matchExpressions:
-                  - key: compute.nutgraf.in/ephemeraljob-uid
-                    operator: Exists
-      validate:
-        message: >-
-          Burst placement is platform-supplied and cannot be declared by a fleet
-          (ADR-052 §4). Remove priorityClassName 'burst-tenant' and the
-          workload-class=burst toleration; request burst capacity through an
-          EphemeralJob or a Sandbox instead.
-        pattern:
-          spec:
-            =(priorityClassName): "!burst-tenant"
-            =(tolerations):
-              - =(key): "!workload-class"
+  failurePolicy: Fail
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        compute.nutgraf.in/burst-compute: enabled
+  variables:
+    - name: isSandboxController
+      expression: >-
+        request.userInfo.username ==
+        'system:serviceaccount:agent-sandbox-system:agent-sandbox-controller'
+    - name: isEphemeralJobOperator
+      expression: >-
+        request.userInfo.username ==
+        'system:serviceaccount:platform-ops:ephemeral-job-operator'
+    - name: placedOnBurst
+      expression: >-
+        has(object.spec.nodeSelector)
+        && 'workload-location' in object.spec.nodeSelector
+        && object.spec.nodeSelector['workload-location'] == 'hetzner'
+        && 'node-role.kubernetes.io/worker' in object.spec.nodeSelector
+        && has(object.spec.tolerations)
+        && object.spec.tolerations.exists(t,
+             has(t.key) && t.key == 'workload-class'
+             && has(t.value) && t.value == 'burst'
+             && has(t.effect) && t.effect == 'NoSchedule')
+        && has(object.spec.priorityClassName)
+        && object.spec.priorityClassName == 'burst-tenant'
+        && has(object.spec.priority) && object.spec.priority == -1000
+    - name: declaresBurstPlacement
+      expression: >-
+        (has(object.spec.priorityClassName) && object.spec.priorityClassName == 'burst-tenant')
+        || (has(object.spec.tolerations)
+            && object.spec.tolerations.exists(t, has(t.key) && t.key == 'workload-class'))
+  validations:
+    - expression: >-
+        variables.isSandboxController ? variables.placedOnBurst
+          : (variables.isEphemeralJobOperator ? true : !variables.declaresBurstPlacement)
+      message: >-
+        Burst placement is platform-supplied (ADR-052 §4). A sandbox pod must carry the
+        platform's complete burst placement -- workload-location=hetzner and the worker
+        role, the workload-class=burst:NoSchedule toleration, priorityClassName
+        burst-tenant and priority -1000; if it does not, the placement mutation did not
+        reach it and admitting it would run tenant execution on home-lab capacity. Any
+        other caller may not declare that placement: remove priorityClassName
+        'burst-tenant' and the workload-class toleration, and request burst capacity
+        through an EphemeralJob or a Sandbox instead.

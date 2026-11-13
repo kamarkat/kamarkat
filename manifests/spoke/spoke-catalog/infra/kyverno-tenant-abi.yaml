@@ -1,144 +1,208 @@
 ---
-# ADR-021: Kyverno Application Binary Interface (ABI) enforcement for tenant workloads.
-# These policies are cluster-scoped and apply to all tenant-* namespaces on the spoke.
-# They enforce the platform contract that all tenant workloads must satisfy.
-# validationFailureAction: Enforce means non-compliant resources are rejected at admission.
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+# ADR-021: the Application Binary Interface every tenant workload satisfies.
+#
+# THREE POLICIES, NOT ONE. A legacy ClusterPolicy matched each rule
+# independently; a CEL policy matches once, at policy level. So the rules are
+# grouped by the resource they govern -- pods, workload controllers, gateways --
+# and each policy declares one scope, one action and one evaluation mode.
+#
+# Autogen is disabled on all three. It defaults to generating rules for every
+# pod controller, which would make a pod-scoped policy silently govern
+# Deployments, Jobs, StatefulSets, DaemonSets, CronJobs, ReplicaSets and
+# ReplicationControllers -- while still not covering argoproj.io/Rollout, which
+# is not a supported pod controller and which the platform does govern. Scope is
+# written down here rather than inferred.
+#
+# Namespace scope is read from object.metadata.namespace, which is available in
+# BOTH admission and background evaluation. The API server reconciles it before
+# admission runs (EnsureObjectNamespaceMatchesRequestNamespace): an object
+# submitted without a namespace is given the request's, and one that disagrees
+# is refused outright. A workload therefore cannot escape these policies by
+# omitting its namespace.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
 metadata:
-  name: enforce-tenant-abi
+  name: tenant-pod-abi
   labels:
     app.kubernetes.io/component: tenant-governance
     app.kubernetes.io/managed-by: argocd
-    # ADR-023: Delay policy injection until wave 5 to guarantee the Rollout CRD
-    # (wave -5) has been applied and the API discovery cache has stabilised.
-    # Kyverno validates kind references against the live API at admission time —
-    # applying before the CRD is Established causes an irrecoverable rejection.
+  annotations:
+    # ADR-023: delay policy injection until wave 5 so the API discovery cache
+    # has stabilised before kind references are resolved at admission.
+    argocd.argoproj.io/sync-wave: "5"
 spec:
-  validationFailureAction: Enforce
-  background: true
-  rules:
-
-    # Rule 1: All Deployments, Jobs, and Rollouts in tenant namespaces must carry
-    # tenant-id, app-id and cost-center labels for attribution and chargeback.
+  failurePolicy: Fail
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+      # Images introduced LATER, through the subresource. An ephemeral
+      # container is added by an update on pods/ephemeralcontainers, so a
+      # policy matching only pods on create never sees it and the digest rule
+      # below would be dead code for that path.
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["pods/ephemeralcontainers"]
+  matchConditions:
+    - name: tenant-namespace
+      expression: "object.metadata.namespace.startsWith('tenant-')"
+  validations:
+    # Immutable image digests. Mutable tags like :latest or :main violate
+    # supply-chain integrity.
     #
+    # ALL THREE CONTAINER CATEGORIES. The policy this replaces named
+    # `containers` only, leaving init and ephemeral containers outside the
+    # guarantee ADR-021 states. That limitation is not preserved: it was a gap,
+    # not a decision. has() on each optional array handles absence, and all()
+    # over an empty list is vacuously true.
+    - expression: >-
+        (!has(object.spec.containers) || object.spec.containers.all(c, c.image.contains('@sha256:')))
+        && (!has(object.spec.initContainers) || object.spec.initContainers.all(c, c.image.contains('@sha256:')))
+        && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c, c.image.contains('@sha256:')))
+      message: >-
+        Container images must reference immutable sha256 digests, not mutable tags.
+        This covers regular, init and ephemeral containers, including an ephemeral
+        container added after the pod was created.
+    # Defence in depth alongside the namespace's PSA restricted label -- both
+    # must pass independently. An absent securityContext fails, as the pattern
+    # this replaces did.
+    - expression: >-
+        has(object.spec.securityContext)
+        && has(object.spec.securityContext.runAsNonRoot)
+        && object.spec.securityContext.runAsNonRoot == true
+      message: "runAsNonRoot: true is required in pod securityContext"
+---
+# Workload controllers: attribution, and image references that become pods.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: tenant-workload-abi
+  labels:
+    app.kubernetes.io/component: tenant-governance
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  failurePolicy: Fail
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs"]
+      - apiGroups: ["argoproj.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rollouts"]
+  matchConditions:
+    - name: tenant-namespace
+      expression: "object.metadata.namespace.startsWith('tenant-')"
+  validations:
     # BOTH axes, because attribution needs both (ADR-088). A cost line against
     # the tenant alone cannot be split between that customer's products, and one
-    # against the product alone cannot be billed to anyone. Until 2026-09-24
-    # `tenant-id` held a product name and there was no field for the customer at
-    # all, so neither figure was available while the label looked sufficient.
-    - name: require-cost-labels
-      match:
-        any:
-          - resources:
-              kinds:
-                - Deployment
-                - Job
-                - argoproj.io/v1alpha1/Rollout
-              namespaces:
-                - "tenant-*"
-      validate:
-        message: "tenant-id, app-id and cost-center labels are required on all tenant workloads (ADR-088)"
-        pattern:
-          metadata:
-            labels:
-              tenant-id: "?*"
-              app-id: "?*"
-              cost-center: "?*"
-
-    # Rule 1b: No tenant may declare a Gateway.
+    # against the product alone cannot be billed to anyone.
+    - expression: >-
+        ['tenant-id', 'app-id', 'cost-center'].all(k,
+          has(object.metadata.labels) && k in object.metadata.labels
+          && object.metadata.labels[k] != '')
+      message: >-
+        tenant-id, app-id and cost-center labels are required on all tenant
+        workloads (ADR-088)
+    # Image references passed as CONFIGURATION must be digests too.
     #
-    # Cilium runs one Envoy per node with hostNetwork, so a Gateway listener binds
-    # 0.0.0.0:<port> on the node itself. Two Gateways claiming the same port
-    # collide in one process, and the loser is not merely inert: Envoy NACKs the
-    # duplicate listener, and a NACK invalidates the whole xDS version — taking
-    # down listeners belonging to other Gateways. A fleet-owned :80 Gateway did
-    # exactly that on 2026-08-31 and every tenant hostname answered 503.
-    #
-    # ADR-047 assigns routing to the platform and ADR-051 makes the public entry
-    # point platform-owned; this makes that structural rather than reviewed. A
-    # tenant-namespace Gateway would also be a path to tenant workloads that never
-    # traverses AgentGateway, which ADR-050 forbids.
-    - name: no-tenant-gateways
-      match:
-        any:
-          - resources:
-              kinds:
-                - gateway.networking.k8s.io/v1/Gateway
-              namespaces:
-                - "tenant-*"
-      validate:
-        message: "Tenants do not declare Gateways. Public entry is platform-owned (ADR-047, ADR-051); a tenant Gateway collides with the platform's on the shared node-local Envoy and bypasses AgentGateway."
-        deny: {}
-
-    # Rule 2: All Pods in tenant namespaces must use immutable image digests.
-    # Tags like :latest or :main are mutable and violate supply chain integrity.
-    - name: require-image-digest
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              namespaces:
-                - "tenant-*"
-      validate:
-        message: "Container images must reference immutable sha256 digests, not mutable tags"
-        pattern:
-          spec:
-            containers:
-              - image: "*@sha256:*"
-
-    # Rule 2b: image references passed as configuration must be digests too.
-    #
-    # Rule 2 only sees a Pod, and some Pods are created by a controller from an
-    # image reference held in a workload's environment — the SDK launches sandbox
-    # Pods from K8S_AGENT_VAULT_IMAGE, and renderer Jobs from
+    # The pod rule only sees a pod, and some pods are created by a controller
+    # from an image reference held in a workload's environment -- the SDK
+    # launches sandbox pods from K8S_AGENT_VAULT_IMAGE and renderer jobs from
     # PROVIDER_EPHEMERAL_*_IMAGE. A mutable tag there is admitted without
-    # complaint, because the Pod that violates rule 2 does not exist until
-    # someone uses the feature.
-    #
-    # It then fails far from its cause: the user sees a workflow node in error,
-    # while the admission denial is in the sandbox controller's log in another
-    # namespace. This rule was added after two such variables carried tags and
-    # every sandbox launch was rejected (2026-08-31).
+    # complaint, because the pod that violates the digest rule does not exist
+    # until someone uses the feature; it then fails far from its cause. Added
+    # after two such variables carried tags and every sandbox launch was
+    # rejected (2026-08-31).
     #
     # Only entries with a literal value are checked; a valueFrom reference is
     # resolved at runtime and is not readable here.
-    - name: require-image-digest-in-env
-      match:
-        any:
-          - resources:
-              kinds:
-                - Deployment
-                - Job
-                - argoproj.io/v1alpha1/Rollout
-              namespaces:
-                - "tenant-*"
-      validate:
-        message: "Image references passed as *_IMAGE environment values must be immutable sha256 digests, not mutable tags — they become Pods at runtime and would be rejected then, far from this manifest."
-        foreach:
-          - list: "request.object.spec.template.spec.containers[].env[?ends_with(name, '_IMAGE') && value][]"
-            deny:
-              conditions:
-                all:
-                  - key: "{{ contains(element.value, '@sha256:') }}"
-                    operator: Equals
-                    value: false
-
-    # Rule 3: All Pods in tenant namespaces must run as non-root.
-    # This is a defence-in-depth control complementing the PSA restricted label
-    # on the namespace — both must pass independently.
-    - name: require-non-root
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              namespaces:
-                - "tenant-*"
-      validate:
-        message: "runAsNonRoot: true is required in pod securityContext"
-        pattern:
-          spec:
-            securityContext:
-              runAsNonRoot: true
+    - expression: >-
+        !has(object.spec.template.spec.containers)
+        || object.spec.template.spec.containers.all(c,
+             !has(c.env) || c.env.filter(e, e.name.endsWith('_IMAGE') && has(e.value))
+                              .all(e, e.value.contains('@sha256:')))
+      message: >-
+        Image references passed as *_IMAGE environment values must be immutable
+        sha256 digests, not mutable tags -- they become pods at runtime and would
+        be rejected then, far from this manifest.
+---
+# No tenant may declare a Gateway.
+#
+# Cilium runs one Envoy per node with hostNetwork, so a Gateway listener binds
+# 0.0.0.0:<port> on the node itself. Two Gateways claiming the same port collide
+# in one process, and the loser is not merely inert: Envoy NACKs the duplicate
+# listener, and a NACK invalidates the whole xDS version -- taking down
+# listeners belonging to other Gateways. A fleet-owned :80 Gateway did exactly
+# that on 2026-08-31 and every tenant hostname answered 503.
+#
+# ADR-047 assigns routing to the platform and ADR-051 makes the public entry
+# point platform-owned; this makes that structural rather than reviewed. A
+# tenant-namespace Gateway would also be a path to tenant workloads that never
+# traverses AgentGateway, which ADR-050 forbids.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: tenant-no-gateways
+  labels:
+    app.kubernetes.io/component: tenant-governance
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  failurePolicy: Fail
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["gateway.networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["gateways"]
+  matchConditions:
+    - name: tenant-namespace
+      expression: "object.metadata.namespace.startsWith('tenant-')"
+  validations:
+    # The legacy rule was `deny: {}` -- unconditional. Inverted, that is a
+    # validation that never passes.
+    - expression: "false"
+      message: >-
+        Tenants do not declare Gateways. Public entry is platform-owned (ADR-047,
+        ADR-051); a tenant Gateway collides with the platform's on the shared
+        node-local Envoy and bypasses AgentGateway.

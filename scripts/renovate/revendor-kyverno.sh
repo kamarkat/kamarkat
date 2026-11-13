@@ -54,6 +54,36 @@ NEW_VERSION="${NEW_VERSION}"
 
 echo "==> Re-vendoring Kyverno v${NEW_VERSION}..."
 
+# THE KUBERNETES VERSION COMES FROM THE WORKLOAD CLUSTERS' OWN DECLARATION.
+#
+# This script renders manifests for SPOKES, so the API target is the version
+# workload clusters run -- `spec.topology.version` in the provider
+# compositions -- not `versions.KubernetesVersion`, which is the MANAGEMENT
+# cluster's. The two are independently owned and are not required to match; an
+# earlier revision of this script read the management constant, which happened
+# to agree today and would have coupled two declarations that may diverge.
+#
+# Read from every supported provider and require agreement. A provider-neutral
+# render cannot target two Kubernetes versions, so a divergence is an explicit
+# refusal here rather than an arbitrary choice made silently.
+COMPOSITIONS=$(ls "${PROJECT_ROOT}"/manifests/providers/*/k8s/spokepool-*composition.yaml 2>/dev/null)
+if [ -z "$COMPOSITIONS" ]; then
+  echo "ERROR: no provider spokepool compositions found; the workload Kubernetes version is undeclared" >&2
+  exit 1
+fi
+# shellcheck disable=SC2086 # COMPOSITIONS is a newline-separated list of paths
+WORKLOAD_VERSIONS=$(awk '/^ *topology:/,/^ *workers:/' $COMPOSITIONS \
+  | grep -oE 'version: v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/version: //;s/^v//' | sort -u)
+if [ "$(printf '%s\n' "$WORKLOAD_VERSIONS" | grep -c .)" -ne 1 ]; then
+  echo "ERROR: provider compositions declare more than one workload Kubernetes version:" >&2
+  printf '  %s\n' $WORKLOAD_VERSIONS >&2
+  echo "       A provider-neutral spoke render cannot target both. Reconcile them, or" >&2
+  echo "       render per provider." >&2
+  exit 1
+fi
+K8S_VERSION="$WORKLOAD_VERSIONS"
+echo "    rendering against Kubernetes v${K8S_VERSION} (the workload clusters' declared version)"
+
 CHART_REPO="https://kyverno.github.io/kyverno"
 SPOKE_DIR="${PROJECT_ROOT}/manifests/spoke/spoke-catalog/infra/kyverno"
 WORK_DIR=$(mktemp -d)
@@ -66,33 +96,26 @@ echo "    Rendering Helm chart..."
 CHART_URL="${CHART_REPO}/kyverno-${NEW_VERSION}.tgz"
 curl -fsSL "$CHART_URL" -o "$WORK_DIR/kyverno.tgz"
 tar -xzf "$WORK_DIR/kyverno.tgz" -C "$WORK_DIR"
-# The cleanup jobs run kubectl, and the chart defaults all seven of them to
-# docker.io/bitnami/kubectl. Bitnami withdrew that namespace from Docker Hub, so
-# the tag 404s: every cleanup CronJob on every spoke sat in ImagePullBackOff
-# while kyverno's own controllers ran fine, which made it look like a kyverno
-# fault rather than a withdrawn image.
+# THE CLEANUP JOBS ARE NOT DELIVERED, so their image is not overridden here.
 #
-# registry.k8s.io/kubectl is the Kubernetes project's own registry -- no Docker
-# Hub rate limits, and not subject to a vendor renaming its namespace, which is
-# the failure being repaired. The tag tracks the cluster version rather than the
-# chart's default 1.28.5, which was three minors outside kubectl's supported skew
-# against a 1.31 cluster.
+# The chart defaults all seven cleanup jobs to docker.io/bitnami/kubectl, a
+# namespace Bitnami withdrew from Docker Hub, and this script used to repoint
+# webhooksCleanup at registry.k8s.io/kubectl with a tag pinned to the cluster
+# version. That override reached nothing: every cleanup job is a helm lifecycle
+# hook, and the hooks are filtered out below -- the vendored render contains no
+# webhooksCleanup object and no kubectl image at all. Keeping it would have been
+# a version dependency on a Job this file does not ship.
 #
-# Overridden HERE and not in the rendered output: controller.yaml carries a
-# sha256 provenance header and verify-vendor-digest.sh exists to catch manual
-# edits to it. A fix applied to the render would be reverted by the next
-# re-vendor and fail the digest gate in the meantime.
+# The six cleanupJobs flags below stay disabled for the same reason they always
+# were: they are hooks, and a left-in hook Job wedges the next upgrade.
 helm template kyverno "$WORK_DIR/kyverno" \
   --namespace kyverno \
-  --kube-version 1.28.0 \
+  --kube-version "${K8S_VERSION}" \
   --set crds.install=true \
   --set backgroundController.enabled=true \
   --set cleanupController.enabled=true \
   --set reportsController.enabled=true \
   --set webhooksCleanup.enabled=true \
-  --set webhooksCleanup.image.registry=registry.k8s.io \
-  --set webhooksCleanup.image.repository=kubectl \
-  --set webhooksCleanup.image.tag=v1.35.10 \
   --set templating.enabled=false \
   --set policyReportsCleanup.enabled=false \
   --set cleanupJobs.admissionReports.enabled=false \
@@ -175,7 +198,25 @@ with open('${WORK_DIR}/final-controller.yaml', 'w') as f:
 # of a file that no longer existed and left the verifier failing on a
 # correctly vendored artifact.
 echo "    Updating version labels..."
-perl -pi -e "s|app\.kubernetes\.io/version: .*|app.kubernetes.io/version: ${NEW_VERSION}|g" \
+# THE CHART VERSION AND THE APPLICATION VERSION ARE DIFFERENT FACTS.
+#
+# app.kubernetes.io/version is "the current version of the application" by
+# Kubernetes convention, and this rewrote it to the CHART version -- so a spoke
+# running kyverno v1.19.2 was labelled 3.9.2, and anything reading the label to
+# answer "which kyverno is running" got the wrong answer while the images beside
+# it said otherwise. helm.sh/chart is the chart's own label and stays the chart
+# version.
+#
+# Read from the chart's appVersion rather than from a second list here, so the
+# upstream chart remains the only place the pairing is declared.
+APP_VERSION=$(grep -m1 '^appVersion:' "$WORK_DIR/kyverno/Chart.yaml" \
+  | sed 's/^appVersion:[[:space:]]*//;s/^v//;s/["'"'"']//g')
+if [ -z "$APP_VERSION" ]; then
+  echo "ERROR: could not read appVersion from the kyverno chart" >&2
+  exit 1
+fi
+echo "    chart ${NEW_VERSION} packages application v${APP_VERSION}"
+perl -pi -e "s|app\.kubernetes\.io/version: .*|app.kubernetes.io/version: v${APP_VERSION}|g" \
   "$WORK_DIR/final-controller.yaml"
 perl -pi -e "s|helm\.sh/chart: kyverno-.*|helm.sh/chart: kyverno-${NEW_VERSION}|g" \
   "$WORK_DIR/final-controller.yaml"

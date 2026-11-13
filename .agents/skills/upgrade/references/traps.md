@@ -20,6 +20,9 @@ happens, and what to do instead.
 - [Round-tripping a file that carries comments](#round-tripping-a-file-that-carries-comments)
 - [A script that succeeds and changes nothing](#a-script-that-succeeds-and-changes-nothing)
 - [Adding a required value and leaving the fixtures behind](#adding-a-required-value-and-leaving-the-fixtures-behind)
+- [Moving the image and leaving the version labels](#moving-the-image-and-leaving-the-version-labels)
+- [A provenance digest computed differently from its verifier](#a-provenance-digest-computed-differently-from-its-verifier)
+- [A validator whose premise a past commit deleted](#a-validator-whose-premise-a-past-commit-deleted)
 - [Upgrading a component on one side only](#upgrading-a-component-on-one-side-only)
 - [Sweeping only the components that have descriptors](#sweeping-only-the-components-that-have-descriptors)
 - [Editing a constant nothing reads](#editing-a-constant-nothing-reads)
@@ -222,6 +225,81 @@ Never add a chart default to get a gate green: the default is the thing the
 `required` exists to refuse. If a gate pipes a render into a checker, render to a
 file and fail on the render's own exit code, so an unrenderable bundle is a
 failure rather than a clean report.
+
+## Moving the image and leaving the version labels
+
+**Looks like:** the bump is done — the image tag and its digest are updated, and
+the component runs the new version.
+
+**Why it fails:** a vendored render carries the version in more places than the
+image. `app.kubernetes.io/version` appears on every object, the header comment
+states it, and `helm.sh/chart` carries the *chart* version, which is a different
+number. Anything reading the label to answer "which version is running" — a
+dashboard, a support report, a human — gets the old answer while the pod runs the
+new image, and nothing compares the two.
+
+Both halves of this were live on 2026-11-14. The kyverno re-vendor script wrote
+`app.kubernetes.io/version` from the **chart** version, so spokes running
+v1.19.2 were labelled 3.9.2; and a hand bump of Loki's digest-pinned image left
+eighteen `app.kubernetes.io/version: 3.7.9` labels and two header comments
+behind.
+
+**Instead:** after any version move, grep the old version string across the file
+and the tree before calling it done —
+
+```bash
+grep -rn "<old-version>" manifests internal/assets scripts | grep -v embedded
+```
+
+— and in a generator, read the application version from the chart's own
+`appVersion` rather than reusing the chart version. Expect historical incident
+comments to match that grep legitimately; those stay.
+
+## A provenance digest computed differently from its verifier
+
+**Looks like:** a re-vendor script that writes a `# sha256:` header, and a
+verifier that recomputes it. Both look right.
+
+**Why it fails:** the verifier hashes `grep -v '^# '`, which drops `# ` prose but
+**keeps bare `#` separator lines** — and provenance headers have several. A
+script that hashes the body alone, or that assembles the header differently,
+disagrees with the verifier on every run, so a correctly vendored artefact fails
+its own gate. The kyverno script documents this at the line that fixes it; the
+cnpg script hit it on its first run.
+
+**Instead:** write the file with a `PLACEHOLDER` digest, compute the hash from
+the written file **the same way the verifier does**, then substitute. The digest
+line itself starts with `# `, so substituting it cannot change the hash.
+
+## A validator whose premise a past commit deleted
+
+**Looks like:** a check that fails loudly, naming several real-sounding
+violations. Easy to read as several real defects.
+
+**Why it fails:** the check encodes an architecture, and an architecture can be
+replaced without anyone updating the check. Two shapes, both found on
+2026-11-14:
+
+- `validate-cluster-name-contract.sh` required every tenant-placing
+  ApplicationSet to select on `cluster-name`. Placement had moved to
+  `environment` + `spoke-type`, with the full producer chain intact, so it
+  reported four working ApplicationSets as outages. Replacing the selectors to
+  satisfy it would have changed placement semantics.
+- `preflight/60-environment-slug.sh` asserted `manifests/environments/{dev,stg,prod}`
+  carried a per-environment slug patch. ADR-111 Revision 7 deleted all three
+  directories, so it hard-failed on absence by construction. The invariant it
+  protected is now enforced by a `required` in the chart, so the file was deleted
+  rather than repaired.
+
+And the inverse, which is worse: a check that **never runs**. A new assertion in
+that same validator used `// empty`, which is jq syntax and a lexer error in yq
+v4; with stderr discarded it returned nothing and the check skipped silently on
+every run.
+
+**Instead:** when a check fails, establish whether the thing it asserts is still
+the design before changing the code it accuses — `git log` the files it reads. And
+negative-control every check you write or touch: break the thing deliberately and
+confirm it fails. A check that cannot be made to fail is not protecting anything.
 
 ## Upgrading a component on one side only
 

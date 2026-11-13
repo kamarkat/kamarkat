@@ -44,6 +44,11 @@ To prevent privilege escalation through unauthorized label tagging:
 
 ## Architecture
 
+> **Note (2026-11-14).** The example below is written against `kyverno.io/v1
+> ClusterPolicy`, which Kyverno 1.20 no longer executes. The RBAC aggregation
+> decision this ADR records is unchanged; a policy that generates resources is
+> now a `policies.kyverno.io/v1 GeneratingPolicy`, and the platform ships none.
+
 ```yaml
 # Kyverno Policy with Dynamic RBAC
 apiVersion: kyverno.io/v1

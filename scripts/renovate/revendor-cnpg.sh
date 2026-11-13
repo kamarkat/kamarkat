@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Re-vendor the CloudNativePG Helm chart into the Git-delivered spoke manifests.
+#
+# WHY THIS EXISTS. The vendored artefact had no recorded recipe: the flags that
+# produced it were not written down anywhere, and it carried no provenance
+# digest, so `verify-vendor-digest.sh` did not cover it. Neither half of the
+# upgrade contract could be met -- the artefact could not be REPRODUCED before
+# being replaced, and a hand edit to it would not have been detected. The recipe
+# below was recovered by rendering chart 0.28.0 and comparing object by object
+# against the committed files: eleven controller objects identical, ten CRDs
+# identical but for one deliberate annotation.
+#
+# THE RECIPE IS THE WHOLE POINT. Chart defaults, release name `cnpg`, namespace
+# `cnpg-system`, split into CRDs and everything else, and the sync-wave
+# annotation added to each CRD (ADR-023: CRDs are established before the
+# operators and resources that depend on them). No --set flags: the chart's
+# defaults are what this platform ships, and recording that is what makes the
+# next upgrade a diff rather than a guess.
+#
+# Requires: curl, helm, python3 (with pyyaml), sha256sum
+#
+# Usage:
+#   bash scripts/renovate/revendor-cnpg.sh            # the version the hub pins
+#   bash scripts/renovate/revendor-cnpg.sh 0.29.1     # an explicit chart version
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SPOKE_DIR="${PROJECT_ROOT}/manifests/spoke/spoke-catalog/infra/cloudnative-pg"
+HUB_APP="${PROJECT_ROOT}/manifests/hub-core-services/cloudnative-pg/application.yaml"
+CRD_SYNC_WAVE="-5"
+
+if [ $# -ge 1 ]; then
+  NEW_VERSION="$1"
+else
+  # The hub's Application is the declared chart version; defaulting to it keeps
+  # the two delivery paths from drifting when this is run with no argument.
+  NEW_VERSION=$(grep -m1 'targetRevision:' "$HUB_APP" | sed 's/.*targetRevision:[[:space:]]*//' || true)
+fi
+[ -n "$NEW_VERSION" ] || { echo "ERROR: could not determine the chart version" >&2; exit 1; }
+
+echo "==> Re-vendoring CloudNativePG chart ${NEW_VERSION}..."
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# The chart's index publishes tarballs on GitHub releases, not under the index's
+# own path: fetching ${REPO}/cloudnative-pg-${V}.tgz returns 404. The URL is
+# read from the index so a change of hosting does not silently break this.
+echo "    Resolving the chart URL..."
+CHART_URL=$(curl -fsSL https://cloudnative-pg.github.io/charts/index.yaml \
+  | python3 -c "
+import sys, yaml
+want = '${NEW_VERSION}'
+for c in yaml.safe_load(sys.stdin)['entries']['cloudnative-pg']:
+    if c['version'] == want:
+        print(c['urls'][0]); break
+else:
+    sys.exit('chart version %s is not in the index' % want)
+")
+[ -n "$CHART_URL" ] || { echo "ERROR: no chart URL for ${NEW_VERSION}" >&2; exit 1; }
+
+echo "    Rendering..."
+curl -fsSL "$CHART_URL" -o "$WORK_DIR/chart.tgz"
+tar -xzf "$WORK_DIR/chart.tgz" -C "$WORK_DIR"
+APP_VERSION=$(grep -m1 '^appVersion:' "$WORK_DIR/cloudnative-pg/Chart.yaml" \
+  | sed 's/^appVersion:[[:space:]]*//;s/^v//;s/["'"'"']//g')
+[ -n "$APP_VERSION" ] || { echo "ERROR: could not read appVersion" >&2; exit 1; }
+echo "    chart ${NEW_VERSION} packages application v${APP_VERSION}"
+
+helm template cnpg "$WORK_DIR/cloudnative-pg" --namespace cnpg-system > "$WORK_DIR/rendered.yaml"
+
+echo "    Splitting CRDs and controller resources..."
+python3 -c "
+import yaml, io
+
+docs = [d for d in yaml.safe_load_all(io.open('${WORK_DIR}/rendered.yaml', encoding='utf-8')) if d]
+crds = [d for d in docs if d['kind'] == 'CustomResourceDefinition']
+rest = [d for d in docs if d['kind'] != 'CustomResourceDefinition']
+if not crds or not rest:
+    raise SystemExit('render produced %d CRDs and %d other objects; expected both'
+                     % (len(crds), len(rest)))
+
+# ADR-023: the CRDs are established before anything that depends on them.
+for d in crds:
+    d['metadata'].setdefault('annotations', {})['argocd.argoproj.io/sync-wave'] = '${CRD_SYNC_WAVE}'
+
+for name, ds in (('crd', crds), ('controller', rest)):
+    with io.open('${WORK_DIR}/final-%s.yaml' % name, 'w', encoding='utf-8') as f:
+        f.write(yaml.safe_dump_all(ds, default_flow_style=False, sort_keys=False))
+"
+
+echo "    Writing provenance headers and vendored files..."
+# HASH EXACTLY WHAT verify-vendor-digest.sh HASHES: `grep -v '^# '`, which drops
+# "# " prose but KEEPS bare "#" separator lines -- and this header has them.
+# Hashing the body alone disagreed with the verifier on every run. The digest
+# line itself starts with "# ", so writing it afterwards cannot change the hash.
+for name in crd controller; do
+  body="$WORK_DIR/final-${name}.yaml"
+  out="${SPOKE_DIR}/${name}.yaml"
+  {
+    echo "# Vendored from helm chart cloudnative-pg v${NEW_VERSION} (cloudnative-pg.github.io/charts)"
+    echo "# sha256: PLACEHOLDER"
+    echo "#"
+    echo "# Generated by scripts/renovate/revendor-cnpg.sh. Do not edit: the digest"
+    echo "# above covers everything below it and verify-vendor-digest.sh checks it."
+    if [ "$name" = "crd" ]; then
+      echo "#"
+      echo "# CRDs applied at sync-wave ${CRD_SYNC_WAVE} so ArgoCD establishes them before"
+      echo "# operators/resources that depend on them (ADR-023)."
+    fi
+    cat "$body"
+  } > "$out"
+  digest=$(grep -v '^# ' "$out" | sha256sum | cut -d' ' -f1)
+  # The placeholder is on a "# " line, so this substitution is outside the hash.
+  perl -pi -e "s|^# sha256: PLACEHOLDER\$|# sha256: ${digest}|" "$out"
+done
+
+echo "==> Done. Vendored CloudNativePG chart ${NEW_VERSION} (application v${APP_VERSION})"
+echo "    Verify with: bash scripts/validate/verify-vendor-digest.sh"

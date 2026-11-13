@@ -1,40 +1,23 @@
 ---
-# Audit the runtime half of the cluster-name contract (tenant placement).
+# Spoke cluster Secrets must carry a non-empty cluster-name label.
 #
-# A spoke's identity travels: SpokePool composition patches cluster-name onto the
-# CAPI Cluster -> the take-along-label marker tells capi2argo to copy it ->
-# capi2argo writes it onto the ArgoCD cluster Secret -> the fleet ApplicationSets
-# select on it with a clusters generator.
+# AUDIT, NOT DENY. A missing label is a platform wiring fault, and refusing the
+# registration would remove the cluster rather than report the fault. The policy
+# reports; the registration proceeds.
 #
-# This audited cell-id, which the compositions patch from the same claim name.
-# Placement moved to cluster-name because cell-id borrowed the vocabulary of
-# policy grouping (ADR-064: a cluster may belong to several cells and receives
-# the union of their policy) for a value that was always one cluster's name.
-# cell-id is still published; nothing selects on it, so its absence is no longer
-# the silent failure this policy exists to report.
+# Scoped to spoke registrations only. capi2argo names the ArgoCD cluster Secret
+# after the CAPI Cluster, which is the SpokePool claim name, so spoke-pool-* is
+# the set of Secrets that must carry a name. Any other cluster registration -- a
+# manually added cluster, a non-spoke target -- is out of scope and must not be
+# reported as a violation.
 #
-# scripts/validate-cluster-name-contract.sh covers the links that live in Git. This
-# policy covers the one that does not: capi2argo actually having written the
-# label onto the Secret. The label can be correct in every manifest and still be
-# absent here -- a capi2argo version that changes its take-along handling, a
-# Secret reconciled before the Cluster labels were applied, or a cluster
-# registered by hand.
-#
-# The failure it catches is silent by construction. A clusters generator that
-# matches nothing does not error: the ApplicationSet generates zero Applications
-# and reports Healthy, which is indistinguishable from "no tenants are assigned
-# to this spoke yet". Every tenant on the affected spoke simply stops being
-# reconciled, and nothing says so.
-#
-# ─── Audit, deliberately, not Enforce ────────────────────────────────────────
-# Enforce would reject the Secret, which means capi2argo could not register the
-# spoke with ArgoCD at all. That converts a degradation affecting tenant
-# placement into a total loss of GitOps delivery for the whole spoke -- the
-# platform components in the spoke catalog target it by spoke-type and would go
-# with it. A missing label is worth reporting loudly; it is not worth refusing
-# the cluster over. See PolicyReports in platform-ops for violations.
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+# The namespace and the name prefix are matchConditions rather than
+# matchConstraints: those select by resource and by label, and neither of these
+# is either. object.metadata.namespace is reconciled by the API server before
+# admission and is always present on a stored object, so the same expressions
+# hold in admission and in background reporting.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
 metadata:
   name: audit-spoke-cluster-name
   labels:
@@ -50,42 +33,44 @@ metadata:
     policies.kyverno.io/severity: high
     policies.kyverno.io/subject: Secret
 spec:
-  validationFailureAction: Audit
-  background: true
-  rules:
-    # Scoped to spoke registrations only. capi2argo names the ArgoCD cluster
-    # Secret after the CAPI Cluster, which is the SpokePool claim name, so
-    # spoke-pool-* is the set of Secrets that must carry a name. Any other
-    # cluster registration (a manually added cluster, a non-spoke target) is out
-    # of scope and must not be reported as a violation.
-    - name: spoke-cluster-secret-has-cluster-name
-      match:
-        any:
-          - resources:
-              kinds:
-                - Secret
-              namespaces:
-                - platform-ops
-              names:
-                - "spoke-pool-*"
-              selector:
-                matchLabels:
-                  argocd.argoproj.io/secret-type: cluster
-      validate:
-        message: >-
-          Spoke cluster Secret {{ request.object.metadata.name }} has no non-empty
-          cluster-name label. The fleet ApplicationSets
-          (tenant-app-xr/spoke/workload-provisioning, tenant-public-tls) select
-          spokes with a clusters generator on this label, so every tenant
-          targeting this spoke will generate zero Applications while the
-          ApplicationSet reports Healthy. Check that the CAPI Cluster carries both
-          cluster-name and take-along-label.capi-to-argocd.cluster-name, and that
-          capi2argo is running.
-        pattern:
-          metadata:
-            labels:
-              # "?*" requires the key to exist AND be a non-empty string. An
-              # empty value is the more dangerous case: the label is present, so
-              # a presence check would pass, but matchLabels still matches
-              # nothing.
-              cluster-name: "?*"
+  failurePolicy: Fail
+  validationActions: [Audit]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+    objectSelector:
+      matchLabels:
+        argocd.argoproj.io/secret-type: cluster
+  matchConditions:
+    - name: platform-ops-namespace
+      expression: "object.metadata.namespace == 'platform-ops'"
+    - name: spoke-pool-secret
+      expression: "object.metadata.name.startsWith('spoke-pool-')"
+  validations:
+    # "?*" in the pattern this replaces required the key to exist AND be a
+    # non-empty string. An empty value is the more dangerous case: the label is
+    # present, so a presence check would pass, but matchLabels still matches
+    # nothing.
+    - expression: >-
+        has(object.metadata.labels)
+        && 'cluster-name' in object.metadata.labels
+        && object.metadata.labels['cluster-name'] != ''
+      messageExpression: >-
+        'Spoke cluster Secret ' + object.metadata.name + ' has no non-empty cluster-name
+        label. The fleet ApplicationSets (tenant-app-xr/spoke/workload-provisioning,
+        tenant-public-tls) select spokes with a clusters generator on this label, so every
+        tenant targeting this spoke will generate zero Applications while the
+        ApplicationSet reports Healthy. Check that the CAPI Cluster carries both
+        cluster-name and take-along-label.capi-to-argocd.cluster-name, and that capi2argo
+        is running.'

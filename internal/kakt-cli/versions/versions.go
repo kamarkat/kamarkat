@@ -23,7 +23,7 @@ const (
 	// other, and neither compared to the version CAPI was reconciling to.
 	//
 	// TestKubernetesVersionHasOneDeclaration asserts the class declares none.
-	KubernetesVersion = "v1.35.10"
+	KubernetesVersion = "v1.36.6"
 
 	// CAPI Core
 	CAPIVersion = "v1.13.7"
@@ -38,7 +38,7 @@ const (
 	KubeadmControlPlaneProviderVersion = "v1.13.7"
 
 	// Infrastructure Providers
-	HetznerInfraProviderVersion = "v1.1.10"
+	HetznerInfraProviderVersion = "v1.1.11"
 
 	// Binaries the CLI downloads are NOT declared here.
 	//

@@ -22,7 +22,7 @@ Once these bootstrap components are running, the ArgoCD Agent can pull the rest 
 ### 1. ArgoCD Agent
 **File**: `argocd-agent-templates.yaml`  
 **Purpose**: Enables GitOps-driven management from Hub  
-**Image**: `quay.io/argoproj-labs/argocd-agent:v0.1.0`
+**Image**: `quay.io/argoprojlabs/argocd-agent:v0.11.0` (pinned by digest in `argocd-agent-templates.yaml`; the hub-side principal is pinned to the same build)
 
 The ArgoCD Agent ConfigMap (`argocd-agent-config`) is dynamically generated per-cluster by the Crossplane Composition.
 

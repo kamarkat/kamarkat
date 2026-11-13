@@ -16,9 +16,15 @@ set -euo pipefail
 # Usage: bash scripts/validate/verify-vendor-digest.sh
 
 SPOKE_DIR="manifests/spoke/spoke-catalog/infra/kyverno"
+CNPG_DIR="manifests/spoke/spoke-catalog/infra/cloudnative-pg"
+ESO_DIR="manifests/spoke/spoke-catalog/infra/external-secrets"
+RELOADER="manifests/spoke/spoke-catalog/infra/reloader/controller.yaml"
 FAIL=0
 
-for file in "$SPOKE_DIR"/crd.yaml "$SPOKE_DIR"/controller.yaml; do
+for file in "$SPOKE_DIR"/crd.yaml "$SPOKE_DIR"/controller.yaml \
+            "$CNPG_DIR"/crd.yaml "$CNPG_DIR"/controller.yaml \
+            "$ESO_DIR"/crd.yaml "$ESO_DIR"/controller.yaml \
+            "$RELOADER"; do
   if [ ! -f "$file" ]; then
     echo "ERROR: $file not found"
     FAIL=1
@@ -47,6 +53,78 @@ for file in "$SPOKE_DIR"/crd.yaml "$SPOKE_DIR"/controller.yaml; do
     FAIL=1
   fi
 done
+
+# ── the two places kyverno's version is declared must agree ──────────────
+#
+# ONE VERSION PER COMPONENT, EVERYWHERE IT RUNS. The management cluster pulls
+# the kyverno chart by targetRevision; the workload clusters apply the vendored
+# render of that same chart. Nothing connected the two, so the hub could be
+# moved to a new chart while every spoke kept applying the old render -- the
+# release would report kyverno twice at two versions with nobody having decided
+# that, which is the split the upgrade policy exists to prevent.
+#
+# Read from the provenance header rather than from a second list, so there is no
+# third place to keep in step.
+APPSET="manifests/argocd/environment-manager/templates/01-platform-infra-appset.yaml"
+VENDORED=$(grep -m1 '^# Vendored from helm chart kyverno v' "$SPOKE_DIR/controller.yaml" \
+  | sed 's/.*kyverno v//;s/ .*//' || true)
+# The element's targetRevision is tens of lines below its repoURL, so read from
+# the repoURL to the first targetRevision after it.
+PINNED=$(awk "/repoURL: 'https:\/\/kyverno.github.io\/kyverno'/,0" "$APPSET" \
+  | grep -m1 targetRevision | sed "s/.*targetRevision: '//;s/'.*//" || true)
+
+if [ -z "$VENDORED" ] || [ -z "$PINNED" ]; then
+  echo "FAIL: could not read kyverno's version from both places (vendored='$VENDORED' pinned='$PINNED')"
+  FAIL=1
+elif [ "$VENDORED" != "$PINNED" ]; then
+  echo "FAIL: KYVERNO VERSION SPLIT — the management cluster pulls chart $PINNED and the"
+  echo "      spokes apply a render of chart $VENDORED. Move both together:"
+  echo "      bash scripts/renovate/revendor-kyverno.sh $PINNED"
+  FAIL=1
+else
+  echo "OK: kyverno chart $PINNED is the version vendored for spokes"
+fi
+
+# ── the same contract for CloudNativePG ──────────────────────────────────
+#
+# Its hub Application pulls the chart; the spokes apply a vendored render of it.
+# Until now neither half was checked: the render carried no digest and nothing
+# compared the two versions, so a chart bump on the hub would have left every
+# spoke on the old operator with nothing reporting it.
+CNPG_APP="manifests/hub-core-services/cloudnative-pg/application.yaml"
+CNPG_VENDORED=$(grep -m1 '^# Vendored from helm chart cloudnative-pg v' "$CNPG_DIR/controller.yaml" \
+  | sed 's/.*cloudnative-pg v//;s/ .*//' || true)
+CNPG_PINNED=$(grep -m1 'targetRevision:' "$CNPG_APP" \
+  | sed 's/.*targetRevision:[[:space:]]*//' || true)
+
+if [ -z "$CNPG_VENDORED" ] || [ -z "$CNPG_PINNED" ]; then
+  echo "FAIL: could not read cloudnative-pg's version from both places (vendored='$CNPG_VENDORED' pinned='$CNPG_PINNED')"
+  FAIL=1
+elif [ "$CNPG_VENDORED" != "$CNPG_PINNED" ]; then
+  echo "FAIL: CLOUDNATIVE-PG VERSION SPLIT — the management cluster pulls chart $CNPG_PINNED and"
+  echo "      the spokes apply a render of chart $CNPG_VENDORED. Move both together:"
+  echo "      bash scripts/renovate/revendor-cnpg.sh $CNPG_PINNED"
+  FAIL=1
+else
+  echo "OK: cloudnative-pg chart $CNPG_PINNED is the version vendored for spokes"
+fi
+
+# ── and for External Secrets, whose hub Application pulls the same chart ─────
+ESO_VENDORED=$(grep -m1 '^# Vendored from helm chart external-secrets v' "$ESO_DIR/controller.yaml" \
+  | sed 's/.*external-secrets v//;s/ .*//' || true)
+ESO_PINNED=$(awk "/repoURL: 'https:\/\/charts.external-secrets.io'/,0" "$APPSET" \
+  | grep -m1 targetRevision | sed "s/.*targetRevision: '//;s/'.*//" || true)
+if [ -z "$ESO_VENDORED" ] || [ -z "$ESO_PINNED" ]; then
+  echo "FAIL: could not read external-secrets' version from both places (vendored='$ESO_VENDORED' pinned='$ESO_PINNED')"
+  FAIL=1
+elif [ "$ESO_VENDORED" != "$ESO_PINNED" ]; then
+  echo "FAIL: EXTERNAL-SECRETS VERSION SPLIT — the management cluster pulls chart $ESO_PINNED"
+  echo "      and the spokes apply a render of chart $ESO_VENDORED. Move both together:"
+  echo "      bash scripts/renovate/revendor-eso.sh $ESO_PINNED"
+  FAIL=1
+else
+  echo "OK: external-secrets chart $ESO_PINNED is the version vendored for spokes"
+fi
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""

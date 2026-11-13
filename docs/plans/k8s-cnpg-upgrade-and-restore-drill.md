@@ -2,7 +2,9 @@
 
 **Owner:** Platform team (lead: Claude; execution: team member; approvals: user)
 **Started:** 2026-10-15 · **Last updated:** 2026-11-03
-**Status:** Phase 1 research complete. **Waiting on the user's decision D-TARGET** before the upgrade plan is written.
+**Status:** D-TARGET resolved (2026-11-14): **Kubernetes 1.36.6** for the management
+cluster and for both spoke providers, implemented in source. The premise that held it at
+1.35 no longer holds -- see the correction below.
 
 **Restore validation moves to staging (user, 2026-11-03).** Restoration is NOT exercised in
 dev. It is tested as part of the **hub recreation test on staging**, once staging has been
@@ -151,8 +153,27 @@ caller carrying a second copy, so `cfg.ImageID`, the Config field and the topolo
 
 ## 3a. Former open decision (resolved above)
 
-**D-TARGET: Kubernetes target version.** The approved target was 1.36, but **no released
-Kyverno supports 1.36** (Kyverno 1.19.x = K8s 1.33–1.35; 1.20 does not exist).
+**D-TARGET: Kubernetes target version. RESOLVED 2026-11-14 as 1.36.6.**
+
+*The premise recorded below was true when written and is no longer.* **Kyverno 1.20.0 is
+released** and supports Kubernetes 1.34-1.37 (kyverno.io/docs/installation/releases/,
+read 2026-11-14), so the constraint that capped the platform at 1.35 is gone. 1.19 is also
+no longer a supported Kyverno release, which turned staying put into its own exposure.
+
+The ceiling is now **1.36**, set jointly by CloudNativePG 1.30 (supports 1.34-1.36; 1.37
+listed "tested, but not supported"), Cilium 1.20 (1.33-1.36) and the Hetzner provider's
+v1.1.x line (1.32-1.36). Cluster API v1.13.7 supports 1.32-1.37 and is not the constraint.
+1.37.2 is published and three components do not support it, so 1.36.6 is the highest
+version every component supports -- not merely the next one.
+
+No intermediate upgrade ladder is designed: there are no production users, and a fresh
+installation provisions directly at 1.36.6. The consecutive-minor contract still governs
+an existing cluster, which is a separate decision from what source declares.
+
+The original reasoning, kept because it records why the platform sat at 1.35:
+
+> The approved target was 1.36, but **no released
+> Kyverno supports 1.36** (Kyverno 1.19.x = K8s 1.33–1.35; 1.20 does not exist).
 
 | Option | Summary | Lead's view |
 |---|---|---|

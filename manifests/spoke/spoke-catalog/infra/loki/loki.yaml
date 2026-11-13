@@ -1,4 +1,4 @@
-# Grafana Loki 3.7.9 -- monolithic (single binary), the log store of ADR-078
+# Grafana Loki 3.7.10 -- monolithic (single binary), the log store of ADR-078
 # addendum 5 §4: three replicas, replication factor 3, memberlist ring; chunks,
 # TSDB index, retention-deletion markers and delete requests in this cluster's
 # object-storage bucket; WAL on each replica's PVC. The compactor ring elects the
@@ -7,7 +7,7 @@
 # Source chart sha256: bb8b254a57afc6b3
 # Vendored from `helm template loki loki-7.5.0 -n platform-observability
 # --kube-version 1.31.6` (deploymentMode SingleBinary; gateway, caches, canary,
-# tests and self-monitoring off). The image is pinned at 3.7.9 by digest (ADR-021):
+# tests and self-monitoring off). The image is pinned at 3.7.10 by digest (ADR-021):
 # `deletion_marker_object_store_prefix` first appears in Loki 3.7. Helm
 # bookkeeping labels, the config checksum and the empty sidecar ClusterRole are
 # removed. Per-box values (bucket, replicas, replication factor, storage class)
@@ -21,7 +21,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
 automountServiceAccountToken: true
 ---
 apiVersion: v1
@@ -32,7 +32,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
 data:
   config.yaml: "\nauth_enabled: false\nbloom_build:\n  builder:\n    planner_address: \"\"\n  enabled: false\nbloom_gateway:\n  client:\n    addresses: \"\"\n  enabled: false\ncommon:\n  compactor_grpc_address: 'loki.platform-observability.svc.cluster.local:9095'\n  path_prefix: /var/loki\n  replication_factor: 3\n  storage:\n    s3:\n      access_key_id: ${S3_ACCESS_KEY_ID}\n      bucketnames: PLACEHOLDER_LOGS_BUCKET\n      endpoint: https://hel1.your-objectstorage.com\n      insecure: false\n      region: hel1\n      s3forcepathstyle: false\n      secret_access_key: ${S3_SECRET_ACCESS_KEY}\ncompactor:\n  compactor_ring:\n    kvstore:\n      store: memberlist\n  delete_request_store: s3\n  deletion_marker_object_store_prefix: retention-markers/\n  retention_enabled: true\n  working_directory: /var/loki/compactor\nfrontend:\n  scheduler_address: \"\"\n  tail_proxy_url: \"\"\nfrontend_worker:\n  scheduler_address: \"\"\nindex_gateway:\n  mode: simple\ningester:\n  chunk_encoding: snappy\nlimits_config:\n  allow_structured_metadata: true\n  max_cache_freshness_per_query: 10m\n  query_timeout: 300s\n  reject_old_samples: true\n  reject_old_samples_max_age: 168h\n  retention_period: 168h\n  split_queries_by_interval: 15m\n  volume_enabled: true\nmemberlist:\n  join_members:\n  - loki-memberlist.platform-observability.svc.cluster.local\npattern_ingester:\n  enabled: false\nquery_range:\n  align_queries_with_step: true\nruler:\n  storage:\n    s3:\n      access_key_id: ${S3_ACCESS_KEY_ID}\n      bucketnames: PLACEHOLDER_LOGS_BUCKET\n      endpoint: https://hel1.your-objectstorage.com\n      insecure: false\n      region: hel1\n      s3forcepathstyle: false\n      secret_access_key: ${S3_SECRET_ACCESS_KEY}\n    type: s3\n  wal:\n    dir: /var/loki/ruler-wal\nruntime_config:\n  file: /etc/loki/runtime-config/runtime-config.yaml\nschema_config:\n  configs:\n  - from: \"2026-10-28\"\n    index:\n      period: 24h\n      prefix: loki_index_\n    object_store: s3\n    schema: v13\n    store: tsdb\nserver:\n  grpc_listen_port: 9095\n  http_listen_port: 3100\n  http_server_read_timeout: 600s\n  http_server_write_timeout: 600s\nstorage_config:\n  bloom_shipper:\n    working_directory: /var/loki/data/bloomshipper\n  boltdb_shipper:\n    index_gateway_client:\n      server_address: \"\"\n  hedging:\n    at: 250ms\n    max_per_second: 20\n    up_to: 3\n  tsdb_shipper:\n    index_gateway_client:\n      server_address: \"\"\n  use_thanos_objstore: false\ntracing:\n  enabled: false\n"
 ---
@@ -44,7 +44,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
 data:
   runtime-config.yaml: '{}
 
@@ -58,7 +58,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
   annotations: null
 spec:
   type: ClusterIP
@@ -81,7 +81,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
     variant: headless
     prometheus.io/service-monitor: 'false'
   annotations: null
@@ -104,7 +104,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
   annotations: null
 spec:
   type: ClusterIP
@@ -137,7 +137,7 @@ metadata:
   labels:
     app.kubernetes.io/name: loki
     app.kubernetes.io/instance: loki
-    app.kubernetes.io/version: 3.7.9
+    app.kubernetes.io/version: 3.7.10
     app.kubernetes.io/component: single-binary
     app.kubernetes.io/part-of: memberlist
 spec:
@@ -192,7 +192,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: loki
-        image: docker.io/grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+        image: docker.io/grafana/loki:3.7.10@sha256:b43c257ccfc925d4a50b8717cac61a3b51df8c48d01847936057e5c4075a24a7
         imagePullPolicy: IfNotPresent
         args:
         - -config.file=/etc/loki/config/config.yaml

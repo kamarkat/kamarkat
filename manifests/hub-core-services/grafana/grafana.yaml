@@ -107,7 +107,7 @@ spec:
   # inventory reads (scripts/package/inventory.py, operated_images). A pod
   # template override sets the running image without the inventory seeing
   # it, so the release would still report the operator's default.
-  version: 13.3.0
+  version: 13.3.1
   config:
     server:
       root_url: https://grafana.PLACEHOLDER_HUB_DOMAIN

@@ -20,11 +20,11 @@ ledger:
 # version ever equals, so the component reads as permanently behind and the
 # release cannot say which version it runs.
 images:
-  # Formance Ledger v2.4.17 (MIT). The scratch build: the binary and nothing else.
+  # Formance Ledger v2.4.18 (MIT). The scratch build: the binary and nothing else.
   ledger:
     repository: ghcr.io/formancehq/ledger
-    tag: "v2.4.17"
-    digest: "sha256:269cc7079a4375eaaad21dd3565563a0372437216cdda14c200619c647c07ea3"
+    tag: "v2.4.18"
+    digest: "sha256:cd4aed286a5e59e9a656a4bbd2db3f5f53f617be0423ed0ab6ac58dfcf46062a"
   # The one-shot provisioner: a shell and an HTTP client (curl 8.23.0).
   provisioner:
     repository: docker.io/curlimages/curl

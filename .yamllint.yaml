@@ -65,7 +65,6 @@ ignore: |
   manifests/spoke/spoke-catalog/infra/crossplane/crd.yaml
   manifests/spoke/spoke-catalog/infra/external-secrets/crd.yaml
   manifests/spoke/spoke-catalog/infra/cloudnative-pg/crd.yaml
-  manifests/spoke/spoke-bootstrap/cnpg-crds-template.yaml
   manifests/hub-core-services/eso/crds/
   internal/assets/manifests/core/
   # Auto-generated CRDs (from make manifests) — third-party schema descriptions

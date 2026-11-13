@@ -52,7 +52,20 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # against each other, so a rename has exactly one correct edit and this script
 # names the rest.
 readonly CLUSTER_LABEL="cluster-name"
-readonly PUBLISHED_LABELS="$CLUSTER_LABEL"
+# THREE IDENTITY CONTRACTS, NOT ONE. This checked `cluster-name` alone and then
+# demanded that every tenant-placing ApplicationSet select on it. That was true
+# of an earlier placement design and is not true now: a tenant is placed on an
+# ENVIRONMENT, which several clusters may serve, so the fleet ApplicationSets
+# select `environment` with `spoke-type`. The check reported four of them as
+# outages while the chain they use was intact end to end.
+#
+#   cluster-name   one exact cluster, patched from the SpokePool claim name
+#   environment    which environment a spoke serves, patched from the claim
+#   spoke-type     the classification, a literal (`pool`) in the composition
+#
+# Each is verified producer-to-consumer below. Adding a key here is not enough
+# to make it pass: it has to be on the Cluster and carry a take-along marker.
+readonly PUBLISHED_LABELS="$CLUSTER_LABEL environment spoke-type"
 readonly TAKE_ALONG_PREFIX="take-along-label.capi-to-argocd"
 
 compositions=(
@@ -80,12 +93,16 @@ for comp in "${compositions[@]}"; do
   fi
 
   for label in $PUBLISHED_LABELS; do
-    # Link 1: a patch must write the label from the claim name. Without it the
-    # Cluster carries the take-along marker for a label that does not exist.
+    # Link 1: the label must be ON the Cluster, by either mechanism the
+    # compositions use -- patched from the claim (cluster-name, environment) or
+    # written as a literal (spoke-type: pool). Requiring a patch alone reported
+    # spoke-type as missing while it was present and working.
     if grep -q "toFieldPath: spec.forProvider.manifest.metadata.labels.${label}\b" "$comp"; then
-      pass "$name: patches metadata.labels.${label}"
+      pass "$name: patches metadata.labels.${label} from the claim"
+    elif grep -qE "^ +${label}: +[^ ]" "$comp"; then
+      pass "$name: sets metadata.labels.${label} as a literal"
     else
-      fail "$name: no patch writes metadata.labels.${label} -- spokes from this composition will never match a fleet clusters generator"
+      fail "$name: metadata.labels.${label} is neither patched nor set literally -- spokes from this composition will never match a fleet clusters generator on it"
     fi
 
     # Link 2: the take-along marker. Present without link 1 is useless; absent
@@ -128,7 +145,7 @@ helm template cell-id-contract "$repo_root/manifests/argocd/environment-manager"
 # weak -- it passes while a tenant ApplicationSet quietly stops using it. So:
 # every key must be one the platform actually publishes, and every ApplicationSet
 # that places tenants must select on this one.
-readonly ALLOWED_SELECTOR_KEYS="$PUBLISHED_LABELS spoke-type"
+readonly ALLOWED_SELECTOR_KEYS="$PUBLISHED_LABELS"
 
 pairs="$(yq '
   select(.kind == "ApplicationSet") as $a
@@ -162,23 +179,83 @@ EOF
     fail "unknown clusters-generator selector key(s):${unknown} -- capi2argo publishes only ${ALLOWED_SELECTOR_KEYS// /, }, so these match nothing. Add the label to the compositions and this allowlist, or fix the typo"
   fi
 
-  # 4b. Every tenant-placing ApplicationSet selects on cell-id.
+  # 4b. Placement is checked by RESPONSIBILITY, not by one blessed key.
+  #
+  #     Two opposite failures, and a rule that catches one lets the other
+  #     through:
+  #
+  #       too few clusters  an ApplicationSet selects nothing the platform
+  #                         publishes, generates zero Applications, and reports
+  #                         Healthy. 4a catches that per key.
+  #       TOO MANY          an environment-scoped ApplicationSet loses its
+  #                         `environment` selector and keeps `spoke-type: pool`.
+  #                         Every key is still published and every value still
+  #                         valid, so a "selects at least one published label"
+  #                         rule passes it -- while ArgoCD generates that
+  #                         tenant's Applications onto every pool spoke in every
+  #                         environment, including other tenants'.
+  #
+  #     So the contract depends on what the ApplicationSet is for, and that is
+  #     derived from its own selector rather than from a list kept here:
+  #
+  #       selects cluster-name   one exact cluster. That IS its contract; leave it.
+  #       places tenants         environment-scoped: needs BOTH environment and
+  #                              spoke-type. Either alone is a real fault.
+  #       anything else          platform-wide (the spoke catalogue, the shared
+  #                              gateway): spoke-type alone is correct.
   tenant_appsets="$(printf '%s\n' "$pairs" | awk '{print $1}' | grep -E 'tenant|fleet' | sort -u || true)"
   if [[ -z "$tenant_appsets" ]]; then
-    fail "no tenant/fleet ApplicationSet has a clusters generator -- tenant placement is what this label exists for"
+    fail "no tenant/fleet ApplicationSet has a clusters generator -- tenant placement is what these labels exist for"
   else
     while IFS= read -r appset; do
       [[ -z "$appset" ]] && continue
-      if printf '%s\n' "$pairs" | grep -qx "$appset $CLUSTER_LABEL"; then
-        pass "$appset selects on ${CLUSTER_LABEL}"
+      keys="$(printf '%s\n' "$pairs" | awk -v a="$appset" '$1==a {print $2}' | sort -u | tr '\n' ' ')"
+      if [[ " $keys " == *" $CLUSTER_LABEL "* ]]; then
+        pass "$appset targets one cluster by ${CLUSTER_LABEL}"
+        continue
+      fi
+      missing=""
+      [[ " $keys " == *" environment "* ]] || missing="$missing environment"
+      [[ " $keys " == *" spoke-type "* ]]  || missing="$missing spoke-type"
+      if [[ -z "$missing" ]]; then
+        pass "$appset is environment-scoped: selects environment and spoke-type"
       else
-        got="$(printf '%s\n' "$pairs" | awk -v a="$appset" '$1==a {print $2}' | tr '\n' ' ')"
-        fail "$appset places tenants but does not select on ${CLUSTER_LABEL} (selects on: ${got:-nothing}) -- it will generate zero Applications and report Healthy"
+        fail "$appset places tenants and selects on${missing} -- it selects ${keys% } only.
+        Environment-scoped placement needs BOTH: without environment it generates onto every
+        pool spoke in EVERY environment, and without spoke-type onto clusters that are not
+        workload spokes. Either way ArgoCD reports Healthy."
       fi
     done <<EOF
 $tenant_appsets
 EOF
   fi
+
+  # 4c. A selector value that cannot be supplied matches nothing, exactly like
+  #     an unknown key, and is just as silent. Only literals constrain the value
+  #     -- a label patched from the claim can be anything.
+  while IFS=' ' read -r appset key; do
+    [[ -z "$key" ]] && continue
+    literals="$(grep -hoE "^ +${key}: +[^ ]+" "${compositions[@]}" 2>/dev/null \
+      | sed "s/.*${key}: *//" | sort -u | tr '\n' ' ' || true)"
+    [[ -z "${literals// /}" ]] && continue   # patched, so unconstrained
+    # `// empty` is jq, not yq v4: it is a lexer error here, and with stderr
+    # discarded the expression returned nothing and this whole check skipped
+    # silently on every run. `select(. != null)` is the yq spelling.
+    want="$(yq -r "
+      select(.kind == \"ApplicationSet\" and .metadata.name == \"$appset\")
+      | [.. | select(type == \"!!map\" and has(\"clusters\"))]
+      | .[] | .clusters.selector.matchLabels.\"$key\" | select(. != null)
+    " "$rendered" 2>/dev/null | sort -u | tr '\n' ' ' || true)"
+    [[ -z "${want// /}" ]] && continue
+    for v in $want; do
+      case " $literals " in
+        *" $v "*) ;;
+        *) fail "$appset selects ${key}=${v}, and the compositions only ever set ${key} to: ${literals% } -- it matches nothing and reports Healthy" ;;
+      esac
+    done
+  done <<EOF
+$pairs
+EOF
 fi
 
 echo

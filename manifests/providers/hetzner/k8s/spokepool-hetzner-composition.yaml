@@ -76,7 +76,7 @@ spec:
                             - 10.96.0.0/12
                       topology:
                         class: spokepool-v1 # Semantic Isolation (Critique 1)
-                        version: v1.35.10
+                        version: v1.36.6
                         controlPlane:
                           replicas: 1
                         workers:

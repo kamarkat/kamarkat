@@ -1,6 +1,6 @@
 # cert-manager v1.21.3 (full install: controller, cainjector, webhook + RBAC).
 # Vendored from helm chart jetstack/cert-manager v1.21.3 (charts.jetstack.io),
-# rendered with --kube-version 1.35.10. The two controller args below are added;
+# rendered with --kube-version 1.36.6. The two controller args below are added;
 # everything else is the chart's own output.
 # CRDs for these resources are vendored separately in crds/cert-manager-crds.yaml.
 ---

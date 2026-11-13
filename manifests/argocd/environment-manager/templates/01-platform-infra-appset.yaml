@@ -170,7 +170,7 @@ spec:
             destinationNamespace: 'platform-ops'
             isPlatformOwned: 'false'
             repoURL: 'https://kyverno.github.io/kyverno'
-            # 3.9.2 (app v1.19.2). The version is load-bearing, not housekeeping.
+            # 3.10.0 (app v1.20.0). The version is load-bearing, not housekeeping.
             #
             # Every release from v1.12.5 to v1.18.x dereferences
             # request.RequestKind in the webhook TRACE middleware with no nil
@@ -199,7 +199,7 @@ spec:
             # which eight templates dereferenced and which had to be supplied
             # here or the chart would not render at all. Those templates are
             # gone, so that block is gone with them; 3.9.1 renders on defaults.
-            targetRevision: '3.9.2'
+            targetRevision: '3.10.0'
             path: ''
             chart: 'kyverno'
             directoryRecurse: ''
@@ -216,9 +216,10 @@ spec:
               # simply never added.
               #
               # It belongs there for the same reason and for a sharper one. That
-              # namespace holds the CAPI bootstrap templates, and two of them are
-              # ~870 KB -- cilium-addon-template at 883 KB and cnpg-crds-template
-              # at 867 KB. Every write of those crossed the tunnel to the
+              # namespace holds the CAPI bootstrap templates, and the largest is
+              # ~880 KB -- cilium-addon-template at 883 KB. (cnpg-crds-template,
+              # 867 KB, was the other; it was removed on 2026-11-14 as an orphan
+              # no ClusterResourceSet referenced.) Every write of those crossed the tunnel to the
               # admission controller on the on-prem worker, synchronously, under
               # failurePolicy=Fail with a 10s timeout, and intermittently came
               # back "unexpected error when reading response body": a truncated
@@ -400,11 +401,11 @@ spec:
               webhooksCleanup:
                 enabled: true
                 image:
-                  tag: v1.19.2
+                  tag: v1.20.0
 
               test:
                 image:
-                  tag: v1.19.2
+                  tag: v1.20.0
 
               # CRDs
               crds:
@@ -415,7 +416,7 @@ spec:
             destinationNamespace: 'platform-ops'
             isPlatformOwned: 'false'
             repoURL: 'https://charts.external-secrets.io'
-            targetRevision: '2.14.0'
+            targetRevision: '2.15.0'
             path: ''
             chart: 'external-secrets'
             directoryRecurse: ''

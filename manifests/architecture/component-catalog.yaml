@@ -92,7 +92,7 @@ components:
     layer: machinery
     match: ["pkg:kubelet", "pkg:kubeadm", "pkg:kubectl"]
     behind:
-      - versions: ["1.35.10"]
+      - versions: ["1.36.6"]
         status: held
         reason: Follows the node's Kubernetes version
         blocked_by: Kubernetes
@@ -124,12 +124,15 @@ components:
     match: ["registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-controller-manager",
             "registry.k8s.io/kube-scheduler", "registry.k8s.io/kube-proxy", "registry.k8s.io/pause"]
     behind:
-      - versions: ["v1.35.10"]
+      - versions: ["v1.36.6"]
         status: held
-        reason: Policy engine supports 1.33-1.35 only
-        blocked_by: Kyverno
+        reason: >-
+          CloudNativePG 1.30 supports Kubernetes 1.34-1.36, Cilium 1.20 1.33-1.36 and the
+          Hetzner provider's v1.1.x line 1.32-1.36, so 1.36 is the highest version every
+          component supports. 1.37 is published and three components do not support it.
+        blocked_by: CloudNativePG
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["3.10.1"]
+      - versions: ["3.10.2"]
         status: held
         reason: Pause image chosen by kubeadm, not pinned here
         blocked_by: Kubernetes
@@ -141,7 +144,7 @@ components:
     layer: machinery
     match: ["registry.k8s.io/etcd"]
     behind:
-      - versions: ["3.6.6-0"]
+      - versions: ["3.6.8-0"]
         status: held
         reason: Chosen by kubeadm, not pinned here
         blocked_by: Kubernetes
@@ -153,7 +156,7 @@ components:
     layer: machinery
     match: ["registry.k8s.io/coredns/*"]
     behind:
-      - versions: ["v1.13.1"]
+      - versions: ["v1.14.2"]
         status: held
         reason: Chosen by kubeadm, not pinned here
         blocked_by: Kubernetes
@@ -284,6 +287,15 @@ components:
     # Cilium's releases, so a current certgen read as far behind.
     repos:
       quay.io/cilium/certgen: cilium/certgen
+    behind:
+      - versions: ["v0.4.13"]
+        status: held
+        reason: >-
+          certgen is its own project, shipped by the Cilium chart and vendored with it.
+          Cilium itself is current at v1.20.4; certgen moves when the chart does, and
+          editing it inside the vendored render would break that render's provenance
+          digest.
+        blocked_by: Cilium
   - name: agentgateway
     description: The gateway that serves application and platform routes.
     license: Apache-2.0
@@ -341,12 +353,6 @@ components:
     repo: hetznercloud/csi-driver
     layer: machinery
     match: ["docker.io/hetznercloud/*"]
-    behind:
-      - versions: ["v2.13.0"]
-        status: not assessed
-        reason: >-
-          Behind by several minors. Nobody has assessed the move; the driver is delivered as a
-          hand-assembled manifest, so its sidecars are pinned here rather than by a chart.
   - name: CSI sidecars
     description: The standard Kubernetes storage sidecars the CSI driver runs with.
     license: Apache-2.0
@@ -359,13 +365,6 @@ components:
       registry.k8s.io/sig-storage/livenessprobe: kubernetes-csi/livenessprobe
     layer: machinery
     match: ["registry.k8s.io/sig-storage/*"]
-    behind:
-      - versions: ["v1.13.2", "v2.13.0", "v2.15.0", "v4.8.1", "v5.2.0"]
-        status: not assessed
-        reason: >-
-          Five sidecars on five independent release series, pinned beside the storage driver's
-          manifest. Each has its own newest release; none has been assessed.
-        blocked_by: Hetzner CSI driver
   - name: Local path provisioner
     description: Node-local volumes on clusters without cloud block storage.
     license: Apache-2.0
@@ -383,6 +382,13 @@ components:
     description: Secret delivery. Copies each workload's secrets from the secret store into its namespace.
     license: Apache-2.0
     repo: external-secrets/external-secrets
+    # UPSTREAM TESTS ONE KUBERNETES MINOR. external-secrets supports only its
+    # current minor and states it runs no test coverage for any other Kubernetes
+    # version. Its table lists 1.37 for both 2.14 and 2.15, and the newest release
+    # tested against 1.36 is 2.13, which is already end-of-life. So at Kubernetes
+    # 1.36.6 the platform runs one minor below ESO's test matrix whichever ESO it
+    # picks; 2.15 is chosen because it is the supported release and 2.14 reached
+    # end-of-life on 2026-11-10.
     layer: machinery
     match: ["ghcr.io/external-secrets/*", "oci.external-secrets.io/*"]
   - name: Infisical
@@ -421,15 +427,6 @@ components:
     repo: cloudnative-pg/cloudnative-pg
     layer: capability
     match: ["ghcr.io/cloudnative-pg/cloudnative-pg"]
-    behind:
-      - versions: ["1.29.0"]
-        status: held
-        reason: >-
-          The newest release supports Kubernetes 1.34 to 1.36, above what the nodes run, so
-          the operator waits on the Kubernetes move. 1.29.x is already out of upstream
-          support.
-        blocked_by: Kubernetes
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: PostgreSQL
     description: The platform database and each application's database.
     license: PostgreSQL
@@ -439,7 +436,7 @@ components:
     layer: capability
     match: ["ghcr.io/cloudnative-pg/postgresql", docker.io/library/postgres]
     behind:
-      - versions: ["15-alpine", "16-alpine"]
+      - versions: ["16-alpine"]
         status: declined
         reason: >-
           Each application selects the newest major it supports, so these differ on purpose.
@@ -447,7 +444,7 @@ components:
           store documents support but has an unresolved fresh-install failure on it, and the
           secret store documents only a floor.
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["17.11-standard-bookworm"]
+      - versions: ["17.11-standard-bookworm", "18.6"]
         status: declined
         reason: Chosen per application; its consumers do not support 18
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
@@ -571,7 +568,7 @@ components:
     layer: machinery
     match: ["registry.k8s.io/kubectl", "docker.io/bitnami/kubectl", "docker.io/bitnamilegacy/kubectl"]
     behind:
-      - versions: ["v1.35.10"]
+      - versions: ["v1.36.6"]
         status: held
         reason: Held within one minor of the API server
         blocked_by: Kubernetes
@@ -603,7 +600,7 @@ components:
     layer: machinery
     match: ["docker.io/alpine/k8s"]
     behind:
-      - versions: ["1.35.10"]
+      - versions: ["1.36.6"]
         status: held
         reason: Tracks the cluster's Kubernetes minor
         blocked_by: Kubernetes

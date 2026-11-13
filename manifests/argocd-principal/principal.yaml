@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: argocd-agent-principal
-        image: quay.io/argoprojlabs/argocd-agent:v0.10.0@sha256:ec9baba6e81555bfa5ce1fa6252f06c6100b56ae7f85273ba2f7e2309303800d
+        image: quay.io/argoprojlabs/argocd-agent:v0.11.0@sha256:30f2e0472c6f50be6a4a3e5c7bf73cadbf34bea61e4e12bb35bc13dc32f7d245
         imagePullPolicy: IfNotPresent
         args:
         - principal

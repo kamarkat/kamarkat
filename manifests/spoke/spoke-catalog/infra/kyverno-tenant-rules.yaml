@@ -1,14 +1,14 @@
-# ADR-078 addendum 5 §5: one deduplication contract. Every rule group evaluates
-# at 30s, the stores' -dedup.minScrapeInterval, because the vendor rules out a
-# group interval longer than the dedup interval and a shorter one is below the
-# scrape resolution. A tenant rule group that declares any other interval is
-# refused at admission; one that declares none takes the evaluator's 30s.
-#
-# Platform rules (app.kubernetes.io/managed-by: platform) are the platform's own
-# and already conform; they are not this policy's to judge.
 ---
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+# ADR-078 addendum 5 §5: every rule group evaluates at the platform interval.
+#
+# The platform's own rule groups are excluded. The legacy policy did that with
+# an `exclude` block selecting on a label, which has no equivalent in
+# matchConstraints.excludeResourceRules -- that field selects by resource, not
+# by label. It is expressed as a negated matchCondition instead, which is
+# faithful: a false matchCondition SKIPS evaluation rather than denying, so a
+# platform-managed rule group is not governed, exactly as before.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
 metadata:
   name: tenant-rule-interval
   labels:
@@ -18,27 +18,38 @@ metadata:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     argocd.argoproj.io/sync-wave: "5"
 spec:
-  validationFailureAction: Enforce
-  background: true
-  rules:
-    - name: rule-groups-evaluate-at-30s
-      match:
-        any:
-          - resources:
-              kinds:
-                - monitoring.coreos.com/v1/PrometheusRule
-                - operator.victoriametrics.com/v1beta1/VMRule
-      exclude:
-        any:
-          - resources:
-              selector:
-                matchLabels:
-                  app.kubernetes.io/managed-by: platform
-      validate:
-        message: >-
-          Every rule group evaluates at 30s (ADR-078 addendum 5 §5). Leave
-          `interval` unset, or set it to 30s.
-        pattern:
-          spec:
-            groups:
-              - =(interval): "30s"
+  failurePolicy: Fail
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  autogen:
+    podControllers:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["monitoring.coreos.com"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["prometheusrules"]
+      - apiGroups: ["operator.victoriametrics.com"]
+        apiVersions: ["v1beta1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["vmrules"]
+  matchConditions:
+    - name: not-platform-managed
+      expression: >-
+        !(has(object.metadata.labels)
+          && 'app.kubernetes.io/managed-by' in object.metadata.labels
+          && object.metadata.labels['app.kubernetes.io/managed-by'] == 'platform')
+  validations:
+    # The legacy pattern used a conditional anchor, =(interval): "30s" -- if the
+    # field is present it must be 30s -- over every group in the list.
+    - expression: >-
+        !has(object.spec.groups)
+        || object.spec.groups.all(g, !has(g.interval) || g.interval == '30s')
+      message: >-
+        Every rule group evaluates at 30s (ADR-078 addendum 5 §5). Leave
+        `interval` unset, or set it to 30s.

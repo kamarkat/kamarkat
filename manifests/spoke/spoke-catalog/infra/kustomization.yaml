@@ -71,6 +71,11 @@ resources:
   # Generated: the kubernetes-mixin recording rules (ADR-078 add.3 §3).
   - platform-alerts/kubernetes-mixin-rules.yaml
   - kyverno-tenant-abi.yaml
+  # ADR-052 §4: burst placement is written by the platform and may not be
+  # declared by a fleet. These were authored and never delivered -- the file
+  # existed, ADR-052 and 86-burst-node-identity.sh referenced it, and no
+  # kustomization included it, so neither policy was ever in force on a spoke.
+  - kyverno-burst-placement.yaml
   - s3-credentials-es.yaml
   # ADR-035: Spoke-side cert-manager for certificate lifecycle management
   - cert-manager.yaml

@@ -700,7 +700,7 @@ spec:
         preKubeadmCommands:
           - set -x
           - export CONTAINERD=2.4.2
-          - export RUNC=1.5.2
+          - export RUNC=1.5.3
           - export TAILSCALE=1.104.4
           # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
           # /etc/kubernetes/k8s-version, which the controlPlaneKubernetesVersion patch on
@@ -891,7 +891,7 @@ spec:
       preKubeadmCommands:
         - set -x
         - export CONTAINERD=2.4.2
-        - export RUNC=1.5.2
+        - export RUNC=1.5.3
         # THE KUBERNETES VERSION IS NOT DECLARED HERE. It is read from
         # /etc/kubernetes/k8s-version, which the workerKubernetesVersion patch on
         # the ClusterClass writes from builtin.machineDeployment.version.
