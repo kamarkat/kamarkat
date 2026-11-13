@@ -38,7 +38,7 @@ const (
 	KubeadmControlPlaneProviderVersion = "v1.13.7"
 
 	// Infrastructure Providers
-	HetznerInfraProviderVersion = "v1.1.11"
+	HetznerInfraProviderVersion = "v1.1.12"
 
 	// Binaries the CLI downloads are NOT declared here.
 	//

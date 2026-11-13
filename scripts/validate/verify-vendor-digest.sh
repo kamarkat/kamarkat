@@ -126,6 +126,30 @@ else
   echo "OK: external-secrets chart $ESO_PINNED is the version vendored for spokes"
 fi
 
+# ── and for Reloader, whose hub pin is a COMPONENT DESCRIPTOR ───────────────
+#
+# Not the appset. The hub installs Reloader as an Argo component, so its chart
+# version lives in manifests/argocd/components/01/, and a parity check that only
+# knew about the appset missed it: the spoke render was moved to 2.2.20 while the
+# hub stayed on 2.2.19, and the release's own reasons check caught it rather than
+# this gate (2026-11-14).
+RELOADER_COMPONENT="manifests/argocd/components/01/stakater-reloader.yaml"
+RELOADER_VENDORED=$(grep -m1 '^# Source:.*chart reloader ' "$RELOADER" \
+  | sed 's/.*chart reloader //;s/,.*//' || true)
+RELOADER_PINNED=$(grep -m1 '^targetRevision:' "$RELOADER_COMPONENT" \
+  | sed 's/^targetRevision:[[:space:]]*//' || true)
+if [ -z "$RELOADER_VENDORED" ] || [ -z "$RELOADER_PINNED" ]; then
+  echo "FAIL: could not read reloader's version from both places (vendored='$RELOADER_VENDORED' pinned='$RELOADER_PINNED')"
+  FAIL=1
+elif [ "$RELOADER_VENDORED" != "$RELOADER_PINNED" ]; then
+  echo "FAIL: RELOADER VERSION SPLIT — the management cluster pulls chart $RELOADER_PINNED and"
+  echo "      the spokes apply a render of chart $RELOADER_VENDORED. Move both together:"
+  echo "      bash scripts/renovate/revendor-reloader.sh $RELOADER_PINNED"
+  FAIL=1
+else
+  echo "OK: reloader chart $RELOADER_PINNED is the version vendored for spokes"
+fi
+
 if [ "$FAIL" -ne 0 ]; then
   echo ""
   echo "Vendored manifests have been modified without re-rendering."
