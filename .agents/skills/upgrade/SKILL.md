@@ -194,6 +194,13 @@ When a component's upgrade path is blocked but a fresh install is not,
 recreating is often smaller than upgrading. Say so rather than designing a
 migration nobody asked for.
 
+**A major platform release is already decided, and it is not a migration.** ADR-111
+Revision 9: a major replaces the box -- a fresh box with its own `boxId`, prepared
+beside the predecessor and cut over to -- because restoring across a contract
+change is forbidden by the same ADR. So for a component whose bump the platform
+takes in a major, the question is which box it lands in, not how to migrate the
+running one. Do not design an in-place path for it.
+
 ## 6. Apply, in source only
 
 - Edit the source tree, never a generated mirror. Generated copies are rebuilt

@@ -19,6 +19,7 @@ happens, and what to do instead.
 - [Re-rendering without reproducing first](#re-rendering-without-reproducing-first)
 - [Round-tripping a file that carries comments](#round-tripping-a-file-that-carries-comments)
 - [A script that succeeds and changes nothing](#a-script-that-succeeds-and-changes-nothing)
+- [Adding a required value and leaving the fixtures behind](#adding-a-required-value-and-leaving-the-fixtures-behind)
 - [Upgrading a component on one side only](#upgrading-a-component-on-one-side-only)
 - [Sweeping only the components that have descriptors](#sweeping-only-the-components-that-have-descriptors)
 - [Editing a constant nothing reads](#editing-a-constant-nothing-reads)
@@ -183,6 +184,44 @@ brittle assumption: a `grep -A1` that assumed two keys were adjacent, say.
 "ran and changed nothing" as a result to verify, never to accept. When you find
 one, fix the detection rather than working around it — and make the failure
 print its reason.
+
+## Adding a required value and leaving the fixtures behind
+
+**Looks like:** a component bump or contract change that introduces a per-box
+value with no safe default, so the template uses `required`. The real paths are
+updated in the same commit — the box template declares it, Day-0 seeds it, the
+operator reads it — and the change looks complete.
+
+**Why it fails:** nothing renders the chart the way a box does. Every gate renders
+it with a hand-written list of example values (`boxId=example-box`,
+`environmentSlug=dev`, `hubDomain=dev.example.test` …), and those lists are
+written out, not derived — so a newly required value is missing from all of them
+at once. The chart's own `values.yaml` does not save you either: `required`
+rejects an **empty string**, not just an absent key, so the usual `key: ""`
+placeholder fails exactly like no key at all. There are six such renders, and the
+failure arrives one at a time, minutes into packaging. Worse, a render whose
+stderr is discarded and piped into a checker produces an *empty stream*: the
+checker finds nothing wrong with nothing and the gate reports clean.
+
+A nested value fails differently again and more quietly. A template reading
+`.Values.global.management.infisicalEnvironmentSlug` against a chart that
+declares no `management` map hits a nil pointer and renders **nothing**, which
+the packager reports as "component produces no objects" and blames the component.
+A flat key that is merely absent renders empty and passes. That difference is why
+the nested case went unnoticed until an overlay templated one.
+
+**Instead:** when you add a `required`, find every renderer before you commit —
+
+```bash
+grep -rn "helm template" scripts .github | grep -i "environment-manager\|platform-bundle"
+```
+
+— and add the value to each fixture, using what a box actually declares (for the
+management scope, `management`, from gitops-template's `templates/mgmt/values.yaml`).
+Never add a chart default to get a gate green: the default is the thing the
+`required` exists to refuse. If a gate pipes a render into a checker, render to a
+file and fail on the render's own exit code, so an unrenderable bundle is a
+failure rather than a clean report.
 
 ## Upgrading a component on one side only
 

@@ -14,6 +14,7 @@ skill — this file is only the ones a version change causes.
 - [Gate: tree behind its upstream](#gate-tree-behind-its-upstream)
 - [Gate: operator defaults](#gate-operator-defaults)
 - [Gate: Day-0 seed parity](#gate-day-0-seed-parity)
+- [Gate: a value the fixtures do not supply](#gate-a-value-the-fixtures-do-not-supply)
 - [The kubeadm constants scraper](#the-kubeadm-constants-scraper)
 - [The reasons check](#the-reasons-check)
 - [Order to fix them in](#order-to-fix-them-in)
@@ -85,6 +86,36 @@ GitOps, so the constant and the declaration must agree.
 
 Moving one half and not the others is the whole failure mode. Move them in one
 commit.
+
+## Gate: a value the fixtures do not supply
+
+```
+platform-bundle: released render failed:
+  Error: execution error at (environment-manager/templates/04-tenant-services-appset.yaml:34:14):
+  management.infisicalEnvironmentSlug is required (ADR-111 Revision 7) ...
+```
+
+The bundle chart requires a per-box value, and the gate's example values do not
+include it. Not a pin problem and not a chart problem: the fixture is short.
+
+Six places render this chart, each with its own hand-written `--set` list, so one
+new `required` breaks all six and they fail one at a time:
+
+| Renderer | What it checks |
+| :- | :- |
+| `scripts/package/bundle-chart.sh` | the released render produces the boundaries |
+| `scripts/package/publish.sh` | application specs, per environment × provider |
+| `scripts/validate/support-matrix.sh` | the support matrix, both halves |
+| `scripts/validate/bundle-portability.sh` | no portability reference survives |
+| `scripts/validate-argocd-seed-parity.sh` | Day-0 seeds what the bundle reconciles |
+| `scripts/validate-cluster-name-contract.sh` | selector keys |
+| `scripts/validate/preflight/10-manifest-renders.sh` | the chart renders at all |
+
+Add the value to every one of them, with what a box declares. Never give the
+chart a default to clear the gate — see
+[traps.md](traps.md#adding-a-required-value-and-leaving-the-fixtures-behind) for
+why, and for the nil-map variant that reports "renders no objects" and blames the
+wrong component.
 
 ## The kubeadm constants scraper
 
