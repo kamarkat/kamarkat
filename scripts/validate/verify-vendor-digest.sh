@@ -1,160 +1,194 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify that the SHA-256 digest in the provenance header matches
-# the actual rendered content. Catches:
-#   - Manual edits to vendored manifests without re-rendering
-#   - Tampered artifacts
+# Verify every vendored chart render against its own provenance, and against the
+# management cluster's pin of the same chart. Catches:
+#   - manual edits to vendored manifests without re-rendering
+#   - tampered artifacts
 #   - Renovate PRs that bump the version but don't re-vendor
+#   - a chart moved on the management cluster and not on the spokes, or vice versa
 #
-# The last of those is completed rather than merely refused:
+# The third is completed rather than merely refused:
 # .github/workflows/revendor-kyverno.yml re-renders on Renovate's branch and
 # commits, so a proposal has something to pass. Refusing without that left a
 # pull request that could only ever fail, which teaches people to merge past the
 # check rather than to trust it.
 #
+# NOTHING HERE IS A LIST. Both sides are discovered:
+#
+#   the vendored renders   every file under manifests/ carrying a `# sha256:`
+#                          provenance line
+#   the management pins    BOTH mechanisms that pin a remote chart, which
+#                          references/pin-locations.md states in one sentence --
+#                          "a component descriptor under
+#                          manifests/argocd/components/<boundary>/, OR an element
+#                          in a boundary appset under
+#                          manifests/argocd/environment-manager/templates/"
+#
+# This script used to name four components and read only the appset. That is how
+# Reloader was moved to chart 2.2.20 on the spokes while the hub stayed on
+# 2.2.19: its pin is a component descriptor, the gate did not look there, and the
+# release's reasons check caught the split instead (2026-11-14). A gate that
+# enumerates the locations it was told about protects only those; a fifth
+# component, or a chart that changes mechanism, now lands inside the check
+# without anyone noticing it needs to.
+#
 # Usage: bash scripts/validate/verify-vendor-digest.sh
 
-SPOKE_DIR="manifests/spoke/spoke-catalog/infra/kyverno"
-CNPG_DIR="manifests/spoke/spoke-catalog/infra/cloudnative-pg"
-ESO_DIR="manifests/spoke/spoke-catalog/infra/external-secrets"
-RELOADER="manifests/spoke/spoke-catalog/infra/reloader/controller.yaml"
 FAIL=0
 
-for file in "$SPOKE_DIR"/crd.yaml "$SPOKE_DIR"/controller.yaml \
-            "$CNPG_DIR"/crd.yaml "$CNPG_DIR"/controller.yaml \
-            "$ESO_DIR"/crd.yaml "$ESO_DIR"/controller.yaml \
-            "$RELOADER"; do
-  if [ ! -f "$file" ]; then
-    echo "ERROR: $file not found"
-    FAIL=1
-    continue
-  fi
-
-  # `|| true` matters: under `set -euo pipefail` a grep that matches nothing
-  # kills the script here, before the branch below can say why. A gate that
-  # dies without a message is indistinguishable from an infrastructure fault.
-  RECORDED_HASH=$(grep '^# sha256:' "$file" | head -1 | sed 's/^# sha256: //' || true)
-  if [ -z "$RECORDED_HASH" ]; then
-    echo "ERROR: No sha256 digest found in $file"
-    FAIL=1
-    continue
-  fi
-
-  # Hash everything except the provenance header lines (# comments).
-  # scripts/renovate/revendor-kyverno.sh writes the digest under this same
-  # rule; the two must agree or every re-vendor produces a failing gate.
-  ACTUAL_HASH=$(grep -v '^# ' "$file" | sha256sum | cut -d' ' -f1)
-
-  if [ "$RECORDED_HASH" = "$ACTUAL_HASH" ]; then
-    echo "OK: $file digest matches"
-  else
-    echo "FAIL: $file digest mismatch (recorded=$RECORDED_HASH actual=$ACTUAL_HASH)"
-    FAIL=1
-  fi
-done
-
-# ── the two places kyverno's version is declared must agree ──────────────
+# ─── 1. every vendored render matches its own digest ─────────────────────────
 #
-# ONE VERSION PER COMPONENT, EVERYWHERE IT RUNS. The management cluster pulls
-# the kyverno chart by targetRevision; the workload clusters apply the vendored
-# render of that same chart. Nothing connected the two, so the hub could be
-# moved to a new chart while every spoke kept applying the old render -- the
-# release would report kyverno twice at two versions with nobody having decided
-# that, which is the split the upgrade policy exists to prevent.
-#
-# Read from the provenance header rather than from a second list, so there is no
-# third place to keep in step.
-APPSET="manifests/argocd/environment-manager/templates/01-platform-infra-appset.yaml"
-VENDORED=$(grep -m1 '^# Vendored from helm chart kyverno v' "$SPOKE_DIR/controller.yaml" \
-  | sed 's/.*kyverno v//;s/ .*//' || true)
-# The element's targetRevision is tens of lines below its repoURL, so read from
-# the repoURL to the first targetRevision after it.
-PINNED=$(awk "/repoURL: 'https:\/\/kyverno.github.io\/kyverno'/,0" "$APPSET" \
-  | grep -m1 targetRevision | sed "s/.*targetRevision: '//;s/'.*//" || true)
-
-if [ -z "$VENDORED" ] || [ -z "$PINNED" ]; then
-  echo "FAIL: could not read kyverno's version from both places (vendored='$VENDORED' pinned='$PINNED')"
-  FAIL=1
-elif [ "$VENDORED" != "$PINNED" ]; then
-  echo "FAIL: KYVERNO VERSION SPLIT — the management cluster pulls chart $PINNED and the"
-  echo "      spokes apply a render of chart $VENDORED. Move both together:"
-  echo "      bash scripts/renovate/revendor-kyverno.sh $PINNED"
-  FAIL=1
-else
-  echo "OK: kyverno chart $PINNED is the version vendored for spokes"
-fi
-
-# ── the same contract for CloudNativePG ──────────────────────────────────
-#
-# Its hub Application pulls the chart; the spokes apply a vendored render of it.
-# Until now neither half was checked: the render carried no digest and nothing
-# compared the two versions, so a chart bump on the hub would have left every
-# spoke on the old operator with nothing reporting it.
-CNPG_APP="manifests/hub-core-services/cloudnative-pg/application.yaml"
-CNPG_VENDORED=$(grep -m1 '^# Vendored from helm chart cloudnative-pg v' "$CNPG_DIR/controller.yaml" \
-  | sed 's/.*cloudnative-pg v//;s/ .*//' || true)
-CNPG_PINNED=$(grep -m1 'targetRevision:' "$CNPG_APP" \
-  | sed 's/.*targetRevision:[[:space:]]*//' || true)
-
-if [ -z "$CNPG_VENDORED" ] || [ -z "$CNPG_PINNED" ]; then
-  echo "FAIL: could not read cloudnative-pg's version from both places (vendored='$CNPG_VENDORED' pinned='$CNPG_PINNED')"
-  FAIL=1
-elif [ "$CNPG_VENDORED" != "$CNPG_PINNED" ]; then
-  echo "FAIL: CLOUDNATIVE-PG VERSION SPLIT — the management cluster pulls chart $CNPG_PINNED and"
-  echo "      the spokes apply a render of chart $CNPG_VENDORED. Move both together:"
-  echo "      bash scripts/renovate/revendor-cnpg.sh $CNPG_PINNED"
-  FAIL=1
-else
-  echo "OK: cloudnative-pg chart $CNPG_PINNED is the version vendored for spokes"
-fi
-
-# ── and for External Secrets, whose hub Application pulls the same chart ─────
-ESO_VENDORED=$(grep -m1 '^# Vendored from helm chart external-secrets v' "$ESO_DIR/controller.yaml" \
-  | sed 's/.*external-secrets v//;s/ .*//' || true)
-ESO_PINNED=$(awk "/repoURL: 'https:\/\/charts.external-secrets.io'/,0" "$APPSET" \
-  | grep -m1 targetRevision | sed "s/.*targetRevision: '//;s/'.*//" || true)
-if [ -z "$ESO_VENDORED" ] || [ -z "$ESO_PINNED" ]; then
-  echo "FAIL: could not read external-secrets' version from both places (vendored='$ESO_VENDORED' pinned='$ESO_PINNED')"
-  FAIL=1
-elif [ "$ESO_VENDORED" != "$ESO_PINNED" ]; then
-  echo "FAIL: EXTERNAL-SECRETS VERSION SPLIT — the management cluster pulls chart $ESO_PINNED"
-  echo "      and the spokes apply a render of chart $ESO_VENDORED. Move both together:"
-  echo "      bash scripts/renovate/revendor-eso.sh $ESO_PINNED"
-  FAIL=1
-else
-  echo "OK: external-secrets chart $ESO_PINNED is the version vendored for spokes"
-fi
-
-# ── and for Reloader, whose hub pin is a COMPONENT DESCRIPTOR ───────────────
-#
-# Not the appset. The hub installs Reloader as an Argo component, so its chart
-# version lives in manifests/argocd/components/01/, and a parity check that only
-# knew about the appset missed it: the spoke render was moved to 2.2.20 while the
-# hub stayed on 2.2.19, and the release's own reasons check caught it rather than
-# this gate (2026-11-14).
-RELOADER_COMPONENT="manifests/argocd/components/01/stakater-reloader.yaml"
-RELOADER_VENDORED=$(grep -m1 '^# Source:.*chart reloader ' "$RELOADER" \
-  | sed 's/.*chart reloader //;s/,.*//' || true)
-RELOADER_PINNED=$(grep -m1 '^targetRevision:' "$RELOADER_COMPONENT" \
-  | sed 's/^targetRevision:[[:space:]]*//' || true)
-if [ -z "$RELOADER_VENDORED" ] || [ -z "$RELOADER_PINNED" ]; then
-  echo "FAIL: could not read reloader's version from both places (vendored='$RELOADER_VENDORED' pinned='$RELOADER_PINNED')"
-  FAIL=1
-elif [ "$RELOADER_VENDORED" != "$RELOADER_PINNED" ]; then
-  echo "FAIL: RELOADER VERSION SPLIT — the management cluster pulls chart $RELOADER_PINNED and"
-  echo "      the spokes apply a render of chart $RELOADER_VENDORED. Move both together:"
-  echo "      bash scripts/renovate/revendor-reloader.sh $RELOADER_PINNED"
-  FAIL=1
-else
-  echo "OK: reloader chart $RELOADER_PINNED is the version vendored for spokes"
-fi
-
-if [ "$FAIL" -ne 0 ]; then
-  echo ""
-  echo "Vendored manifests have been modified without re-rendering."
-  echo "Run: bash scripts/renovate/revendor-kyverno.sh"
+# Hash everything except the provenance header lines. `grep -v '^# '` DROPS
+# "# " prose and KEEPS bare "#" separators, which the headers contain; the
+# re-vendor scripts write the digest under this same rule, and the digest line
+# itself starts with "# " so it cannot affect its own hash.
+VENDORED=$(grep -rl '^# sha256: ' manifests 2>/dev/null | grep -v '/embedded/' | sort || true)
+if [ -z "$VENDORED" ]; then
+  echo "FAIL: no vendored render carries a provenance digest -- this gate would pass vacuously"
   exit 1
 fi
 
-echo "All vendor digests verified."
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  RECORDED=$(grep -m1 '^# sha256: ' "$file" | sed 's/^# sha256: //' || true)
+  if [ -z "$RECORDED" ]; then
+    echo "FAIL: no sha256 digest found in $file"
+    FAIL=1
+    continue
+  fi
+  ACTUAL=$(grep -v '^# ' "$file" | sha256sum | cut -d' ' -f1)
+  if [ "$RECORDED" = "$ACTUAL" ]; then
+    echo "OK: $file digest matches"
+  else
+    echo "FAIL: $file digest mismatch (recorded=$RECORDED actual=$ACTUAL)"
+    FAIL=1
+  fi
+done <<EOF
+$VENDORED
+EOF
+
+# ─── 2. the management pin and the vendored render name one chart version ────
+#
+# ONE VERSION PER COMPONENT, EVERYWHERE IT RUNS. The management cluster pulls
+# the chart; the spokes apply a render of that chart. Nothing else connects them,
+# so a split is silent: the release reports the component twice at two versions
+# with nobody having decided that.
+if ! PARITY=$(python3 - "$VENDORED" <<'PY'
+import glob, os, re, sys, yaml
+
+vendored_files = [f for f in sys.argv[1].split("\n") if f.strip()]
+
+# The vendored side: chart name and version, in either header spelling.
+HEADERS = (
+    re.compile(r'^#\s*Vendored from helm chart\s+(?P<chart>[\w.-]+)\s+v?(?P<ver>[\w.+-]+)', re.M),
+    re.compile(r'^#\s*Source:.*?\bchart\s+(?P<chart>[\w.-]+)\s+v?(?P<ver>[\d][\w.+-]*)', re.M),
+)
+vendored = {}
+for path in vendored_files:
+    head = "".join(l for l in open(path, encoding="utf-8") if l.startswith("#"))
+    for pat in HEADERS:
+        m = pat.search(head)
+        if m:
+            vendored.setdefault(m.group("chart"), {})[m.group("ver")] = path
+            break
+    else:
+        print(f"FAIL: {path} carries a digest but no readable chart/version header, "
+              f"so its version cannot be compared with the management pin")
+        sys.exit(1)
+
+# The management side: BOTH mechanisms from pin-locations.md.
+pins = {}
+
+# FOUND BY SHAPE, NOT BY PATH. pin-locations.md names two mechanisms -- a
+# component descriptor and an appset element -- and there is a third it does not:
+# an ArgoCD Application manifest, which is how CloudNativePG is pinned
+# (manifests/hub-core-services/cloudnative-pg/application.yaml). Scanning the two
+# documented directories reported CNPG as having no management pin at all, which
+# is a false OK and worse than the hardcoded list it replaced. So the rule is the
+# SHAPE of a remote-chart pin -- a repoURL beginning http, a chart, and a
+# targetRevision -- wherever it appears under manifests/.
+for path in sorted(glob.glob("manifests/**/*.yaml", recursive=True)):
+    if "/embedded/" in path or "/environment-manager/templates/" in path:
+        continue
+    try:
+        docs = [d for d in yaml.safe_load_all(open(path, encoding="utf-8")) if isinstance(d, dict)]
+    except yaml.YAMLError:
+        continue
+    for d in docs:
+        # a component descriptor holds the triple at the top level; an ArgoCD
+        # Application holds it under spec.source (or each of spec.sources).
+        candidates = [d]
+        spec = d.get("spec") if isinstance(d.get("spec"), dict) else {}
+        if isinstance(spec.get("source"), dict):
+            candidates.append(spec["source"])
+        for src in spec.get("sources") or []:
+            if isinstance(src, dict):
+                candidates.append(src)
+        for c in candidates:
+            repo, chart, rev = c.get("repoURL") or "", c.get("chart") or "", c.get("targetRevision")
+            if str(repo).startswith("http") and chart and rev not in (None, ""):
+                pins.setdefault(str(chart), {})[str(rev)] = path
+
+# An appset element spreads repoURL, chart and targetRevision over tens of
+# lines, so the triple is accumulated per element rather than matched on one.
+for path in sorted(glob.glob("manifests/argocd/environment-manager/templates/*.yaml")):
+    text = open(path, encoding="utf-8").read()
+    cur = {}
+    for line in text.splitlines():
+        for key in ("repoURL", "chart", "targetRevision"):
+            m = re.match(rf"\s*{key}:\s*'?\"?([^'\"#]+?)'?\"?\s*$", line)
+            if m:
+                if key == "repoURL" and cur.get("repoURL"):
+                    cur = {}            # a new element begins at its repoURL
+                cur[key] = m.group(1).strip()
+        if {"repoURL", "chart", "targetRevision"} <= cur.keys():
+            if cur["repoURL"].startswith("http") and cur["chart"] and cur["targetRevision"]:
+                pins.setdefault(cur["chart"], {})[cur["targetRevision"]] = path
+            cur = {}
+
+failed = False
+for chart in sorted(vendored):
+    vers = vendored[chart]
+    if len(vers) > 1:
+        print(f"FAIL: {chart} is vendored at more than one version: "
+              f"{', '.join(f'{v} ({os.path.basename(p)})' for v, p in sorted(vers.items()))}")
+        failed = True
+        continue
+    vver, vpath = next(iter(vers.items()))
+    if chart not in pins:
+        # Spoke-only by design for some components; stated rather than assumed.
+        print(f"OK: {chart} chart {vver} is vendored for spokes; the management cluster pins no chart for it")
+        continue
+    pvers = pins[chart]
+    if len(pvers) > 1:
+        print(f"FAIL: {chart} is pinned at more than one version on the management cluster: "
+              f"{', '.join(f'{v} ({os.path.basename(p)})' for v, p in sorted(pvers.items()))}")
+        failed = True
+        continue
+    pver, ppath = next(iter(pvers.items()))
+    if pver != vver:
+        print(f"FAIL: {chart.upper()} VERSION SPLIT — the management cluster pulls chart {pver}")
+        print(f"      ({ppath}) and the spokes apply a render of chart {vver}.")
+        print(f"      Move both together, then re-vendor:")
+        print(f"        bash scripts/renovate/revendor-{chart}.sh {pver}")
+        failed = True
+    else:
+        print(f"OK: {chart} chart {pver} is the version vendored for spokes")
+
+sys.exit(1 if failed else 0)
+PY
+); then
+  FAIL=1
+fi
+printf '%s\n' "$PARITY"
+
+if [ "$FAIL" -ne 0 ]; then
+  echo ""
+  echo "Vendored manifests have been modified without re-rendering, or a chart's"
+  echo "management pin and its vendored render disagree."
+  echo "Re-vendor with the script for that component under scripts/renovate/."
+  exit 1
+fi
+
+echo "All vendor digests and chart-version parity verified."

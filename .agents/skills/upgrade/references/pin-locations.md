@@ -77,10 +77,23 @@ Two habits handle this:
 
 ## Remote chart descriptors
 
-A component descriptor under `manifests/argocd/components/<boundary>/`, or an
-element in a boundary appset under
-`manifests/argocd/environment-manager/templates/`, that names a `repoURL`
-beginning `http` and a `chart`. Its `targetRevision` is the **chart** version.
+**Three** mechanisms, not two, and they are easy to mistake for one:
+
+| Shape | Where | Example |
+| :- | :- | :- |
+| component descriptor | `manifests/argocd/components/<boundary>/` | Reloader |
+| appset element | `manifests/argocd/environment-manager/templates/` | Kyverno, External Secrets |
+| ArgoCD `Application` | anywhere, the triple under `spec.source` | CloudNativePG |
+
+Each names a `repoURL` beginning `http` and a `chart`. Its `targetRevision` is
+the **chart** version.
+
+Find them by SHAPE rather than by path -- that triple, wherever it appears under
+`manifests/` -- because listing the directories is how one gets missed. This
+reference said "two" until 2026-11-14, Reloader's pin was the mechanism not
+checked, and its chart was moved on the spokes while the hub stayed behind;
+`scripts/validate/verify-vendor-digest.sh` now discovers all three by shape and
+is negative-controlled against each one.
 
 Change by editing `targetRevision`. Resolve the chart→app pair first; the
 application version is not what goes here.
