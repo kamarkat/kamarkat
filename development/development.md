@@ -1,8 +1,25 @@
 # Hub boostratp
 
-- zero-ops/docs/onboarding-an-application.md
+- docs/onboarding-an-application.md
 
 ## Local Testing
+
+### Where the names come from
+
+A box mints its own names, so none of them can be typed from memory. The checkout
+the e2e loop leaves behind is `.local-e2e/<tenant>-gitops-<timestamp>`, and the
+names are in its own declaration:
+
+```
+BOX=$(ls -d .local-e2e/nutgraf-gitops-* | tail -1)
+MGMT=$(sed -n 's/^managementClusterName:[[:space:]]*//p' "$BOX/registry/box.yaml")
+KC=~/.kamarkat/run/kubeconfig/$MGMT.kubeconfig
+```
+
+The harness does the same thing itself (`box_dir`, `box_hub` in local-e2e.sh), so
+a phase run on its own finds the box a previous run created. Kubeconfigs are in
+the operator's store, never in a checkout.
+
 ### A rule of thumb: 
 #### CLI change → 
 ./scripts/dev/local-e2e.sh 0.1.16-rc.60 clean cli scaffold bootstrap
@@ -27,7 +44,7 @@ PROVIDER=hybrid make e2e-workload VERSION=0.1.16-rc.60
 
 PROVIDER=hybrid ./scripts/dev/local-e2e.sh 0.1.16-rc.60 cli bootstrap
 
-./bin/kakt reseed --kubeconfig .local-e2e/acme-gitops/k8-secrets/kubeconfig/acme-hub.kubeconfig \
+./bin/kakt reseed --kubeconfig ~/.kamarkat/run/kubeconfig/$MGMT.kubeconfig \
                    --bundle-version 0.1.16-rc.60
 
 DOMAIN=nutgraf.in PROVIDER=hybrid ./scripts/dev/local-e2e.sh 0.1.16-rc.60 \
@@ -35,25 +52,27 @@ DOMAIN=nutgraf.in PROVIDER=hybrid ./scripts/dev/local-e2e.sh 0.1.16-rc.60 \
 
 #### Chart Change
 1. Publish the fix as rc.4 — this is a chart change, so it needs a new version:
-cd /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
+cd /Users/arun_subramanian/Projects/soloz-io/ide/kamarkat
 export PATH="$HOME/.local/helm3:$PATH"
 make publish-local VERSION=0.1.16-rc.60
-2. Promote the running cluster — one edit, both fields, exactly as Renovate would:
-cd .local-e2e/acme-gitops
-sed -i '' 's/0\.1\.16-rc\.40/0.1.16-rc.60/g' clusters/acme-hub/bundle.yaml clusters/acme-hub/values.yaml 
-git commit -am "promote acme-hub to 0.1.16-rc.60" && git push
-cd ../..
+2. Promote the running cluster — one edit, both fields:
+cd "$BOX"
+sed -i '' 's/0\.1\.16-rc\.40/0.1.16-rc.60/g' \
+  registry/clusters/$MGMT/bundle.yaml registry/clusters/$MGMT/values.yaml
+git commit -am "promote $MGMT to 0.1.16-rc.60" && git push
+cd -
 3. Resume the bootstrap once it's Synced, to finish adr045-commit and what follows:
 ./scripts/dev/local-e2e.sh 0.1.16-rc.60 bootstrap
 It skips provisioning (the cluster reports Provisioned) and picks up where it stopped.
 
 #### Promote new chart at tenant box
 
-Update targetRevision and bundleVersion value in below,
-- registry/clusters/nutgraf-01/bundle.yaml 
-- registry/clusters/nutgraf-hub/bundle.yaml
+Update targetRevision and bundleVersion value in each cluster's bundle.yaml --
+the management cluster and every workload cluster:
+- registry/clusters/$MGMT/bundle.yaml
+- registry/clusters/<workload cluster>/bundle.yaml
 
-KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfig \
+KUBECONFIG=~/.kamarkat/run/kubeconfig/$MGMT.kubeconfig \
   scripts/argocd-hard-sync.sh --promote 0.1.16-rc.112
 
 #### MAC DNS cache clearance
@@ -61,32 +80,53 @@ KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfi
 - ! sudo networksetup -setdnsservers Wi-Fi 1.1.1.1 8.8.8.8   
 
 ## Tenant repo testing
-### Once, on a branch you've pushed (ArgoCD reads git, not your working tree)
-./kakt box init --tenant local --box soloz-io --domain local.nutgraf.in \
-  --bundle-version development
-cd local-gitops-* && ../kakt tenant add-management
 
+### Once, on a branch you've pushed (ArgoCD reads git, not your working tree)
+
+box init runs in an EMPTY directory and mints the box's three names from one
+timestamp, so nothing below can be typed from memory -- read them back from the
+checkout it leaves.
+
+A development box pins the branch of the checkout that supplied the template, is
+bootstrapped LOCALLY and carries no bootstrap workflow; add-management prints
+the sequence.
+
+mkdir -p ~/kamarkat/boxes/local && cd ~/kamarkat/boxes/local
+
+KAKT=/Users/arun_subramanian/Projects/soloz-io/ide/kamarkat/bin/kakt
+
+$KAKT box init --tenant local --box soloz-io --domain local.nutgraf.in \
+  --bundle-version development
+
+BOX=$(ls -d local-gitops-* | tail -1)
+cd "$BOX" && $KAKT tenant add-management
+MGMT=$(sed -n 's/^managementClusterName:[[:space:]]*//p' registry/box.yaml)
+
+### The escrow this box declares, and the organization that holds it:
+### kakt escrow init --gitops-dir . --name <project> records the organization
+### and fills registry/box.yaml + registry/clusters/$MGMT/values.yaml in. A box
+### declaring none is refused for escrow-backed access.
 https://app.infisical.com/organizations/89f6d208-ea9b-4b6d-b4bd-a249f50ead8d/identities/671e356d-76ad-4886-8357-635abf19d435
 
-### box init mints the box's three names, creates + pushes the repo with NO
-### clusters, sets the secrets and leaves a checkout; add-management declares the
-### first cluster in it (no --name), which you then commit and push yourself.
-### A run that stops part-way: kakt box init --resume <checkout>
-cd local-gitops
+### add-management declares the first cluster (no --name), which you commit and
+### push yourself. A run that stops part-way: kakt box init --resume <checkout>
 
-export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/k8-secrets/hetzner/token)
+export HCLOUD_TOKEN=$(cat ~/.kamarkat/hetzner/token)
 
-/Users/arun_subramanian/Projects/soloz-io/ide/zero-ops/kakt bootstrap --name local-hub --provider hetzner --region hel1 \
-  --gitops-dir .
+$KAKT bootstrap-mgmt --name "$MGMT" --gitops-dir .
 
 ## Cluster Teardown
 
-./kakt teardown --name test-hub --confirm
+./kakt teardown --name "$MGMT" --confirm
 
 ## Fresh Bootstrap
 
-./kakt bootstrap \
-  --name devbox \
+The command is bootstrap-mgmt, and the name is the box's own management cluster
+(registry/box.yaml: managementClusterName) -- it is not a name you choose here.
+
+./kakt bootstrap-mgmt \
+  --name "$MGMT" \
+  --gitops-dir . \
   --provider hetzner \
   --region hel1 \
   --on-prem \
@@ -98,10 +138,10 @@ export HCLOUD_TOKEN=$(cat /Users/arun_subramanian/Projects/soloz-io/ide/zero-ops
 - gh release create v0.1.14 --generate-notes
 - gh run watch
 
-- ./bin/kakt reseed --kubeconfig k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \
-  --bundle-version 0.1.14     
+- ./bin/kakt reseed --kubeconfig ~/.kamarkat/run/kubeconfig/$MGMT.kubeconfig \
+  --bundle-version 0.1.14
 
-- KUBECONFIG=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \                   
+- KUBECONFIG=~/.kamarkat/run/kubeconfig/$MGMT.kubeconfig \
   kubectl get app platform-infisical-db -n platform-ops \
   -o jsonpath='{.spec.source.helm.values}{"\n"}'
 

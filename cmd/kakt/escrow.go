@@ -208,10 +208,19 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 	// identity Infisical cannot return it -- it is readable once -- and the copy
 	// a running box authenticates with is already in this directory. Overwriting
 	// it with nothing would take that box's credential away.
+	//
+	// The ORGANIZATION is recorded with them, and this is the only place that
+	// knows it: it is the organization of the session that just created or
+	// adopted the project, stated by the server at login rather than chosen by
+	// anyone. Without it a box declares no organization, and the check that
+	// keeps a session from another organization away from a box's escrowed
+	// material has nothing to compare against -- see
+	// hubaccess.authorizeAdministrator, which now refuses instead of skipping.
 	values := map[string]string{
 		"INFISICAL_ESCROW_URL":        escrowURL,
 		"INFISICAL_ESCROW_CLIENT_ID":  clientID,
 		"INFISICAL_ESCROW_PROJECT_ID": projectID,
+		"INFISICAL_ESCROW_ORG_ID":     strings.TrimSpace(s.OrgID),
 	}
 	if strings.TrimSpace(clientSecret) != "" {
 		values["INFISICAL_ESCROW_CLIENT_SECRET"] = clientSecret
@@ -220,6 +229,40 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		pth := filepath.Join(out, name)
 		if err := os.WriteFile(pth, []byte(value), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", pth, err)
+		}
+	}
+
+	// THE BOX'S OWN DECLARATION, corrected where it is incomplete.
+	//
+	// Run inside a box's repository, this command holds the two things the
+	// correction needs at once: the escrow that box uses, and the organization
+	// that holds it. Boxes rendered before the organization was recorded
+	// declare an empty one, and an empty one is now refused rather than
+	// skipped -- so without this the only way to fix a running box would be to
+	// re-create it, which would mean a new box id, a new repository and
+	// unreachable escrowed material.
+	//
+	// It changes a file in the operator's checkout and nothing else: committing
+	// and pushing it stays theirs, as every other change to a box's
+	// declarations does.
+	//
+	// SCOPED TO THE PROJECT THIS RUN AUTHENTICATED AGAINST. projectID is the
+	// project the session just created or adopted -- adopting an existing box's
+	// project goes through ProvisionEscrowInProject, which succeeds only for an
+	// organization that holds it -- so passing it here is what stops an
+	// unrelated authenticated organization writing itself into a declaration it
+	// has no authority over.
+	if strings.TrimSpace(escrowGitops) != "" {
+		changed, rerr := tenant.RecordEscrowOrganization(escrowGitops, projectID, s.OrgID)
+		if rerr != nil {
+			return fmt.Errorf("record the escrow organization in %s: %w", escrowGitops, rerr)
+		}
+		if len(changed) > 0 {
+			fmt.Printf("✓ recorded escrow organization %s in this box's declarations:\n", s.OrgID)
+			for _, p := range changed {
+				fmt.Printf("    %s\n", p)
+			}
+			fmt.Println("  Commit and push them: the box is read from the repository, not from this machine.")
 		}
 	}
 

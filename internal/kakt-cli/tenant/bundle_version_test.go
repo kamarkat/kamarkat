@@ -3,6 +3,7 @@ package tenant
 import (
 	"bufio"
 	"bytes"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,13 +223,37 @@ func TestDevelopmentModeLeavesTheReleasedDeclarationIntact(t *testing.T) {
 	}
 }
 
-// The branch a development box reads defaults to main rather than to empty, which
-// would render a declaration ArgoCD cannot resolve.
-func TestDevelopmentRevisionFallsBackToMain(t *testing.T) {
-	if got := (Spec{}).developmentRevision(); got != "main" {
-		t.Errorf("developmentRevision() = %q, want %q", got, "main")
+// THE BRANCH A DEVELOPMENT BOX READS IS NEVER DEFAULTED.
+//
+// It defaulted to "main", so a box whose branch could not be determined pinned
+// a branch that exists and resolves: the declaration was valid, ArgoCD was
+// happy, and the cluster reconciled something other than the change under
+// test. The detection it depended on read the working directory, which stopped
+// being a checkout the day a box had to be initialized in an empty directory.
+//
+// Refused instead, by Validate, naming the flag that resolves it.
+func TestDevelopmentBoxRefusesAnUnknownBranch(t *testing.T) {
+	if got := (Spec{}).developmentRevision(); got != "" {
+		t.Errorf("developmentRevision() = %q, want empty: nothing may be assumed", got)
 	}
 	if got := (Spec{PlatformRevision: "wip"}).developmentRevision(); got != "wip" {
 		t.Errorf("developmentRevision() = %q, want %q", got, "wip")
+	}
+
+	s := testSpec()
+	s.BundleVersion = versions.DevelopmentBundle
+	s.PlatformRevision = ""
+	err := s.Validate()
+	if err == nil {
+		t.Fatal("a development box with no branch was accepted; it would pin whatever " +
+			"the renderer assumed")
+	}
+	if !strings.Contains(err.Error(), "--platform-revision") {
+		t.Errorf("the refusal must name the flag that resolves it, got: %v", err)
+	}
+
+	s.PlatformRevision = "wip"
+	if err := s.Validate(); err != nil {
+		t.Errorf("a development box that names its branch is exactly what this permits: %v", err)
 	}
 }

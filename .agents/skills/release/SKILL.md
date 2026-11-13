@@ -21,8 +21,9 @@ green. Follow the order; do not improvise around a gate.
 `kakt release` runs from the root of a kamarkat checkout: each subcommand runs
 the checkout's own `scripts/release.sh` or `scripts/argocd-hard-sync.sh`. Without
 an installed `kakt`, use `go run ./cmd/kakt release …`. Flags common to all:
-`--gitops-dir` (no default: a tenant's checkout, e.g. `../nutgraf-gitops`; without
-it nothing is promoted or synced), `--owner` (default `kamarkat`), `--version`.
+`--gitops-dir` (no default: a tenant's checkout, e.g. `../nutgraf-gitops-1794508917`
+-- a box mints `<tenant>-gitops-<timestamp>`, so the name is read from the checkout
+rather than typed from memory; without it nothing is promoted or synced), `--owner` (default `kamarkat`), `--version`.
 
 One person can hold several roles, but only the release owner publishes. A
 version is consumed the moment publishing starts (ADR-063), so two people
@@ -33,11 +34,23 @@ publishing is two burned versions.
 - **Prerelease** `X.Y.Z-rc.N`: `kakt release publish` publishes from a laptop, and
   with `--gitops-dir` promotes that tenant. With no `--version` it takes the
   newest published rc + 1.
+
+  It publishes **charts and nothing else**: no git tag, no GitHub Release, no
+  release notes, and **no CLI binaries**. The charts go to a public registry all
+  the same -- an rc is unannounced, not private -- so nobody can download a
+  `kakt` from one, which is what makes this the internal path.
 - **Stable** `X.Y.Z`: a GitHub Release triggers
-  `.github/workflows/publish-platform-charts.yml`, which publishes the bundle and
-  attaches the CLI. Once that run is green, the release owner promotes it with
-  `kakt release promote --version X.Y.Z`, which confirms the version
-  is in the registry and then promotes, syncs and verifies exactly as below.
+  `.github/workflows/publish-platform-charts.yml`, which publishes the bundle,
+  attaches `components.json` and the vendored inputs, rewrites the release notes
+  and **uploads the CLI binaries to the release page** -- the one place a
+  customer gets the executable. Once that run is green, the release owner
+  promotes it with `kakt release promote --version X.Y.Z`, which confirms the
+  version is in the registry and then promotes, syncs and verifies exactly as
+  below.
+
+  **Cutting a stable is a decision, never a default.** `kakt release publish`
+  only ever counts rc numbers up; it will not turn `0.1.16-rc.N` into `0.1.16`
+  for you.
 - **A version is published once.** Never re-publish, re-tag or delete one. If a
   publish fails part way, the next attempt takes the next version.
 
@@ -105,9 +118,9 @@ after minutes of packaging, or something no gate catches at all.
 
 ```bash
 kakt release publish                        # publish the next rc after the newest published
-kakt release publish --gitops-dir ../nutgraf-gitops   # publish, promote that tenant, sync its box
+kakt release publish --gitops-dir ../nutgraf-gitops-1794508917   # publish, promote that tenant, sync its box
 kakt release publish --version X.Y.Z-rc.N
-kakt release promote --version X.Y.Z --gitops-dir ../nutgraf-gitops   # already published by CI
+kakt release promote --version X.Y.Z --gitops-dir ../nutgraf-gitops-1794508917   # already published by CI
 kakt release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
 ```
 
@@ -145,6 +158,7 @@ through the normal path, then release again.
 | `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `kakt release sync --version <v>` again. Do not re-publish |
 | `clusters are on different versions` | A half-applied promotion | Bring them to one version, or pass `--version` |
 | `could not confirm <v> in oci://…` (`promote`) | Not published, or no registry login | Check the publish run; `helm registry login ghcr.io` |
+| `cannot increment <v> automatically: it is not an -rc.N version` | The newest published version is a stable, so there is no rc number to follow; nothing published | Name the version. The next rc of the next line is `--version X.Y.(Z+1)-rc.1`; a stable is published by a GitHub Release, not here |
 
 Never force-push the tenant repository: a rejected push is someone else's
 commit, usually a CI bot's.

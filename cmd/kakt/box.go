@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -85,6 +84,10 @@ remember.
 --dry-run renders to a local directory and creates nothing, which is how to see
 what a tenant would receive before any repository exists.`,
 		RunE: b.run,
+		// Every refusal here is a paragraph that says what is missing and how to
+		// obtain it. Cobra's usage text after one buries it under thirty flag
+		// descriptions, and the operator reads the flags rather than the reason.
+		SilenceUsage: true,
 	}
 	b.bind(cmd)
 	return cmd
@@ -208,14 +211,15 @@ func (b *boxInit) run(cmd *cobra.Command, _ []string) error {
 		b.spec.Workers = &w
 	}
 	// A development box reads the platform chart from the branch under test, so
-	// the change being tested is the change the cluster reconciles. Resolved here
-	// rather than in the renderer: this is the only place that knows a working
-	// tree is present, and a released box ignores it entirely.
+	// the change being tested is the change the cluster reconciles.
+	//
+	// Taken from the checkout that supplies the TEMPLATE, not from the working
+	// directory. A box is initialized in an empty directory, which is never a
+	// checkout -- read from there the branch was always undetectable, and the
+	// old default ("main") made that silent.
 	if b.spec.PlatformRevision == "" {
-		if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-			if br := strings.TrimSpace(string(out)); br != "" && br != "HEAD" {
-				b.spec.PlatformRevision = br
-			}
+		if rev, ok := tenant.TemplateRevision(b.template); ok {
+			b.spec.PlatformRevision = rev
 		}
 	}
 
@@ -350,6 +354,13 @@ func (b *boxInit) create(ctx context.Context) error {
 	}
 	if v := strings.TrimSpace(b.secrets.EscrowProjectID); v != "" {
 		b.spec.EscrowProjectID = v
+	}
+	// AND THE ORGANIZATION THEY BELONG TO, which the box declares so that the
+	// administrator it names can be checked. Refused here, where the
+	// coordinates have just been resolved and nothing has been minted or
+	// created yet, rather than inside Validate -- which runs before them.
+	if err := b.spec.RequireEscrowOrganization(); err != nil {
+		return err
 	}
 
 	// WHERE THE CHECKOUT WILL LAND, checked before an identity is minted.
@@ -515,6 +526,14 @@ func (b *boxInit) continueInit(ctx context.Context) error {
 	if err := b.spec.Validate(); err != nil {
 		return fmt.Errorf("the box declared in %s is incomplete: %w", b.resume, err)
 	}
+	// Including the organization its escrow belongs to. A continuation reads it
+	// from the declaration rather than from the store, because by this point
+	// the box has declared one and that declaration is what every later check
+	// reads -- a run that filled the gap from this machine's settings would
+	// leave the committed file still saying nothing.
+	if err := b.spec.RequireEscrowOrganization(); err != nil {
+		return fmt.Errorf("the box declared in %s is incomplete: %w", b.resume, err)
+	}
 	fmt.Printf("[box] continuing %s, declared in %s\n", b.spec.BoxID, b.resume)
 	fmt.Printf("[box]   repository %s/%s, management cluster %s\n",
 		b.spec.GitOrg, b.spec.RepoName(), b.spec.ManagementCluster)
@@ -610,8 +629,16 @@ func boxCreatedVerdict(spec tenant.Spec, dir string) error {
 	fmt.Printf("\nregistry/box.yaml records all three. Next, declare the management cluster:\n\n")
 	fmt.Printf("  cd %s\n", dir)
 	fmt.Printf("  kakt tenant add-management\n\n")
-	fmt.Printf("Then commit and push it, and dispatch the repository's bootstrap-cluster\n")
-	fmt.Printf("workflow with that cluster name. Day-0 builds it from there.\n\n")
+	if spec.DevelopmentBox() {
+		// A development box is not dispatched, and carries no workflow to
+		// dispatch. `kakt tenant add-management` prints the local sequence.
+		fmt.Printf("This box pins `development`, so it reads its charts from a branch and is\n")
+		fmt.Printf("bootstrapped LOCALLY -- it carries no bootstrap workflow. The declare step\n")
+		fmt.Printf("above prints the commands.\n\n")
+	} else {
+		fmt.Printf("Then commit and push it, and dispatch the repository's bootstrap-cluster\n")
+		fmt.Printf("workflow with that cluster name. Day-0 builds it from there.\n\n")
+	}
 	fmt.Printf("If this run stops before it finishes, continue it with:\n\n")
 	fmt.Printf("  kakt box init --resume %s\n", dir)
 	return nil

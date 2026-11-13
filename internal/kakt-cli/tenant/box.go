@@ -234,3 +234,159 @@ func SpecFromDecl(b BoxDecl) Spec {
 		EscrowOrgID:       b.Escrow.OrganizationID,
 	}
 }
+
+// RecordEscrowOrganization fills a box's declarations in with the Infisical
+// organization its escrow belongs to, and reports which files changed.
+//
+// For the boxes that already exist. `organizationId` had one reader and no
+// writer, so every box ever rendered declared an empty one -- and an empty one
+// used to disable the check that an administrator id is only meaningful inside
+// the organization that issued it. That check now refuses instead, which would
+// strand a running box that cannot be re-created: its id, its repository, its
+// clusters and its escrowed material all stay as they are.
+//
+// So the gap is CORRECTED rather than the box replaced. A declaration that
+// already names a different organization is not an incomplete one: it is a box
+// pointed somewhere else, and repointing it is not this function's business.
+//
+// IT CANNOT CHANGE WHO OWNS THE ESCROW. projectID is the project this run
+// authenticated against, and a file is corrected only when it already names
+// that same project -- so the organization written is the one that demonstrably
+// holds the box's existing escrow, not whichever organization happens to be
+// signed in. Without that scope an unbound declaration could be claimed by any
+// authenticated organization simply by running this inside the checkout. A file
+// naming another project is refused rather than adopted, and no project id, url
+// or escrowed material is ever written or moved.
+func RecordEscrowOrganization(gitopsDir, projectID, orgID string) ([]string, error) {
+	orgID = strings.TrimSpace(orgID)
+	projectID = strings.TrimSpace(projectID)
+	if orgID == "" {
+		return nil, fmt.Errorf("no organization to record")
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("no escrow project to record an organization for")
+	}
+
+	paths := []string{filepath.Join(gitopsDir, RegistryDir, BoxDeclFile)}
+	clusters := filepath.Join(gitopsDir, RegistryDir, "clusters")
+	entries, err := os.ReadDir(clusters)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read %s: %w", clusters, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			paths = append(paths, filepath.Join(clusters, e.Name(), "values.yaml"))
+		}
+	}
+
+	var changed []string
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", p, err)
+		}
+		updated, did, err := setEscrowOrganization(string(raw), projectID, orgID)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		if !did {
+			continue
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, err
+		}
+		tmp := p + ".tmp"
+		if err := os.WriteFile(tmp, []byte(updated), info.Mode()); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmp, p); err != nil {
+			return nil, err
+		}
+		changed = append(changed, p)
+	}
+	return changed, nil
+}
+
+// setEscrowOrganization rewrites the one line, leaving the rest of the file
+// byte for byte as it was.
+//
+// Line-wise rather than through the YAML marshaller: these declarations are
+// written to be read and edited by the person who owns the box, and a
+// round-trip through a marshaller returns a file with every comment gone. The
+// key is only matched inside the `escrow:` block, so a field of the same name
+// elsewhere in a values file is left alone.
+func setEscrowOrganization(src, projectID, orgID string) (string, bool, error) {
+	lines := strings.Split(src, "\n")
+	inEscrow := false
+	declaredProject := ""
+	orgLine := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// A top-level key ends whatever block was open and may open this one.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inEscrow = strings.HasPrefix(trimmed, "escrow:")
+			continue
+		}
+		if !inEscrow {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "projectId:") {
+			declaredProject = yamlScalar(trimmed, "projectId:")
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "organizationId:") {
+			continue
+		}
+		value := yamlScalar(trimmed, "organizationId:")
+		switch {
+		case value == orgID:
+			return src, false, nil
+		case value != "" && value != "<ESCROW_ORG_ID>":
+			return src, false, fmt.Errorf("already declares organization %s, which is not %s.\n\n"+
+				"An incomplete declaration is filled in; one that names another organization is\n"+
+				"a box pointed somewhere else, and moving it is not something this corrects",
+				value, orgID)
+		}
+		orgLine = i
+	}
+
+	if orgLine < 0 {
+		return src, false, nil
+	}
+	// THE OWNERSHIP CHECK. The organization is only written into a declaration
+	// that already names the project this run authenticated against. A
+	// declaration naming some other project describes an escrow this session has
+	// not been shown to hold, and filling its organization in would let an
+	// unrelated authority claim the box.
+	if declaredProject != projectID {
+		return src, false, fmt.Errorf("declares escrow project %s, and this session holds %s.\n\n"+
+			"The organization is recorded only for the escrow it was proven against, so a\n"+
+			"declaration naming another project is left untouched rather than claimed",
+			orDash(declaredProject), projectID)
+	}
+	line := lines[orgLine]
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	lines[orgLine] = indent + "organizationId: " + orgID
+	return strings.Join(lines, "\n"), true, nil
+}
+
+// yamlScalar is the value of a `key: value` line, unquoted.
+func yamlScalar(trimmed, key string) string {
+	return strings.Trim(strings.TrimSpace(strings.TrimPrefix(trimmed, key)), `"'`)
+}
+
+// orDash names an absent value in an error, so "declares escrow project " does
+// not read as a blank the reader has to guess at.
+func orDash(v string) string {
+	if v == "" {
+		return "none"
+	}
+	return v
+}

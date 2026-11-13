@@ -98,6 +98,15 @@ package_path() {
 # supplies it, and one that does not is refused upstream by the hubDomain helper.
 global:
   hubDomain: ""
+  # The management secret scope (ADR-111 Revision 7 §2). Present for the same
+  # reason as the keys below and for one more: `global.management` is a NESTED
+  # map, so a template reading .Values.global.management.infisicalEnvironmentSlug
+  # against a chart that does not declare it fails on a nil pointer and renders
+  # NOTHING -- which emit_chart reports as a component producing no objects, and
+  # blames the component. A flat key that is merely absent renders empty and
+  # passes, which is why this was missed until the overlay templated a nested one.
+  management:
+    infisicalEnvironmentSlug: ""
   # The box's own Infisical identity, empty for the same reason: a chart with no
   # default for a key its templates read renders NOTHING -- the lookup is a nil
   # map and helm fails the whole render, which emit_chart reports as a component

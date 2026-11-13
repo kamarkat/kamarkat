@@ -1,8 +1,8 @@
 # ADR-062: Onboarding and Scaffolding a Tenant
 
 **Date:** 2026-09-06
-**Status:** Accepted — implemented as `kakt tenant scaffold`; `nutgraf-gitops` is
-a repository this produced.
+**Status:** Accepted — implemented as `kakt box init`; `nutgraf-gitops-1794508917`
+is a repository this produced.
 
 **Scope: a TENANT, not an application.** This ADR is how an organisation becomes a
 running box: repositories, scaffolding, who may write where. It does not describe
@@ -66,9 +66,9 @@ Onboarding begins with an App installation on the tenant's git organisation and 
 
 Cloud credentials are not supplied to the platform. They are held in the tenant's box under ADR-065, and the Day-0 sequence that establishes the control plane is run by the tenant against its own account. The platform scaffolds what Day-0 reconciles; it does not provision the tenant's infrastructure.
 
-### The platform creates and scaffolds `<tenant>-gitops`
+### The platform creates and scaffolds the box's repository
 
-The platform creates one repository per tenant, named `<tenant>-gitops`, in the tenant's organisation, and renders it from a template held in `zero-ops`, substituting the identifiers and locations that make it that tenant's: organisation, repository locations, domain, cloud provider and region, cluster names.
+The platform creates one repository per box, named as below, in the tenant's organisation, and renders it from a template held in `zero-ops`, substituting the identifiers and locations that make it that tenant's: organisation, repository locations, domain, cloud provider and region, cluster names.
 
 The repository holds one directory per cluster — the tenant's control plane and each of its spoke clusters alike — and each such directory holds two things: the bundle version that cluster runs, and the values it runs with. It also retains the templates from which the tenant renders its next cluster.
 
@@ -79,6 +79,24 @@ Nothing of the bundle's content is placed there. Under ADR-063 the bundle is pub
 Separation is by file rather than by permission. A repository in the tenant's organisation is administered by that organisation, and no arrangement of access control changes that; a repository the tenant could not write would also be one it could not customise, and would contradict the ownership ADR-065 asserts. Review rules on the version file express the intended division and are the tenant's to keep or remove.
 
 Substituted values carry no secret material. They are identifiers and locations. Secrets are generated into and delivered from the tenant's own store, which the standing secret lifecycle already requires and which onboarding does not vary.
+
+### A box mints its own names, once, from one timestamp
+
+A box outlives every cluster it ever runs (ADR-111 §1), and a tenant may have more than one. So a name derived from the tenant alone is not an identity: a second box, or a box rebuilt after the first was torn down, would collide with the first in the escrow paths, the DNS owner record and the repository name alike.
+
+`kakt box init` therefore mints the box's identity at the moment the box is created — one Unix-seconds timestamp, three names derived from it:
+
+| Name | Shape | What it keys |
+|---|---|---|
+| Box id | `<tenant>-<timestamp>` | the escrow paths and `dns.ownerId` |
+| GitOps repository | `<tenant>-gitops-<timestamp>` | where the box's desired state lives |
+| First management cluster | `<tenant>-mgmt-<timestamp>` | the CAPI objects and the WAL archive prefix (ADR-082) |
+
+**Minted once and then read, never re-derived.** The timestamp is taken immediately before the identity is first needed and written into the box's own declaration, `registry/box.yaml`, before any remote call. A run that stops part-way is continued with `kakt box init --resume <checkout>`, which reads those names back rather than minting a second set — so the same box cannot acquire two identities however many times the command runs.
+
+**`-mgmt-`, not `-hub-`.** The cluster is named for what it is. "Hub" survives only in the names of components that were built under it, such as `hub-operator`, where it is a component identifier rather than a description of a cluster.
+
+**The box id is not the cluster name.** They are different lifetimes: `clusterName` keys the CAPI objects of one cluster and changes when that cluster is replaced, while `boxId` is the one fact that must outlive every cluster. Nothing may derive one from the other.
 
 ### Scaffolding happens once; maintenance is continuous
 
@@ -128,8 +146,6 @@ Every credential this platform asks for is named for what it is permitted to do 
 | `GITOPS_REPO_WRITE_TOKEN` | write the box's GitOps repository, and read it from ArgoCD; inherited by the tenant's application builds so they can pin a chart version | the tenant, in their own organisation's secrets |
 
 No credential substitutes for another. Each is read by its own name and a missing one is reported by that name: the bootstrap that gives ArgoCD write access to the box's own repository fails when `GITOPS_REPO_WRITE_TOKEN` is absent rather than reaching for the operator's credential or the Actions token, because either would be stored in the cluster's repo-creds Secret and outlive the run that borrowed it (ADR-065).
-
-No credential substitutes for another. Each is read by its own name, and a missing one is reported by that name: the bootstrap that gives ArgoCD read access to the box's own repository fails when `GITOPS_REPO_WRITE_TOKEN` is absent rather than reaching for the operator's credential, because that credential would be written into the cluster's repo-creds Secret and outlive the run that borrowed it (ADR-065).
 
 `GITHUB_TOKEN` names neither. It is reserved for GitHub Actions' own job token and for third-party interfaces that require that exact variable name — a credential of ours parked under it is read by whatever else happens to be in the environment, and inside a workflow it is silently the wrong one: Actions' token reaches only the repository running the job, never its siblings.
 

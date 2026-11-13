@@ -97,6 +97,55 @@ func TestAnIdentityFromAnotherOrganizationIsRefused(t *testing.T) {
 	}
 }
 
+// A BOX DECLARING NO ORGANIZATION AUTHORIZES NOBODY.
+//
+// This is the regression. The organization comparison used to run only when the
+// declaration carried one -- and nothing wrote the value, so it never ran at
+// all: a missing organization silently removed the requirement instead of
+// failing it. An authorization check that switches itself off when its input is
+// absent is not a check, so an empty declaration is refused and the refusal says
+// how to record it.
+func TestABoxDeclaringNoOrganizationAuthorizesNobody(t *testing.T) {
+	dir, cluster := box(t, strings.Replace(declared, "  organizationId: org-abc\n", "  organizationId: \n", 1))
+	c, err := Declaration(dir, cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.EscrowOrgID != "" {
+		t.Fatalf("EscrowOrgID = %q, want empty for this fixture", c.EscrowOrgID)
+	}
+	err = authorizeAdministrator(c, session.Session{
+		UserID: "user-admin-1", Email: "admin@acme.example", OrgID: "org-abc",
+	})
+	if err == nil {
+		t.Fatal("a box declaring no organization authorized a session; the requirement " +
+			"disabled itself rather than failing")
+	}
+	if !strings.Contains(err.Error(), "kakt escrow init") {
+		t.Errorf("the refusal does not say how to record the organization:\n%v", err)
+	}
+}
+
+// A session carrying no organization cannot be compared, so it is refused.
+//
+// The other half of the same contract: both sides are required. An id is issued
+// by one organization and means nothing in another, so comparing the ids while
+// one side's organization is unknown compares values that need not come from the
+// same namespace.
+func TestASessionWithoutAnOrganizationIsRefused(t *testing.T) {
+	dir, cluster := box(t, declared)
+	c, _ := Declaration(dir, cluster)
+	err := authorizeAdministrator(c, session.Session{
+		UserID: "user-admin-1", Email: "admin@acme.example",
+	})
+	if err == nil {
+		t.Fatal("a session naming no organization was authorized against a box that declares one")
+	}
+	if !strings.Contains(err.Error(), "kakt login") {
+		t.Errorf("the refusal does not say how to obtain one:\n%v", err)
+	}
+}
+
 // A session with no id cannot be checked, so it is refused rather than trusted.
 func TestASessionWithoutAnIdentityIsRefused(t *testing.T) {
 	dir, cluster := box(t, declared)

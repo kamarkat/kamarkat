@@ -141,6 +141,20 @@ func (s Spec) Validate() error {
 			missing = append(missing, name)
 		}
 	}
+	// A DEVELOPMENT BOX NEEDS A BRANCH, and there is no sensible default: it
+	// reads its charts from the platform's repository at a revision, and the
+	// one this used to assume ("main") is a real branch, so the box resolved
+	// and reconciled the wrong content.
+	if s.BundleVersion == versions.DevelopmentBundle && strings.TrimSpace(s.PlatformRevision) == "" {
+		return fmt.Errorf("a development box reads its charts from a branch, and this run could not\n" +
+			"determine which one.\n\n" +
+			"The branch is taken from the platform checkout that supplied the template.\n" +
+			"Run from a checkout, or name it:\n\n" +
+			"  --platform-revision <branch>\n\n" +
+			"It is not defaulted. `main` is a branch that resolves, so a box pinned to it\n" +
+			"bootstraps and reconciles something other than the change you are testing.")
+	}
+
 	// Sorted, not map order. Go randomises map iteration, so two runs of the
 	// same mistake printed the same values in different orders -- which reads
 	// as the answer having changed between them.
@@ -465,6 +479,40 @@ func (s Spec) WithEscrowCoordinates() Spec {
 	return s
 }
 
+// RequireEscrowOrganization refuses a box that would declare no Infisical
+// organization.
+//
+// The organization is part of the escrow's identity, not decoration. A box
+// names one human by Infisical's own id, and that id is issued by one
+// organization and means nothing in another -- so a declaration that records
+// the administrator without the organization that issued them cannot be
+// checked, and hubaccess refuses rather than skipping the comparison.
+//
+// Every box rendered before this carried an empty organizationId, because the
+// value had one reader and no writer. `kakt escrow init` records it now, which
+// is why this refusal names that command: the fix is to run it, not to type an
+// id in.
+func (s Spec) RequireEscrowOrganization() error {
+	if strings.TrimSpace(s.EscrowOrgID) != "" {
+		return nil
+	}
+	return fmt.Errorf(`this box has no Infisical organization to declare, and will not be created without one.
+
+A box names one human administrator by Infisical's own id for them. That id is
+issued by an organization and is meaningless in any other, so the organization
+is recorded with it -- otherwise the box cannot check the session that presents
+it, and escrow-backed access would be granted on an unverified match.
+
+It is read from the escrow you already have, never typed:
+
+  kakt login
+  kakt escrow init --name <project name>
+
+records INFISICAL_ESCROW_ORG_ID alongside the escrow's other settings, from the
+organization your session belongs to.%s`,
+		escrow.MoveHint("INFISICAL_ESCROW_ORG_ID", "INFISICAL_ESCROW_PROJECT_ID"))
+}
+
 // clusterTokens are facts about ONE cluster, and are substituted only into the
 // instance being hydrated.
 //
@@ -662,10 +710,11 @@ func (s Spec) chartSource() string {
 // cluster reconciles. Defaults to main when it cannot be determined -- a detached
 // checkout, or a copy of the tree with no git.
 func (s Spec) developmentRevision() string {
-	if s.PlatformRevision != "" {
-		return s.PlatformRevision
-	}
-	return "main"
+	// No default. Validate refuses a development box without one, because the
+	// value this used to fall back to -- "main" -- is a branch that exists and
+	// resolves, so a box pinned to it looked correct and reconciled something
+	// other than the change being tested.
+	return s.PlatformRevision
 }
 
 // publicTLSIssuer is the ACME issuer this environment's public certificates come
@@ -836,12 +885,44 @@ func RenderBox(templateDir, dst string, s Spec) error {
 		return err
 	}
 
+	// A DEVELOPMENT BOX CARRIES NO BOOTSTRAP WORKFLOW.
+	//
+	// The workflow calls the platform's reusable workflow by tag and downloads
+	// the released CLI for the version this box pins -- and `development` is not
+	// a version: there is no tag, no release and no published binary, so GitHub
+	// refuses the `uses:` line before a step runs and reports a missing
+	// workflow. Rendered anyway, the repository offers a dispatch that cannot
+	// work and says nothing about why.
+	//
+	// Wiring one would be worse than leaving it out. CI would have to read the
+	// platform's SOURCE at a branch and build it, which is access no tenant has
+	// (ADR-065) -- a path that only ever works for the platform's own team,
+	// inside the tenant's repository.
+	//
+	// So a development box is bootstrapped locally, and the same CLI enforces
+	// the same contracts either way: `bootstrap-mgmt` runs the identical
+	// orchestrator, admission check and escrow requirement that the workflow
+	// runs through the released binary. What differs is only where it executes
+	// (ADR-072), which is the property the local path exists to preserve.
+	if s.BundleVersion == versions.DevelopmentBundle {
+		if err := os.Remove(filepath.Join(dst, ".github", "workflows", "bootstrap-cluster.yml")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
 	workflows := filepath.Join(dst, ".github", "workflows")
 	if _, err := os.Stat(workflows); err == nil {
 		return substitute(workflows, boxTokens, true)
 	}
 	return nil
 }
+
+// DevelopmentBox reports whether this box reads its charts from a branch rather
+// than from a published version, and is therefore bootstrapped locally.
+func (s Spec) DevelopmentBox() bool { return s.BundleVersion == versions.DevelopmentBundle }
+
+// IsDevelopmentBox reports the same for a box read back from its declaration.
+func (b BoxDecl) IsDevelopmentBox() bool { return b.BundleVersion == versions.DevelopmentBundle }
 
 // templateWalk chooses which tree the template is read from.
 //
@@ -870,6 +951,43 @@ func templateSource(src string) (func(string, fs.WalkDirFunc) error, func(string
 		return platform.WalkCarried, platform.ReadCarried
 	}
 	return platform.WalkDir, platform.ReadFile
+}
+
+// TemplateRevision is the branch of the platform checkout that supplied the
+// template, and whether there is one to ask.
+//
+// A development box reads its charts from a branch, so that branch has to be
+// known. It used to be read from the WORKING DIRECTORY -- which worked while a
+// box was rendered from inside the platform's own checkout, and stopped the day
+// a box had to be initialized in an empty directory. The detection failed
+// silently and the box pinned "main", so a platform change under test was not
+// what the cluster reconciled.
+//
+// Asked of the template's own tree instead: that is the checkout whose content
+// is being rendered, so its branch is the one the box should follow. The tree
+// the binary CARRIES has no branch -- it is a copy, not a checkout -- and that
+// is reported as unknown rather than guessed.
+func TemplateRevision(src string) (string, bool) {
+	dir := src
+	if !filepath.IsAbs(dir) {
+		if !platform.Exists(src) {
+			return "", false
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", false
+		}
+		dir = filepath.Join(wd, src)
+	}
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "", false
+	}
+	rev := strings.TrimSpace(string(out))
+	if rev == "" || rev == "HEAD" {
+		return "", false
+	}
+	return rev, true
 }
 
 // TemplateOrigin says which tree a render will read the template from, for the

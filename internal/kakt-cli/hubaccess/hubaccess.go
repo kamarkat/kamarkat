@@ -339,7 +339,37 @@ authorized rebind rather than an edit: the new identity has to hold membership o
 this box's escrow project as well, which Infisical enforces and this check does
 not.`, email, c.BoxID, c.PlatformAdmin, userID)
 	}
-	if c.EscrowOrgID != "" && strings.TrimSpace(s.OrgID) != c.EscrowOrgID {
+	// FAIL CLOSED. This used to read `if c.EscrowOrgID != "" && ...`, so a box
+	// that declared no organization was waved past the check rather than
+	// refused -- and nothing ever wrote the value, which made that the only
+	// case there was. An authorization requirement that switches itself off
+	// when its input is missing is not a requirement.
+	//
+	// Both sides are required and must match. The declared side says which
+	// organization issued the administrator id; the session side is stated by
+	// the server at login. An id is only meaningful inside the organization
+	// that issued it, so comparing the ids while leaving the organizations
+	// unknown compares two values that need not be from the same namespace.
+	if c.EscrowOrgID == "" {
+		return fmt.Errorf(`this box declares no Infisical organization, so the administrator it declares cannot be checked.
+
+Box: %s
+
+An administrator id is issued by one organization and means nothing in another,
+so the organization is part of the declaration rather than an optional extra.
+Record it from the escrow this box already uses:
+
+  kakt escrow init --gitops-dir <this checkout> --name <project name>
+
+which reads the organization from your authenticated session, writes it to this
+operator's store, and fills it into the box's own declaration. Commit the change.`, c.BoxID)
+	}
+	if strings.TrimSpace(s.OrgID) == "" {
+		return fmt.Errorf("this session names no Infisical organization, so it cannot be "+
+			"checked against the organization box %s declares (%s). Run `kakt login` again "+
+			"to obtain one", c.BoxID, c.EscrowOrgID)
+	}
+	if strings.TrimSpace(s.OrgID) != c.EscrowOrgID {
 		return fmt.Errorf("this session belongs to a different Infisical organization than "+
 			"box %s declares (%s). The administrator id is only meaningful inside the "+
 			"organization that issued it", c.BoxID, c.EscrowOrgID)

@@ -115,6 +115,29 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		fmt.Println("until the predecessor is retired.")
 	}
 
+	// WHERE DAY-0 RUNS, and it is a property of the box rather than a choice
+	// made here. A released box is built by the workflow its repository
+	// carries; a development box reads its charts from a branch, carries no
+	// workflow, and is built from this checkout by the same CLI. Both run the
+	// same orchestrator, the same admission check and the same escrow
+	// requirement -- what differs is only where it executes (ADR-072).
+	if box.Decl.IsDevelopmentBox() {
+		fmt.Println("\nCommit and push, then build it from here:")
+		fmt.Println()
+		fmt.Printf("  git add registry/clusters && git commit -m \"Declare %s\" && git push\n", name)
+		fmt.Printf("  kakt bootstrap-mgmt --name %s --gitops-dir . \\\n", name)
+		fmt.Printf("      --provider %s --region %s\n", box.Decl.Provider, box.Decl.Region)
+		fmt.Println()
+		fmt.Println("This box pins `development`: it reads its charts from a branch, so there is")
+		fmt.Println("no published version for a workflow to fetch and it carries no")
+		fmt.Println("bootstrap-cluster workflow. The commands above run the same Day-0 the")
+		fmt.Println("released path runs, from this clone, under your own credentials.")
+		fmt.Println()
+		fmt.Println("Committing declares the cluster. Building one costs money and takes hours,")
+		fmt.Println("so nothing is created until you run that second command.")
+		return nil
+	}
+
 	fmt.Println("\nCommit and push, then create it:")
 	fmt.Printf("  gh workflow run bootstrap-cluster -f cluster=%s\n", name)
 	fmt.Println("\nCommitting declares it. The cluster is built by that workflow, which costs")
