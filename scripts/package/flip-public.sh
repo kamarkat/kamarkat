@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --check reports and changes nothing: no settings page is opened and nothing
+# waits on a keypress, so `kakt release check` can run it. It exits non-zero when
+# a package is unreachable in either direction, because both directions break a
+# release and neither is visible until it does.
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+
 # Packages that must be public for anonymous GHCR pull.
 # Format: "label|repository|settings_url"
 PKG="https://github.com/orgs/kamarkat/packages/container"
@@ -9,6 +16,14 @@ PACKAGES=(
   "platform|kamarkat/charts/platform|$PKG/charts%2Fplatform/settings"
   "universal-tenant|kamarkat/charts/universal-tenant|$PKG/charts%2Funiversal-tenant/settings"
   "tenant-public-tls|kamarkat/charts/tenant-public-tls|$PKG/charts%2Ftenant-public-tls/settings"
+  # The three spoke/workload charts, added 2026-11-14. They were published
+  # private, which a tenant cannot pull: ArgoCD holds no OCI credential and the
+  # nodes hold no imagePullSecret. platform-spoke-gateway is referenced four
+  # times by the released management bundle. The release failed on a 403 from
+  # the already-published check, not here, because they were not listed.
+  "platform-spoke-gateway|kamarkat/charts/platform-spoke-gateway|$PKG/charts%2Fplatform-spoke-gateway/settings"
+  "platform-spoke-datasources|kamarkat/charts/platform-spoke-datasources|$PKG/charts%2Fplatform-spoke-datasources/settings"
+  "platform-workload|kamarkat/charts/platform-workload|$PKG/charts%2Fplatform-workload/settings"
   "hub-operator|kamarkat/kamarkat/hub-operator|$PKG/kamarkat%2Fhub-operator/settings"
   "auth-proxy|kamarkat/kamarkat/auth-proxy|$PKG/kamarkat%2Fauth-proxy/settings"
   "kube-sbt|kamarkat/kamarkat/kube-sbt|$PKG/kamarkat%2Fkube-sbt/settings"
@@ -48,6 +63,29 @@ exists() {
   gh api "/orgs/${org}/packages/container/${rest//\//%2F}" >/dev/null 2>&1
 }
 
+# WHICH REPOSITORY MAY PUSH THIS PACKAGE. Anonymous pull above is what a cluster
+# needs; this is what CI needs, and the two are independent -- every package here
+# was public and none could be written to.
+#
+# An org package is linked to a repository when it is created by that
+# repository's GITHUB_TOKEN, or when the pushed artefact carries
+# org.opencontainers.image.source. A package with no link grants Actions access
+# to NO repository, so a workflow is refused write -- "403 Forbidden" on
+# POST .../blobs/uploads/ -- however it declares `packages: write`. The
+# 2026-11-04 rename to this org re-created all 17 packages by hand, so none was
+# linked and the first CI release after it could not write a single blob, while
+# every package still read PUBLIC here.
+#
+# Reported from the record exists() already fetches, because that state has no
+# other way to be seen: GitHub exposes a package's Actions access only in the UI,
+# and `repository` being null is the one part of it the API will admit to.
+# Fixing it is UI work on the same settings page this script already opens.
+linked_repo() {
+  local org="${1%%/*}" rest="${1#*/}"
+  gh api "/orgs/${org}/packages/container/${rest//\//%2F}" \
+    --jq '.repository.full_name // ""' 2>/dev/null || echo ""
+}
+
 check_public() {
   local token http_code
   token=$(curl -s "https://ghcr.io/token?scope=repository:$1:pull" 2>/dev/null \
@@ -76,13 +114,19 @@ echo ""
 
 PRIVATE=()
 ABSENT=()
+UNLINKED=()
 
 for entry in "${PACKAGES[@]}"; do
   IFS='|' read -r label repository url <<< "$entry"
   printf "  %-30s " "$label"
 
   if check_public "$repository"; then
-    echo "PUBLIC"
+    if [ -n "$(linked_repo "$repository")" ]; then
+      echo "PUBLIC"
+    else
+      echo "PUBLIC, NOT LINKED"
+      UNLINKED+=("$label|$url")
+    fi
   elif exists "$repository"; then
     echo "PRIVATE"
     PRIVATE+=("$label|$url")
@@ -92,6 +136,22 @@ for entry in "${PACKAGES[@]}"; do
   fi
 done
 
+if [ ${#UNLINKED[@]} -gt 0 ]; then
+  echo ""
+  echo "${#UNLINKED[@]} package(s) are pullable but NOT LINKED to a repository, so CI"
+  echo "cannot push them -- a release fails with 403 Forbidden on blob upload:"
+  for entry in "${UNLINKED[@]}"; do
+    IFS='|' read -r label url <<< "$entry"
+    echo "  $label"
+    echo "    $url"
+  done
+  echo ""
+  echo "On each settings page: Manage Actions access > Add repository >"
+  echo "kamarkat/kamarkat > role Write. (Connect repository, where offered, does"
+  echo "the same by inheritance.) New packages link themselves from now on: the"
+  echo "charts carry sources[0] and the images an image.source label."
+fi
+
 if [ ${#ABSENT[@]} -gt 0 ]; then
   echo ""
   echo "${#ABSENT[@]} not published yet: ${ABSENT[*]}"
@@ -100,10 +160,32 @@ fi
 
 echo ""
 
+if [ "$CHECK" = 1 ]; then
+  # Absent is not a failure: GHCR has no settings page for a package before its
+  # first publish, so a new artefact is legitimately absent here. It will come
+  # out private, which is why the note above says to flip it afterwards.
+  if [ ${#PRIVATE[@]} -eq 0 ] && [ ${#UNLINKED[@]} -eq 0 ]; then
+    echo "every package is publicly pullable and linked to a repository"
+    exit 0
+  fi
+  echo "release would fail: ${#PRIVATE[@]} package(s) not publicly pullable," >&2
+  echo "${#UNLINKED[@]} that CI cannot push to. Both are fixed in the GitHub UI --" >&2
+  echo "run 'bash scripts/package/flip-public.sh' to be walked through them." >&2
+  exit 1
+fi
+
 if [ ${#PRIVATE[@]} -eq 0 ]; then
-  echo "All packages are public!"
+  if [ ${#UNLINKED[@]} -eq 0 ]; then
+    echo "All packages are public and linked!"
+    echo ""
+    exit 0
+  fi
+  # Non-zero: every package is pullable, and a release would still fail on the
+  # first push. Reporting that as success is how this went unnoticed until a
+  # release hit it.
+  echo "All packages are public, but ${#UNLINKED[@]} cannot be pushed to by CI."
   echo ""
-  exit 0
+  exit 1
 fi
 
 echo "========================================="

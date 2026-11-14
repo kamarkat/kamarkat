@@ -37,4 +37,13 @@ if ! helm template platform-bundle "$CHART" \
     echo "bundle-portability: the bundle did not render, so nothing was checked" >&2
     exit 1
 fi
-python3 scripts/validate/bundle-portability.py <"$rendered"
+# The platform repository URL comes from the chart value that declares it, not
+# from a copy inside the checker. A copy went stale when the repository was
+# renamed and the gate passed unconditionally from then on.
+platform_repo=$(yq -r '.platformRepoURL // ""' manifests/argocd/environment-manager/values.yaml)
+if [ -z "$platform_repo" ]; then
+    echo "bundle-portability: platformRepoURL is not set in the environment-manager" >&2
+    echo "                   values, so there is nothing to check portability against" >&2
+    exit 1
+fi
+python3 scripts/validate/bundle-portability.py "$platform_repo" <"$rendered"

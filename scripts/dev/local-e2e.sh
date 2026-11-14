@@ -718,14 +718,29 @@ do_scaffold() {
 # This exists because a --dry run published nothing and the phases after it went
 # ahead regardless, which is exactly the failure it now prevents.
 require_published() {
-    local missing=""
+    local missing="" charts=""
     require_helm3
-    # The four names scripts/package/flip-public.sh calls authoritative. NOT
-    # "platform-bundle": that is a directory name in dist/, and the Chart.yaml
+    # The chart names are READ from scripts/package/flip-public.sh, which this
+    # comment used to call authoritative while restating its contents as four
+    # names. Three spoke charts were added there and this list did not grow, so
+    # bootstrap went ahead believing charts it needs were published. A list that
+    # has to be kept in step with another list is the defect, not the drift.
+    #
+    # The chart entries are the ones whose package path is under charts/; the
+    # rest of that file is images, which ArgoCD does not pull.
+    #
+    # NOT "platform-bundle": that is a directory name in dist/, and the Chart.yaml
     # inside it still reads `name: environment-manager` (bundle-chart.sh:17-18),
     # so it packages and pushes under that name. Checking for it would refuse
     # every bootstrap, for a chart that is never published under that name.
-    for c in environment-manager platform universal-tenant tenant-public-tls; do
+    charts=$(sed -n 's#^ *"\([^|]*\)|[^|]*/charts/[^|]*|.*#\1#p' scripts/package/flip-public.sh)
+    [ -n "$charts" ] || {
+        echo "local-e2e: no chart names could be read from scripts/package/flip-public.sh." >&2
+        echo "  That file is where they are declared; without it this check would" >&2
+        echo "  pass on an empty list and bootstrap would proceed blind." >&2
+        return 1
+    }
+    for c in $charts; do
         helm show chart "oci://ghcr.io/$OWNER/charts/$c" --version "$VERSION" >/dev/null 2>&1 \
             || missing="${missing}  ${c}"$'\n'
     done

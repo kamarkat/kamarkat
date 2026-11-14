@@ -159,6 +159,58 @@ done
 rm -rf dist/charts && mv dist/dist dist/charts
 ./scripts/package/bundle-chart.sh               "$VERSION" dist/charts
 
+# ── Source annotation ───────────────────────────────────────────────────────
+
+# Every published chart declares this repository as its source, in ONE place.
+#
+# GHCR links a package to a repository when the artefact carries
+# org.opencontainers.image.source, and an org package with no link grants Actions
+# access to no repository -- so CI is refused write with "403 Forbidden" on
+# POST .../blobs/uploads/ however the workflow declares `packages: write`. That is
+# what the 2026-11-04 rename to the kamarkat org produced for all 17 packages:
+# they were re-created by local PAT pushes instead of by the workflow, none was
+# linked, and the first CI publish after the rename could not write one blob. The
+# September releases had succeeded because CI created those packages itself.
+#
+# Helm publishes that annotation from Chart.yaml's FIRST `sources:` entry, not
+# from `annotations:` (helm v4 pkg/registry/chart.go, generateChartOCIAnnotations
+# maps meta.Sources[0] to ocispec.AnnotationSource).
+#
+# HERE, not in each generator. The charts are written by six different places --
+# four heredocs, a copy of the committed tenant charts, and distribution.py's
+# umbrella and subcharts -- and the first attempt at this patched four of them and
+# missed nine charts, universal-tenant and platform-spoke-gateway among them. This
+# runs once over the assembled tree, so a generator added later is covered without
+# being told about this, and the gate below is what proves it.
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/platform-source-url.sh"
+SOURCE_URL="$(platform_source_url)" || exit 1
+
+python3 - "$SOURCE_URL" dist/charts <<'PY_SRC'
+import pathlib, re, sys
+url, root = sys.argv[1], pathlib.Path(sys.argv[2])
+for chart in sorted(root.glob("*/Chart.yaml")):
+    t = chart.read_text()
+    t = re.sub(r"(?ms)^sources:\n(?:[ \t]*-.*\n?)*", "", t)
+    chart.write_text(t.rstrip("\n") + f"\nsources:\n  - {url}\n")
+PY_SRC
+
+# The gate. An injector that silently wrote nothing would leave exactly the state
+# it exists to prevent, and that state is invisible until a release tries to push.
+missing=0
+for c in dist/charts/*/Chart.yaml; do
+    [ "$(yq -r '.sources[0] // ""' "$c")" = "$SOURCE_URL" ] || {
+        echo "  $(basename "$(dirname "$c")") does not declare $SOURCE_URL as its first source" >&2
+        missing=$((missing + 1))
+    }
+done
+if [ "$missing" -gt 0 ]; then
+    echo "publish: $missing chart(s) carry no source annotation." >&2
+    echo "  GHCR would not link their packages to this repository, and the next CI" >&2
+    echo "  release would be refused write with a 403 naming neither cause." >&2
+    exit 1
+fi
+echo "source annotation: $(ls -d dist/charts/*/ | wc -l | tr -d ' ') chart(s) declare ${SOURCE_URL}"
+
 # ── Gate ────────────────────────────────────────────────────────────────────
 
 # A release invariant, not a report. ADR-063 makes mirroring a condition of a

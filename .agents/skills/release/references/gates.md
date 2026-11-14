@@ -17,10 +17,11 @@ patch the bundle or skip the gate.
 | 8 | Equivalence | `verify-equivalence.py` | A packaged chart renders different objects from its source | Fix the packaging, not the comparison |
 | 9 | Application specs | `application specs: N problem(s)` | An Application would be refused or manage nothing | See below |
 | 10 | Support matrix | `support-matrix.sh` | A supported combination fails to render, or an unsupported one is not refused | Fix the chart, or `supportedMatrix` in `environment-manager/values.yaml` |
-| 11 | Inventory | `have no catalog entry` (exit 3) | An artefact ships that the catalog does not describe | Add a catalog entry (see SKILL.md, Prepare 4) |
-| 12 | Operator defaults | `… is reconciled by <operator> <v>, but its defaults were read at <v>` | An operator was bumped | Re-read its image defaults at the new tag; update `OPERATED` in `inventory.py` |
-| 13 | Seed parity | `Day-0 seeds argo-cd <v> but the bundle reconciles <v>` (or cert-manager) | The CLI installs a different version at Day-0 than GitOps then adopts | Align the CLI's version constants with the bundle |
-| 14 | Not yet published | `version … is already published` | Some chart already exists at this version | Release the next version |
+| 11 | Source annotation | `N chart(s) carry no source annotation` | A chart does not declare the platform repository as `sources[0]`, so GHCR will not link its package and CI cannot push it | Nothing to fix by hand -- `publish.sh` injects it for every chart in `dist/charts`; the gate firing means the injector did not reach that chart |
+| 12 | Inventory | `have no catalog entry` (exit 3) | An artefact ships that the catalog does not describe | Add a catalog entry (see SKILL.md, Prepare 4) |
+| 13 | Operator defaults | `… is reconciled by <operator> <v>, but its defaults were read at <v>` | An operator was bumped | Re-read its image defaults at the new tag; update `OPERATED` in `inventory.py` |
+| 14 | Seed parity | `Day-0 seeds argo-cd <v> but the bundle reconciles <v>` (or cert-manager) | The CLI installs a different version at Day-0 than GitOps then adopts | Align the CLI's version constants with the bundle |
+| 15 | Not yet published | `version … is already published` | Some chart already exists at this version | Release the next version |
 
 ## Gate 9: application specs
 
@@ -40,6 +41,46 @@ default values, and once with every optional component on (every boolean
 A failure only in the "every optional component on" render means the defect is
 behind a switch no default box turns on. It is still a defect: the first box
 that turns it on gets an Application that renders nothing and reports Healthy.
+
+## Release check: every package is pullable and pushable
+
+`kakt release check` runs `scripts/package/flip-public.sh --check` after the
+gates above, and `die`s on it. Neither state it checks lives in this repository,
+so no gate above can see either one.
+
+A package can be unreachable in two independent directions, and every package
+can be fine in one while failing the other:
+
+| Direction | Who needs it | Fails with | Why |
+|---|---|---|---|
+| **Pullable** (public) | the tenant's cluster | `403` / `manifest unknown` when ArgoCD or a node pulls | ArgoCD holds no OCI credential and the nodes no `imagePullSecret`, so a private package is unreachable from a box |
+| **Pushable** (linked to a repository) | CI | `unexpected status from POST …/blobs/uploads/: 403 Forbidden` | GHCR grants a workflow write only through the package's link to a repository; an unlinked org package refuses `GITHUB_TOKEN` whatever `packages: write` says |
+
+**A rename re-creates every package, and whoever re-publishes them owns their
+state.** The 2026-11-04 move to the `kamarkat` org re-created all 17 by local
+PAT push rather than by the workflow, so none was linked. Every gate reported
+green and the release failed on its first push, with an error naming a blob
+upload and no cause. Before that the three spoke charts had come out *private*
+and the same release failed on a read. Same event, both directions.
+
+**Fix:** `bash scripts/package/flip-public.sh` (no `--check`) walks the settings
+page of each one. Visibility is *Danger Zone > Change visibility > Public*; the
+link is *Manage Actions access > Add repository > `kamarkat/kamarkat` > role
+Write*, or *Connect repository* where offered. Both are UI-only -- GitHub exposes
+a package's Actions access nowhere in the API, and `repository: null` is the one
+part of it a read will admit to.
+
+**New packages link themselves.** Charts carry the repository as `sources[0]`,
+which Helm publishes as `org.opencontainers.image.source` (helm v4
+`pkg/registry/chart.go`, `generateChartOCIAnnotations` maps `meta.Sources[0]`;
+it is **not** read from `annotations:`), and the image builds set the same field
+as a build label. `publish.sh` injects it over the whole assembled tree rather
+than in each generator, because the charts are written in six places and the
+first attempt at this missed nine of them.
+
+A package that has never been published reads as absent and is **not** a
+failure: GHCR has no settings page before a first publish. It will come out
+private, so flip it immediately afterwards.
 
 ## Release check: every component behind latest has a reason
 

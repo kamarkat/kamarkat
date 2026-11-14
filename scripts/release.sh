@@ -184,7 +184,21 @@ if [ "$CHECK" = 1 ]; then
   say "3. Rehearse $VERSION (nothing is pushed)"
   PREVIOUS_VERSION="$CURRENT" SKIP_PUSH=1 make publish-local VERSION="$VERSION" OWNER="$OWNER" \
     || die "the rehearsal failed a gate -- fix the cause on main before releasing"
-  say "4. Every component behind its latest release has a reason"
+  # Both directions a package can be unreachable, checked before a release finds
+  # out. PULLABLE is what a tenant needs: ArgoCD holds no OCI credential and the
+  # nodes no imagePullSecret, so a private package is unreachable from a box.
+  # PUSHABLE is what CI needs: GHCR grants a workflow write only through a
+  # package's link to a repository, so an unlinked one refuses GITHUB_TOKEN with
+  # a 403 on blob upload whatever `packages: write` says.
+  #
+  # Here because neither state is in this repository and nothing else looks. The
+  # 2026-11-04 org rename left all 17 packages public and unlinked, and the
+  # release that followed reported every gate green and then failed on its first
+  # push. A rehearsal that cannot see that is rehearsing the wrong thing.
+  say "4. Every package is publicly pullable and pushable by CI"
+  scripts/package/flip-public.sh --check \
+    || die "fix the packages above in the GitHub UI, then run this again"
+  say "5. Every component behind its latest release has a reason"
   # Exits 4 and 5 are failed lookups, not unexplained versions: the catalog
   # advice below would send someone to edit a reason that is not the problem.
   set +e

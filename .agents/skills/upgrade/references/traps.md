@@ -599,3 +599,28 @@ running. The checking is the expensive part and it does not get delegated.
 **Instead:** run the reads. Hand over only what genuinely cannot be done from
 here: renders and builds that need a toolchain, downloads of release artefacts,
 and anything that writes to a cluster or a secret store.
+
+## A gate holding a copy of the name it checks for
+
+**Looks like:** a validator with a constant naming the thing it hunts for --
+`PLATFORM_REPO = "zero-ops"`, a list of the four charts that must be public, the
+component names a parity check walks.
+
+**Why it fails:** the constant is a copy, and the original moves. The platform
+repository was renamed to `kamarkat`, so nothing could contain `"zero-ops"`
+again; `bundle-portability.sh` then printed "nothing reaches the platform
+repository" on every release, which is the one conclusion it exists to be
+capable of disproving. A gate that cannot fail is not a passing gate. The same
+copy in `local-e2e.sh` carried a comment calling `flip-public.sh` authoritative
+while restating four of its seven names, so bootstrap ran believing three charts
+were published that were not -- and the release found out from a 403.
+
+**Instead:** read the value from the single place that declares it -- a chart
+value, the other script's own list -- and pass it in. Then **refuse** when it
+cannot be read, rather than comparing against nothing: an empty authority must
+exit non-zero, because a check against an empty list passes everything.
+
+**How to catch it:** make every gate fail once, deliberately, before trusting a
+pass. Feed it the thing it should reject. A gate nobody has ever seen fail has
+no evidence behind its verdict, and a renamed constant is invisible in review --
+the code reads exactly as it did on the day it worked.

@@ -55,6 +55,12 @@ jobs:
           # here cross-compiles, and the non-native leg runs under QEMU.
           platforms: linux/amd64
           push: true
+          # Links the GHCR package to this repository. Without the link an org
+          # package grants Actions access to no repository and CI is refused write
+          # with a 403 on blob upload, whatever `packages: write` says -- which is
+          # what every package re-created by hand at the 2026-11-04 org rename did.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
             ghcr.io/${{ github.repository }}/workspace-sync:${{ github.sha }}
             ghcr.io/${{ github.repository }}/workspace-sync:latest

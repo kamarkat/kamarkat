@@ -3,8 +3,9 @@
 #
 # ADR-063 requires a release to carry a build a tenant can run. Bootstrap read
 # platform manifests from the working directory, so the published binary worked
-# only inside a checkout of zero-ops -- a hidden dependency on the vendor's
-# repository, in the one artefact a tenant runs before it has anything else.
+# only inside a checkout of the platform repository -- a hidden dependency on
+# the vendor's repository, in the one artefact a tenant runs before it has
+# anything else.
 #
 # The check runs the released binary from a directory that is not a checkout. A
 # development build is expected to fail this and is not run: it reads the working
@@ -32,12 +33,29 @@ fi
 sandbox="$(mktemp -d)"
 trap 'rm -rf "$sandbox"' EXIT
 
+# `box init`, not `tenant scaffold`: scaffolding moved when box management landed,
+# and this check went on naming the old command until a release found out. Cobra
+# reported it as `unknown flag: --dry-run`, because `tenant` has no `scaffold`
+# subcommand and read the word as a positional argument instead -- an error that
+# names the flag and not the command that is missing.
+#
 # --dry-run renders and writes nothing, so this asks the one question that
 # matters -- can the binary resolve the platform content Day-0 needs -- without
 # provisioning anything or needing a cloud credential.
-if ! out=$(cd "$sandbox" && "$BIN" tenant scaffold --dry-run \
+#
+# The escrow coordinates come from the environment, which is the supported way to
+# supply them to something that has no operator store (tenant.WithEscrowCoordinates).
+# They are probe values: a box that declares no Infisical organization is refused
+# before it renders, so a check that passes none tests the refusal and not the
+# render. --platform-admin likewise, which the binary otherwise reads from this
+# operator's session and CI has none of.
+if ! out=$(cd "$sandbox" && \
+        INFISICAL_ESCROW_URL=https://probe.invalid \
+        INFISICAL_ESCROW_PROJECT_ID=probe-project \
+        INFISICAL_ESCROW_ORG_ID=probe-org \
+        "$BIN" box init --dry-run \
         --tenant probe --box probe-org --domain probe.example \
-        --cluster probe-hub --provider hetzner \
+        --provider hetzner --platform-admin probe-admin \
         --bundle-version "$VERSION" --out "$sandbox/render" 2>&1); then
     echo "released-cli-standalone: scaffolding failed outside a checkout, so the" >&2
     echo "release does not carry the content it needs (ADR-063):" >&2
@@ -45,15 +63,29 @@ if ! out=$(cd "$sandbox" && "$BIN" tenant scaffold --dry-run \
     exit 1
 fi
 
-if [[ ! -f "$sandbox/render/registry/clusters/probe-hub/bundle.yaml" ]]; then
+# The box's own declaration. A box is created with no clusters -- the first one is
+# `kakt tenant add-management`, which mints identities and cannot run offline -- so
+# there is no cluster to assert here, and this check asserted one for as long as it
+# had been failing. What ADR-063 asks is whether the binary carries the platform
+# content, and a rendered box answers it; the per-cluster render is gated by the
+# bundle render checks.
+if [[ ! -f "$sandbox/render/registry/box.yaml" ]]; then
     echo "released-cli-standalone: scaffolding reported success but rendered no" >&2
-    echo "cluster; a silent empty render is the failure this check exists for" >&2
+    echo "box; a silent empty render is the failure this check exists for" >&2
     exit 1
 fi
 
-if grep -q "<[A-Z_]*>" "$sandbox/render/registry/clusters/probe-hub/bundle.yaml"; then
-    echo "released-cli-standalone: the rendered cluster still carries tokens:" >&2
-    grep -o "<[A-Z_]*>" "$sandbox/render/registry/clusters/probe-hub/bundle.yaml" | sort -u | sed 's/^/  /' >&2
+# UNDER registry/ ONLY. templates/ keeps its placeholders on purpose: those files
+# are the templates a cluster is rendered FROM, filled in per cluster when one is
+# declared. Scanning the whole tree is the obvious mistake and would refuse every
+# release.
+# Emptiness, not exit status: the status of `grep | sort` is sort's, which is 0
+# whether grep matched anything or not, so testing it made this refuse every
+# render -- the mirror of the gate that could never fail.
+leftover=$(grep -ro "<[A-Z_]\{3,\}>" "$sandbox/render/registry" 2>/dev/null | sort -u || true)
+if [[ -n "$leftover" ]]; then
+    echo "released-cli-standalone: the rendered box still carries tokens:" >&2
+    sed 's/^/  /' <<<"$leftover" >&2
     exit 1
 fi
 

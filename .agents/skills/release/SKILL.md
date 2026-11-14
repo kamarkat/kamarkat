@@ -109,7 +109,32 @@ after minutes of packaging, or something no gate catches at all.
    ```bash
    helm repo update
    ```
-10. **Rehearse, and check every component behind latest has a reason.**
+10. **Every package is pullable AND pushable.**
+    ```bash
+    bash scripts/package/flip-public.sh
+    ```
+    Two independent states, and a package can fail either. *Pullable* is what a
+    tenant's cluster needs: ArgoCD holds no OCI credential and the nodes hold no
+    imagePullSecret, so a private package is unreachable. *Pushable* is what CI
+    needs: GHCR grants a workflow write only through a package's link to a
+    repository, so an unlinked package refuses `GITHUB_TOKEN` with a 403 on blob
+    upload however the workflow declares `packages: write`.
+
+    A rename re-creates every package. The 2026-11-04 move to the `kamarkat` org
+    did, they were re-created by local PAT pushes rather than by the workflow,
+    and all 17 came out public and unlinked -- so the 403 arrived on the first CI
+    release after it, naming a blob upload and no cause. New packages link
+    themselves now (charts carry `sources[0]`, images an `image.source` label),
+    but an existing package is UI-only work: *Manage Actions access > Add
+    repository > role Write* on the page this script opens.
+
+    `kakt release check` enforces this (step 4, via `--check`), so a release
+    cannot be rehearsed clean while a package is unreachable. Run it here anyway
+    when a package is new or an org has been renamed: the fix is in the GitHub UI
+    and the rehearsal can only tell you it is needed.
+    [references/gates.md](references/gates.md) explains both directions.
+
+11. **Rehearse, and check every component behind latest has a reason.**
     ```bash
     kakt release check
     ```

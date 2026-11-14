@@ -67,6 +67,21 @@ Then package, gate and publish:
 make publish-local VERSION=0.1.16-rc.1
 ```
 
+> **A local push owns the package's state.** A package GHCR creates for a PAT
+> push comes out *private*, which no tenant can pull, and it used to come out
+> *unlinked*, which means CI cannot push it afterwards -- the next release fails
+> with `403 Forbidden` on `POST …/blobs/uploads/` and names no cause. That is
+> what happened to all 17 packages at the 2026-11-04 org rename.
+>
+> Linking is now automatic from here: every chart declares the repository as
+> `sources[0]` and every image carries an `org.opencontainers.image.source`
+> label, and GHCR links on that field whoever pushes. Visibility is not --
+> check it after publishing a package for the first time:
+>
+> ```bash
+> bash scripts/package/flip-public.sh
+> ```
+
 This runs `scripts/package/publish.sh` — the same script the release workflow
 runs, so what lands in the registry passed the same gates a release passes:
 bundle portability, chart-renders-what-the-cluster-applies, Applications
