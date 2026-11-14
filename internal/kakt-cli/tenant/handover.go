@@ -566,8 +566,8 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 		fmt.Fprintln(w)
 	}
 
-	fmt.Fprintf(w, "Then bootstrap it, in the tenant's repository:\n\n")
-	fmt.Fprintf(w, "  gh workflow run bootstrap-cluster.yml --repo %s\n", repo)
+	fmt.Fprintf(w, "Then commit the cluster's declaration in the tenant's repository: the\n")
+	fmt.Fprintf(w, "push is what builds it, from what the declaration says.\n\n")
 	fmt.Fprintf(w, "  https://github.com/%s/actions/workflows/bootstrap-cluster.yml\n", repo)
 }
 

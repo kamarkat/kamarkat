@@ -138,10 +138,12 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		return nil
 	}
 
-	fmt.Println("\nCommit and push, then create it:")
-	fmt.Printf("  gh workflow run bootstrap-cluster -f cluster=%s\n", name)
-	fmt.Println("\nCommitting declares it. The cluster is built by that workflow, which costs")
-	fmt.Println("money and takes hours, so no push creates one.")
+	fmt.Println("\nCommit and push to build it:")
+	fmt.Println("  git add registry/clusters && git commit -m \"Declare " + name + "\" && git push")
+	fmt.Println("\nThe push starts Day-0 in your repository, which reads this cluster's shape")
+	fmt.Println("from the declaration you just committed. It costs money and takes hours, so")
+	fmt.Println("review the declaration before you push -- and only a cluster this push ADDS is")
+	fmt.Println("built, so editing one that exists changes nothing here.")
 
 	return nil
 }

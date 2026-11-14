@@ -67,7 +67,7 @@ func TestHandoverSaysWhatIsMissingAndHowToFinish(t *testing.T) {
 		"0.1.9",                             // what it is pinned to
 		"HCLOUD_TOKEN",                      // the provider's own secret name
 		"GITOPS_REPO_WRITE_TOKEN",           // and the other one
-		"gh workflow run bootstrap-cluster", // what completes it
+		"push is what builds it",            // what completes it
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the handover does not mention %q:\n%s", want, out)

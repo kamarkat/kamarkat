@@ -18,6 +18,15 @@ tenantId: <TENANT_ID>
 # secret scope is management.infisicalEnvironmentSlug below.
 provider: <CLOUD_PROVIDER>
 
+# The cloud region this cluster's nodes are created in.
+#
+# Declared here because git is where Day-0 reads what to build: the bootstrap
+# workflow resolves this cluster's shape from this file, so a region that lived
+# only in a dispatch form would be a part of the cluster that git did not
+# describe. Read once, when the cluster is created; moving an existing cluster
+# between regions means replacing it.
+region: <CLOUD_REGION>
+
 # The management plane's own configuration (ADR-111 Revision 7).
 #
 # Management identity, management secret scope, management availability and
