@@ -1,0 +1,43 @@
+# Packages whose Manage Actions access grants kamarkat/kamarkat the Write role.
+#
+# DECLARED HERE BECAUSE IT CANNOT BE READ. GitHub exposes nine REST endpoints for
+# an organisation's packages and none of them reads Manage Actions access: the
+# package record carries created_at, html_url, id, name, owner, package_type,
+# updated_at, url, version_count and visibility, plus `repository` only when a
+# repository is connected. Every candidate path -- actions-access, permissions,
+# repositories, actions/permissions -- returns 404.
+#
+# So this file is the record, and flip-public.sh reads it. A package is pushable
+# by CI when EITHER a repository is connected to it -- which grants that
+# repository access implicitly -- OR its Write role was granted by hand and
+# written down here. A package with neither is the state that produced
+# "403 Forbidden" on POST .../blobs/uploads/ after the 2026-11-04 rename.
+#
+# ADD A LINE WHEN YOU GRANT THE ROLE, in the same visit to the settings page.
+# The entry is the package label as flip-public.sh prints it. A line here that
+# is not true makes the gate pass on a package CI cannot push, so it is written
+# from the page you just changed and never from memory.
+# The chart packages. Each also has a repository CONNECTED, which grants the
+# same access implicitly -- so for these the record changes nothing about
+# pushability. Written down anyway, because the role IS granted and a record
+# that omits it reads as though it were not.
+environment-manager
+platform
+universal-tenant
+tenant-public-tls
+platform-spoke-gateway
+platform-spoke-datasources
+platform-workload
+
+# The image packages. These have no connected repository, so the Write role is
+# the ONLY thing making them pushable and this record is load-bearing for them.
+hub-operator
+auth-proxy
+kube-sbt
+mcp-server
+ephemeral-job-operator
+ephemeral-vm-provisioner
+spoke-identity-operator
+workspace-sync
+support-agent
+postgres-partman

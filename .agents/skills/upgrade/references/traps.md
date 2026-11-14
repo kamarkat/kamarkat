@@ -646,3 +646,26 @@ by limiting how many answers you are willing to see.
 **How to catch it:** the thing being renamed is a contract, so ask the contract.
 Run the gate that exercises it before publishing, not after: `kakt release check`
 now builds the CLI and runs the standalone check for this reason.
+
+
+## Gating on a field that cannot answer the question
+
+**Looks like:** a check that reads the one API field near the state it cares
+about and treats it as that state. `repository` on a GHCR package was read as
+"CI can push this".
+
+**Why it fails:** they are different things. Write access comes from a package's
+Manage Actions access list, which the API does not expose at all; `repository`
+reports a LINK, which grants access implicitly but is not the only way to have
+it. Ten image packages with Write already granted by hand read as unlinked, and
+the gate refused a release that would have succeeded. A missing key compounded
+it: `.repository.full_name // ""` cannot tell an absent field from an empty one.
+
+**Instead:** gate on what the source of truth answers -- visibility, here -- and
+report the rest as information. A check that cannot observe the state it gates
+must not refuse: the same rule that says a gate which cannot fail is worthless
+says a gate which cannot see must not block.
+
+**How to catch it:** read the whole record once (`--jq 'keys'`) before trusting a
+field, and ask whether a human could satisfy the real requirement in a way the
+field would not show. If they could, it is a report and not a gate.

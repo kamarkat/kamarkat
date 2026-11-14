@@ -63,27 +63,51 @@ exists() {
   gh api "/orgs/${org}/packages/container/${rest//\//%2F}" >/dev/null 2>&1
 }
 
-# WHICH REPOSITORY MAY PUSH THIS PACKAGE. Anonymous pull above is what a cluster
-# needs; this is what CI needs, and the two are independent -- every package here
-# was public and none could be written to.
+# THREE GATES, because a package has three independent states and only two of
+# them can be read.
 #
-# An org package is linked to a repository when it is created by that
-# repository's GITHUB_TOKEN, or when the pushed artefact carries
-# org.opencontainers.image.source. A package with no link grants Actions access
-# to NO repository, so a workflow is refused write -- "403 Forbidden" on
-# POST .../blobs/uploads/ -- however it declares `packages: write`. The
-# 2026-11-04 rename to this org re-created all 17 packages by hand, so none was
-# linked and the first CI release after it could not write a single blob, while
-# every package still read PUBLIC here.
+#   1 PULLABLE          public, so a tenant's cluster can pull it. ArgoCD holds
+#                       no OCI credential and the nodes no imagePullSecret.
+#                       Read by asking GHCR for an anonymous pull token.
+#   2 CONNECTED         a repository is connected to the package, which grants
+#                       that repository Actions access implicitly. Read from the
+#                       package record's `repository`.
+#   3 WRITE GRANTED     Manage Actions access names a repository with the Write
+#                       role. NOT READABLE: GitHub documents nine endpoints for
+#                       an organisation's packages and none of them exposes it,
+#                       and actions-access, permissions, repositories and
+#                       actions/permissions all return 404. So it is DECLARED,
+#                       in actions-write-granted.txt, and read from there.
 #
-# Reported from the record exists() already fetches, because that state has no
-# other way to be seen: GitHub exposes a package's Actions access only in the UI,
-# and `repository` being null is the one part of it the API will admit to.
-# Fixing it is UI work on the same settings page this script already opens.
+# CI can push when 2 or 3 holds. Gate 2 was read as though it were gate 3 and
+# failed the release for it, on ten image packages whose Write role had already
+# been granted by hand -- a check refusing a release that would have worked,
+# because it was reading the field next to the one that mattered.
+# Gate 2. Prints the connected repository, or nothing when the package has none.
+#
+# A FAILED CALL IS NOT AN ANSWER. This ended in `|| echo ""`, so a rate-limited
+# or transient request was reported as "no repository connected" -- and this
+# makes about fifty calls in a row, so that happened: a package whose link five
+# consecutive direct queries confirm read as unconnected in one run and
+# connected in the next. The same rule the already-published gate states:
+# anything other than a clean answer is unknown, not absent.
 linked_repo() {
-  local org="${1%%/*}" rest="${1#*/}"
-  gh api "/orgs/${org}/packages/container/${rest//\//%2F}" \
-    --jq '.repository.full_name // ""' 2>/dev/null || echo ""
+  local org="${1%%/*}" rest="${1#*/}" out status
+  out=$(gh api "/orgs/${org}/packages/container/${rest//\//%2F}" \
+    --jq '.repository.full_name // ""' 2>&1)
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    LINK_QUERY_ERROR="$out"
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# Gate 3, from the record beside this script. The label, as PACKAGES prints it.
+WRITE_GRANTED_FILE="$(dirname "${BASH_SOURCE[0]}")/actions-write-granted.txt"
+write_granted() {
+  [ -f "$WRITE_GRANTED_FILE" ] || return 1
+  grep -qxF "$1" <(grep -v "^#" "$WRITE_GRANTED_FILE" | grep -v "^[[:space:]]*$")
 }
 
 check_public() {
@@ -109,109 +133,167 @@ gh auth status >/dev/null 2>&1 || {
 }
 
 echo ""
-echo "Checking package visibility..."
+echo "  PULLABLE and CONNECTED are read from GitHub. WRITE-RECORDED is read from"
+echo "  $(basename "$WRITE_GRANTED_FILE"), because GitHub exposes Manage Actions"
+echo "  access through no API -- 'no' there means not recorded, not that the role"
+echo "  is missing. OK needs all three: a package CI can push but nobody can trace"
+echo "  back to this repository is not a package this release ships."
 echo ""
 
-PRIVATE=()
-ABSENT=()
-UNLINKED=()
+printf "  %-30s %-9s %-10s %-15s %s\n" PACKAGE PULLABLE CONNECTED WRITE-RECORDED OK
+printf "  %-30s %-9s %-10s %-15s %s\n" "------------------------------" -------- --------- -------------- --------
 
+PRIVATE=()      # gate 1 failed: a tenant's cluster cannot pull it
+WORK=()         # any gate failed, with the gates named
+ABSENT=()       # never published, so it has no settings page yet
+UNREADABLE=()   # the link could not be read, so this run established nothing
+
+# ALL THREE GATES, FOR EVERY PACKAGE. Each is a separate fact about a separate
+# control, so each is evaluated and printed for each package. They were an
+# if/elif chain -- connected, else write-declared, else refuse -- which meant a
+# connected package never had its Write grant looked at and a write-granted one
+# never had its connection reported. One column each, so the row says which
+# controls are set rather than which branch was taken.
+#
+# PUSHABLE is the conclusion, not a fourth gate: connecting a repository grants
+# Actions access implicitly, so either of gates 2 and 3 is enough on its own.
 for entry in "${PACKAGES[@]}"; do
   IFS='|' read -r label repository url <<< "$entry"
-  printf "  %-30s " "$label"
 
-  if check_public "$repository"; then
-    if [ -n "$(linked_repo "$repository")" ]; then
-      echo "PUBLIC"
-    else
-      echo "PUBLIC, NOT LINKED"
-      UNLINKED+=("$label|$url")
-    fi
-  elif exists "$repository"; then
-    echo "PRIVATE"
-    PRIVATE+=("$label|$url")
-  else
-    echo "NOT PUBLISHED"
+  if ! exists "$repository"; then
+    printf "  %-30s %s\n" "$label" "NOT PUBLISHED"
     ABSENT+=("$label")
+    continue
   fi
+
+  if check_public "$repository"; then pullable=yes; else pullable=no; fi
+
+  # Unknown is its own value, and it is never read as "no": a run that could not
+  # ask has established nothing, and says so rather than reporting the absence of
+  # an answer as the absence of a link.
+  LINK_QUERY_ERROR=""
+  if connected="$(linked_repo "$repository")"; then
+    if [ -n "$connected" ]; then connected_s=yes; else connected_s=no; fi
+  else
+    connected_s="UNKNOWN"
+    UNREADABLE+=("$label|$url|${LINK_QUERY_ERROR}")
+  fi
+
+  if write_granted "$label"; then declared=yes; else declared=no; fi
+
+  # ALL THREE, each required on its own. Connecting a repository is not merely
+  # another way to grant Actions access: it is what gives the package a readme,
+  # its discussions and its contributors on the package page, so a package CI can
+  # push and nobody can trace is still wrong. A Write role does not excuse a
+  # missing connection and a connection does not excuse an unrecorded role.
+  if [ "$connected_s" = "UNKNOWN" ]; then
+    ok="UNKNOWN"
+  elif [ "$pullable" = yes ] && [ "$connected_s" = yes ] && [ "$declared" = yes ]; then
+    ok=yes
+  else
+    ok=no
+  fi
+
+  printf "  %-30s %-9s %-10s %-15s %s\n" \
+    "$label" "$pullable" "$connected_s" "$declared" "$ok"
+
+  # One entry per package, naming every gate it fails, so a package with two
+  # problems is one visit to one page rather than two.
+  if [ "$ok" = no ]; then
+    needs=""
+    [ "$pullable" = no ]     && needs="${needs}${needs:+,}pullable"
+    [ "$connected_s" = no ]  && needs="${needs}${needs:+,}connect"
+    [ "$declared" = no ]     && needs="${needs}${needs:+,}write"
+    WORK+=("$label|$url|$needs|$repository")
+  fi
+  true
 done
 
-if [ ${#UNLINKED[@]} -gt 0 ]; then
+if [ ${#UNREADABLE[@]} -gt 0 ]; then
   echo ""
-  echo "${#UNLINKED[@]} package(s) are pullable but NOT LINKED to a repository, so CI"
-  echo "cannot push them -- a release fails with 403 Forbidden on blob upload:"
-  for entry in "${UNLINKED[@]}"; do
-    IFS='|' read -r label url <<< "$entry"
-    echo "  $label"
-    echo "    $url"
+  echo "${#UNREADABLE[@]} package(s) could not be read, so this run established nothing" >&2
+  echo "about them. Run it again -- about fifty calls go out in a row and GitHub" >&2
+  echo "rate-limits in bursts:" >&2
+  for entry in ${UNREADABLE[@]+"${UNREADABLE[@]}"}; do
+    IFS='|' read -r label url err <<< "$entry"
+    echo "  $label: ${err:-no detail}" >&2
   done
-  echo ""
-  echo "On each settings page: Manage Actions access > Add repository >"
-  echo "kamarkat/kamarkat > role Write. (Connect repository, where offered, does"
-  echo "the same by inheritance.) New packages link themselves from now on: the"
-  echo "charts carry sources[0] and the images an image.source label."
+  exit 1
 fi
 
 if [ ${#ABSENT[@]} -gt 0 ]; then
   echo ""
-  echo "${#ABSENT[@]} not published yet: ${ABSENT[*]}"
-  echo "Visibility is set after the first publish; there is no settings page before it."
+  echo "${#ABSENT[@]} not published yet: ${ABSENT[*]:-}"
+  echo "A package has no settings page before its first publish."
 fi
 
 echo ""
+
+if [ ${#WORK[@]} -eq 0 ]; then
+  echo "Every package is pullable, connected to this repository, and recorded as"
+  echo "granting it Write."
+  echo ""
+  exit 0
+fi
 
 if [ "$CHECK" = 1 ]; then
-  # Absent is not a failure: GHCR has no settings page for a package before its
-  # first publish, so a new artefact is legitimately absent here. It will come
-  # out private, which is why the note above says to flip it afterwards.
-  if [ ${#PRIVATE[@]} -eq 0 ] && [ ${#UNLINKED[@]} -eq 0 ]; then
-    echo "every package is publicly pullable and linked to a repository"
-    exit 0
-  fi
-  echo "release would fail: ${#PRIVATE[@]} package(s) not publicly pullable," >&2
-  echo "${#UNLINKED[@]} that CI cannot push to. Both are fixed in the GitHub UI --" >&2
-  echo "run 'bash scripts/package/flip-public.sh' to be walked through them." >&2
-  exit 1
-fi
-
-if [ ${#PRIVATE[@]} -eq 0 ]; then
-  if [ ${#UNLINKED[@]} -eq 0 ]; then
-    echo "All packages are public and linked!"
-    echo ""
-    exit 0
-  fi
-  # Non-zero: every package is pullable, and a release would still fail on the
-  # first push. Reporting that as success is how this went unnoticed until a
-  # release hit it.
-  echo "All packages are public, but ${#UNLINKED[@]} cannot be pushed to by CI."
-  echo ""
+  echo "release would fail: ${#WORK[@]} package(s) do not pass all three gates:" >&2
+  for entry in ${WORK[@]+"${WORK[@]}"}; do
+    IFS='|' read -r label url needs repository <<< "$entry"
+    echo "  $label: ${needs//,/, }" >&2
+  done
+  echo "Fix in the GitHub UI: run 'bash scripts/package/flip-public.sh'." >&2
   exit 1
 fi
 
 echo "========================================="
-echo "  ${#PRIVATE[@]} package(s) PRIVATE"
-echo "========================================="
-echo ""
-echo "For each package:"
-echo "  1. Click Package settings (right sidebar)"
-echo "  2. Scroll to Danger Zone > Change visibility"
-echo "  3. Select Public > confirm"
-echo "  4. Press Enter here to continue"
-echo ""
+echo "  ${#WORK[@]} package(s) need a visit"
 echo "========================================="
 echo ""
 
-TOTAL=${#PRIVATE[@]}
+TOTAL=${#WORK[@]}
 
-for i in "${!PRIVATE[@]}"; do
-  IFS='|' read -r label url <<< "${PRIVATE[$i]}"
+for i in "${!WORK[@]}"; do
+  IFS='|' read -r label url needs repository <<< "${WORK[$i]}"
   idx=$((i + 1))
+  org="${repository%%/*}"
+  name="${repository#*/}"
+  # The package's own page, where the "Link this package to a repository" prompt
+  # is. The settings page below holds visibility and Actions access.
+  page="https://github.com/orgs/${org}/packages/container/package/${name//\//%2F}"
 
   echo "[$idx/$TOTAL] $label"
-  echo "    $url"
+  case ",$needs," in
+    *,pullable,*)
+      echo "    NOT PULLABLE -- a tenant's cluster cannot pull it."
+      echo "      $url"
+      echo "      Danger Zone > Change visibility > Public > confirm"
+      ;;
+  esac
+  case ",$needs," in
+    *,connect,*)
+      echo "    NOT CONNECTED -- nothing ties this package to its source. Connecting it"
+      echo "    adds the readme, the discussions and the contributors to its page, and"
+      echo "    grants this repository Actions access."
+      echo "      $page"
+      echo "      Connect repository > kamarkat/kamarkat"
+      ;;
+  esac
+  case ",$needs," in
+    *,write,*)
+      echo "    WRITE NOT RECORDED -- grant it, then write it down, because GitHub"
+      echo "    exposes Manage Actions access through no API."
+      echo "      $url"
+      echo "      Manage Actions access > Add repository > kamarkat/kamarkat > Write"
+      echo "      then add '$label' to $(basename "$WRITE_GRANTED_FILE")"
+      ;;
+  esac
   echo ""
 
-  open "$url"
+  case ",$needs," in
+    *,connect,*) open "$page" ;;
+    *)           open "$url" ;;
+  esac
 
   if [ "$idx" -lt "$TOTAL" ]; then
     read -rp "Press Enter to continue to next package... "
@@ -221,6 +303,7 @@ done
 
 echo ""
 echo "========================================="
-echo "  Done! Re-run to verify all are public"
+echo "  Done! Re-run to verify all three gates"
+echo "  pass for every package."
 echo "========================================="
 echo ""

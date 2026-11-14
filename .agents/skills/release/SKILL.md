@@ -117,9 +117,11 @@ after minutes of packaging, or something no gate catches at all.
     Two independent states, and a package can fail either. *Pullable* is what a
     tenant's cluster needs: ArgoCD holds no OCI credential and the nodes hold no
     imagePullSecret, so a private package is unreachable. *Pushable* is what CI
-    needs: GHCR grants a workflow write only through a package's link to a
-    repository, so an unlinked package refuses `GITHUB_TOKEN` with a 403 on blob
-    upload however the workflow declares `packages: write`.
+    needs: GHCR grants a workflow write through a package's **Manage Actions
+    access** list, or implicitly through a linked repository, so a package with
+    neither refuses `GITHUB_TOKEN` with a 403 on blob upload however the workflow
+    declares `packages: write`. Actions access is absent from the API, so only
+    visibility is gated and the missing link is reported.
 
     A rename re-creates every package. The 2026-11-04 move to the `kamarkat` org
     did, they were re-created by local PAT pushes rather than by the workflow,

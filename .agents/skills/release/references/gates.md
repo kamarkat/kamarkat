@@ -54,7 +54,7 @@ can be fine in one while failing the other:
 | Direction | Who needs it | Fails with | Why |
 |---|---|---|---|
 | **Pullable** (public) | the tenant's cluster | `403` / `manifest unknown` when ArgoCD or a node pulls | ArgoCD holds no OCI credential and the nodes no `imagePullSecret`, so a private package is unreachable from a box |
-| **Pushable** (linked to a repository) | CI | `unexpected status from POST …/blobs/uploads/: 403 Forbidden` | GHCR grants a workflow write only through the package's link to a repository; an unlinked org package refuses `GITHUB_TOKEN` whatever `packages: write` says |
+| **Pushable** (Actions access) | CI | `unexpected status from POST …/blobs/uploads/: 403 Forbidden` | GHCR grants a workflow write through the package's **Manage Actions access** list, or implicitly through a linked repository. A package with neither refuses `GITHUB_TOKEN` whatever `packages: write` says |
 
 **A rename re-creates every package, and whoever re-publishes them owns their
 state.** The 2026-11-04 move to the `kamarkat` org re-created all 17 by local
@@ -66,9 +66,17 @@ and the same release failed on a read. Same event, both directions.
 **Fix:** `bash scripts/package/flip-public.sh` (no `--check`) walks the settings
 page of each one. Visibility is *Danger Zone > Change visibility > Public*; the
 link is *Manage Actions access > Add repository > `kamarkat/kamarkat` > role
-Write*, or *Connect repository* where offered. Both are UI-only -- GitHub exposes
-a package's Actions access nowhere in the API, and `repository: null` is the one
-part of it a read will admit to.
+Write*, or *Connect repository* where offered. Both are UI-only.
+
+**Only visibility is gated, and that is deliberate.** The package API exposes
+`created_at`, `html_url`, `id`, `name`, `owner`, `package_type`, `updated_at`,
+`url`, `version_count` and `visibility` -- and `repository` only when a link
+exists. Manage Actions access is not there at all. So a package whose access was
+granted by hand reads as having no linked repository, and failing a release on
+that field refuses a release that would have worked. It did: ten image packages
+with Write already granted. The missing link is reported because it is real --
+an unlinked package needs access granted by hand, and a new one links itself --
+and it is not a verdict on whether CI can push.
 
 **New packages link themselves.** Charts carry the repository as `sources[0]`,
 which Helm publishes as `org.opencontainers.image.source` (helm v4

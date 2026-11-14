@@ -98,7 +98,18 @@ if [ "$PUBLISH" = 1 ]; then
   if [ -z "$VERSION" ]; then
     case "$CURRENT" in
       *-rc.*) VERSION="${CURRENT%-rc.*}-rc.$((${CURRENT##*-rc.} + 1))" ;;
-      *) die "cannot increment $CURRENT automatically: it is not an -rc.N version. Pass --version." ;;
+      # A STABLE VERSION IS NOT INCREMENTED FOR YOU. Whether the next one is a
+      # patch, a minor or a major says what the release means, and a version is
+      # consumed the moment it is published (ADR-063) -- so a guess here spends
+      # a number that was meant for something else. The candidate is named
+      # because the refusal is about intent, not about arithmetic.
+      *) die "$CURRENT is a stable version, and the next one says what this release means:
+   a patch, a minor or a major. Name it:
+
+     kakt release check --version ${CURRENT%.*}.$((${CURRENT##*.} + 1))   # patch
+     kakt release check --version <X.Y.Z>
+
+   Only an -rc.N version is incremented automatically." ;;
     esac
   fi
   note "next:             $VERSION"
