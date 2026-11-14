@@ -221,14 +221,37 @@ if [ "$CHECK" = 1 ]; then
   # TARGETS=host: one binary for this machine, because what is being checked is
   # whether a released build resolves its platform content outside a checkout,
   # and that answer does not differ per architecture.
-  say "5. The released CLI bootstraps from its binary alone"
+  # EVERY VALUE THE RELEASE NEEDS, BEFORE THE VERSION IS SPENT. DOCS_BASE_URL is
+  # read in the second-to-last step of the release workflow, which runs long
+  # after publish.sh has pushed the charts -- so an unset variable consumed
+  # 0.2.6 and left it with no CLI attached, no disclosure and no support-state
+  # report. A requirement that can only be met before publishing has no business
+  # being discovered after it.
+  say "5. Every value the release workflow needs is set"
+  missing=""
+  for v in DOCS_BASE_URL; do
+    # This checkout's own repository, resolved by gh. Composed from $OWNER it
+    # would be "$OWNER/$OWNER", which is right here only because the
+    # organisation and the repository happen to share a name.
+    gh variable list --json name -q '.[].name' 2>/dev/null \
+      | grep -qx "$v" || missing="$missing $v"
+  done
+  if [ -n "$missing" ]; then
+    die "the release workflow reads these repository variables and they are not set:$missing
+   Set each once, and every release after this one has it:
+     gh variable set DOCS_BASE_URL --body https://<your documentation host>
+   Nothing has been published."
+  fi
+  note "every required repository variable is set"
+
+  say "6. The released CLI bootstraps from its binary alone"
   TARGETS=host ./scripts/package/build-cli.sh "$VERSION" dist/bin >/dev/null \
     || die "the release CLI did not build"
   ./scripts/validate/released-cli-standalone.sh "$VERSION" \
     || die "the released binary cannot bootstrap a box outside a checkout (ADR-063).
    Nothing has been published."
 
-  say "6. Every component behind its latest release has a reason"
+  say "7. Every component behind its latest release has a reason"
   # Exits 4 and 5 are failed lookups, not unexplained versions: the catalog
   # advice below would send someone to edit a reason that is not the problem.
   set +e

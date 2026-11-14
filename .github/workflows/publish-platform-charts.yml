@@ -199,32 +199,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ADR-064 revision 2: the version page carries what taking this version
-      # means, and the release body carries the link to it. SET, not appended --
-      # the body is the link and nothing else, so a release does not depend on
-      # whoever created it having typed anything. `gh release create` is run with
-      # no --notes.
-      - name: Point the release at its version page
-        if: github.event_name == 'release'
-        run: |
-          set -euo pipefail
-          ./scripts/package/release-metadata.sh "${{ steps.v.outputs.version }}" \
-            > /tmp/release-body.md
-          gh release edit "${{ github.event.release.tag_name }}" --notes-file /tmp/release-body.md
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCS_BASE_URL: ${{ vars.DOCS_BASE_URL }}
-
-      # ADR-064 states its constraints as validators. This one runs after the
-      # notes are written, because the generator that writes them appends to a
-      # body and an append producing nothing leaves a release that still looks
-      # complete.
-      - name: Refuse a release that does not point at its version page
-        if: github.event_name == 'release'
-        run: ./scripts/validate/release-discloses.sh "${{ github.event.release.tag_name }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       # ADR-069 makes the window a property of the version, so what the platform
       # still owes is derivable from what each tenant runs. Derivable is not the
       # same as derived: publishing a version changes the state of every OTHER
@@ -287,6 +261,38 @@ jobs:
           ./scripts/package/update-homebrew-tap.sh "${{ steps.v.outputs.version }}" dist/bin
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # LAST, DELIBERATELY. This is the only step that reads a repository
+      # variable, and it used to run before the CLI was attached: an unset
+      # DOCS_BASE_URL consumed 0.2.6 and left it with no binaries on the release.
+      # Everything a tenant downloads is attached above, so a failure here costs
+      # the release body and nothing else -- and `kakt release check` now refuses
+      # before publishing when the variable is missing.
+      # ADR-064 revision 2: the version page carries what taking this version
+      # means, and the release body carries the link to it. SET, not appended --
+      # the body is the link and nothing else, so a release does not depend on
+      # whoever created it having typed anything. `gh release create` is run with
+      # no --notes.
+      - name: Point the release at its version page
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          ./scripts/package/release-metadata.sh "${{ steps.v.outputs.version }}" \
+            > /tmp/release-body.md
+          gh release edit "${{ github.event.release.tag_name }}" --notes-file /tmp/release-body.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCS_BASE_URL: ${{ vars.DOCS_BASE_URL }}
+
+      # ADR-064 states its constraints as validators. This one runs after the
+      # notes are written, because the generator that writes them appends to a
+      # body and an append producing nothing leaves a release that still looks
+      # complete.
+      - name: Refuse a release that does not point at its version page
+        if: github.event_name == 'release'
+        run: ./scripts/validate/release-discloses.sh "${{ github.event.release.tag_name }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
