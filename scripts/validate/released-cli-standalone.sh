@@ -43,14 +43,21 @@ trap 'rm -rf "$sandbox"' EXIT
 # matters -- can the binary resolve the platform content Day-0 needs -- without
 # provisioning anything or needing a cloud credential.
 #
-# The escrow coordinates come from the environment, which is the supported way to
-# supply them to something that has no operator store (tenant.WithEscrowCoordinates).
-# They are probe values: a box that declares no Infisical organization is refused
-# before it renders, so a check that passes none tests the refusal and not the
-# render. --platform-admin likewise, which the binary otherwise reads from this
-# operator's session and CI has none of.
+# AN ISOLATED HOME, so this operator's credential store cannot answer for the
+# binary. It did: this check passed on a workstation whose ~/.kamarkat held every
+# credential, and failed in CI, where the staging step found them missing,
+# reported what was outstanding and returned success without rendering. A gate
+# that reads the machine it runs on is testing the machine.
+#
+# The escrow values are synthetic and are NOT secrets: the three coordinates are
+# names that get rendered into the declaration, and a dry run neither
+# authenticates nor reaches them. --platform-admin likewise, which the binary
+# otherwise reads from this operator's session and CI has none of.
+home="$sandbox/home"
+mkdir -p "$home"
 if ! out=$(cd "$sandbox" && \
-        INFISICAL_ESCROW_URL=https://probe.invalid \
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+        INFISICAL_ESCROW_URL=https://escrow.probe.invalid \
         INFISICAL_ESCROW_PROJECT_ID=probe-project \
         INFISICAL_ESCROW_ORG_ID=probe-org \
         "$BIN" box init --dry-run \
@@ -75,6 +82,23 @@ if [[ ! -f "$sandbox/render/registry/box.yaml" ]]; then
     exit 1
 fi
 
+# RESOLVED, not merely present. An empty or half-substituted declaration is a
+# file on disk, so existence is not the question -- the question is whether the
+# binary had the content to fill it. Each value below is one the renderer
+# substitutes, so a template that reached disk unsubstituted fails here.
+box="$sandbox/render/registry/box.yaml"
+for pair in "probe:the tenant" "probe.example:the domain" "$VERSION:the bundle version" \
+            "probe-org:the escrow organization" "probe-project:the escrow project" \
+            "escrow.probe.invalid:the escrow address" "probe-admin:the administrator"; do
+    want="${pair%%:*}" what="${pair#*:}"
+    grep -q "$want" "$box" || {
+        echo "released-cli-standalone: the rendered box does not carry ${what}," >&2
+        echo "so the binary rendered a declaration it could not fill:" >&2
+        sed 's/^/  /' "$box" >&2
+        exit 1
+    }
+done
+
 # UNDER registry/ ONLY. templates/ keeps its placeholders on purpose: those files
 # are the templates a cluster is rendered FROM, filled in per cluster when one is
 # declared. Scanning the whole tree is the obvious mistake and would refuse every
@@ -86,6 +110,17 @@ leftover=$(grep -ro "<[A-Z_]\{3,\}>" "$sandbox/render/registry" 2>/dev/null | so
 if [[ -n "$leftover" ]]; then
     echo "released-cli-standalone: the rendered box still carries tokens:" >&2
     sed 's/^/  /' <<<"$leftover" >&2
+    exit 1
+fi
+
+# templates/ MUST still carry placeholders. They are the files a cluster is
+# rendered from, filled in when one is declared, so an empty set here would mean
+# the binary shipped templates already substituted -- every cluster would then
+# inherit this probe's values. Asserted rather than merely excluded above, so the
+# exclusion cannot quietly become the reason this check passes.
+if ! grep -rq "<[A-Z_]\{3,\}>" "$sandbox/render/templates" 2>/dev/null; then
+    echo "released-cli-standalone: templates/ carries no placeholders, so the" >&2
+    echo "binary ships cluster templates that are already substituted" >&2
     exit 1
 fi
 

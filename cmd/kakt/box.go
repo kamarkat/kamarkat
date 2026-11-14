@@ -259,14 +259,22 @@ func (b *boxInit) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	skipped, err := b.stage()
-	if err != nil {
-		return err
-	}
-	if len(skipped) > 0 {
-		// Reported, not fatal, and nothing is created: the answers already given
-		// are staged, and re-running asks only for what is still missing.
-		return boxInitVerdict(ctx, skipped)
+	// Staged for a run that will create something. Skipped entirely under
+	// --dry-run rather than merely not acted on: stage() prompts, opens the page
+	// that issues each credential, and calls EnsurePlatformCredential, so a dry
+	// run that reached it would touch the network and this operator's store to
+	// decide something it is not going to do.
+	if !b.dryRun {
+		skipped, err := b.stage()
+		if err != nil {
+			return err
+		}
+		if len(skipped) > 0 {
+			// Reported, not fatal, and nothing is created: the answers already
+			// given are staged, and re-running asks only for what is still
+			// missing.
+			return boxInitVerdict(ctx, skipped)
+		}
 	}
 
 	return b.create(ctx)
@@ -322,37 +330,46 @@ func (b *boxInit) stage() ([]string, error) {
 
 // create makes the repository and gives it the credentials it was built with.
 func (b *boxInit) create(ctx context.Context) error {
-	// The escrow, before anything exists. ADR-076 makes it mandatory -- a box
-	// that would have nowhere to keep its master keys is refused -- and checking
-	// it here means the refusal costs nothing, where it used to arrive after a
-	// repository had been created.
-	if err := b.secrets.RequireEscrow(); err != nil {
-		return err
-	}
-	// Usable, not merely supplied. An Infisical project has a TYPE, and only a
-	// secret-manager project accepts what an escrow does; a kms project
-	// authenticates perfectly and then refuses every read and write.
+	// PROVISIONING CREDENTIALS AND THE NETWORK. None of this is rendered: the
+	// box declaration carries the bundle version, the platform revision, the
+	// escrow's three NAMES and the administrator's id, and nothing else. The
+	// client id and secret authenticate a provisioning run; S3, SMTP, IRM and
+	// Tailscale become the repository's Actions secrets after it exists.
 	//
-	// NOT UNDER --dry-run, which renders and creates nothing. This reaches the
-	// escrow over the network and authenticates against it, so requiring it to
-	// work made a render impossible anywhere the escrow is not reachable --
-	// including the release gate that checks the published binary carries its
-	// platform content, which never got as far as rendering. RequireEscrow above
-	// still applies: a box with no escrow DECLARED is refused in either mode,
-	// because that is a property of the box and not of this machine's network.
+	// SO NOT UNDER --dry-run, which renders to a local directory and creates
+	// nothing. Requiring them made a render impossible on any machine without
+	// this operator's store -- including the release gate that checks a published
+	// binary carries its platform content, which exited 0 without rendering
+	// because the staging step reports a missing credential and returns. A dry
+	// run of a box that cannot be provisioned is still a true answer to what the
+	// box would look like.
+	//
+	// What a render DOES need is checked in either mode, below and in Validate:
+	// the box's identity, the escrow organization it declares (that id is
+	// rendered), and a target directory that is empty.
 	if !b.dryRun {
+		// The escrow, before anything exists. ADR-076 makes it mandatory -- a
+		// box that would have nowhere to keep its master keys is refused -- and
+		// checking it here means the refusal costs nothing, where it used to
+		// arrive after a repository had been created.
+		if err := b.secrets.RequireEscrow(); err != nil {
+			return err
+		}
+		// Usable, not merely supplied. An Infisical project has a TYPE, and only
+		// a secret-manager project accepts what an escrow does; a kms project
+		// authenticates perfectly and then refuses every read and write.
 		if err := b.secrets.VerifyEscrow(); err != nil {
 			return err
 		}
-	}
-	if err := b.secrets.RequireSelectedCapabilities(b.spec); err != nil {
-		return err
-	}
-	if !b.secrets.CompleteFor(b.spec.Provider) {
-		w := bufio.NewWriter(os.Stdout)
-		tenant.HandoverInstructions(b.spec, b.secrets, w)
-		w.Flush()
-		return fmt.Errorf("this box is not complete, so nothing was created")
+		if err := b.secrets.RequireSelectedCapabilities(b.spec); err != nil {
+			return err
+		}
+		if !b.secrets.CompleteFor(b.spec.Provider) {
+			w := bufio.NewWriter(os.Stdout)
+			tenant.HandoverInstructions(b.spec, b.secrets, w)
+			w.Flush()
+			return fmt.Errorf("this box is not complete, so nothing was created")
+		}
 	}
 
 	// The box's escrow, as names, for its own declaration. The store is read
