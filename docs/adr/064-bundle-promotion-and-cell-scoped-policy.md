@@ -68,6 +68,45 @@ A tenant that does not merge a promotion does not fall off the upgrade path, and
 
 What the platform owes instead is disclosure, and that is a property of the release rather than of the proposal. A published version records the versions it spans from its predecessor, the security fixes among them (ADR-069 places those outside the ordinary cadence), whether each step is operationally reversible, and the minimum version it may be taken from. Renovate surfaces release metadata in the proposal it opens, so this reaches the tenant without the platform generating prose per pull request -- and it reaches a tenant reading the release directly, which a generated pull request body does not.
 
+**Revision 2 (2026-11-14): the disclosure is rendered once, and the release points at it.**
+
+The obligation is unchanged: a published version still records the versions it
+spans from its predecessor, the security fixes among them, whether each step is
+operationally reversible, the minimum version it may be taken from, and the
+support window ADR-069 declares. What changes is where it is written.
+
+It is rendered on the version's page in the documentation, from the component
+inventory the release already publishes, and the release body carries the link
+to that page and nothing else. Two reasons:
+
+- **One place can be corrected.** Writing it into the release body produced a
+  second copy of facts the inventory already held, and a release body is what it
+  was at publication. A support window that is a property of the version changes
+  as later versions are published -- the page re-renders, a body does not.
+- **A release body that is generated in full depends on nobody.** The body was
+  appended to whatever the person creating the release had typed, so what a
+  tenant read varied with what a maintainer remembered. The release is now
+  created with no notes and the pipeline writes the body.
+
+What this costs, stated plainly: a tenant reading the upgrade proposal Renovate
+opens sees the link rather than the disclosure itself, and must follow it. That
+was the reason for writing it into the release in the first place, and it is
+given up deliberately -- a correct page one click away is worth more than a copy
+that cannot be corrected.
+
+`scripts/validate/release-discloses.sh` enforces this by requiring the body to
+link this version's own page, so a release whose body generator failed quietly is
+still refused.
+
+**What this revision depends on, and does not yet have.** The version page today
+renders what changed, what is included, and the bootstrap tools. It does not
+render the span, the security fixes, the reversibility, the minimum version or
+the support window. Until `scripts/release/release-pages.py` and the inventory it
+reads carry those fields, a release body reduced to a link points at a page
+missing what the link is for, and the disclosure exists nowhere. This revision is
+therefore not complete, and the link-only body is not correct to ship before the
+page renders the fields.
+
 A tenant is entitled to cross several versions at once; it is not entitled to cross them without being told.
 
 ### A proposal resolves the versions it carries
