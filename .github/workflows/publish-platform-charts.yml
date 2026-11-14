@@ -83,11 +83,30 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             prev="${{ inputs.previous }}"
           else
-            git fetch --tags --quiet
-            prev=$(git tag --list 'v*' --sort=-v:refname | grep -v "^${{ github.event.release.tag_name }}$" | head -1)
-            prev="${prev#v}"
+            # FROM THE REGISTRY, not from git tags. This read the newest git tag
+            # below the one being released, and publish.sh then PULLS that
+            # version's chart to diff the inventory against it -- two different
+            # authorities for one value. The tags still carry the v0.1.x series
+            # published under the previous organisation, so a release resolved
+            # 0.1.15 and died on
+            #   ghcr.io/<owner>/charts/environment-manager:0.1.15: not found
+            # because the packages were re-created when the organisation was
+            # renamed and that version exists in a registry that no longer does.
+            # What this value has to be is a version whose chart can be pulled,
+            # so the registry is what is asked.
+            prev=$(gh api \
+                "/orgs/${{ github.repository_owner }}/packages/container/charts%2Fenvironment-manager/versions?per_page=100" \
+                --jq '[.[].metadata.container.tags[]?] | .[]' \
+              | grep -vx "${{ steps.v.outputs.version }}" \
+              | sort -V | tail -1)
+            if [ -z "$prev" ]; then
+              echo "::error::no previously published version of charts/environment-manager to compare against"
+              exit 1
+            fi
           fi
           echo "version=$prev" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package, gate and publish the bundle
         run: |
