@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
 
 // newReleaseCmd groups the platform team's release operations. Each runs the
@@ -101,21 +104,46 @@ With no version, only renders.`,
 			if version == "" {
 				return fmt.Errorf("name the published version to promote: --version")
 			}
-			if gitopsDir == "" {
-				return fmt.Errorf("name the tenant checkout to promote: --gitops-dir")
+			// THE BOX YOU ARE STANDING IN, when you did not name one. Promotion
+			// rewrites a box's own references, so the common case is being in it;
+			// requiring the flag there made an operator name the directory they
+			// were already inside. A directory holding registry/box.yaml is a
+			// box and nothing else is, so there is nothing to guess.
+			dir := gitopsDir
+			if dir == "" {
+				cwd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				if _, err := os.Stat(filepath.Join(cwd, tenant.RegistryDir, tenant.BoxDeclFile)); err != nil {
+					return fmt.Errorf(`name the box to promote: --gitops-dir
+
+This directory is not a box: it has no %s. Run this from a box's checkout, or
+name one.`, filepath.Join(tenant.RegistryDir, tenant.BoxDeclFile))
+				}
+				dir = cwd
 			}
-			args := withVersion("--promote-only")
+			// No platform checkout. Promotion is a rewrite of this box's own
+			// references and a commit, so it runs wherever the box is -- which is
+			// what lets a tenant promote without a copy of the platform (ADR-065).
+			running, err := tenant.Promotion{
+				GitopsDir: dir,
+				Version:   version,
+				Registry:  "ghcr.io/" + owner + "/charts",
+				DryRun:    dryRun,
+			}.Promote()
+			if err != nil {
+				return err
+			}
 			if dryRun {
-				args = append(args, "--dry-run")
+				fmt.Printf("dry run: %s would be promoted %s -> %s; nothing was written\n", dir, running, version)
+				return nil
 			}
-			if noSync {
-				args = append(args, "--no-sync")
-			}
-			return runScript(env(), "scripts/release.sh", args...)
+			fmt.Printf("promoted %s -> %s and pushed. Your control plane reconciles the new version from git.\n", running, version)
+			return nil
 		},
 	}
-	promote.Flags().BoolVar(&dryRun, "dry-run", false, "Say what each step would do; change nothing")
-	promote.Flags().BoolVar(&noSync, "no-sync", false, "Promote; do not sync the box")
+	promote.Flags().BoolVar(&dryRun, "dry-run", false, "Say what would change; write nothing")
 
 	sync := &cobra.Command{
 		Use:   "sync",

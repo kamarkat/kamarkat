@@ -44,9 +44,10 @@ publishing is two burned versions.
   attaches `components.json` and the vendored inputs, rewrites the release notes
   and **uploads the CLI binaries to the release page** -- the one place a
   customer gets the executable. Once that run is green, the release owner
-  promotes it with `kakt release promote --version X.Y.Z`, which confirms the
-  version is in the registry and then promotes, syncs and verifies exactly as
-  below.
+  promotes it with `kakt release promote --version X.Y.Z`, run inside the box or
+  with `--gitops-dir`. It rewrites every reference under `registry/`, commits and
+  pushes; the box's own **Bundle sync** workflow converges the cluster on that
+  push and confirms it reached the version, one job per cluster the commit moved.
 
   **Cutting a stable is a decision, never a default.** `kakt release publish`
   only ever counts rc numbers up; it will not turn `0.1.16-rc.N` into `0.1.16`

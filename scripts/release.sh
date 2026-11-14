@@ -261,54 +261,16 @@ fi
 # theoretical ordering problem: it shipped twice.
 # ---------------------------------------------------------------------------
 say "4. Promote $RUNNING -> $VERSION"
-cd "$GITOPS_DIR"
-FILES="$(grep -rl -- "$RUNNING" registry/ --include='*.yaml' 2>/dev/null || true)"
-[ -n "$FILES" ] || die "no file under registry/ references $RUNNING"
-note "rewriting: $(echo "$FILES" | tr '\n' ' ')"
 
-if [ "$DRY_RUN" = 1 ]; then
-  # Falls THROUGH to step 5 rather than exiting. A dry run that stops before the
-  # last step cannot answer the question a dry run is for -- what will this do to
-  # the box -- and the sync is the step with the consequences.
-  note "would rewrite $(echo "$FILES" | wc -l | tr -d ' ') file(s), commit, rebase and push"
-  cd - >/dev/null
-  DRY_PROMOTED=1
-fi
-if [ "${DRY_PROMOTED:-0}" != 1 ]; then
-
-for f in $FILES; do
-  # In place, both GNU and BSD sed.
-  sed -i.bak "s|${RUNNING}|${VERSION}|g" "$f" && rm -f "$f.bak"
-done
-
-LEFT="$(grep -rn -- "$RUNNING" registry/ --include='*.yaml' 2>/dev/null || true)"
-[ -z "$LEFT" ] || die "after rewriting, $RUNNING still appears -- promotion is incomplete and has NOT been pushed
-$LEFT"
-note "$(grep -rc -- "$VERSION" registry/ --include='*.yaml' 2>/dev/null | grep -v ':0$' | wc -l | tr -d ' ') file(s) now reference $VERSION"
-
-# Staged BY NAME. `git add -A` here commits .state/*.json, which is this box's
-# local bootstrap state and belongs to no tenant's repository.
-git add $FILES
-STAGED="$(git diff --cached --name-only)"
-echo "$STAGED" | grep -q '^\.state/' && die "refusing to commit: .state/ is staged"
-
-git commit -q -m "chore(promote): ${RUNNING} -> ${VERSION}
-
-Every reference under registry/, not only environmentRevision: a bundle carries
-the version twice, and moving one leaves the children pinned while the root
-reports Synced."
-
-# Rebase again before pushing. The publish above takes minutes, and a CI bot
-# writing a chart bump in that window is ordinary -- the first push of this
-# promotion was rejected for exactly that. Never force: the rejection is the
-# other party's commit, and discarding it is the failure, not the rejection.
-git -c rebase.autoStash=true pull --rebase -q || die "the remote moved and the rebase did not apply cleanly.
-   $VERSION IS PUBLISHED. Resolve in $GITOPS_DIR and push; do not re-publish."
-git push -q || die "push rejected. $VERSION IS PUBLISHED but not promoted -- resolve in $GITOPS_DIR and push"
-note "pushed $(git log --oneline -1)"
-cd - >/dev/null
-say "Promoted to $VERSION"
-fi
+# THE CLI DOES THIS, and this script does not have a second copy of it.
+# Promotion is a rewrite of the box's own references and a commit, so it needs
+# the box and git and nothing from here -- which is what lets a tenant promote
+# without a checkout of the platform (ADR-065). A copy kept here would be the
+# version that drifts, because this script runs only on the platform's own
+# releases while the command runs on every box.
+promote_args=(release promote --version "$VERSION" --gitops-dir "$GITOPS_DIR" --owner "$OWNER")
+[ "$DRY_RUN" = 1 ] && promote_args+=(--dry-run)
+go run ./cmd/kakt "${promote_args[@]}" || die "promotion failed. $VERSION IS PUBLISHED but not promoted -- resolve in $GITOPS_DIR"
 
 # ---------------------------------------------------------------------------
 # 5. Sync, and VERIFY the box reached the version.
