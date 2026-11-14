@@ -8,21 +8,18 @@ get cluster lifecycle, GitOps, identity, secrets, databases, a gateway and
 observability as one tested distribution, running on your cloud account under
 credentials only you hold.
 
-The software is free. What is sold is maintenance: keeping the stack current,
-patched and upgradeable without breaking what is running on it.
-
-## The Platform
-
-It helps small and medium scale brands to experience a enterprise grade platform which they cannot afford to have such huge investment for having a platform of their own to defining their working model that is unique for them to make a difference in their market. Save runway for startups, focus companies to build their capabilities inward within their org instead of relying on others. Giving them full control of their business. don’t separate software and scale as two separate concerns. Opensource has to move beyond, proving single tenant OSS open and gating the scale. We believe the diretcion of OSS must be improving the value it provides and not gating by scale..
+The working model on top of it is yours to define. The platform supplies the
+infrastructure, the application runtime and the operational capabilities around
+them through consistent contracts; what you build with them is not something it
+decides for you.
 
 ## Who it is for
 
 "You shouldn't have to become large before you deserve a serious platform."
 
-Funded startups saving runway from hyperscaler pricing, who want a golden path
-defined and maintained for them, and cannot staff a platform engineering team to
-do it. Kamarkat is platform engineering as a service: the golden path arrives
-tested, and stays maintained, without the team it would otherwise take.
+Teams that need a production platform and cannot staff a platform engineering
+team to build one. The golden path arrives tested and stays current, and the
+infrastructure it runs on is yours throughout.
 
 This is the opposite end of the market from tools that hand a platform team a
 faster start and room to customise. A tenant here inherits a tested set rather
@@ -34,17 +31,17 @@ A customer is a **tenant** and holds one **box**: a control plane plus that
 tenant's own managed clusters.
 
 - **Bring your own cloud.** Clusters run in the tenant's account, on the
-  tenant's bill. Kamarkat resells no compute.
+  tenant's bill.
 - **The control plane ships into the box.** It runs in the tenant's cloud under
   credentials the tenant holds. Kamarkat operates no tenant infrastructure and
   holds no cloud, cluster or secret credential.
 - **A managed cluster belongs to exactly one tenant** and is the unit of
-  maintenance, versioning and metering.
+  versioning.
 - **A cell is a label**, grouping a tenant's clusters to attach policy —
   residency, compliance, or anything else a tenant needs applied to a subset. It
   holds no compute and pins no version.
 
-## How maintenance works
+## How a version reaches a cluster
 
 The platform's authority ends at a pull request.
 
@@ -58,8 +55,8 @@ Nothing is applied by the platform. A change reaches infrastructure when the
 tenant accepts the pull request and the tenant's own control plane reconciles
 it. Tenants may configure automatic acceptance.
 
-Support extends as far as the telemetry a box exports. Telemetry is egress-only
-and covers control-plane state, never workload data. An upgrade proposal carries
+A box exports telemetry that is egress-only and covers control-plane state,
+never workload data. An upgrade proposal carries
 a pre-flight verdict produced inside the box, or is raised as unverified.
 
 ## What the platform is, and what the tenant owns
@@ -190,7 +187,7 @@ platform.
 
 When a version is published, a pull request appears against `<tenant>-gitops` changing the pinned version. Merging it moves the cluster; closing it declines the upgrade. Nothing is applied by Kamarkat.
 
-Each release records what taking it means — the versions it spans, the security fixes among them, whether the predecessor is restorable from it, and the minimum version it may be taken from. Declining is not a breach of support: support follows the version, and one outside its window is a version the platform stops promising maintenance for rather than one it forces.
+Each release records what taking it means — the versions it spans, the security fixes among them, whether the predecessor is restorable from it, and the minimum version it may be taken from. Declining changes nothing that is running: a version outside its window is one the platform no longer publishes fixes for, not one it forces.
 
 A tenant that wants the fast path enables auto-merge on that repository.
 
