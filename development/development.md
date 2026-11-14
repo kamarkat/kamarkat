@@ -95,7 +95,7 @@ mkdir -p ~/kamarkat/boxes/local && cd ~/kamarkat/boxes/local
 
 KAKT=/Users/arun_subramanian/Projects/soloz-io/ide/kamarkat/bin/kakt
 
-$KAKT box init --tenant local --box soloz-io --domain local.nutgraf.in \
+$KAKT box init --tenant local --git-org soloz-io --domain local.nutgraf.in \
   --bundle-version development
 
 BOX=$(ls -d local-gitops-* | tail -1)
@@ -163,15 +163,15 @@ chmod +x kakt
 ## Scaffold a real tenant repo 
 
 cd /Users/arun_subramanian/Projects/kamarkat/kamarkat
-./kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+./kakt box init --tenant test-tenant --git-org soloz-io --domain test-tenant.nutgraf.in
 
 Or from your current directory:
 
-/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+/Users/arun_subramanian/Projects/kamarkat/kamarkat/kakt box init --tenant test-tenant --git-org soloz-io --domain test-tenant.nutgraf.in
 
 ### Interactive
 
-kakt box init --tenant test-tenant --box soloz-io --domain test-tenant.nutgraf.in
+kakt box init --tenant test-tenant --git-org soloz-io --domain test-tenant.nutgraf.in
 
 Asks for each credential it does not have (no echo, a browser on the page that
 issues it), then creates the repo and sets them on it. Declaring the management
@@ -179,7 +179,7 @@ cluster and dispatching the bootstrap are your next two steps.
 
 ### Non-interactive:
 
-kakt box init --no-prompt --tenant tenant1 --box soloz-io --domain tenant1.nutgraf.in \
+kakt box init --no-prompt --tenant tenant1 --git-org soloz-io --domain tenant1.nutgraf.in \
   --provider-token "$HCLOUD_TOKEN" --gitops-token "$GITOPS_PAT"
 
 No secrets → nothing is created, and the handover instructions say what is

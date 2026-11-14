@@ -623,7 +623,7 @@ do_scaffold() {
     # `tenant add-management` declares the first management cluster inside it.
     say "creating a box for $TENANT in $GIT_ORG against $VERSION"
     ( cd "$WORKSPACE" && "$ROOT/bin/kakt" box init --no-prompt \
-        --tenant "$TENANT" --box "$GIT_ORG" --domain "$DOMAIN" \
+        --tenant "$TENANT" --git-org "$GIT_ORG" --domain "$DOMAIN" \
         --provider "$PROVIDER" \
         --subdomain "$SUBDOMAIN" \
         --region "$REGION" \

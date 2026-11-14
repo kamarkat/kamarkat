@@ -624,3 +624,25 @@ exit non-zero, because a check against an empty list passes everything.
 pass. Feed it the thing it should reject. A gate nobody has ever seen fail has
 no evidence behind its verdict, and a renamed constant is invisible in review --
 the code reads exactly as it did on the day it worked.
+
+
+## Trusting a truncated search
+
+**Looks like:** `grep -rn ... | head -10` while renaming a flag, a command or a
+file, reading the ten results, and treating them as the set.
+
+**Why it fails:** the eleventh is still there. A flag rename was swept out of the
+README and six documentation pages, and the release then failed on
+`unknown flag: --box` from `scripts/validate/released-cli-standalone.sh` -- which
+had been in the same grep, below the cut. The second attempt fixed the validator
+and the release failed again, on `scripts/dev/local-e2e.sh` and five commands in
+`development/development.md`, all of which had also been below a cut.
+
+**Instead:** when the question is "is this name gone", pipe to `cat` or `wc -l`,
+never `head`. Narrow by excluding the uses that are CORRECT -- `--box` is right
+on the escrow commands, and that is what the exclusion list is for -- rather than
+by limiting how many answers you are willing to see.
+
+**How to catch it:** the thing being renamed is a contract, so ask the contract.
+Run the gate that exercises it before publishing, not after: `kakt release check`
+now builds the CLI and runs the standalone check for this reason.

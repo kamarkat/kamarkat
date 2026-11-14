@@ -51,6 +51,11 @@
 name: Bootstrap cluster
 
 on:
+  push:
+    branches: [main]
+    # The declaration itself, which is what names the cluster and its shape.
+    paths:
+      - 'registry/clusters/*/values.yaml'
   workflow_dispatch:
     inputs:
       cluster:
@@ -81,10 +86,29 @@ on:
         required: false
         default: ''
 
-# Dispatch only. A cluster is not created because a file changed: creating one
-# costs money and takes hours, and a push that triggered it would make an
-# editing mistake into an infrastructure bill. Changing a cluster after it
-# exists is reconciled by the control plane rather than by this workflow.
+# GIT IS THE SOURCE OF TRUTH. Committing a management cluster's declaration to
+# main is what builds it: this workflow resolves the cluster and its shape from
+# the declaration itself, so what gets built is what the repository says, and
+# there is no second place to state it.
+#
+# WHAT IT WILL NOT DO, because creating a cluster costs money and takes hours:
+#
+#   - It builds only a cluster this push ADDED. A commit that edits a cluster
+#     already declared is reconciled by that cluster's own control plane, which
+#     is where every change after Day-0 belongs.
+#   - It builds only a cluster that has no generated/ directory. Day-0 writes
+#     that directory, so its presence is the repository's own record that this
+#     cluster has been built, and a re-added declaration does not bill twice.
+#   - It builds only a MANAGEMENT cluster -- a declaration with no
+#     environmentSlug. A managed cluster declares one, and is provisioned by the
+#     management cluster reconciling it from git, not by a CI run.
+#
+# Each of those is a reason to do nothing, reported in the run rather than
+# passing silently, so a push that was not meant to build says so.
+#
+# workflow_dispatch remains, for re-running a build that stopped part way and for
+# replacing a management cluster whose declaration is already committed.
+#
 # Day-0 commits the artifacts it generates back into this repository, so the run
 # needs write access to it.
 #
@@ -115,16 +139,111 @@ permissions:
   contents: write
 
 jobs:
+  # WHAT TO BUILD, READ FROM THE REPOSITORY. One job decides it for both events,
+  # so a dispatch and a push build the same cluster the same way and there is no
+  # second description of a cluster's shape to disagree with the declaration.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      clusters: ${{ steps.pick.outputs.clusters }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Two commits, so a push can be diffed against what preceded it.
+          fetch-depth: 2
+
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_CLUSTER: ${{ inputs.cluster }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+              # Named explicitly, and still read from the declaration below: the
+              # dispatch says WHICH cluster, never what it is made of.
+              candidates="$DISPATCH_CLUSTER"
+          else
+              # A push with no base establishes nothing, so it claims nothing.
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                  echo "::warning::no base commit to diff against; nothing was resolved"
+                  echo "clusters=[]" >> "$GITHUB_OUTPUT"
+                  exit 0
+              fi
+              # ADDED, not modified. An edit to a cluster already declared is
+              # reconciled by its own control plane.
+              candidates=$(git diff --diff-filter=A --name-only "$BEFORE" HEAD -- \
+                  'registry/clusters/*/values.yaml' \
+                  | sed 's|/values.yaml$||' | sed 's|^registry/clusters/||' || true)
+          fi
+
+          CANDIDATES="$candidates" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib, sys, yaml
+
+          picked, refused = [], []
+          for name in os.environ["CANDIDATES"].split():
+              decl = pathlib.Path("registry/clusters") / name / "values.yaml"
+              if not decl.is_file():
+                  refused.append(f"{name}: no declaration at {decl}")
+                  continue
+              values = yaml.safe_load(decl.read_text()) or {}
+              # A managed cluster declares the workload environment it serves.
+              # The management cluster has none, and that is the difference
+              # between a cluster CI builds and one the hub provisions.
+              if values.get("environmentSlug"):
+                  refused.append(f"{name}: declares environmentSlug, so the management cluster provisions it")
+                  continue
+              # Day-0's own record that this cluster exists.
+              if (pathlib.Path("registry/clusters") / name / "generated").is_dir():
+                  refused.append(f"{name}: already built (generated/ is present)")
+                  continue
+              on_prem = (values.get("onPrem") or {})
+              missing = [k for k in ("provider", "region") if not values.get(k)]
+              if missing:
+                  print(f"::error::{decl} declares no {' or '.join(missing)}, so this cluster cannot be built from git",
+                        file=sys.stderr)
+                  raise SystemExit(1)
+              picked.append({
+                  "cluster":  name,
+                  "provider": str(values["provider"]),
+                  "region":   str(values["region"]),
+                  # Day-0 sizes the cluster from this, and reads the declaration
+                  # itself afterwards; absent means the chart's own default.
+                  "workers":  "" if values.get("workers") is None else str(values["workers"]),
+                  "on-prem":  bool(on_prem.get("enabled", False)),
+                  "tailnet":  str(on_prem.get("tailnet") or ""),
+              })
+
+          for line in refused:
+              print(f"::notice::not building {line}", file=sys.stderr)
+          if not picked:
+              print("::notice::nothing to build from this commit", file=sys.stderr)
+          print("clusters=" + json.dumps(picked))
+          PY
+        # CANDIDATES is passed through the environment rather than interpolated
+        # into the script, so a branch or cluster name cannot become shell.
+        shell: bash
+
   bootstrap:
+    needs: resolve
+    if: needs.resolve.outputs.clusters != '[]'
+    strategy:
+      # One cluster at a time. Each build provisions servers, and a failure that
+      # stops the others is the safer answer when the thing being created bills.
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        box: ${{ fromJSON(needs.resolve.outputs.clusters) }}
     uses: kamarkat/kamarkat/.github/workflows/tenant-bootstrap.yml@v<BUNDLE_VERSION>
     with:
-      cluster: ${{ inputs.cluster }}
-      provider: ${{ inputs.provider }}
-      region: ${{ inputs.region }}
+      cluster: ${{ matrix.box.cluster }}
+      provider: ${{ matrix.box.provider }}
+      region: ${{ matrix.box.region }}
       bundle-version: <BUNDLE_VERSION>
-      workers: ${{ inputs.workers }}
-      on-prem: ${{ inputs.on-prem }}
-      tailnet: ${{ inputs.tailnet }}
+      workers: ${{ matrix.box.workers }}
+      on-prem: ${{ matrix.box.on-prem }}
+      tailnet: ${{ matrix.box.tailnet }}
     secrets:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}

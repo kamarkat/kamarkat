@@ -198,7 +198,26 @@ if [ "$CHECK" = 1 ]; then
   say "4. Every package is publicly pullable and pushable by CI"
   scripts/package/flip-public.sh --check \
     || die "fix the packages above in the GitHub UI, then run this again"
-  say "5. Every component behind its latest release has a reason"
+  # THE BINARY A TENANT INSTALLS, built and exercised here rather than only in
+  # CI after the charts are pushed.
+  #
+  # This gate lives in the release workflow, which runs it AFTER publish.sh has
+  # consumed the version -- so everything it catches is caught too late to fix
+  # cheaply. It caught a renamed command once and a renamed flag twice, each
+  # time on a published version that then could not be released. A rehearsal
+  # that does not build the thing a tenant runs is not rehearsing the release.
+  #
+  # TARGETS=host: one binary for this machine, because what is being checked is
+  # whether a released build resolves its platform content outside a checkout,
+  # and that answer does not differ per architecture.
+  say "5. The released CLI bootstraps from its binary alone"
+  TARGETS=host ./scripts/package/build-cli.sh "$VERSION" dist/bin >/dev/null \
+    || die "the release CLI did not build"
+  ./scripts/validate/released-cli-standalone.sh "$VERSION" \
+    || die "the released binary cannot bootstrap a box outside a checkout (ADR-063).
+   Nothing has been published."
+
+  say "6. Every component behind its latest release has a reason"
   # Exits 4 and 5 are failed lookups, not unexplained versions: the catalog
   # advice below would send someone to edit a reason that is not the problem.
   set +e

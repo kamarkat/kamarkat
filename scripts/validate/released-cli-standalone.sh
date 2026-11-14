@@ -61,7 +61,7 @@ if ! out=$(cd "$sandbox" && \
         INFISICAL_ESCROW_PROJECT_ID=probe-project \
         INFISICAL_ESCROW_ORG_ID=probe-org \
         "$BIN" box init --dry-run \
-        --tenant probe --box probe-org --domain probe.example \
+        --tenant probe --git-org probe-org --domain probe.example \
         --provider hetzner --platform-admin probe-admin \
         --bundle-version "$VERSION" --out "$sandbox/render" 2>&1); then
     echo "released-cli-standalone: scaffolding failed outside a checkout, so the" >&2

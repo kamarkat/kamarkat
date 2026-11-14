@@ -82,6 +82,30 @@ A package that has never been published reads as absent and is **not** a
 failure: GHCR has no settings page before a first publish. It will come out
 private, so flip it immediately afterwards.
 
+## Release check: the released CLI bootstraps from its binary alone
+
+`kakt release check` builds the CLI for this machine and runs
+`scripts/validate/released-cli-standalone.sh` against it, before anything is
+published.
+
+The same gate runs in the release workflow — but there it runs AFTER the charts
+are pushed, so what it catches is caught on a version already consumed. It has
+caught a renamed command once and a renamed flag twice, each time on a published
+version that could not then be released. The rehearsal builds the thing a tenant
+installs for exactly that reason.
+
+What it proves: a binary reporting this version, run from a directory with no
+`manifests/` and no `.git` and with an isolated `HOME`, renders a complete box
+from its embedded content — `registry/box.yaml` present and fully resolved, no
+unresolved tokens under `registry/`, and `templates/` still carrying the
+placeholders a cluster is rendered from.
+
+**When it fails**, the usual cause is that a flag or command the validator names
+has been renamed in the CLI and the validator was not updated with it. The error
+is cobra's — `unknown flag: --x`, or a usage block for the parent command when a
+subcommand is the thing that moved. Fix the invocation in the validator; the
+binary is right and the gate is reading it correctly.
+
 ## Release check: every component behind latest has a reason
 
 `kakt release check` runs this after the gates above. It looks up each
