@@ -31,6 +31,9 @@ permissions:
   # through before stopping.
   contents: write
   packages: write
+  # Signed build provenance for the CLI binaries (actions/attest-build-provenance).
+  id-token: write
+  attestations: write
 
 jobs:
   publish:
@@ -236,11 +239,54 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # WHAT WAS DOWNLOADED, CHECKABLE. A tenant installs this binary before it
+      # holds any credential, over an anonymous fetch, and has nothing to compare
+      # what arrived against. The installer verifies this file; a person running
+      # the documented curl can too.
+      #
+      # One file for every binary, in the format `shasum -c` reads, so the check
+      # is a command a reader already knows rather than one this project invents.
+      - name: Checksum the CLI binaries
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          cd dist/bin
+          shasum -a 256 kakt-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # Signed provenance, tying each binary to the workflow run and the commit
+      # that produced it. Verified with `gh attestation verify`, which needs no
+      # key distribution of ours.
+      - name: Attest the CLI binaries
+        if: github.event_name == 'release'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/bin/kakt-*
+
       - name: Attach the CLI to the release
         if: github.event_name == 'release'
         run: gh release upload "${{ github.event.release.tag_name }}" dist/bin/* --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The tap, last: it points at release assets, so it moves only once those
+      # assets and their checksums are attached. The script skips a prerelease
+      # and does nothing when the tap already names this version.
+      #
+      # Conditional on the secret, so a release does not fail for a tap that has
+      # not been set up. A missing secret is reported in the summary rather than
+      # breaking a release that is otherwise complete.
+      - name: Update the Homebrew tap
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated"
+            exit 0
+          fi
+          ./scripts/package/update-homebrew-tap.sh "${{ steps.v.outputs.version }}" dist/bin
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Summary
         run: |
