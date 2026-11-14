@@ -27,7 +27,7 @@ func newRootCmd() *cobra.Command {
 		// called hub read as though it managed that one cluster, when what it
 		// creates is the whole box: the control plane, its identity and trust,
 		// and the repository the tenant reconciles from.
-		Long: "Create and maintain the platform a tenant runs: scaffold the tenant's\n" +
+		Long: "Create and maintain the platform a tenant runs: render the tenant's\n" +
 			"repository, bootstrap the control plane it declares, and manage the\n" +
 			"bundle version it is pinned to.",
 	}

@@ -50,7 +50,7 @@ type AdminCredential struct {
 // anywhere the platform can read.
 //
 // The escrow is the idempotency anchor, because nothing else can be. A
-// repository secret cannot be read back, so a second scaffold run would mint a
+// repository secret cannot be read back, so a second `box init` run would mint a
 // second password and push it over the one the running Infisical was bootstrapped
 // with -- locking Day-0 out of its own secret store. Here, a box that already has
 // an escrowed administrator reuses it, and only a box with none gets a new one.

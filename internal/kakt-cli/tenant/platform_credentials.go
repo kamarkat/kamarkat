@@ -56,7 +56,7 @@ type platformCredential struct {
 	// -- what changes is only who supplies it.
 	Derived bool
 	// Store is where this operator stages the value between `kakt box init` and
-	// the scaffold that delivers it (internal/kakt-cli/opstore). Empty for a
+	// the render that delivers it (internal/kakt-cli/opstore). Empty for a
 	// derived value, which is never staged because it is never typed.
 	Store string
 }

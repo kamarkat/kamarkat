@@ -38,7 +38,7 @@ This is break-glass access. Normal access is through your own identity provider,
 where each person authenticates as themselves. Use this when that is not available:
 the identity provider is down, the cluster is broken, or nobody can log in.
 
-The escrow is the Infisical you supplied at scaffold time, reached with the same
+The escrow is the Infisical you supplied when the box is rendered, reached with the same
 four values the cluster uses:
 
   INFISICAL_ESCROW_URL         usually https://app.infisical.com

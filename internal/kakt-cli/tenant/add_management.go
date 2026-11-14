@@ -416,7 +416,7 @@ func (m ManagementCluster) addFirst(box Box) (string, []string, error) {
 	src := filepath.Join(m.GitopsDir, "templates", "mgmt")
 	if _, err := os.Stat(src); err != nil {
 		return "", nil, fmt.Errorf("%s has no templates/mgmt to render a management cluster from.\n\n"+
-			"A box created by `kakt box init` carries it. A repository scaffolded before the\n"+
+			"A box created by `kakt box init` carries it. A box rendered before the\n"+
 			"box and its clusters were separated does not, and declares its management\n"+
 			"cluster already.", m.GitopsDir)
 	}

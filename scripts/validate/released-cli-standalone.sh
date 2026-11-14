@@ -33,11 +33,11 @@ fi
 sandbox="$(mktemp -d)"
 trap 'rm -rf "$sandbox"' EXIT
 
-# `box init`, not `tenant scaffold`: scaffolding moved when box management landed,
-# and this check went on naming the old command until a release found out. Cobra
-# reported it as `unknown flag: --dry-run`, because `tenant` has no `scaffold`
-# subcommand and read the word as a positional argument instead -- an error that
-# names the flag and not the command that is missing.
+# `box init` renders the box, and this asks whether the published binary can do
+# it outside a checkout. A gate naming a command that has moved reports the
+# move, not the thing it tests: cobra answered `unknown flag: --dry-run`,
+# because the word it was given was read as a positional argument -- an error
+# that names the flag and not the command that is missing.
 #
 # --dry-run renders and writes nothing, so this asks the one question that
 # matters -- can the binary resolve the platform content Day-0 needs -- without

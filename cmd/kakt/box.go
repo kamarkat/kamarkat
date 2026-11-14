@@ -35,7 +35,7 @@ func newBoxCmd() *cobra.Command {
 // `kakt tenant add-management` for the management cluster, `kakt tenant
 // add-cluster` for a workload one.
 //
-// This used to be one command, `kakt tenant scaffold`, which created the
+// This used to be one command, `kakt tenant render`, which created the
 // repository AND declared the first management cluster in the same pass. That
 // made the box's own identity a field inside that cluster's values file: a
 // repository could not exist without a cluster, and the one fact that must
@@ -110,7 +110,15 @@ type boxInit struct {
 func (b *boxInit) bind(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.StringVar(&b.spec.TenantID, "tenant", "", "tenant identifier (required)")
-	f.StringVar(&b.spec.GitOrg, "box", "", "the box this repository belongs to: the tenant's git organisation, where it is created (required)")
+	// --git-org, because that is what it is. It was --box, which named the one
+	// thing it does not set: a box's identity is MINTED from the tenant and a
+	// timestamp (DeriveBoxIdentity) and never passed in, so the flag called
+	// --box set the git organisation while the box named itself.
+	//
+	// Not required. Left out, it is read from the credential that will create
+	// the repository, which reaches exactly one organisation in the ordinary
+	// case; several is a refusal that names them (ResolveGitOrg).
+	f.StringVar(&b.spec.GitOrg, "git-org", "", "the tenant's git organisation, where their repository is created. Read from the platform credential when it reaches exactly one")
 	f.StringVar(&b.spec.Domain, "domain", "", "the tenant's base domain (required)")
 	// The DNS label this box sits under, declared rather than derived from the
 	// environment (ADR-051 amendment 2026-09-18). Empty publishes on the apex.
@@ -255,6 +263,32 @@ func (b *boxInit) run(cmd *cobra.Command, _ []string) error {
 	// mint here is provisional: it is replaced below, immediately before the
 	// render that first needs it, so a run refused for a missing flag has not
 	// claimed a timestamp.
+	// THE ORGANISATION, from the credential that will create the repository,
+	// when it was not named. Before Validate, which refuses an empty one: the
+	// credential usually reaches exactly one organisation, and asking an
+	// operator to retype what the token already says is the flag earning its
+	// reputation rather than its keep.
+	//
+	// Without prompting. A box init that has to ask for a credential will ask
+	// for it in staging below, where every missing credential is reported
+	// together; reaching for one here would open a browser page in the middle of
+	// resolving a flag.
+	if strings.TrimSpace(b.spec.GitOrg) == "" {
+		cred, err := tenant.EnsurePlatformCredential(false)
+		if err != nil {
+			return fmt.Errorf(`name the tenant's git organisation: --git-org
+
+It is read from the platform credential when there is one, and this machine has
+none yet: %w`, err)
+		}
+		org, err := tenant.ResolveGitOrg(cmd.Context(), cred)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("[box] git organisation: %s (from this operator's %s)\n", org, cred.Kind())
+		b.spec.GitOrg = org
+	}
+
 	if err := b.spec.Validate(); err != nil {
 		return err
 	}
@@ -685,7 +719,7 @@ func printState(name string, present bool, why string) {
 // printEscrowState reports the escrow without asking for it.
 //
 // `kakt escrow init` owns creating it, and this says whether that has happened
-// because a box cannot be scaffolded without one and the refusal is nicer here
+// because a box cannot be rendered without one and the refusal is nicer here
 // than four steps later.
 func printEscrowState() {
 	have := 0

@@ -29,7 +29,7 @@ PATHS=(
     # Component descriptors, read to know what a boundary must generate
     # (health/boundary_inventory.go).
     "manifests/argocd/components"
-    # The tenant scaffolding template (tenant/scaffold.go).
+    # The tenant template a box is rendered from (tenant/render_box.go).
     "manifests/tenants/gitops-template"
     # The Cilium workloads a hetzner hub installs (provider_cloud.go, via
     # HetznerDriver.CiliumAddonPath). One file rather than the directory: the

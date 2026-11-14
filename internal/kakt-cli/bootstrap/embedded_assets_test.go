@@ -124,7 +124,7 @@ func TestEmbeddedCarriesEveryBoundaryInventory(t *testing.T) {
 	}
 }
 
-// orchestrator.go:1547 reads the ADR-045 artifact registry; scaffold.go:447 walks
+// orchestrator.go:1547 reads the ADR-045 artifact registry; render_box.go:447 walks
 // the tenant template. The registry is a file and the template a tree, and a
 // released CLI needs both before it has anything else.
 func TestEmbeddedCarriesTheArtifactRegistryAndTenantTemplate(t *testing.T) {

@@ -157,7 +157,7 @@ func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
 // the escrow.
 //
 // Separate from Declaration because the two have different preconditions: the box
-// id is declared from the moment a repository is scaffolded, while the escrow
+// id is declared from the moment a repository is rendered, while the escrow
 // coordinates may be filled in later, and a bootstrap must not fail for want of
 // coordinates it is not about to use.
 func DeclaredBoxID(gitopsDir, clusterName string) (string, error) {

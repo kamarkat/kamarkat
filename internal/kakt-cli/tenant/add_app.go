@@ -8,7 +8,7 @@ import (
 )
 
 // AppTemplateDir and WorkloadTemplateDir are the retained templates an
-// application is hydrated from. They stay in the repository after scaffolding
+// application is hydrated from. They stay in the repository after the box is rendered
 // because, unlike the management cluster's, they are consumed once per
 // application rather than once per box.
 const (
@@ -127,7 +127,7 @@ func AddApp(s AppSpec) ([]string, error) {
 //
 // A missing template is reported as a repository that predates the command
 // rather than as a missing file. The templates a repository keeps are copied in
-// at scaffolding and never updated afterwards, so a box scaffolded before a
+// when the box is rendered and never updated afterwards, so a box rendered before a
 // template was renamed still holds the old one -- and "no such file or
 // directory" does not tell anyone that.
 func hydrate(src, dst string, tokens map[string]string) error {
@@ -135,8 +135,8 @@ func hydrate(src, dst string, tokens map[string]string) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("this repository has no %s.\n\n"+
-				"The templates a repository keeps are written once, when it is scaffolded,\n"+
-				"and are not updated afterwards. A repository scaffolded before an\n"+
+				"The templates a repository keeps are written once, when it is rendered,\n"+
+				"and are not updated afterwards. A box rendered before an\n"+
 				"application's template was renamed still holds the previous layout -- look\n"+
 				"for templates/fleet/, and bring it in line with the platform's current\n"+
 				"templates/app/ and templates/workload/ before running this again.", src)

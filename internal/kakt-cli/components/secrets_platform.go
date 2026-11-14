@@ -155,12 +155,12 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 			continue
 		case len(found) == 0:
 			// A capability this box is configured for cannot work without it.
-			// Scaffolding refuses to dispatch without these, so reaching here
+			// Rendering refuses to dispatch without these, so reaching here
 			// means Day-0 was run by hand and should say so rather than build a
 			// box that looks finished.
 			return fmt.Errorf("%s was not supplied, and %s needs it.\n\n"+
 				"Set %s in the environment, or put the values under ~/.kamarkat/%s/.\n"+
-				"Scaffolding collects these; a hand-run Day-0 has to pass them.",
+				"Rendering collects these; a hand-run Day-0 has to pass them.",
 				s.name, s.what, strings.Join(envNames(s), ", "), s.dir)
 		case len(missing) > 0:
 			return fmt.Errorf("%s is partially supplied: missing %s.\n"+

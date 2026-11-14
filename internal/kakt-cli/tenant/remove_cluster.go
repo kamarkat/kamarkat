@@ -87,7 +87,7 @@ func (r ClusterRemoval) RemoveDeclaration() ([]string, error) {
 	// layout this platform has shipped.
 	//
 	// Two readings were tried and both were wrong. root.yaml is optional, and Day-0
-	// says so: "root.yaml postdates the repositories scaffolded before it. A box
+	// says so: "root.yaml postdates the boxes rendered before it. A box
 	// without one still reconciles what it has" -- so requiring it told the oldest
 	// boxes they had "no management cluster". bundle.yaml does not discriminate: the
 	// workload-cluster template shipped one until the platform Application was

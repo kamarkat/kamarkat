@@ -13,7 +13,7 @@ Bootstrap and manage Hub (Management) Clusters on Hetzner Cloud using Cluster AP
 ```bash
 make build-hub
 # or
-go build -o bin/kakt ./cmd/hub
+go build -o bin/kakt ./cmd/kakt
 ```
 
 **Usage:**
@@ -188,7 +188,7 @@ make test
 
 **Docker builds:**
 ```bash
-docker build -f cmd/hub/Dockerfile -t zero-ops/hub:latest .
+docker build -f cmd/kakt/Dockerfile -t kamarkat/kakt:latest .
 docker build -f cmd/opensbt/Dockerfile -t zero-ops/opensbt:latest .
 docker build -f cmd/auth-proxy/Dockerfile -t zero-ops/auth-proxy:latest .
 docker build -f cmd/mcp-server/Dockerfile -t zero-ops/mcp-server:latest .

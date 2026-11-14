@@ -69,9 +69,9 @@ func readTokenValue(cmd *cobra.Command) (string, error) {
 // newTenantSetGitopsTokenCmd republishes the organisation credential an
 // application build needs.
 //
-// It exists because scaffold's attempt is non-fatal by design: a token without
+// It exists because render's attempt is non-fatal by design: a token without
 // the organisation's "Secrets: write" permission leaves the box complete and the
-// credential unset, and the only recovery was the `gh secret set` line scaffold
+// credential unset, and the only recovery was the `gh secret set` line render
 // printed in a warning. That makes the tenant perform a step ADR-084 assigns to
 // the platform, once per box, from a message they saw days earlier.
 func newTenantSetGitopsTokenCmd() *cobra.Command {
@@ -84,9 +84,9 @@ func newTenantSetGitopsTokenCmd() *cobra.Command {
 		Long: `Publish GITOPS_REPO_WRITE_TOKEN at the organisation level, so every application
 repository the tenant owns inherits it (ADR-084).
 
-Scaffold does this already. This re-runs it for a box whose scaffold-time token
+Render does this already. This re-runs it for a box whose render-time token
 lacked the organisation's "Secrets: write" permission -- the case where the
-scaffold succeeded, printed a warning, and left application builds unable to pin
+render succeeded, printed a warning, and left application builds unable to pin
 a chart version.
 
 The token needs that one fine-grained permission, not admin:org.`,
@@ -249,7 +249,7 @@ path and its backup prefix for their whole lives.`,
 	f.StringVar(&workloadCluster.GitopsRepoURL, "gitops-repo-url", "", "this repository's URL (required)")
 	f.StringVar(&workloadCluster.PlatformRepoURL, "platform-repo-url", "", "the platform repository URL")
 	f.StringVar(&workloadCluster.BundleRegistry, "bundle-registry", "ghcr.io/kamarkat/charts", "the chart registry")
-	f.StringVar(&workloadCluster.ChartSource, "chart-source", "", "chart source, as the management cluster was scaffolded with")
+	f.StringVar(&workloadCluster.ChartSource, "chart-source", "", "chart source, as the management cluster was rendered with")
 	f.StringVar(&workloadCluster.PublicTLSIssuer, "public-tls-issuer", "letsencrypt-prod", "ACME issuer for public certificates")
 	// -1 is "no opinion", so an explicit --workers is distinguishable from the
 	// default. hybrid runs on the tenant's own hardware alone and has no cloud
@@ -355,7 +355,7 @@ func printTree(dir string) error {
 // carries none.
 //
 // Empty rather than a guess: an unreleased build has no published version to
-// offer, and scaffolding a repository pinned to something that does not resolve
+// offer, and rendering a repository pinned to something that does not resolve
 // produces a box that cannot bootstrap and says nothing about why until the
 // first Application fails to load its source.
 func defaultBundleVersion() string {

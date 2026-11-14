@@ -139,7 +139,7 @@ func Load(repoRoot, environment, app string) (*App, error) {
 
 // registryClustersDir holds this box's cluster declarations. The authority for
 // the name is tenant.RegistryDir; repeated rather than imported because that
-// package carries the whole scaffolder and this one reads two fields.
+// package carries the whole renderer and this one reads two fields.
 const registryClustersDir = "registry/clusters"
 
 // WHY THERE IS NO VerifyTargetCluster. It checked three facts against each

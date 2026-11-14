@@ -123,7 +123,7 @@ declaration (`ReadBoxValues`) rather than from a flag.
    - ClusterClass (CAPI templates)
    - Crossplane Composition (labelled `provider: <name>`)
    - Any provider-specific CRDs, CCMs, webhooks, or secrets
-2. Add a claim template to the tenant scaffolding's
+2. Add a claim template to the tenant template's
    `templates/workload-cluster/infrastructure/spokepool-<name>.yaml`, which
    `add-cluster` selects by provider.
 3. No AppSet changes needed — the `infrastructure-provider` element
@@ -131,5 +131,5 @@ declaration (`ReadBoxValues`) rather than from a flag.
 4. Add a provider driver in `internal/kakt-cli/bootstrap/` implementing the
    `Provider` interface.
 5. Add the combination to `supportedMatrix` in both the chart's `values.yaml`
-   and `internal/kakt-cli/tenant/scaffold.go`; a test asserts they agree, and
+   and `internal/kakt-cli/tenant/render_box.go`; a test asserts they agree, and
    `add-cluster` refuses a combination the platform ships no source for.

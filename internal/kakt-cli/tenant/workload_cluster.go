@@ -58,7 +58,7 @@ type WorkloadCluster struct {
 	// PublicTLSIssuer is the ACME issuer its public certificates come from.
 	PublicTLSIssuer string
 	// ChartSource and PlatformRepoURL and BundleRegistry carry the same values
-	// the management cluster was scaffolded with.
+	// the management cluster was rendered with.
 	ChartSource     string
 	PlatformRepoURL string
 	BundleRegistry  string
@@ -125,7 +125,7 @@ func (w WorkloadCluster) Add() ([]string, error) {
 	// The supported topology, against THIS cluster's declaration (ADR-111
 	// Revision 7 §4).
 	//
-	// It used to be asked of the hub, at scaffold time, about the hub's own
+	// It used to be asked of the hub, when the box is rendered, about the hub's own
 	// environment and provider -- which answered the question only while a hub
 	// belonged to one environment. A hub managing dev, stg and prod has no value
 	// to look up, and the combination that matters is the one declared HERE: this
@@ -166,7 +166,7 @@ func (w WorkloadCluster) Add() ([]string, error) {
 	tmpl := filepath.Join(w.GitopsDir, "templates", "workload-cluster")
 	if _, err := os.Stat(tmpl); err != nil {
 		return nil, fmt.Errorf("no workload-cluster template at %s: this repository was "+
-			"not scaffolded by a version that ships one", tmpl)
+			"not rendered by a version that ships one", tmpl)
 	}
 	mgmtDir := filepath.Join(w.GitopsDir, RegistryDir, "clusters", w.MgmtCluster)
 	if _, err := os.Stat(mgmtDir); err != nil {
@@ -248,7 +248,7 @@ func (w WorkloadCluster) Add() ([]string, error) {
 	return []string{filepath.Join(RegistryDir, "clusters", w.Name)}, nil
 }
 
-// tokens are the same set scaffolding substitutes into a cluster, so a workload
+// tokens are the same set rendering substitutes into a cluster, so a workload
 // cluster and the management cluster are hydrated from one vocabulary.
 func (w WorkloadCluster) tokens() map[string]string {
 	return map[string]string{

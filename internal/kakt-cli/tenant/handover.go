@@ -31,7 +31,7 @@ func ProviderCredential(provider string) (string, error) {
 		return "HCLOUD_TOKEN", nil
 	default:
 		return "", fmt.Errorf("no credential is known for provider %q; the "+
-			"scaffolded repository will need its cloud secret set by hand", provider)
+			"rendered box will need its cloud secret set by hand", provider)
 	}
 }
 
@@ -115,7 +115,7 @@ func needsTailscale(provider string) bool {
 }
 
 // Complete reports whether both are present. A repository is only dispatchable
-// with both, so this is the test for whether scaffolding can go further than
+// with both, so this is the test for whether rendering can go further than
 // creating the repository.
 func (s Secrets) Complete() bool {
 	return strings.TrimSpace(s.ProviderToken) != "" && strings.TrimSpace(s.GitopsToken) != ""
@@ -174,9 +174,9 @@ func (s Secrets) Prompt(spec Spec) (Secrets, error) {
 	// them, and the platform keeps no copy beyond the staging store (ADR-065).
 	//
 	// `kakt box init` is where this is meant to happen, before anything is
-	// created. Reaching it here means the scaffold found something missing, so it
+	// created. Reaching it here means the render found something missing, so it
 	// asks rather than ending a run that has already made a repository.
-	fmt.Println("\nCredentials this box needs, which `kakt box init` collects before scaffolding.")
+	fmt.Println("\nCredentials this box needs, which `kakt box init` collects before the box is rendered.")
 	if s.escrowNamedButUnauthenticated() {
 		fmt.Println("\nThis box's escrow is known, but its client secret is not on this machine.")
 		fmt.Println("Infisical shows a client secret once. Issuing another is additive, so your")
@@ -241,7 +241,7 @@ func (s *Secrets) fillFromStore(spec Spec) {
 // render read them from the store, while the repository secrets read only flags --
 // so an operator with a complete store was still asked to type all four, and the
 // refusal for a box with no escrow claimed the opposite ("these settings are
-// recorded for you, so scaffolding finds them without any being passed").
+// recorded for you, so `box init` finds them without any being passed").
 func (s *Secrets) fillEscrowFromStore() {
 	for _, f := range []struct {
 		name  string
@@ -345,7 +345,7 @@ func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
 // The alternative was a repository-level secret per application, and it does not
 // hold. `kakt box init` knows exactly one repository: <tenant>-gitops.
 // Applications are the tenant's to create, rename and retire long after
-// scaffolding has run, so a platform that set their secrets would have to track
+// `box init` has run, so a platform that set their secrets would have to track
 // a set that changes without it -- and the failure when it falls behind is
 // silent. waypoint's bff has published a chart on every commit since September
 // and pinned a version NOT ONCE, because its deploy job reads a
@@ -363,14 +363,14 @@ func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
 //
 // so the narrow one is available and is what the prompt asks for.
 //
-// A failure here is REPORTED, NOT FATAL. The box it was scaffolding is complete
+// A failure here is REPORTED, NOT FATAL. The box it was rendering is complete
 // and bootstraps without this; what is missing is the credential a future
-// application build will need, and aborting the scaffold over it would destroy
+// application build will need, and aborting the render over it would destroy
 // a working repository to fix something no cluster depends on.
 // publishOrgSecret performs the write and REPORTS ITS FAILURE.
 //
 // Separate from setOrgGitopsToken because the two callers want opposite things
-// from a failure. Scaffold wants to continue: the box is complete without this
+// from a failure. Render wants to continue: the box is complete without this
 // credential and aborting would destroy a working repository over something no
 // cluster depends on. An operator who ran the retry deliberately wants the
 // opposite -- a retry that prints a warning and exits 0 has told them it worked
@@ -405,7 +405,7 @@ func setOrgGitopsToken(ctx context.Context, org, token string) error {
 		return nil
 	}
 
-	// Scaffold knows ONE repository -- the GitOps repository it just created --
+	// Render knows ONE repository -- the GitOps repository it just created --
 	// so on a plan where organisation secrets do not reach private repositories
 	// that is the one it can cover. It is also the only one that exists at this
 	// point: applications are created later, and each will need the credential
@@ -441,7 +441,7 @@ func setOrgGitopsToken(ctx context.Context, org, token string) error {
 // fault.
 //
 // It is called after the repository has been created and pushed to, and there is
-// no way back from here: an error aborts the scaffold with the repository
+// no way back from here: an error aborts the render with the repository
 // already existing, so the next attempt fails on "already exists" before it
 // reaches this code, and the operator has to delete the repository by hand. A
 // single HTTP 500 -- GitHub's, not ours -- therefore cost a whole run:
@@ -515,7 +515,7 @@ func firstLine(s string) string {
 
 // HandoverInstructions prints what is left for the tenant to do.
 //
-// Printed rather than performed when a secret is absent. Scaffolding has already
+// Printed rather than performed when a secret is absent. Rendering has already
 // created a repository at this point, so the run cannot simply fail: what it owes
 // is an accurate account of where it stopped and what completes it.
 func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
@@ -526,7 +526,7 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 		credName = "<PROVIDER_TOKEN>"
 	}
 
-	fmt.Fprintf(w, "\n%s is scaffolded and pinned to %s.\n", repo, spec.BundleVersion)
+	fmt.Fprintf(w, "\n%s is rendered and pinned to %s.\n", repo, spec.BundleVersion)
 	fmt.Fprintf(w, "  https://github.com/%s\n\n", repo)
 
 	if !s.CompleteFor(spec.Provider) {
@@ -612,12 +612,12 @@ func shellQuote(v string) string {
 // PublishOrgGitopsToken republishes the organisation's GITOPS_REPO_WRITE_TOKEN
 // for a box that already exists.
 //
-// SetSecrets does this once, during scaffold, and deliberately does not fail the
-// scaffold when it cannot: the box is complete without it and aborting would
+// SetSecrets does this once, during render, and deliberately does not fail the
+// render when it cannot: the box is complete without it and aborting would
 // destroy a working repository over a credential no cluster depends on. The
-// consequence is that a scaffold whose token lacked the organisation's
+// consequence is that a render whose token lacked the organisation's
 // "Secrets: write" permission leaves a box permanently short of it, with no way
-// back that does not involve scaffolding again -- which is not a thing anyone
+// back that does not involve rendering again -- which is not a thing anyone
 // can do to a running box.
 //
 // So the retry is a command. What it replaces is an operator pasting
@@ -708,7 +708,7 @@ func PublishRepoGitopsToken(ctx context.Context, repo, token string) error {
 //
 // DERIVED, never enumerated. ADR-084 says the platform is not told which
 // application repositories exist -- they are created, renamed and retired by the
-// tenant long after scaffolding -- so a list held anywhere falls behind
+// tenant long after the box is rendered -- so a list held anywhere falls behind
 // silently. The same argument rules out publishing to every repository in the
 // organisation: most of them have nothing to do with this box, and a credential
 // that can write a tenant's GitOps repository should not sit in a repository

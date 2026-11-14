@@ -10,7 +10,7 @@ which renders a bundle pointing ArgoCD at this repository at a branch. A tenant 
 neither. Two defects reached clusters through that gap — see ADR-068 addendum 1.
 
 Use the development build for ordinary work. Use this before a release, and whenever
-a change touches what a released binary carries or what `tenant scaffold` renders.
+a change touches what a released binary carries or what `box init` renders.
 
 ---
 
@@ -94,7 +94,7 @@ Iterate with `-rc.2`, `-rc.3`.
 
 Charts land in `oci://ghcr.io/kamarkat/charts` — the same registry a release uses,
 so the `repoURL` your test renders is identical to a tenant's. `OWNER=` overrides
-the namespace, but it must match what the scaffolded bundle names.
+the namespace, but it must match what the rendered bundle names.
 
 **To check packaging without spending a version:**
 
@@ -137,23 +137,26 @@ so:
 bin/kakt bundle-version   # must print 0.1.16-rc.1
 ```
 
-## 3. Scaffold against it
+## 3. Create a box against it
 
 ```bash
 export PATH="$PWD/bin:$PATH"
 export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
 
-kakt tenant scaffold --local \
-  --tenant acme --box <your-gh-org> --domain acme.example \
-  --cluster acme-hub --environment dev --provider hetzner \
+kakt box init --local \
+  --tenant acme --git-org <your-gh-org> --domain acme.example \
+  --region hel1 --provider hetzner \
   --bundle-version 0.1.16-rc.1
+
+# Then its first management cluster, which the box names itself:
+kakt tenant add-management
 ```
 
 `--bundle-version` is redundant when the binary already declares it — it defaults to
 the version the CLI carries — but passing it makes the intent visible in shell
 history, which matters when several prereleases are in flight.
 
-Scaffolding prompts for the tenant's credentials, including the Infisical escrow
+`kakt box init` prompts for the tenant's credentials, including the Infisical escrow
 (ADR-076). `--local` clones the repository it creates and prints the bootstrap
 command instead of dispatching the workflow.
 
@@ -194,7 +197,7 @@ cd ..
 kakt teardown --name acme-hub --force --confirm
 ```
 
-Then delete the scaffolded repository and its local clone. `kakt tenant scaffold`
+Then delete the box's repository and its local clone. `kakt box init`
 refuses to clone over an existing directory, so a stale clone will stop the next run
 rather than being silently bootstrapped.
 

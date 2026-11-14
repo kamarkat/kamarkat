@@ -499,18 +499,18 @@ func (o *Orchestrator) applyTenantSeed(ctx context.Context, kubeconfig string) e
 		path := filepath.Join(o.GitopsDir, tenant.RegistryDir, "clusters", o.ClusterName, f)
 		seed, err := os.ReadFile(path)
 		if err != nil {
-			// root.yaml postdates the repositories scaffolded before it. A box
+			// root.yaml postdates the boxes rendered before it. A box
 			// without one still reconciles what it has; it just does not pick up
-			// promotions until it is re-scaffolded, which is what it had before.
+			// promotions until it is re-rendered, which is what it had before.
 			if f == "root.yaml" && os.IsNotExist(err) {
 				fmt.Printf("[seed] %s has no root.yaml: promotions will not reconcile "+
-					"on their own until this repository is re-scaffolded (ADR-064)\n",
+					"on their own until this repository is re-rendered (ADR-064)\n",
 					o.GitopsDir)
 				continue
 			}
 			return fmt.Errorf("the tenant repository declares no cluster %q: %w.\n"+
 				"A cluster is bootstrapped from the declaration its own repository "+
-				"holds (ADR-072); scaffold it there before bootstrapping it",
+				"holds (ADR-072); render it there before bootstrapping it",
 				o.ClusterName, err)
 		}
 
@@ -530,7 +530,7 @@ func (o *Orchestrator) applyTenantSeed(ctx context.Context, kubeconfig string) e
 	return nil
 }
 
-// unsubstituted matches a scaffolding placeholder. A template copied into
+// unsubstituted matches a rendering placeholder. A template copied into
 // clusters/ without hydration renders an Application whose source names a
 // literal <BUNDLE_VERSION>, which ArgoCD accepts and then cannot resolve.
 var unsubstituted = regexp.MustCompile(`<[A-Z_]{3,}>`)

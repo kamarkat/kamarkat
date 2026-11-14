@@ -16,7 +16,7 @@ import (
 
 // escrowEnv are the four values hub-operator reads to reach the escrow, in the
 // order a human supplies them. Declared once because three places must agree on
-// them: this installer, the operator's Deployment, and the scaffolding that asks.
+// them: this installer, the operator's Deployment, and the rendering that asks.
 var escrowEnv = []string{
 	"INFISICAL_ESCROW_URL",
 	"INFISICAL_ESCROW_CLIENT_ID",
@@ -50,11 +50,11 @@ func (i *Installer) InstallEscrowCredentials(ctx context.Context) error {
 		// Refused, not reported. This used to print a notice and continue, on the
 		// reasoning that whether a box may be built without an escrow is decided
 		// before this point -- and the decision made before this point is
-		// RequireEscrow, which runs in a DIFFERENT PROCESS during scaffolding and
+		// RequireEscrow, which runs in a DIFFERENT PROCESS while the box is rendered and
 		// checks values passed to it as flags. Passing it proves the values were
 		// typed, not that they reached the box.
 		//
-		// They did not, on the local path: scaffolding accepted them, wrote them
+		// They did not, on the local path: `box init` accepted them, wrote them
 		// nowhere, and Day-0 read an empty environment. The notice was printed,
 		// nothing failed, and the box ran for weeks with its master keys existing
 		// only inside it -- which is the single outcome ADR-076 makes the escrow

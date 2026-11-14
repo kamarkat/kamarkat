@@ -483,7 +483,7 @@ func NewEscrowClientForToken(ctx context.Context, url, projectID, token string) 
 // The box built for forty minutes, HubEnvironment never published
 // DatabaseRolesProvisioned, and boundary-04 waited on database roles that could
 // not be created -- three layers away from a project created as the wrong type
-// days earlier, and accepted at scaffold time on nothing more than a presence
+// days earlier, and accepted when the box is rendered on nothing more than a presence
 // check.
 //
 // The probe is a read of a path that does not exist: one request, no write

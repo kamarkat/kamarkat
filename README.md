@@ -116,7 +116,7 @@ gh release download --repo kamarkat/kamarkat \
   --output kakt && chmod +x kakt
 
 # the box: a repository in acme-inc, with no clusters
-./kakt box init --tenant acme --box acme-inc --domain acme.example
+./kakt box init --tenant acme --git-org acme-inc --domain acme.example
 
 # its management cluster, declared inside the checkout box init left behind
 cd acme-gitops-* && ../kakt tenant add-management

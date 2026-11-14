@@ -2,7 +2,7 @@
 // <tenant>-gitops repository and rendering it from the template the platform
 // holds.
 //
-// Scaffolding happens once. Everything after it is a proposal against the
+// Rendering happens once. Everything after it is a proposal against the
 // rendered repository (ADR-064), which is the whole of the difference from the
 // platform this pattern is taken from: kubefirst renders a customer's repository
 // and never returns to it, so a fix it publishes reaches nothing already running.
@@ -63,7 +63,7 @@ type Spec struct {
 	//
 	// Separate from ClusterName because the two have different lifetimes. The box
 	// owns the escrow path and the DNS records; the cluster owns the WAL archive
-	// prefix and the CAPI object names. Pinned at scaffolding and never changed,
+	// prefix and the CAPI object names. Pinned when the box is rendered and never changed,
 	// for the same reason dns.ownerId is not: everything already written under it
 	// is orphaned by a change.
 	BoxID string
@@ -74,7 +74,7 @@ type Spec struct {
 	// PlatformRevision is the platform branch a development box reads its chart
 	// from. Ignored by a released box, which names a published chart instead.
 	PlatformRevision string
-	// PlatformRepoURL is the platform's repository. A scaffolded box does not
+	// PlatformRepoURL is the platform's repository. A rendered box does not
 	// resolve it at runtime (ADR-063); it is recorded so a tenant can find the
 	// source of what it runs.
 	PlatformRepoURL string
@@ -127,7 +127,10 @@ func (s Spec) repoURL() string {
 func (s Spec) Validate() error {
 	missing := []string{}
 	for name, v := range map[string]string{
-		"tenant": s.TenantID, "box": s.GitOrg, "domain": s.Domain,
+		// By the flag's own name. It read "box", so an operator who left out the
+		// organisation was told a box was missing -- and a box is the thing
+		// being created, not an input.
+		"tenant": s.TenantID, "git-org": s.GitOrg, "domain": s.Domain,
 		"provider": s.Provider, "region": s.Region,
 		// The minted names are NOT asked about here. They are not operator
 		// inputs: a new box derives them from one timestamp and a continuation
@@ -163,7 +166,7 @@ func (s Spec) Validate() error {
 		// The version is the one an unreleased build cannot supply, and the
 		// reason is worth stating: a developer running from source has no
 		// published version to pin, and the alternatives are naming one or
-		// scaffolding a repository that cannot bootstrap.
+		// rendering a repository that cannot bootstrap.
 		for _, m := range missing {
 			if m == "bundle-version" {
 				return fmt.Errorf("no bundle version.\n\n"+
@@ -192,7 +195,7 @@ func (s Spec) Validate() error {
 // RequireEscrow refuses a box that would have nowhere to keep its master keys.
 //
 // Checked after the repository is created rather than before: the repository is
-// not the thing at risk, and a tenant who has scaffolded and not yet obtained an
+// not the thing at risk, and a tenant who has rendered and not yet obtained an
 // escrow should keep what they have rather than start again.
 //
 // Required rather than warned about because the cost of skipping lands entirely in
@@ -208,7 +211,7 @@ func (s Secrets) RequireEscrow() error {
 		"which its secret store cannot be decrypted -- to an Infisical you control.\n"+
 		"The box's own cannot hold them: they are the keys that decrypt it.\n\n"+
 		"Infisical Cloud is the usual answer: https://app.infisical.com\n\n"+
-		"Create one and these settings are recorded for you, so scaffolding finds\n"+
+		"Create one and these settings are recorded for you, so `box init` finds\n"+
 		"them without any being passed:\n\n"+
 		"  kakt login\n"+
 		"  kakt escrow init --name <project-name>\n\n"+
@@ -257,7 +260,7 @@ func (s Secrets) VerifyEscrow() error {
 	// refusal applies to a running box and cannot be evaluated here.
 	if _, err := escrow.NewEscrowClient(ctx, ""); err != nil {
 		return fmt.Errorf("the escrow this box would use does not work.\n\n%w\n\n"+
-			"Nothing is scaffolded on an escrow that cannot hold the master keys: the\n"+
+			"Nothing is rendered on an escrow that cannot hold the master keys: the\n"+
 			"box behaves identically for months and the difference appears on the day\n"+
 			"the cluster is gone (ADR-076).", err)
 	}
@@ -276,7 +279,7 @@ func (s Secrets) VerifyEscrow() error {
 // prompt added was a password chosen under pressure and remembered nowhere.
 //
 // The escrow is read BEFORE anything is generated. A repository secret cannot be
-// read back, so a second scaffold run has no way to discover what the first one
+// read back, so a second `box init` run has no way to discover what the first one
 // chose; without this, re-running would mint a new password and push it over the
 // one the live Infisical was bootstrapped with, locking Day-0 out of the secret
 // store it is meant to administer.
@@ -299,7 +302,7 @@ func (s Secrets) WithAdminCredential(ctx context.Context, boxID, clusterName, se
 	}
 
 	// The environment's address wins over the session's, so an operator
-	// scaffolding a box somebody else administers can say so.
+	// rendering a box somebody else administers can say so.
 	email := strings.TrimSpace(s.InfisicalAdminEmail)
 	if email == "" {
 		email = strings.TrimSpace(sessionEmail)
@@ -566,7 +569,7 @@ func escrowCoordinate(name string) string { return escrow.StoredValue(name) }
 // Two in every environment. Development briefly defaulted to zero, so that its
 // capacity would come from the tenant's own hardware (ADR-075) -- the right end
 // state, reached the wrong way: it made on-prem hardware a precondition for the
-// simplest box the platform can build, and scaffolding with no arguments produced
+// simplest box the platform can build, and rendering with no arguments produced
 // a repository whose bootstrap was refused for having nowhere to schedule.
 //
 // A tenant who wants that arrangement asks for it with --workers 0, which is why
@@ -578,12 +581,12 @@ func (s Spec) workerCount() int {
 	return 2
 }
 
-// CapacityWarning reports that this box, as scaffolded, has nowhere to run
+// CapacityWarning reports that this box, as rendered, has nowhere to run
 // anything -- or returns "" when it does.
 //
 // A box needs worker capacity from somewhere: cloud workers, or nodes on the
 // tenant's own premises. A development box defaults to no cloud workers, so one
-// scaffolded without on-prem details has neither. Its bootstrap is refused at
+// rendered without on-prem details has neither. Its bootstrap is refused at
 // pre-flight, which is the correct place to stop but the wrong place to find out:
 // by then a repository exists, secrets are set, and someone is watching a workflow.
 //
@@ -596,7 +599,7 @@ func (s Spec) CapacityWarning() string {
 		"This box has no worker capacity: %s provisions no cloud workers, so its\n"+
 			"capacity must come from nodes on your own premises.\n\n"+
 			"  Bootstrap it with on-prem nodes:  dispatch with on-prem=true and your tailnet\n"+
-			"  Or give it cloud workers instead: re-scaffold with --workers 2,\n"+
+			"  Or give it cloud workers instead: re-render with --workers 2,\n"+
 			"                                    or edit workers in registry/clusters/%s/values.yaml\n\n"+
 			"Without one of those the bootstrap is refused before anything is built.",
 		s.Provider, s.ClusterName)
@@ -720,16 +723,16 @@ func (s Spec) developmentRevision() string {
 // publicTLSIssuer is the ACME issuer this environment's public certificates come
 // from.
 //
-// Written into the values file at scaffold time because the chart refuses to
+// Written into the values file when the box is rendered because the chart refuses to
 // default it, and refuses for a good reason: an empty issuer produces an
 // ApplicationSet that applies cleanly and a child Application that cannot render,
 // which ArgoCD reports as Healthy while managing nothing -- leaving whatever
 // certificate was issued last in place, including a staging one no browser
 // trusts. The chart's message says the environment bootstrap owns this policy.
 //
-// For a tenant box, scaffolding IS that bootstrap: it is where the environment is
+// For a tenant box, rendering IS that bootstrap: it is where the environment is
 // chosen, and the tenant's seed passes a values file and no parameters, so a value
-// the chart requires and scaffolding does not write is a value nothing supplies.
+// the chart requires and rendering does not write is a value nothing supplies.
 // That gap stalled a real bootstrap at boundary-01 for ten minutes with the seed
 // rendering no ApplicationSets at all.
 // The hub's certificate policy, which is the hub's own and not a workload
@@ -739,7 +742,7 @@ func (s Spec) developmentRevision() string {
 // trading browser trust for Let's Encrypt's per-registered-domain rate limit on
 // a certificate that outlives its cluster by minutes. That branch was already
 // unreachable from here -- "ephemeral" is not a key in supportedMatrix, so
-// scaffolding refused it before this was called -- and with the hub declaring no
+// rendering refused it before this was called -- and with the hub declaring no
 // environment there is no input left to branch on.
 func publicTLSIssuer() string {
 	return "letsencrypt-prod"
@@ -752,7 +755,7 @@ func publicTLSIssuer() string {
 // convention ReadHubZone documents for the platform's own overlays, where "a
 // production overlay deliberately does not patch spec.domain".
 //
-// Written by scaffolding because the chart cannot default it. It travelled as the
+// Written by rendering because the chart cannot default it. It travelled as the
 // platform's own literal inside agentgateway's config until this existed, so a
 // tenant's gateway trusted the PLATFORM's Zitadel as its OIDC issuer and fetched
 // signing keys from it -- broken, and the runtime dependency on the vendor that
@@ -1094,7 +1097,7 @@ func RemoteBoxID(ctx context.Context, s Spec, cred Credential) (string, error) {
 //
 // Walking through fs.WalkDir rather than filepath.Walk is what makes both cases
 // one code path: an embedded FS and a directory present the same interface, so
-// the scaffolder cannot acquire a dependency on being run inside a checkout --
+// the renderer cannot acquire a dependency on being run inside a checkout --
 // which is what it had, and what made the published binary unusable.
 func copyPlatformTree(src, dst string) error {
 	// ONE SOURCE for the whole copy: the walk and the reads must agree, or the
@@ -1261,13 +1264,13 @@ func TokenFromEnv() (Credential, error) {
 			moved = fmt.Sprintf("\n\nThere is one in %s, which is no longer read. Move it:\n\n"+
 				"  mkdir -p %s && mv %s %s", old, filepath.Dir(p), old, p)
 		}
-		// Says what to do, not only what is missing. Scaffolding is often the
+		// Says what to do, not only what is missing. Rendering is often the
 		// first command anyone runs against this platform, and an error naming a
 		// variable without saying where its value comes from is a support round
 		// trip.
 		return Credential{}, fmt.Errorf(
 			"no credential for setting up the tenant's organisation.\n\n"+
-				"Scaffolding creates a repository in the tenant's organisation, so it needs\n"+
+				"`box init` creates a repository in the tenant's organisation, so it needs\n"+
 				"a credential that may do that, in %s or in\n%s\n\n"+
 				"Either kind works and you do not have to say which it is:\n\n"+
 				"  an installation token for a GitHub App the tenant granted. Preferred,\n"+
@@ -1343,7 +1346,7 @@ func Publish(ctx context.Context, dir string, s Spec, cred Credential) error {
 	remote := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git",
 		cred.Token, s.GitOrg, s.RepoName())
 
-	// A repository that already has history is not scaffolded over.
+	// A repository that already has history is not rendered over.
 	//
 	// This check used to be a claim: the caller said pushing was "refused below
 	// if it already has history", and nothing below refused it. What actually
@@ -1352,7 +1355,7 @@ func Publish(ctx context.Context, dir string, s Spec, cred Credential) error {
 	// would merge a tenant's box into a freshly rendered template. Safe by
 	// accident, and unreadable.
 	//
-	// ADR-062: scaffolding happens once and the repository is a starting state
+	// ADR-062: rendering happens once and the repository is a starting state
 	// rather than a fork. Re-rendering one that exists is not a resume, it is a
 	// second starting state for a box that already has one.
 	ls := exec.CommandContext(ctx, "git", "ls-remote", "--heads", remote)
@@ -1362,14 +1365,14 @@ func Publish(ctx context.Context, dir string, s Spec, cred Credential) error {
 			strings.ReplaceAll(string(out), cred.Token, "***"))
 	}
 	if strings.TrimSpace(string(out)) != "" {
-		return fmt.Errorf("%s/%s already has commits, so it is not scaffolded again.\n"+
-			"Scaffolding produces a starting state, not a fork (ADR-062), and pushing\n"+
+		return fmt.Errorf("%s/%s already has commits, so it is not rendered again.\n"+
+			"`box init` produces a starting state, not a fork (ADR-062), and pushing\n"+
 			"this render over an existing box would replace declarations its clusters\n"+
 			"are reconciling.\n\n"+
-			"  To re-scaffold from scratch: delete the repository, then run this again.\n"+
+			"  To render it again from scratch: delete the repository, then run this again.\n"+
 			"  To inspect what would be written: re-run with --dry-run --out <dir>.\n"+
 			"  To bootstrap the box that is already there: dispatch its own\n"+
-			"  bootstrap-cluster workflow rather than scaffolding.",
+			"  bootstrap-cluster workflow rather than `box init`.",
 			s.GitOrg, s.RepoName())
 	}
 

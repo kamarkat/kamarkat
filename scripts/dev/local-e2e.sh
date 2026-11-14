@@ -257,10 +257,10 @@ load_credentials() {
 
     # Exported, under the names Day-0 reads.
     #
-    # These four were collected for `tenant scaffold`, which takes them as FLAGS
-    # and satisfies RequireEscrow with them. Day-0 reads them from the
-    # ENVIRONMENT, and nothing put them there -- so every box built by this
-    # script passed the escrow gate during scaffolding and was then bootstrapped
+    # These four were collected for `box init`, which takes them as FLAGS and
+    # satisfies RequireEscrow with them. Day-0 reads them from the ENVIRONMENT,
+    # and nothing put them there -- so every box built by this script passed the
+    # escrow gate while it was rendered and was then bootstrapped
     # without one. It printed "no escrow configured" and carried on.
     #
     # The dispatch path never had the bug: scaffolding writes these as repository

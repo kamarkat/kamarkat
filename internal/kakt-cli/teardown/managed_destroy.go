@@ -149,7 +149,7 @@ func (o *Orchestrator) forceDeleteApplication(ctx context.Context, baseArgs []st
 		"--ignore-not-found", "--wait=false")
 	if out, err := exec.CommandContext(ctx, "kubectl", del...).CombinedOutput(); err != nil {
 		// Reported, not fatal. A box whose root Application is already gone --
-		// a repeated teardown, or one scaffolded before root.yaml existed -- is
+		// a repeated teardown, or one rendered before root.yaml existed -- is
 		// in the state this step is trying to reach.
 		fmt.Printf("[teardown]   note: %s not deleted (%v); if it is still reconciling, "+
 			"the deletes below may be undone\n", app, err)

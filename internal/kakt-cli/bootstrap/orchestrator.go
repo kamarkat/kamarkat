@@ -2020,7 +2020,7 @@ func (o *Orchestrator) zitadelHookFailure(ctx context.Context, kubeconfig string
 // READ, not derived (ADR-111 Revision 7 §3). It was a switch over the bootstrap's
 // environment slug, which made this the second authority for a policy the
 // environment-manager chart already requires as a value: `publicTlsIssuer`,
-// written into the box's own values.yaml by scaffolding. Two mappings had to agree
+// written into the box's own values.yaml by rendering. Two mappings had to agree
 // and only one of them shipped to the cluster.
 //
 // Still no default, for the reason the switch gave: a staging certificate is an
