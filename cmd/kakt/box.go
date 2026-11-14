@@ -332,8 +332,18 @@ func (b *boxInit) create(ctx context.Context) error {
 	// Usable, not merely supplied. An Infisical project has a TYPE, and only a
 	// secret-manager project accepts what an escrow does; a kms project
 	// authenticates perfectly and then refuses every read and write.
-	if err := b.secrets.VerifyEscrow(); err != nil {
-		return err
+	//
+	// NOT UNDER --dry-run, which renders and creates nothing. This reaches the
+	// escrow over the network and authenticates against it, so requiring it to
+	// work made a render impossible anywhere the escrow is not reachable --
+	// including the release gate that checks the published binary carries its
+	// platform content, which never got as far as rendering. RequireEscrow above
+	// still applies: a box with no escrow DECLARED is refused in either mode,
+	// because that is a property of the box and not of this machine's network.
+	if !b.dryRun {
+		if err := b.secrets.VerifyEscrow(); err != nil {
+			return err
+		}
 	}
 	if err := b.secrets.RequireSelectedCapabilities(b.spec); err != nil {
 		return err
