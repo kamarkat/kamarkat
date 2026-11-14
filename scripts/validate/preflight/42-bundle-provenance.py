@@ -27,10 +27,10 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts/package/bundle-chart.sh"
 
 REQUIRED = [
-    "zero-ops.io/source-commit",
-    "zero-ops.io/source-dirty",
-    "zero-ops.io/source-branch",
-    "zero-ops.io/built-at",
+    "kamarkat.io/source-commit",
+    "kamarkat.io/source-dirty",
+    "kamarkat.io/source-branch",
+    "kamarkat.io/built-at",
 ]
 
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The HubEnvironmentReconciler is the core controller that orchestrates Day-2 operations for the Zero-Ops Hub cluster. It watches the HubEnvironment Custom Resource and executes a multi-phase reconciliation workflow to provision and configure all Hub infrastructure components.
+The HubEnvironmentReconciler is the core controller that orchestrates Day-2 operations for the Kamarkat Hub cluster. It watches the HubEnvironment Custom Resource and executes a multi-phase reconciliation workflow to provision and configure all Hub infrastructure components.
 
 ## Architecture
 

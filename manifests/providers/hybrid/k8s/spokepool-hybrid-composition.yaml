@@ -441,7 +441,7 @@ spec:
                     metadata:
                       namespace: platform-capi
                       labels:
-                        hybrid.zero-ops.io/home-worker-config: "true"
+                        hybrid.kamarkat.io/home-worker-config: "true"
                     data:
                       home-workers: "[]"         # Patched from annotation
                       home-worker-enabled: "false" # Patched from annotation

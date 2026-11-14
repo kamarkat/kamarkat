@@ -1,4 +1,4 @@
-# Zero-Ops Validation Scripts
+# Kamarkat Validation Scripts
 
 Read-only assertion scripts for validating cluster state after GitOps changes.
 
@@ -36,7 +36,7 @@ waiting for ArgoCD to sync.
 **Usage:**
 
 ```bash
-# From the zero-ops repo root
+# From the kamarkat repo root
 ./scripts/validate-tenant-workloads.sh <tenant-id>
 
 # Examples
@@ -167,7 +167,7 @@ These scripts validate state **after** ArgoCD has synced. They are the
 "Day 1 GitOps" validation step:
 
 ```
-1. Developer commits to fleet-registry or zero-ops
+1. Developer commits to fleet-registry or kamarkat
 2. ArgoCD detects change and syncs to cluster
 3. Developer runs validation script to assert end state
 ```

@@ -20,7 +20,7 @@ The `InfisicalClient` handles secret backup operations to Infisical using Univer
 ```go
 import (
     "context"
-    "github.com/zero-ops/hub-operator/internal/client"
+    "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
     "sigs.k8s.io/controller-runtime/pkg/client"
 )
 

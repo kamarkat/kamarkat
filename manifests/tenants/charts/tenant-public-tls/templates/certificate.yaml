@@ -19,7 +19,7 @@ metadata:
   name: {{ include "tenant-public-tls.certificateName" . }}
   labels:
     app.kubernetes.io/managed-by: tenant-public-tls
-    zero-ops.io/tenant-id: {{ .Values.tenantId }}
+    kamarkat.io/tenant-id: {{ .Values.tenantId }}
 spec:
   secretName: {{ include "tenant-public-tls.secretName" . }}
   duration: {{ .Values.certificateDuration }}

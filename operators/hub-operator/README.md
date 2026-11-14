@@ -1,6 +1,6 @@
 # Hub Operator
 
-A Kubernetes Operator that manages Day-2 operations for the Zero-Ops Hub cluster and orchestrates Spoke bootstrap PKI.
+A Kubernetes Operator that manages Day-2 operations for the Kamarkat Hub cluster and orchestrates Spoke bootstrap PKI.
 
 ## Overview
 

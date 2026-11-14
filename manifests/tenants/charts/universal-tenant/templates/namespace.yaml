@@ -31,5 +31,5 @@ metadata:
   annotations:
     # ADR-108: the one origin the preview codes endpoint accepts, and the only
     # one a preview refusal page posts its state to.
-    preview-access.zero-ops.io/app-origin: {{ printf "https://%s" $origin | quote }}
+    preview-access.kamarkat.io/app-origin: {{ printf "https://%s" $origin | quote }}
 {{- end }}

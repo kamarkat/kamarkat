@@ -45,7 +45,7 @@ with `kind://`**. Local mode can't run anywhere but Kind.
    LOCAL_APP_ORIGINS=<the apps' origins, comma-separated, e.g. http://localhost:3002,http://localhost:3007> \
    LOCAL_SUBJECT=<the app's development identity subject> \
    LOCAL_PREVIEW_BASE='http://{host}:<preview port>' \
-   zero-ops/scripts/local/kind-profile.sh
+   kamarkat/scripts/local/kind-profile.sh
    ```
 
 3. **Reach the previews:** `kubectl -n platform-ops port-forward svc/preview-access <preview port>:8081`.

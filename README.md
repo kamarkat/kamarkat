@@ -1,11 +1,12 @@
-# Zero-Ops — StartupOS- Enterprise infrastructure for growing companies.
+# Kamarkat
 
-**We maintain the platform your team builds on.**
+**An agentic cloud-native platform OS for businesses.**
 
-Zero-Ops is a complete, open-source infrastructure stack for software startups —
-compute and cluster lifecycle, GitOps, identity, secrets, databases, gateway,
-observability — packaged as one tested unit that runs on affordable
-infrastructure instead of a hyperscaler.
+One executable establishes an enterprise-grade cloud platform in your own
+infrastructure, without the platform engineering that usually comes first. You
+get cluster lifecycle, GitOps, identity, secrets, databases, a gateway and
+observability as one tested distribution, running on your cloud account under
+credentials only you hold.
 
 The software is free. What is sold is maintenance: keeping the stack current,
 patched and upgradeable without breaking what is running on it.
@@ -20,24 +21,24 @@ It helps small and medium scale brands to experience a enterprise grade platform
 
 Funded startups saving runway from hyperscaler pricing, who want a golden path
 defined and maintained for them, and cannot staff a platform engineering team to
-do it. Zero-Ops is platform engineering as a service: the golden path arrives
+do it. Kamarkat is platform engineering as a service: the golden path arrives
 tested, and stays maintained, without the team it would otherwise take.
 
 This is the opposite end of the market from tools that hand a platform team a
 faster start and room to customise. A tenant here inherits a tested set rather
-than a starting point to diverge from — see `docs/adr/071-how-this-platform-differs-from-kubefirst.md`.
+than a starting point to diverge from.
 
 ## The box
 
 A customer is a **tenant** and holds one **box**: a control plane plus that
-tenant's own spoke clusters.
+tenant's own managed clusters.
 
 - **Bring your own cloud.** Clusters run in the tenant's account, on the
-  tenant's bill. Zero-Ops resells no compute.
+  tenant's bill. Kamarkat resells no compute.
 - **The control plane ships into the box.** It runs in the tenant's cloud under
-  credentials the tenant holds. Zero-Ops operates no tenant infrastructure and
+  credentials the tenant holds. Kamarkat operates no tenant infrastructure and
   holds no cloud, cluster or secret credential.
-- **A spoke cluster belongs to exactly one tenant** and is the unit of
+- **A managed cluster belongs to exactly one tenant** and is the unit of
   maintenance, versioning and metering.
 - **A cell is a label**, grouping a tenant's clusters to attach policy —
   residency, compliance, or anything else a tenant needs applied to a subset. It
@@ -47,7 +48,7 @@ tenant's own spoke clusters.
 
 The platform's authority ends at a pull request.
 
-Zero-Ops publishes a **bundle**: the complete platform at one tested revision,
+Kamarkat publishes a **bundle**: the complete platform at one tested revision,
 named by a tag. When a bundle is published, the platform opens a pull request
 against the tenant's own infrastructure repository advancing the clusters that
 are due it — the shape of a dependency-update bot. Access is granted by the
@@ -63,7 +64,7 @@ a pre-flight verdict produced inside the box, or is raised as unverified.
 
 ## What the platform is, and what the tenant owns
 
-The platform is the set of capabilities Zero-Ops provides and maintains, on
+The platform is the set of capabilities Kamarkat provides and maintains, on
 which a tenant's applications execute. The tenant owns the application logic and
 the use it makes of those capabilities.
 
@@ -93,7 +94,7 @@ tenant turns them on.
 nothing to install. Every capability the bundle provides ships to every tenant,
 and a tenant turns on what it runs. A capability left off is still maintained:
 it advances with every bundle, and turning it on later needs no action by
-Zero-Ops.
+Kamarkat.
 
 ## Getting a box
 
@@ -101,7 +102,7 @@ Zero-Ops.
 
 - **A git organisation.** The platform creates one repository in it, `<tenant>-gitops`, and proposes changes to that repository afterwards. Nothing else in the organisation is touched.
 - **A cloud account.** Clusters are created in it, on the tenant's bill. Hetzner today.
-- **Two credentials**, both the tenant's and neither held by Zero-Ops:
+- **Two credentials**, both the tenant's and neither held by Kamarkat:
   - the cloud API token clusters are created with — `HCLOUD_TOKEN` for Hetzner;
   - a token with write access to `<tenant>-gitops`, so Day-0 can commit what it generates there.
 
@@ -122,7 +123,7 @@ gh release download --repo kamarkat/kamarkat \
 cd acme-gitops-* && ../kakt tenant add-management
 ```
 
-A box outlives every cluster in it (ADR-111 §1), so the box is what is created
+A box outlives every cluster in it, so the box is what is created
 and a cluster is a declaration added to it. `box init` asks for the credentials
 it needs one at a time, creates the repository, sets those credentials as its
 Actions secrets, and writes what the box IS to `registry/box.yaml` — its names,
@@ -154,7 +155,7 @@ Bootstrapping happens in a GitHub Actions workflow **in the tenant's repository*
 gh run watch --repo acme-inc/acme-gitops
 ```
 
-Zero-Ops runs nothing during this and holds no credential involved in it.
+Kamarkat runs nothing during this and holds no credential involved in it.
 
 ### What the tenant is left holding
 
@@ -164,20 +165,20 @@ acme-gitops
 │   ├── bundle.yaml                 the platform version this cluster runs
 │   ├── values.yaml                 what differs from the bundle's defaults
 │   └── generated.yaml              applies what Day-0 writes, once it has
-├── registry/environments/          a fleet's applications, per environment
+├── registry/environments/          an application's declarations, per environment
 ├── templates/workload-cluster/     the mould for the next cluster
 ├── renovate.json                   how upgrade proposals arrive
 ├── TOKENS.md                       what the template's placeholders mean
 └── .github/workflows/              how a cluster is bootstrapped
 ```
 
-The directory names are kubefirst's (ADR-071): `registry/clusters/<name>` and
+The directory names follow kubefirst's: `registry/clusters/<name>` and
 `registry/environments/<env>` beside a `templates/` that renders into them. A
 reader who knows one should not have to learn the other's names to find the same
 file.
 
 Bootstrapping adds `registry/clusters/acme/generated/` and commits it: the facts that
-do not exist until Day-0 runs — the Infisical coordinates, the control-plane
+do not exist until Day-0 runs — the secret store's coordinates, the control-plane
 address. They belong to the tenant, so they live here rather than with the
 platform.
 
@@ -187,7 +188,7 @@ platform.
 
 ### Upgrades arrive as pull requests
 
-When a version is published, a pull request appears against `<tenant>-gitops` changing the pinned version. Merging it moves the cluster; closing it declines the upgrade. Nothing is applied by Zero-Ops.
+When a version is published, a pull request appears against `<tenant>-gitops` changing the pinned version. Merging it moves the cluster; closing it declines the upgrade. Nothing is applied by Kamarkat.
 
 Each release records what taking it means — the versions it spans, the security fixes among them, whether the predecessor is restorable from it, and the minimum version it may be taken from. Declining is not a breach of support: support follows the version, and one outside its window is a version the platform stops promising maintenance for rather than one it forces.
 
@@ -203,7 +204,7 @@ There is no second mechanism for this: the thing that keeps a cluster in its des
 
 Every capability the bundle provides ships to every tenant. A tenant turns on what it runs by enabling it in `values.yaml`.
 
-A capability left off is still maintained — it advances with every bundle, and turning it on later needs no action by Zero-Ops and no proposal.
+A capability left off is still maintained — it advances with every bundle, and turning it on later needs no action by Kamarkat and no proposal.
 
 ## Exit
 
@@ -247,15 +248,14 @@ from the tenant's own repository.
 
 **To work on the platform:**
 
-- `docs/adr/` — the architecture, decision by decision. ADR-062 through ADR-072
-  define the tenant model, the bundle and its version, promotion, the platform
-  boundary, the basis of support, the maintenance promise, how this platform
-  differs from kubefirst, and where Day-0 runs.
+- `docs/adr/` — the architecture, decision by decision: the tenant model, the
+  bundle and its version, promotion, the platform boundary, the basis of
+  support, the maintenance promise, and where Day-0 runs.
 - `docs/runbooks/bootstrap-and-binaries.md` — the binaries, teardown and state
   management.
 - `make build` builds `kakt`. A build from source reports its version as
   `development` and reads platform content from the working tree; a released
-  build carries both (ADR-068).
+  build carries both.
 
 ## License
 

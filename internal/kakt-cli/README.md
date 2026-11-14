@@ -1,6 +1,6 @@
 # Package Directory
 
-Go library code for Zero-Ops Platform.
+Go library code for Kamarkat Platform.
 
 ## Structure (to be implemented)
 

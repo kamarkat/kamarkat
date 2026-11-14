@@ -1,13 +1,13 @@
-# zero-ops-auth
+# kamarkat-auth
 
 Platform-wide authentication and authorization primitives for tenant services.
 
 ## Installation
 
 ```bash
-npm install zero-ops-auth
+npm install kamarkat-auth
 # or
-pnpm add zero-ops-auth
+pnpm add kamarkat-auth
 ``` 
 
 ## Features
@@ -25,7 +25,7 @@ pnpm add zero-ops-auth
 
 ```typescript
 import { Hono } from "hono";
-import { JwtValidator, authMiddleware } from "zero-ops-auth";
+import { JwtValidator, authMiddleware } from "kamarkat-auth";
 
 const app = new Hono();
 
@@ -49,7 +49,7 @@ export default app;
 
 ```typescript
 import { Hono } from "hono";
-import { JwtValidator, authMiddleware, requireTenantBoundary } from "zero-ops-auth";
+import { JwtValidator, authMiddleware, requireTenantBoundary } from "kamarkat-auth";
 
 const app = new Hono();
 app.use("/api/*", authMiddleware({ validator }));
@@ -66,7 +66,7 @@ export default app;
 
 ```typescript
 import { Hono } from "hono";
-import { JwtValidator, authMiddleware, requireRole } from "zero-ops-auth";
+import { JwtValidator, authMiddleware, requireRole } from "kamarkat-auth";
 
 const app = new Hono();
 app.use("/api/*", authMiddleware({ validator }));
@@ -82,7 +82,7 @@ export default app;
 ### OAuth Delegation
 
 ```typescript
-import { OidcClient, RedisTokenStore } from "zero-ops-auth";
+import { OidcClient, RedisTokenStore } from "kamarkat-auth";
 import Redis from "ioredis";
 
 const redis = new Redis();
@@ -121,7 +121,7 @@ const freshTokens = await tokenStore.refreshToken(
 A tenant application should not implement authentication logic. It listens.
 
 ```ts
-import { createAuthClient } from "zero-ops-auth/client";
+import { createAuthClient } from "kamarkat-auth/client";
 
 const auth = createAuthClient({ baseUrl: "" });
 
@@ -198,7 +198,7 @@ await validator.validate(token: string): Promise<TenantClaims>
 #### A BFF: `bffAuth`
 
 ```typescript
-import { bffAuth } from "zero-ops-auth";
+import { bffAuth } from "kamarkat-auth";
 
 const auth = bffAuth({ appId: "shop", publicPaths: ["/api/v1/auth"] });
 app.get("/health", (c) => c.text("ok"));       // liveness: never depends on the issuer

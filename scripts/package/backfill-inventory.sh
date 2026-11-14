@@ -4,8 +4,13 @@
 #   backfill-inventory.sh <out-dir> <version>...
 #
 # Each version's published charts are pulled from the registry and inventoried
-# against the commit they were built from: the chart's zero-ops.io/source-commit
-# annotation, or the release tag where there is no annotation. A version with
+# against the commit they were built from: the chart's kamarkat.io/source-commit
+# annotation, or the release tag where there is no annotation.
+#
+# A version published before the annotation moved from the previous domain
+# carries the old key, which this does not read: there is one key and no second
+# lookup, so those versions resolve through the release tag instead. That is the
+# path this already takes for a version published before inventories existed. A version with
 # neither cannot be tied to a tree and is refused rather than inventoried against
 # the wrong one. Versions are compared in the order given, each against the one
 # before it.
@@ -39,8 +44,8 @@ for v in "$@"; do
         fi
     done
 
-    commit=$(awk -F'"' '/zero-ops.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
-    [ -n "$commit" ] || commit=$(awk '/zero-ops.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
+    commit=$(awk -F'"' '/kamarkat.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
+    [ -n "$commit" ] || commit=$(awk '/kamarkat.io\/source-commit/ {print $2}' "$charts/environment-manager/Chart.yaml")
     if [ -z "$commit" ]; then
         if ! git -C "$HERE" rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
             echo "   skipped: $v records no source commit and has no tag; it cannot be tied to a tree" >&2

@@ -1,6 +1,6 @@
 # Manifests Directory
 
-This directory contains infrastructure definitions for the Zero-Ops Platform.
+This directory contains infrastructure definitions for the Kamarkat Platform.
 
 ## Structure
 

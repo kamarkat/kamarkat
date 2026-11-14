@@ -50,17 +50,17 @@ This creates locally-trusted certificates in `./certs/`
 ### 2. Create Kubernetes TLS secrets
 
 ```bash
-kubectl create secret tls api-zero-ops-tls \
+kubectl create secret tls api-kamarkat-tls \
   --cert=certs/api.nutgraf.in.crt \
   --key=certs/api.nutgraf.in.key \
   -n api-gateway
 
-kubectl create secret tls auth-zero-ops-tls \
+kubectl create secret tls auth-kamarkat-tls \
   --cert=certs/auth.nutgraf.in.crt \
   --key=certs/auth.nutgraf.in.key \
   -n identity-services
 
-kubectl create secret tls console-zero-ops-tls \
+kubectl create secret tls console-kamarkat-tls \
   --cert=certs/console.nutgraf.in.crt \
   --key=certs/console.nutgraf.in.key \
   -n ory-system
@@ -124,7 +124,7 @@ kubectl apply -k .
 
 ```bash
 kubectl get certificate -A
-kubectl describe certificate api-zero-ops-dev -n api-gateway
+kubectl describe certificate api-kamarkat-dev -n api-gateway
 ```
 
 ## Troubleshooting
@@ -159,7 +159,7 @@ kubectl get endpoints -n <namespace>
 
 ```bash
 # Verify /etc/hosts entries
-cat /etc/hosts | grep zero-ops
+cat /etc/hosts | grep kamarkat
 
 # Test DNS resolution
 nslookup api.nutgraf.in
@@ -177,16 +177,16 @@ For local development:
 ### Remove local DNS entries
 
 ```bash
-sudo sed -i '' '/Zero-Ops Demo 1/,+3d' /etc/hosts
+sudo sed -i '' '/Kamarkat Demo 1/,+3d' /etc/hosts
 ```
 
 ### Remove certificates
 
 ```bash
 rm -rf certs/
-kubectl delete secret api-zero-ops-tls -n api-gateway
-kubectl delete secret auth-zero-ops-tls -n identity-services
-kubectl delete secret console-zero-ops-tls -n ory-system
+kubectl delete secret api-kamarkat-tls -n api-gateway
+kubectl delete secret auth-kamarkat-tls -n identity-services
+kubectl delete secret console-kamarkat-tls -n ory-system
 ```
 
 ### Remove Ingress resources

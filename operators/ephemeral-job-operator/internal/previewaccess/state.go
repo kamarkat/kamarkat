@@ -52,7 +52,7 @@ func EmbedKey(app, name string) string { return app + "/" + name }
 // AppOriginAnnotation is set by the universal-tenant chart on each application
 // namespace: the origin a refusal page may post to, and the only Origin the
 // codes endpoint accepts.
-const AppOriginAnnotation = "preview-access.zero-ops.io/app-origin"
+const AppOriginAnnotation = "preview-access.kamarkat.io/app-origin"
 
 // TargetKey is the IndexTarget value of a record.
 func TargetKey(jobRef string, port int32) string { return fmt.Sprintf("%s/%d", jobRef, port) }

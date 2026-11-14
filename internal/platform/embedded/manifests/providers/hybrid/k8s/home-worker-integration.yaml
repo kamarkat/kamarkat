@@ -16,7 +16,7 @@ kind: ClusterRole
 metadata:
   name: hub-operator-hybrid-worker
   labels:
-    hybrid.zero-ops.io/component: home-worker-integration
+    hybrid.kamarkat.io/component: home-worker-integration
 rules:
   # Read spoke kubeconfigs (platform-capi namespace)
   - apiGroups: [""]
@@ -45,7 +45,7 @@ kind: ClusterRoleBinding
 metadata:
   name: hub-operator-hybrid-worker
   labels:
-    hybrid.zero-ops.io/component: home-worker-integration
+    hybrid.kamarkat.io/component: home-worker-integration
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

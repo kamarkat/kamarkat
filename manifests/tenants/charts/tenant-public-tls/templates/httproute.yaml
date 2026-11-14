@@ -42,7 +42,7 @@ metadata:
   namespace: platform-ops
   labels:
     app.kubernetes.io/managed-by: tenant-public-tls
-    zero-ops.io/tenant-id: {{ .Values.tenantId }}
+    kamarkat.io/tenant-id: {{ .Values.tenantId }}
 spec:
   parentRefs:
     - name: {{ .Values.tlsGatewayName }}

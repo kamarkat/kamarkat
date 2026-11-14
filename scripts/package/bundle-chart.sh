@@ -142,10 +142,10 @@ t = re.sub(r"(?ms)^annotations:\n(?:[ \t]+.*\n?)*", "", t)
 t = t.rstrip("\n") + "\n"
 t += (
     "annotations:\n"
-    + f'  zero-ops.io/source-commit: "{sha}"\n'
-    + f'  zero-ops.io/source-dirty: "{dirty}"\n'
-    + f'  zero-ops.io/source-branch: "{branch}"\n'
-    + f'  zero-ops.io/built-at: "{built}"\n'
+    + f'  kamarkat.io/source-commit: "{sha}"\n'
+    + f'  kamarkat.io/source-dirty: "{dirty}"\n'
+    + f'  kamarkat.io/source-branch: "{branch}"\n'
+    + f'  kamarkat.io/built-at: "{built}"\n'
 )
 p.write_text(t)
 PY

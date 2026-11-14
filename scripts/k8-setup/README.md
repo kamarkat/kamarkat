@@ -32,7 +32,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 
 ```powershell
 # Download and run in one command
-iwr -useb https://raw.githubusercontent.com/your-repo/zero-ops/main/scripts/k8-setup/setup-windows.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/your-repo/kamarkat/main/scripts/k8-setup/setup-windows.ps1 | iex
 ```
 
 ## Script Details
