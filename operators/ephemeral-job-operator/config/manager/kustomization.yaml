@@ -12,6 +12,6 @@ resources:
 # `kustomize edit set image`, or nothing rewrites it and the running image
 # drifts from what Git records.
 images:
-- digest: sha256:9d9a777c04896534f81e512207e4713aa22cda59581e4d2701a54be995f9a357
+- digest: sha256:f746e6e67bf29de1f1c3b582603d102280f6b2f66a53e0a5974ae3b4e5d8554b
   name: ephemeral-job-operator
   newName: ghcr.io/kamarkat/kamarkat/ephemeral-job-operator
