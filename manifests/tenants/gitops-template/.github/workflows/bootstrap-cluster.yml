@@ -204,13 +204,14 @@ jobs:
                   print(f"::error::{decl} declares no {' or '.join(missing)}, so this cluster cannot be built from git",
                         file=sys.stderr)
                   raise SystemExit(1)
+              # NOT the worker count. It is declared in this same file and read
+              # from there by Day-0, so resolving it here only to pass it back
+              # was a second route to one value -- and the flag it became was
+              # never accepted by the script that received it.
               picked.append({
                   "cluster":  name,
                   "provider": str(values["provider"]),
                   "region":   str(values["region"]),
-                  # Day-0 sizes the cluster from this, and reads the declaration
-                  # itself afterwards; absent means the chart's own default.
-                  "workers":  "" if values.get("workers") is None else str(values["workers"]),
                   "on-prem":  bool(on_prem.get("enabled", False)),
                   "tailnet":  str(on_prem.get("tailnet") or ""),
               })
@@ -241,7 +242,6 @@ jobs:
       provider: ${{ matrix.box.provider }}
       region: ${{ matrix.box.region }}
       bundle-version: <BUNDLE_VERSION>
-      workers: ${{ matrix.box.workers }}
       on-prem: ${{ matrix.box.on-prem }}
       tailnet: ${{ matrix.box.tailnet }}
     secrets:

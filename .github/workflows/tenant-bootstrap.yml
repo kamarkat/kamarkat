@@ -35,9 +35,10 @@ on:
         default: sequenced
       workers:
         description: >-
-          Cloud worker nodes to provision. Defaults to this cluster's values.yaml;
-          a box whose capacity comes from nodes on the tenant's own premises
-          (ADR-075) passes 0.
+          Accepted and not used. The worker count is declared in
+          registry/clusters/<name>/values.yaml and read from there; this input
+          remains only so a box pinned to an earlier version, whose workflow
+          still passes it, is not refused for an unexpected input.
         required: false
         type: string
         default: ''
@@ -323,12 +324,16 @@ jobs:
             onprem=(--on-prem --tailnet-name "${{ inputs.tailnet }}")
           fi
 
-          # Empty means "let the CLI decide from the environment", which is what a
-          # caller scaffolded before this input existed sends.
-          workers=()
-          if [[ -n "${{ inputs.workers }}" ]]; then
-            workers=(--workers "${{ inputs.workers }}")
-          fi
+          # THE WORKER COUNT IS NOT PASSED. It is declared in
+          # registry/clusters/<name>/values.yaml, which the CLI reads through
+          # --gitops-dir below -- "Day-0 reads this once, to size the cluster it
+          # creates", as that file says of itself.
+          #
+          # It used to be built into `--workers <n>` here, and hub-bootstrap.sh
+          # has never accepted that flag: every bootstrap whose declaration named
+          # a worker count died on `ERROR: Unknown argument: --workers` before
+          # provisioning anything. Passing a value that is already in git was the
+          # mistake; the flag never existing was what made it visible.
 
           # hub-bootstrap.sh, not `kakt bootstrap-mgmt` directly.
           #
@@ -415,8 +420,7 @@ jobs:
             --region "${{ inputs.region }}" \
             --gating "${{ inputs.gating }}" \
             "${onprem[@]}" \
-            "${workers[@]}" \
-            --gitops-dir . \
+                      --gitops-dir . \
             --debug
 
       # Bootstrap succeeding means its phases completed, not that the platform is
