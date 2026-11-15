@@ -1,67 +1,37 @@
 #!/usr/bin/env bash
-# Publish the next bundle and, given a tenant's GitOps checkout, promote it.
+# Publish a bundle version to the registry.
 #
 #   scripts/release.sh                       publish the next rc after the newest published
 #   scripts/release.sh --version 0.1.17-rc.1 an explicit version
 #   scripts/release.sh --dry-run             say what it would do, change nothing
-#   GITOPS_DIR=<checkout> scripts/release.sh publish, promote that tenant, sync its box
-#   GITOPS_DIR=<checkout> scripts/release.sh --no-promote / --no-sync
-#                                            stop after publishing / after promoting
-#   GITOPS_DIR=<checkout> scripts/release.sh --promote-only --version 0.1.17
-#                                            promote a version already published
+#   scripts/release.sh --stable --version 0.2.8   publish a STABLE version by
+#                                            creating its GitHub release, which
+#                                            is what the publish workflow runs on
 #   scripts/release.sh --check               rehearse the next version and check
 #                                            every component behind latest has a reason
 #
-# A release is the platform's, not a tenant's: its version follows the newest one
-# in the registry, and publishing needs no tenant. Promoting and syncing are a
-# tenant's, so they run only when GITOPS_DIR names its checkout.
+# NO BOX IS TOUCHED HERE. A release is the platform's act and it ends when the
+# version exists in the registry; moving a box onto a version is that box
+# owner's act, done with `kakt promote` using their own credentials in their own
+# repository (ADR-065).
 #
-# --promote-only is for a version this script did not publish: a stable release,
-# which the GitHub Release workflow publishes. Without it the publish step finds
-# the version in the registry and refuses, correctly, so a CI-published version
-# could not be promoted at all. The version must be named, because "the next rc"
-# is a version to create, never one to assume exists; and it must already be in
-# the registry, because promoting first writes a reference to nothing.
-#
-# WHY ONE SCRIPT. Publishing and promoting are two halves of one intent, and
-# doing them by hand has failed in three distinct ways that this sequence
-# removes:
-#
-#   the version was bumped in values.yaml only, so the root Application synced
-#   and every CHILD stayed pinned to the previous release -- reporting Synced
-#   while shipping nothing (rc.111, rc.112);
-#
-#   the promotion commit was written against a stale checkout, so the push was
-#   rejected and a later force would have discarded a CI bot's own commit;
-#
-#   .state/*.json was staged along with the version files, committing local
-#   machine state into a tenant's repository.
-#
-# The ordering is deliberate and is the point: check and PULL the tenant, then
-# publish, then promote. A tenant that cannot be promoted is refused before
-# anything is published, so a failure never leaves a version published and
-# unpromoted that could have been caught first. Promoting before publishing
-# writes a reference to an artefact that does not exist, which ArgoCD reports as
-# a chart pull failure naming a version nobody can find.
+# The rewrite that moves a box between versions lives in `kakt promote`
+# (internal/kakt-cli/tenant/promote.go): all references moved or none, no stale
+# checkout, no .state/ staged.
 set -euo pipefail
 
-GITOPS_DIR="${GITOPS_DIR:-}"
 OWNER="${OWNER:-kamarkat}"
 VERSION=""
 DRY_RUN=0
-PUBLISH=1
-PROMOTE=1
-SYNC=1
 CHECK=0
+STABLE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --version)      VERSION="${2:?--version needs a value}"; shift 2 ;;
     --dry-run)      DRY_RUN=1; shift ;;
-    --promote-only) PUBLISH=0; shift ;;
-    --no-promote)   PROMOTE=0; shift ;;
-    --no-sync)      SYNC=0; shift ;;
     --check)        CHECK=1; shift ;;
+    --stable)       STABLE=1; shift ;;
     -h|--help)      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)              echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -69,14 +39,37 @@ done
 
 # --check spends nothing and touches no tenant: every step that would change
 # something is the rehearsal's instead.
-if [ "$CHECK" = 1 ]; then DRY_RUN=1; PROMOTE=0; fi
+if [ "$CHECK" = 1 ]; then DRY_RUN=1; fi
 
-if [ "$PUBLISH" = 0 ]; then
-  [ "$PROMOTE" = 1 ] || { echo "--promote-only and --no-promote together do nothing" >&2; exit 2; }
-  [ -n "$VERSION" ] || { echo "--promote-only needs --version: name the published version to promote" >&2; exit 2; }
-  [ -n "$GITOPS_DIR" ] || { echo "--promote-only needs GITOPS_DIR: the tenant checkout to promote" >&2; exit 2; }
+# A STABLE version is published by CI, from a GitHub Release, and never from a
+# workstation. The publish workflow triggers on `release: types: [created]`
+# (ADR-063: a version names a set that was tested together, and a release is a
+# deliberate act with an author and a record). So --stable creates that release
+# and follows the run; it does not package anything here.
+#
+# Without this flag the publish step runs `make publish-local`, which is right
+# for a candidate and wrong for a stable version: it would push charts that no
+# release names, so nothing would carry the tag, the CLI binaries would never be
+# built, and the Homebrew tap would stay on the previous version.
+if [ "$STABLE" = 1 ]; then
+  case "$VERSION" in
+    "") echo "--stable needs --version: a stable version is never incremented for you," >&2
+        echo "  because whether the next one is a patch, a minor or a major says what the" >&2
+        echo "  release means. Name it." >&2; exit 2 ;;
+    *-rc.*) echo "--stable publishes a stable version, and $VERSION is a candidate." >&2
+            echo "  Drop --stable to publish a candidate from here." >&2; exit 2 ;;
+  esac
 fi
-[ -n "$GITOPS_DIR" ] || PROMOTE=0
+# The same rule from the other direction. A named stable version with no
+# --stable would be packaged and pushed from here, which is the one way to get
+# charts in the registry that no release, tag, binary or tap entry agrees with.
+if [ "$STABLE" = 0 ] && [ -n "$VERSION" ]; then
+  case "$VERSION" in
+    *-rc.*) ;;
+    *) echo "$VERSION is a stable version, and a stable version is published by its" >&2
+       echo "  GitHub Release rather than from here. Add --stable." >&2; exit 2 ;;
+  esac
+fi
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -90,97 +83,28 @@ run()  { if [ "$DRY_RUN" = 1 ]; then note "would run: $*"; else "$@"; fi; }
 # runs what. It is also what the inventory's "changed since" compares against:
 # the release notes say what changed since the last release, not since one box.
 # ---------------------------------------------------------------------------
-if [ "$PUBLISH" = 1 ]; then
-  say "1. Decide the version"
-  CURRENT="$(scripts/release/release-data.py newest --owner "$OWNER")" \
-    || die "could not read the newest published version from ghcr.io/$OWNER (gh auth status)"
-  note "newest published: $CURRENT"
-  if [ -z "$VERSION" ]; then
-    case "$CURRENT" in
-      *-rc.*) VERSION="${CURRENT%-rc.*}-rc.$((${CURRENT##*-rc.} + 1))" ;;
-      # A STABLE VERSION IS NOT INCREMENTED FOR YOU. Whether the next one is a
-      # patch, a minor or a major says what the release means, and a version is
-      # consumed the moment it is published (ADR-063) -- so a guess here spends
-      # a number that was meant for something else. The candidate is named
-      # because the refusal is about intent, not about arithmetic.
-      *) die "$CURRENT is a stable version, and the next one says what this release means:
+say "1. Decide the version"
+CURRENT="$(scripts/release/release-data.py newest --owner "$OWNER")" \
+  || die "could not read the newest published version from ghcr.io/$OWNER (gh auth status)"
+note "newest published: $CURRENT"
+if [ -z "$VERSION" ]; then
+  case "$CURRENT" in
+    *-rc.*) VERSION="${CURRENT%-rc.*}-rc.$((${CURRENT##*-rc.} + 1))" ;;
+    # A STABLE VERSION IS NOT INCREMENTED FOR YOU. Whether the next one is a
+    # patch, a minor or a major says what the release means, and a version is
+    # consumed the moment it is published (ADR-063) -- so a guess here spends
+    # a number that was meant for something else. The candidate is named
+    # because the refusal is about intent, not about arithmetic.
+    *) die "$CURRENT is a stable version, and the next one says what this release means:
    a patch, a minor or a major. Name it:
 
      kakt release check --version ${CURRENT%.*}.$((${CURRENT##*.} + 1))   # patch
      kakt release check --version <X.Y.Z>
 
    Only an -rc.N version is incremented automatically." ;;
-    esac
-  fi
-  note "next:             $VERSION"
+  esac
 fi
-
-# ---------------------------------------------------------------------------
-# 2. Pull the tenant repository, BEFORE publishing.
-#
-# Before any edit, because a rebase with local changes in the tree is a conflict
-# resolved under time pressure -- and the only safe resolution of a conflict on
-# a version file is to start again. Before publishing, because a tenant that
-# cannot be promoted should stop the release while nothing is spent.
-# ---------------------------------------------------------------------------
-if [ "$PROMOTE" = 1 ]; then
-  say "2. Pull the tenant repository"
-  [ -d "$GITOPS_DIR/.git" ] || die "no tenant GitOps checkout at $GITOPS_DIR"
-  cd "$GITOPS_DIR"
-  git diff --quiet -- registry/ environments/ || die "uncommitted changes under registry/ or environments/ in $GITOPS_DIR
-   This script rewrites version references. Commit or discard them first;
-   it will not rebase on top of work it did not make."
-  if [ "$DRY_RUN" = 1 ]; then
-    note "would: git pull --rebase"
-  else
-    # Autostash covers .state/*.json, which this box writes and never commits.
-    git -c rebase.autoStash=true pull --rebase -q || die "could not update $GITOPS_DIR -- resolve it there, then re-run"
-  fi
-  note "at $(git log --oneline -1)"
-
-  # The version the tenant runs, which promotion rewrites -- every cluster's
-  # environmentRevision, de-duplicated.
-  #
-  # `grep -m1` over several files matches once PER FILE, not once in total, so the
-  # naive read returns one line per cluster and the "current version" becomes two
-  # versions joined by a newline. Sorted unique instead, and a disagreement is a
-  # refusal rather than a guess: clusters on different versions is a real state --
-  # a promotion that half-applied -- and picking either one silently completes it
-  # in a direction nobody chose.
-  RUNNING="$(awk '/^environmentRevision:/ {print $2}' registry/clusters/*/values.yaml 2>/dev/null | sort -u)"
-  [ -n "$RUNNING" ] || die "no environmentRevision found under $GITOPS_DIR/registry/clusters/*/values.yaml"
-  if [ "$(printf '%s\n' "$RUNNING" | wc -l | tr -d ' ')" != "1" ]; then
-    die "clusters are on different versions, so there is no single current version:
-$(grep -H '^environmentRevision:' registry/clusters/*/values.yaml)
-   Bring them to one version first."
-  fi
-  note "tenant runs: $RUNNING"
-
-  # Every cluster must pull the bundle from the registry this release publishes
-  # to. Promotion rewrites the version and nothing else, so a bundle.yaml still
-  # naming another registry is promoted to a version that registry does not hold:
-  # ArgoCD cannot pull it and every Application stays on the old version. That
-  # shipped twice (rc.189, rc.190) after the platform's registry moved.
-  WANT_REGISTRY="ghcr.io/${OWNER}/charts"
-  WRONG=""
-  for f in registry/clusters/*/bundle.yaml; do
-    got="$(awk '/repoURL:/ {u=$NF} /chart: environment-manager/ {print u; exit}' "$f")"
-    [ "$got" = "$WANT_REGISTRY" ] || WRONG="$WRONG
-     $f: ${got:-no environment-manager chart source}"
-  done
-  [ -z "$WRONG" ] || die "these clusters do not pull the bundle from $WANT_REGISTRY, where $VERSION is published:$WRONG
-   Set their environment-manager repoURL to $WANT_REGISTRY, commit and push, then re-run.
-   Nothing has been published."
-  note "every cluster pulls from $WANT_REGISTRY"
-
-  # Refuse to reuse a version. A republished tag with different content is the one
-  # failure GitOps cannot diagnose: every reference still resolves, and the box
-  # runs something other than what the reference names.
-  EVERY_REF="$(grep -rn -- "$VERSION" registry/ --include='*.yaml' 2>/dev/null || true)"
-  [ -z "$EVERY_REF" ] || die "$VERSION is already referenced in $GITOPS_DIR/registry/ -- a version is published once
-$EVERY_REF"
-  cd - >/dev/null
-fi
+note "next:             $VERSION"
 
 # ---------------------------------------------------------------------------
 # --check: rehearse this version and check it can be explained.
@@ -278,13 +202,68 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Publish. The existing script, unchanged -- one packaging path, one gate set.
 # ---------------------------------------------------------------------------
-if [ "$PUBLISH" = 0 ]; then
-  # Read, not assumed: the chart a box pulls must resolve before anything names it.
-  say "3. Confirm $VERSION is published"
-  helm show chart "oci://ghcr.io/${OWNER}/charts/environment-manager" --version "$VERSION" >/dev/null 2>&1 \
-    || die "could not confirm $VERSION in oci://ghcr.io/${OWNER}/charts -- not published, or the registry
-   could not be read (helm registry login ghcr.io). Nothing has been promoted."
-  note "oci://ghcr.io/${OWNER}/charts/environment-manager:$VERSION resolves"
+if [ "$STABLE" = 1 ]; then
+  say "3. Publish $VERSION by creating its GitHub release"
+
+  # The repository is READ from the one declaration that already names it, not
+  # assembled from $OWNER. "$OWNER/$OWNER" happens to be right today only
+  # because the organisation and the repository share a name.
+  . scripts/lib/platform-source-url.sh
+  REPO="$(platform_source_url)" || die "could not read the platform repository URL"
+  REPO="${REPO#*://github.com/}"; REPO="${REPO%.git}"; REPO="${REPO%/}"
+  note "repository:       $REPO"
+
+  command -v gh >/dev/null 2>&1 || die "gh is required to create a release"
+  gh auth status >/dev/null 2>&1 || die "gh is not authenticated (gh auth login)"
+
+  # A version is published once (ADR-063). A re-created release with different
+  # content is the one failure GitOps cannot diagnose, so an existing one stops
+  # this before anything is promoted.
+  if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+    die "v$VERSION already has a release on $REPO. A version is published once --
+   take the next one, or move a box onto this one with: kakt promote --version $VERSION."
+  fi
+
+  # NO --draft, and no --notes.
+  #
+  # --draft: the workflow triggers on `release: types: [created]`, which does
+  # NOT fire for a draft, nor for publishing an existing draft. A draft here
+  # would create a release, publish nothing, and look like it worked.
+  #
+  # --notes: the workflow writes the body itself at the end, pointing at the
+  # version page, and a gate refuses a release that does not. Notes given here
+  # are overwritten, so this passes the shortest placeholder that keeps
+  # `gh release create` non-interactive.
+  run gh release create "v$VERSION" --repo "$REPO" \
+    --target main --title "v$VERSION" --notes "Publishing." \
+    || die "could not create the release -- nothing was published or promoted"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    note "would follow the publish run and wait for it to finish"
+  else
+    # The newest run of that workflow for a release event is the one just
+    # created. Matching on the tag is not reliable -- a release run reports the
+    # tag in different fields across gh versions -- so the run is named in the
+    # output for the operator to confirm.
+    say "3b. Follow the publish run"
+    RUN_ID=""
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      RUN_ID="$(gh run list --repo "$REPO" --workflow publish-platform-charts.yml \
+        --event release --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
+      [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] && break
+      sleep 5
+    done
+    [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] \
+      || die "the release v$VERSION exists but no publish run appeared. Check
+   https://github.com/$REPO/actions -- the release must NOT be promoted until it
+   has published, because promoting first writes a reference to nothing."
+    note "run:              https://github.com/$REPO/actions/runs/$RUN_ID"
+    gh run watch "$RUN_ID" --repo "$REPO" --exit-status \
+      || die "the publish run failed. v$VERSION has a release but no charts, so
+   nothing has been promoted. Fix the run and re-run it; do not create the
+   release again."
+    note "published by CI"
+  fi
 else
 say "3. Publish $VERSION"
 # The inventory compares this version against the newest published.
@@ -293,88 +272,5 @@ run make publish-local VERSION="$VERSION" OWNER="$OWNER" \
   || die "publish failed -- nothing has been promoted, so the box is untouched"
 fi
 
-if [ "$PROMOTE" = 0 ]; then
-  if [ "$DRY_RUN" = 1 ]; then
-    say "Would publish $VERSION. No tenant promoted."
-  elif [ -n "$GITOPS_DIR" ]; then
-    say "Published $VERSION. Not promoted (--no-promote)."
-  else
-    say "Published $VERSION. No tenant promoted: pass a GitOps checkout to promote one."
-  fi
-  exit 0
-fi
-
-# ---------------------------------------------------------------------------
-# 4. Promote EVERY reference, and verify none of the old one survives.
-#
-# Not just environmentRevision. A bundle.yaml carries the version twice -- once
-# as the root Application's targetRevision and once as the value the generated
-# child Applications are rendered with -- and moving only the first leaves the
-# root Synced while every child stays on the previous release. That is not a
-# theoretical ordering problem: it shipped twice.
-# ---------------------------------------------------------------------------
-say "4. Promote $RUNNING -> $VERSION"
-
-# THE CLI DOES THIS, and this script does not have a second copy of it.
-# Promotion is a rewrite of the box's own references and a commit, so it needs
-# the box and git and nothing from here -- which is what lets a tenant promote
-# without a checkout of the platform (ADR-065). A copy kept here would be the
-# version that drifts, because this script runs only on the platform's own
-# releases while the command runs on every box.
-promote_args=(release promote --version "$VERSION" --gitops-dir "$GITOPS_DIR" --owner "$OWNER")
-[ "$DRY_RUN" = 1 ] && promote_args+=(--dry-run)
-go run ./cmd/kakt "${promote_args[@]}" || die "promotion failed. $VERSION IS PUBLISHED but not promoted -- resolve in $GITOPS_DIR"
-
-# ---------------------------------------------------------------------------
-# 5. Sync, and VERIFY the box reached the version.
-#
-# Not an opt-in step, and not a line of advice printed at the end. A promotion
-# that is written to git and never confirmed on the box is the failure this
-# whole script exists to prevent: the repository says rc.N, every child stays on
-# rc.N-1, and nothing reports it. Printing "Next: run this" leaves exactly that
-# gap, and leaves it at the moment the operator has most reason to believe the
-# work is done.
-#
-# The hard-sync is what turns "written" into "running": it drives the root, waits
-# for each child to reach the version, and exits non-zero naming any that did
-# not. This script's exit code is therefore the answer to "is the box on the new
-# version", which is the only question worth asking after a release.
-# ---------------------------------------------------------------------------
-if [ "$SYNC" = 0 ]; then
-  echo
-  note "Not synced (--no-sync). The repository says $VERSION; the box does not yet."
-  note "  KUBECONFIG=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/<hub>.kubeconfig \\"
-  note "    scripts/argocd-hard-sync.sh --promote $VERSION"
-  exit 0
-fi
-
-say "5. Sync the box and verify it reached $VERSION"
-if [ -z "${KUBECONFIG:-}" ]; then
-  # Discovered, not assumed. Exactly one match or it asks: guessing which cluster
-  # to drive is not a thing a release script may do quietly.
-  # Plain globbing, not mapfile: the system bash on macOS is 3.2, where mapfile
-  # does not exist and the script would die with "command not found" at the last
-  # step of a release that had already published and promoted.
-  HUBS=""
-  for k in "${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig"/*hub*.kubeconfig; do
-    [ -f "$k" ] && HUBS="$HUBS$k"$'\n'
-  done
-  HUB_COUNT=$(printf '%s' "$HUBS" | grep -c . || true)
-  case "$HUB_COUNT" in
-    1) KUBECONFIG="$(printf '%s' "$HUBS" | head -1)"; export KUBECONFIG; note "using $KUBECONFIG" ;;
-    0) die "no hub kubeconfig under ${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/ -- set KUBECONFIG" ;;
-    *) die "several hub kubeconfigs found; set KUBECONFIG to the one to drive:
-$(printf '%s' "$HUBS" | sed 's/^/     /')" ;;
-  esac
-fi
-
-if [ "$DRY_RUN" = 1 ]; then
-  note "would run: scripts/argocd-hard-sync.sh --promote $VERSION"
-  exit 0
-fi
-
-scripts/argocd-hard-sync.sh --promote "$VERSION" || die "$VERSION is published and promoted in git, but the box did NOT converge.
-   The Applications named above are still on the previous version.
-   Fix them and re-run the sync; do not re-publish."
-
-say "Done. $VERSION is published, promoted and running."
+say "Published $VERSION."
+note "No box is touched by a release. Its owner moves it with: kakt promote --version $VERSION"

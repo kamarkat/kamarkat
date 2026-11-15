@@ -72,10 +72,6 @@ on:
       region:
         required: true
         default: <CLOUD_REGION>
-      workers:
-        description: Cloud worker nodes to provision. Defaults to this cluster's values.yaml.
-        required: false
-        default: '<WORKER_COUNT>'
       on-prem:
         description: Accept nodes on your own premises, joining over your tailnet.
         required: false

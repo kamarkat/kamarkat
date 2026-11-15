@@ -33,15 +33,6 @@ on:
         required: false
         type: string
         default: sequenced
-      workers:
-        description: >-
-          Accepted and not used. The worker count is declared in
-          registry/clusters/<name>/values.yaml and read from there; this input
-          remains only so a box pinned to an earlier version, whose workflow
-          still passes it, is not refused for an unexpected input.
-        required: false
-        type: string
-        default: ''
       on-prem:
         description: >-
           Whether this cluster accepts nodes on the tenant's own premises,
@@ -358,11 +349,9 @@ jobs:
           # --gitops-dir below -- "Day-0 reads this once, to size the cluster it
           # creates", as that file says of itself.
           #
-          # It used to be built into `--workers <n>` here, and hub-bootstrap.sh
-          # has never accepted that flag: every bootstrap whose declaration named
-          # a worker count died on `ERROR: Unknown argument: --workers` before
-          # provisioning anything. Passing a value that is already in git was the
-          # mistake; the flag never existing was what made it visible.
+          # Git is the source of truth for the shape of a cluster, so a value
+          # already committed there is never also handed over as an argument:
+          # two routes to one number is two numbers that can disagree.
 
           # hub-bootstrap.sh, not `kakt bootstrap-mgmt` directly.
           #

@@ -4,35 +4,32 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
-
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
 
-// newReleaseCmd groups the platform team's release operations. Each runs the
-// script that implements it -- scripts/release.sh, scripts/argocd-hard-sync.sh,
-// scripts/release/release-data.py -- so there is one release path, and these
-// commands only name its modes. The docs' release pages are written by
-// `docs`, so the docs and the release check read one implementation.
+// newReleaseCmd groups the operations that PUBLISH the platform. Three, and only
+// three: rehearse a version, publish it, write its documentation.
 //
-// They run from the root of a kamarkat checkout, where those scripts and the
-// packaging live. A box owner never runs them; their upgrade is a proposal to
-// their own repository (kakt proposal).
+// Nothing here touches a box. Publishing used to promote a tenant and sync its
+// cluster in the same command, which made the platform's release reach into a
+// tenant's repository and push -- the opposite of what this platform promises,
+// where a version reaches a box as a proposal its owner accepts. Moving a box
+// onto a version is `kakt promote`, run by whoever owns that box.
+//
+// Each command runs the script that implements it -- scripts/release.sh,
+// scripts/release/release-data.py -- so there is one release path and these
+// commands only name its modes. They run from the root of a kamarkat checkout,
+// where those scripts and the packaging live.
 func newReleaseCmd() *cobra.Command {
-	var gitopsDir, owner, version string
+	var owner, version string
 	cmd := &cobra.Command{
 		Use:   "release",
-		Short: "Publish a bundle version and promote a tenant to it (platform team)",
+		Short: "Publish a bundle version to the registry (platform maintainers)",
 	}
-	cmd.PersistentFlags().StringVar(&gitopsDir, "gitops-dir", "",
-		"A tenant's GitOps checkout to promote and sync; without it a release only publishes")
-	cmd.PersistentFlags().StringVar(&owner, "owner", "kamarkat", "GitHub organisation whose registry the bundle is published to")
-	cmd.PersistentFlags().StringVar(&version, "version", "", "The version; default the newest published rc + 1")
 
 	env := func(extra ...string) []string {
-		return append([]string{"GITOPS_DIR=" + gitopsDir, "OWNER=" + owner}, extra...)
+		return append([]string{"OWNER=" + owner}, extra...)
 	}
 	withVersion := func(args ...string) []string {
 		if version != "" {
@@ -77,95 +74,62 @@ With no version, only renders.`,
 	}
 	docs.Flags().StringVar(&docsDir, "docs-dir", "../kamarkat-docs", "The docs checkout to write the release pages into")
 
-	var dryRun, noPromote, noSync bool
+	var dryRun, stable bool
 	publish := &cobra.Command{
 		Use:   "publish",
-		Short: "Publish the next version; with --gitops-dir, promote that tenant and verify its box reached it",
-		Args:  cobra.NoArgs,
+		Short: "Publish the next version to the registry",
+		Long: `Publish a bundle version to the registry, and nothing else.
+
+No box is touched. A box moves onto a published version when its owner promotes
+it (kakt promote), or by accepting the upgrade proposal the version raises.
+
+Without --stable this publishes the next release CANDIDATE, packaging and
+pushing it from this checkout.
+
+With --stable it publishes a stable version the only way one is ever published:
+by creating its GitHub release, which is what the publish workflow runs on. The
+version must be named, because whether the next one is a patch, a minor or a
+major says what the release means. The command follows the run and fails if it
+does, so nothing is promoted to a version that has no charts.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			args := withVersion()
-			for flag, on := range map[string]bool{"--dry-run": dryRun, "--no-promote": noPromote, "--no-sync": noSync} {
-				if on {
-					args = append(args, flag)
+			// Ordered, not ranged over a map: the script takes these in any
+			// order, but a stable ordering keeps `--dry-run` output comparable
+			// between runs.
+			for _, f := range []struct {
+				flag string
+				on   bool
+			}{
+				{"--stable", stable},
+				{"--dry-run", dryRun},
+			} {
+				if f.on {
+					args = append(args, f.flag)
 				}
 			}
 			return runScript(env(), "scripts/release.sh", args...)
 		},
 	}
+	publish.Flags().BoolVar(&stable, "stable", false,
+		"Publish a stable version by creating its GitHub release; requires --version")
 	publish.Flags().BoolVar(&dryRun, "dry-run", false, "Say what each step would do; change nothing")
-	publish.Flags().BoolVar(&noPromote, "no-promote", false, "Publish only")
-	publish.Flags().BoolVar(&noSync, "no-sync", false, "Publish and promote; do not sync the box")
 
-	promote := &cobra.Command{
-		Use:   "promote",
-		Short: "Promote the tenant to a version already published (a stable release CI published)",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if version == "" {
-				return fmt.Errorf("name the published version to promote: --version")
-			}
-			// THE BOX YOU ARE STANDING IN, when you did not name one. Promotion
-			// rewrites a box's own references, so the common case is being in it;
-			// requiring the flag there made an operator name the directory they
-			// were already inside. A directory holding registry/box.yaml is a
-			// box and nothing else is, so there is nothing to guess.
-			dir := gitopsDir
-			if dir == "" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return err
-				}
-				if _, err := os.Stat(filepath.Join(cwd, tenant.RegistryDir, tenant.BoxDeclFile)); err != nil {
-					return fmt.Errorf(`name the box to promote: --gitops-dir
-
-This directory is not a box: it has no %s. Run this from a box's checkout, or
-name one.`, filepath.Join(tenant.RegistryDir, tenant.BoxDeclFile))
-				}
-				dir = cwd
-			}
-			// No platform checkout. Promotion is a rewrite of this box's own
-			// references and a commit, so it runs wherever the box is -- which is
-			// what lets a tenant promote without a copy of the platform (ADR-065).
-			running, err := tenant.Promotion{
-				GitopsDir: dir,
-				Version:   version,
-				Registry:  "ghcr.io/" + owner + "/charts",
-				DryRun:    dryRun,
-			}.Promote()
-			if err != nil {
-				return err
-			}
-			if dryRun {
-				fmt.Printf("dry run: %s would be promoted %s -> %s; nothing was written\n", dir, running, version)
-				return nil
-			}
-			fmt.Printf("promoted %s -> %s and pushed. Your control plane reconciles the new version from git.\n", running, version)
-			return nil
-		},
+	// Each flag goes on the subcommands that READ it, never on the group. A flag
+	// that parses and has no effect is indistinguishable from one that is
+	// broken, and it reads as a capability the command has.
+	for _, c := range []*cobra.Command{check, docs, publish} {
+		c.Flags().StringVar(&owner, "owner", "kamarkat",
+			"GitHub organisation whose registry the bundle is published to")
 	}
-	promote.Flags().BoolVar(&dryRun, "dry-run", false, "Say what would change; write nothing")
-
-	sync := &cobra.Command{
-		Use:   "sync",
-		Short: "Sync the box to a promoted version and verify every Application reached it",
-		Long: `Sync the box to a promoted version and verify every Application reached it.
-
-For a release whose box did not converge: fix the Applications it named, then run
-this again. Never re-publish. KUBECONFIG names the hub to drive.`,
-		Args: cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if version == "" {
-				return fmt.Errorf("name the version the box should reach: --version")
-			}
-			if os.Getenv("KUBECONFIG") == "" {
-				return fmt.Errorf("set KUBECONFIG to the hub kubeconfig to drive")
-			}
-			return runScript(nil, "scripts/argocd-hard-sync.sh", "--promote", version)
-		},
+	// Not docs: it takes the versions it writes as arguments.
+	for _, c := range []*cobra.Command{check, publish} {
+		c.Flags().StringVar(&version, "version", "",
+			"The version; default the newest published rc + 1")
 	}
 
 	// A failed release prints the state it left; usage text would bury it.
-	for _, c := range []*cobra.Command{check, publish, promote, sync, docs} {
+	for _, c := range []*cobra.Command{check, publish, docs} {
 		c.SilenceUsage = true
 		cmd.AddCommand(c)
 	}

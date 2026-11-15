@@ -46,8 +46,9 @@ func newAppCmd() *cobra.Command {
 		// supplied" buries the finding under flag documentation.
 		SilenceUsage: true,
 	}
-	cmd.PersistentFlags().StringVar(&appKubeconfig, "kubeconfig", "",
-		"Path to this box's hub kubeconfig")
+	// --repo is persistent because every subcommand reads the repository; it is
+	// where an application's declarations live. --kubeconfig is NOT, because
+	// only some of them reach the box -- see newAppSecretsCmd.
 	cmd.PersistentFlags().StringVar(&appRepoRoot, "repo", ".",
 		"Root of the tenant's GitOps repository (holds environments/<env>/values.yaml)")
 	cmd.AddCommand(newAppSecretsCmd())
@@ -100,8 +101,22 @@ that repository in any form.
 This is where they are supplied, and where an operator can see which declared
 secrets are still absent without any value being disclosed.`,
 	}
-	cmd.AddCommand(newAppSecretsTemplateCmd(), newAppSecretsStatusCmd(),
-		newAppSecretsSetCmd(), newAppSecretsImportCmd())
+	template, status := newAppSecretsTemplateCmd(), newAppSecretsStatusCmd()
+	set, importCmd := newAppSecretsSetCmd(), newAppSecretsImportCmd()
+
+	// --kubeconfig goes only where the box is actually reached. These three read
+	// this box's own Infisical through withInfisical, which refuses without it.
+	//
+	// `template` renders from the repository and `hosts aggregate` reads files;
+	// neither needs a cluster. As a persistent flag on `app` it was accepted by
+	// both and ignored, which reads as a capability they have -- that a template
+	// could be rendered against a particular box, or that aggregation looked at
+	// one.
+	for _, c := range []*cobra.Command{status, set, importCmd} {
+		c.Flags().StringVar(&appKubeconfig, "kubeconfig", "",
+			"Path to this box's hub kubeconfig")
+	}
+	cmd.AddCommand(template, status, set, importCmd)
 	return cmd
 }
 

@@ -43,15 +43,24 @@ publishing is two burned versions.
   `.github/workflows/publish-platform-charts.yml`, which publishes the bundle,
   attaches `components.json` and the vendored inputs, rewrites the release notes
   and **uploads the CLI binaries to the release page** -- the one place a
-  customer gets the executable. Once that run is green, the release owner
-  promotes it with `kakt release promote --version X.Y.Z`, run inside the box or
-  with `--gitops-dir`. It rewrites every reference under `registry/`, commits and
+  customer gets the executable. Once that run is green, the release is
+  done -- a release ends at the registry and touches no box. Moving a box onto
+  the version is a separate act by whoever owns it: `kakt promote --version
+  X.Y.Z`, run inside that box or with `--gitops-dir`. It rewrites every reference under `registry/`, commits and
   pushes; the box's own **Bundle sync** workflow converges the cluster on that
   push and confirms it reached the version, one job per cluster the commit moved.
 
   **Cutting a stable is a decision, never a default.** `kakt release publish`
   only ever counts rc numbers up; it will not turn `0.1.16-rc.N` into `0.1.16`
-  for you.
+  for you. A stable goes through `kakt release publish --stable --version X.Y.Z`,
+  which creates the GitHub release the publish workflow runs on, follows that run
+  and fails if it does. Naming the version is required: whether the next one is a
+  patch, a minor or a major says what the release means.
+
+  A stable version is never packaged from a workstation. `--stable` without
+  `--version`, an rc passed to `--stable`, and a stable `--version` without
+  `--stable` are each refused -- the last one because it would push charts that
+  no release, tag, binary or tap entry agrees with.
 - **A version is published once.** Never re-publish, re-tag or delete one. If a
   publish fails part way, the next attempt takes the next version.
 
@@ -158,10 +167,15 @@ after minutes of packaging, or something no gate catches at all.
 
 ```bash
 kakt release publish                        # publish the next rc after the newest published
-kakt release publish --gitops-dir ../nutgraf-gitops-1794508917   # publish, promote that tenant, sync its box
 kakt release publish --version X.Y.Z-rc.N
-kakt release promote --version X.Y.Z --gitops-dir ../nutgraf-gitops-1794508917   # already published by CI
-kakt release sync --version <v>             # re-sync a promoted version (KUBECONFIG = hub)
+kakt release publish --stable --version X.Y.Z   # a STABLE version: creates its GitHub release
+```
+
+A release stops there. Moving a box is not part of it, and runs separately:
+
+```
+kakt promote --version X.Y.Z --gitops-dir ../nutgraf-gitops-1794508917
+kakt sync --version <v>                     # re-drive a promoted version (KUBECONFIG = hub)
 ```
 
 What it does, in this order, and why the order matters:
@@ -194,11 +208,10 @@ through the normal path, then release again.
 | `these clusters do not pull the bundle from ghcr.io/<owner>/charts` | A tenant `bundle.yaml` names another registry; nothing published | Fix its environment-manager `repoURL` in `GITOPS_DIR`, push, run again |
 | `publish failed — nothing has been promoted` | Version possibly partly pushed | Fix the cause; release the **next** version |
 | `version … is already published` | Consumed | Release the next version |
-| `<v> IS PUBLISHED but not promoted` | Registry has it, git does not | Resolve in `GITOPS_DIR`, push. Do not re-publish |
-| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `kakt release sync --version <v>` again. Do not re-publish |
+| `the box did NOT converge` | Git says new, box says old | Fix the named Applications, run `kakt sync --version <v>` again. Do not re-publish |
 | `clusters are on different versions` | A half-applied promotion | Bring them to one version, or pass `--version` |
 | `could not confirm <v> in oci://…` (`promote`) | Not published, or no registry login | Check the publish run; `helm registry login ghcr.io` |
-| `cannot increment <v> automatically: it is not an -rc.N version` | The newest published version is a stable, so there is no rc number to follow; nothing published | Name the version. The next rc of the next line is `--version X.Y.(Z+1)-rc.1`; a stable is published by a GitHub Release, not here |
+| `cannot increment <v> automatically: it is not an -rc.N version` | The newest published version is a stable, so there is no rc number to follow; nothing published | Name the version. The next rc of the next line is `--version X.Y.(Z+1)-rc.1`; a stable is published with `--stable --version X.Y.Z`, which creates that release |
 
 Never force-push the tenant repository: a rejected push is someone else's
 commit, usually a CI bot's.
@@ -237,7 +250,7 @@ End every release with this report, filled in:
 
 ```
 Release <version>
-  Published: <yes/no> at <registry time>; promoted: <commit sha in GITOPS_DIR>
+  Published: <yes/no> at <registry time>; promoted: <commit sha in the box, if a box was moved>
   Box: <N> Applications Synced/Healthy; not healthy: <list, each marked new or pre-existing>
   Changed components verified: <list>; unproven: <list and why>
   Docs: <kamarkat-docs commit sha>; <behind> of <total> components behind latest
