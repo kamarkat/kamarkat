@@ -286,19 +286,30 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/kamarkat/kamarkat/releases/download/v${VERSION}"
-          if ! curl -fsSL --retry 3 --retry-connrefused -o kakt "${base}/kakt-linux-amd64"; then
-            echo "::error::no kakt-linux-amd64 on release v${VERSION}"
+          # UNDER ITS PUBLISHED NAME, because that is the name the checksum file
+          # uses. Saved as "kakt", every entry in SHA256SUMS named a file that
+          # was not there, --ignore-missing ignored all four of them, and
+          # sha256sum exited non-zero with "no file was verified" -- a
+          # verification that checked nothing, reported as a checksum mismatch.
+          asset="kakt-linux-amd64"
+          if ! curl -fsSL --retry 3 --retry-connrefused -o "$asset" "${base}/${asset}"; then
+            echo "::error::no ${asset} on release v${VERSION}"
             echo "::error::registry/clusters/${{ matrix.box.cluster }}/bundle.yaml pins"
             echo "::error::${VERSION}; a version with no published binary cannot build a cluster."
             exit 1
           fi
-          if curl -fsSL --retry 3 -o SHA256SUMS "${base}/SHA256SUMS"; then
-            sha256sum --ignore-missing -c SHA256SUMS < /dev/null \
-              || { echo "::error::kakt-linux-amd64 does not match the checksum published for v${VERSION}"; exit 1; }
-          else
+          if ! curl -fsSL --retry 3 -o SHA256SUMS "${base}/SHA256SUMS"; then
             echo "::error::release v${VERSION} publishes no SHA256SUMS; the download cannot be verified"
             exit 1
           fi
+          # grep the asset's own line rather than trusting --ignore-missing to
+          # have found something: a checksum file that does not mention this
+          # asset would otherwise verify nothing and say so only in passing.
+          grep -q " ${asset}\$" SHA256SUMS \
+            || { echo "::error::SHA256SUMS for v${VERSION} does not list ${asset}"; exit 1; }
+          grep " ${asset}\$" SHA256SUMS | sha256sum -c - \
+            || { echo "::error::${asset} does not match the checksum published for v${VERSION}"; exit 1; }
+          mv "$asset" kakt
           chmod +x kakt
           got="$(./kakt bundle-version)"
           if [ "$got" != "$VERSION" ]; then

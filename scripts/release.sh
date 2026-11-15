@@ -293,15 +293,22 @@ $(printf '%s\n' "$DIRTY" | sed 's/^/     /')
   if [ "$DRY_RUN" = 1 ]; then
     note "would follow the publish run and wait for it to finish"
   else
-    # The newest run of that workflow for a release event is the one just
-    # created. Matching on the tag is not reliable -- a release run reports the
-    # tag in different fields across gh versions -- so the run is named in the
-    # output for the operator to confirm.
+    # THE RUN FOR THIS COMMIT, matched on the SHA.
+    #
+    # "The newest release run" is wrong whenever one already exists: a previous
+    # attempt at the same version had left a failed run, the new one had not
+    # registered yet, and this reported that old failure as the outcome of a
+    # publish that was in fact still running -- "has already completed with
+    # 'failure'", seconds after creating the release.
+    #
+    # headSha is exact and is a field gh has always returned, and the release
+    # was created at this very commit, so there is nothing to infer.
     say "3b. Follow the publish run"
     RUN_ID=""
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
       RUN_ID="$(gh run list --repo "$REPO" --workflow publish-platform-charts.yml \
-        --event release --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
+        --event release --limit 20 --json databaseId,headSha \
+        -q "[.[] | select(.headSha == \"$SHA\")] | .[0].databaseId" 2>/dev/null || true)"
       [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] && break
       sleep 5
     done
