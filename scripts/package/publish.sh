@@ -251,6 +251,12 @@ python3 scripts/validate/runtime-script-closure.py
 # in CI died in it.
 python3 scripts/validate/portable-tool-install.py
 
+# Carrying a portable script is still not enough if it reads a variable nothing
+# assigns: `set -u` ends the run at that line, `bash -n` passes, and the abort
+# lands in a tenant's CI. 0.3.2 shipped one and died on "env_flag: unbound
+# variable" before step 1 invoked anything.
+./scripts/validate/shell-unassigned-variables.sh
+
 # The gate on the conversion, not a convenience: a published chart that renders
 # different objects is a silent change to every cluster that pulls it.
 for d in manifests/argocd/components/*/*.yaml; do

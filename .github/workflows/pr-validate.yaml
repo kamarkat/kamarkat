@@ -89,6 +89,13 @@ jobs:
       - name: Python dependencies for the static checks
         run: pip install pyyaml
 
+      # BEFORE a release, not after. A variable nothing assigns is valid shell,
+      # so bash -n and the test suite both pass; the failure appears when the
+      # line is reached, which for Day-0 means a tenant's CI on a published
+      # binary. shellcheck ships on this runner image.
+      - name: No Day-0 script reads an unassigned variable
+        run: ./scripts/validate/shell-unassigned-variables.sh
+
       - name: Static preflight invariants
         run: ENVIRONMENT=dev bash scripts/validate/run.sh preflight
 
