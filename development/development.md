@@ -4,6 +4,9 @@
 
 ## Local Testing
 
+rm -f ~/go/bin/kakt /Users/arun_subramanian/Projects/soloz-io/ide/kamarkat/kakt
+rm -rf /Users/arun_subramanian/Projects/soloz-io/ide/kamarkat/bin
+
 ### Where the names come from
 
 A box mints its own names, so none of them can be typed from memory. The checkout
