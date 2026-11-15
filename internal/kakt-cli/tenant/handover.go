@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"sort"
@@ -334,7 +336,83 @@ func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
 		fmt.Printf("[box] ✓ %s set on %s\n", name, repo)
 	}
 
+	reportGitopsTokenReach(ctx, repo, s.GitopsToken)
+
 	return setOrgGitopsToken(ctx, spec.GitOrg, s.GitopsToken)
+}
+
+// reportGitopsTokenReach says whether the token just installed can actually
+// write the repository it was installed for.
+//
+// SET IS NOT THE SAME AS USABLE. This credential is read from the operator's own
+// store, where it persists across boxes, so a token issued for one tenant's
+// organisation is carried into the next one's -- and the staging list reports it
+// as "present", because presence is all it knew how to check. The secret lands,
+// `box init` finishes, and the failure surfaces three steps into a bootstrap, in
+// a workflow this repository does not contain, as `git exit code 128` with
+// "403" beside it. Nothing in that output names the token.
+//
+// Asked of GitHub rather than inferred: a GET on the repository with this token
+// returns the permissions it actually has there, which is the only thing that
+// settles it.
+//
+// REPORTED, NOT FATAL. The repository exists by the time this runs and the rest
+// of the box is correct, so aborting would leave a created box and no
+// instructions. The operator needs the fix, which is what this prints.
+func reportGitopsTokenReach(ctx context.Context, repo, token string) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	can, why := tokenCanWrite(ctx, repo, token)
+	if can {
+		fmt.Printf("[box] ✓ GITOPS_REPO_WRITE_TOKEN can write %s\n", repo)
+		return
+	}
+	fmt.Printf("[box] ! GITOPS_REPO_WRITE_TOKEN is set on %s but cannot write it: %s\n", repo, why)
+	fmt.Printf("[box]   Day-0 checks this repository out with it and commits what it\n")
+	fmt.Printf("[box]   generates, so the bootstrap fails on its first step.\n")
+	fmt.Printf("[box]   This token is kept in your own store and outlives a box, so one\n")
+	fmt.Printf("[box]   issued for another organisation is carried into this one.\n\n")
+	fmt.Printf("[box]   Issue one for this repository -- Contents: read and write -- then:\n")
+	fmt.Printf("[box]     gh secret set GITOPS_REPO_WRITE_TOKEN --repo %s\n\n", repo)
+}
+
+// tokenCanWrite reports whether a token has push access to a repository, and why
+// not when it does not.
+func tokenCanWrite(ctx context.Context, repo, token string) (bool, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/repos/%s", githubAPI(), repo), nil)
+	if err != nil {
+		return false, err.Error()
+	}
+	authorize(req, Credential{Token: token})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// Unreachable is unknown, not a refusal: a runner with no network would
+		// otherwise be reported as a bad credential.
+		return true, ""
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var doc struct {
+			Permissions struct{ Push bool } `json:"permissions"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&doc) != nil {
+			return true, ""
+		}
+		if doc.Permissions.Push {
+			return true, ""
+		}
+		return false, "it can read the repository but not write it"
+	case http.StatusNotFound:
+		return false, "the repository is not visible to it at all (404)"
+	case http.StatusForbidden, http.StatusUnauthorized:
+		return false, fmt.Sprintf("GitHub refused it (%d)", resp.StatusCode)
+	default:
+		// Anything else is unknown rather than a verdict.
+		return true, ""
+	}
 }
 
 // setOrgGitopsToken publishes GITOPS_REPO_WRITE_TOKEN once at the ORGANISATION

@@ -822,6 +822,45 @@ def compare(rows: list[dict], previous: dict) -> list[dict]:
     return changes
 
 
+# WHAT TAKING THIS VERSION MEANS (ADR-064 revision 2).
+#
+# Written into the inventory the release publishes, so the version page renders
+# it rather than a release body stating it a second time. These four are
+# captured HERE, at publication, because each is a fact about this release that
+# cannot be re-derived afterwards: the commit range closes, a declaration is
+# made once, and git history is not a record of what was promised.
+#
+# The support window is deliberately NOT here. It depends on what has been
+# published SINCE, so it is derived when the page renders -- which is the whole
+# reason the disclosure moved to a page from a release body that cannot change.
+def disclosure(version: str, previous: str | None) -> dict:
+    # A security fix is declared by the commit that makes it, not inferred from
+    # words in a subject line: inference would either miss one or cry wolf, and
+    # both make the marker worth ignoring.
+    fixes: list[str] = []
+    if previous:
+        tag = previous if previous.startswith("v") else f"v{previous}"
+        out = subprocess.run(
+            ["git", "log", f"{tag}..HEAD", "--grep=^security(", "--format=%s"],
+            capture_output=True, text=True)
+        if out.returncode == 0:
+            fixes = [l.strip() for l in out.stdout.splitlines() if l.strip()]
+
+    return {
+        # The predecessor this version's changes are measured from.
+        "spansFrom": previous,
+        # The oldest version this one may be taken from. Declared, defaulting to
+        # the predecessor rather than to "any": a step the platform has not
+        # tested is not one it may claim.
+        "minimumFrom": os.environ.get("BUNDLE_MINIMUM_FROM", "").strip() or previous,
+        # Declared per release and defaulting to unknown rather than to
+        # reversible. A tenant told a one-way step is reversible discovers
+        # otherwise at the moment it needs to go back.
+        "predecessorRestorable": os.environ.get("BUNDLE_REVERSIBLE", "").strip() or "unknown",
+        "securityFixes": fixes,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("version")
@@ -872,6 +911,7 @@ def main() -> None:
         prev = json.loads(Path(a.previous).read_text())
         doc["previous"] = prev["version"]
         doc["changes"] = compare(rows, prev)
+    doc["disclosure"] = disclosure(a.version, doc.get("previous"))
     Path(a.out).write_text(json.dumps(doc, indent=2) + "\n")
     print(f"inventory: {len(rows)} components in {a.version}"
           + (f", {len(doc['changes'])} changed since {doc['previous']}" if "changes" in doc else ""))

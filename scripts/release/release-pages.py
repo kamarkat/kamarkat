@@ -24,8 +24,10 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
+
+import yaml
 
 
 def semver_key(v: str):
@@ -50,11 +52,81 @@ def jsx(name: str, value) -> str:
     return f"export const {name} = {json.dumps(value, indent=2)};\n"
 
 
+POLICY = Path("manifests/architecture/support-policy.yaml")
+
+
+# WHAT TAKING THIS VERSION MEANS (ADR-064 revision 2). The release body links
+# here and carries nothing else, so this section IS the disclosure.
+#
+# Four facts come from the inventory the release published: they were true when
+# it was published and cannot be re-derived afterwards. The support window is
+# computed HERE, because it depends on what has been published since -- a
+# version supported today is deprecated once enough minors follow it, and that
+# is the property a page can state correctly and a release body cannot.
+def taking(r: dict) -> str:
+    d = r.get("disclosure") or {}
+    rows = []
+
+    spans = d.get("spansFrom")
+    rows.append(("Spans from", f"`{spans}`" if spans else "no earlier release"))
+    minimum = d.get("minimumFrom")
+    rows.append(("Minimum version this may be taken from",
+                 f"`{minimum}`" if minimum else "no earlier release"))
+    rows.append(("Predecessor restorable from this version",
+                 f"**{d.get('predecessorRestorable', 'unknown')}**"))
+    rows.extend(support_window(r))
+
+    table = "| | |\n| :- | :- |\n" + "".join(f"| {k} | {v} |\n" for k, v in rows)
+
+    fixes = d.get("securityFixes") or []
+    if fixes:
+        note = "\n**Security fixes in this version**\n\n" + "\n".join(f"- {f}" for f in fixes) + "\n"
+    else:
+        note = "\nNo security fixes are declared in this version.\n"
+
+    # Said here because a reader of this page is deciding whether to take the
+    # version, and the answer to "what will this do to my cluster" is nothing
+    # until they commit it.
+    applied = ("\nNothing here is applied for you. A cluster changes when this version is\n"
+               "committed to your own repository and your own control plane reconciles it.\n")
+
+    # A version published before the disclosure was recorded states nothing
+    # rather than stating defaults: "no security fixes are declared" is itself a
+    # claim, and this page cannot make it on that version's behalf.
+    if not d:
+        return ("This version was published before its disclosure was recorded, so what\n"
+                "taking it means is not stated here. Its components are below.\n" + applied)
+    return table + note + applied
+
+
+def support_window(r: dict) -> list[tuple[str, str]]:
+    """The dates this version's window runs to, as of today."""
+    try:
+        doc = yaml.safe_load(POLICY.read_text()) or {}
+    except OSError:
+        return []
+    w = doc.get("window") or {}
+    sup, dep = (w.get("supported") or {}), (w.get("deprecated") or {})
+    if not isinstance(sup.get("days"), int) or not isinstance(dep.get("days"), int):
+        return []
+    released = r.get("released")
+    if not released:
+        return []
+    start = date.fromisoformat(str(released)[:10])
+    until = start + timedelta(days=sup["days"])
+    minors = sup.get("minors")
+    floor = (f", or while within {minors} minor versions of the newest published "
+             f"version, whichever is longer") if minors else ""
+    return [("Supported until", f"{until.isoformat()}{floor}"),
+            ("Then deprecated until", (until + timedelta(days=dep["days"])).isoformat())]
+
+
 def release_page(r: dict, line: str) -> str:
     v = r["version"]
     lead = (f"Every component {'prerelease' if '-' in v else 'bundle version'} `{v}` installs, on which nodes, "
             f"at what version. Released {day(r['released'])}.")
     since = f" since `{r['previous']}`" if r.get("previous") else ""
+    taking_section = taking(r)
     return f"""---
 title: "{v}"
 description: "Components in bundle version {v}."
@@ -67,6 +139,10 @@ import {{ release }} from "/snippets/releases/{slug(v)}.jsx";
 > {lead}
 
 [All {line} versions](/versions/lines/{slug(line)})
+
+## Taking this version
+
+{taking_section}
 
 ## What changed{since}
 

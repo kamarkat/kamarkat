@@ -98,14 +98,22 @@ that cannot be corrected.
 link this version's own page, so a release whose body generator failed quietly is
 still refused.
 
-**What this revision depends on, and does not yet have.** The version page today
-renders what changed, what is included, and the bootstrap tools. It does not
-render the span, the security fixes, the reversibility, the minimum version or
-the support window. Until `scripts/release/release-pages.py` and the inventory it
-reads carry those fields, a release body reduced to a link points at a page
-missing what the link is for, and the disclosure exists nowhere. This revision is
-therefore not complete, and the link-only body is not correct to ship before the
-page renders the fields.
+**Where each fact is captured, and why that split.** Four are written into the
+inventory at publication by `scripts/package/inventory.py`: the version this one
+spans from, the minimum it may be taken from, whether the predecessor is
+restorable, and the security fixes among the commits. Each is a fact about the
+release that cannot be re-derived afterwards -- the commit range closes, and a
+declaration is made once.
+
+The support window is NOT captured. It depends on what has been published since,
+because a version supported today is deprecated once enough minor versions
+follow it, so `scripts/release/release-pages.py` derives it from
+`manifests/architecture/support-policy.yaml` and the publication date each time
+the page renders. That is the half a release body could never have stated
+correctly, and it is the clearest reason the disclosure belongs on a page.
+
+A version published before this revision records no disclosure, and its page
+says so rather than printing defaults on its behalf.
 
 A tenant is entitled to cross several versions at once; it is not entitled to cross them without being told.
 

@@ -145,11 +145,25 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 					declared.EscrowProjectID)
 			}
 		}
-	} else if existing, err := os.ReadFile(idPath); err == nil && strings.TrimSpace(string(existing)) != "" {
-		return fmt.Errorf("%s already names project %s.\n\n"+
-			"Creating another would leave whatever that one holds reachable by nothing.\n"+
-			"If it is wrong, verify no box depends on it and remove the file first.",
-			idPath, strings.TrimSpace(string(existing)))
+	}
+
+	// THE PROJECT THIS MACHINE ALREADY RECORDED, adopted rather than refused.
+	//
+	// This used to refuse outright: "already names project X; creating another
+	// would leave whatever that one holds reachable by nothing." The worry is
+	// right and the answer was wrong -- the way not to orphan that project is to
+	// PREPARE it, which is what this command does for a project a box declares,
+	// and there was no reason the same project read from this operator's store
+	// should be treated differently.
+	//
+	// The refusal also made its own advice impossible to follow. `box init`
+	// refuses a box with no INFISICAL_ESCROW_ORG_ID and says to run
+	// `kakt escrow init`, which is the only thing that records it -- and this
+	// guard then refused, because a project id was on disk. An operator whose
+	// escrow predates that field had no route at all, from either command.
+	var storedProject string
+	if existing, rerr := os.ReadFile(idPath); rerr == nil {
+		storedProject = strings.TrimSpace(string(existing))
 	}
 
 	// The administrator's own session. Every call this makes is authorized by
@@ -177,6 +191,15 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		escrowURL = declared.EscrowURL
 		p, err = escrow.ProvisionEscrowInProject(ctx, escrowURL, s.Token, s.OrgID,
 			declared.EscrowProjectID, declaredFor)
+		clientID, clientSecret = p.ClientID, p.ClientSecret
+	} else if storedProject != "" {
+		// The project this machine already recorded. Prepared, not replaced:
+		// --name is not consulted, because the project exists and renaming it is
+		// not what was asked for.
+		fmt.Printf("escrow: preparing the project this machine already records, %s\n", storedProject)
+		fmt.Printf("        (no second escrow is created; --name is not used for one that exists)\n\n")
+		p, err = escrow.ProvisionEscrowInProject(ctx, escrowURL, s.Token, s.OrgID,
+			storedProject, "this operator's store")
 		clientID, clientSecret = p.ClientID, p.ClientSecret
 	} else {
 		p, err = escrow.ProvisionEscrow(ctx, escrowURL, s.Token, s.OrgID, escrowProjectName)
@@ -266,9 +289,15 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if declared.EscrowProjectID != "" {
+	// PREPARED OR CREATED, said as it happened. Adopting a project printed
+	// "created" with the name that was NOT used, which reads as a second escrow
+	// having been made -- the one thing the guard above exists to prevent.
+	switch {
+	case declared.EscrowProjectID != "":
 		fmt.Printf("✓ box %s's escrow prepared: %s\n", declared.BoxID, projectID)
-	} else {
+	case storedProject != "":
+		fmt.Printf("✓ escrow prepared: %s\n", projectID)
+	default:
 		fmt.Printf("✓ escrow project %q created: %s\n", escrowProjectName, projectID)
 	}
 	fmt.Printf("  %s is its admin\n", s.Email)
