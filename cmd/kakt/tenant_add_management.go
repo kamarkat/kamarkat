@@ -122,19 +122,31 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	// same orchestrator, the same admission check and the same escrow
 	// requirement -- what differs is only where it executes (ADR-072).
 	if box.Decl.IsDevelopmentBox() {
-		fmt.Println("\nCommit and push, then build it from here:")
+		// THE PUSH DOES NOT BUILD THIS BOX, said first and said plainly.
+		//
+		// On the released path the push IS the build -- that is what the
+		// documentation teaches and what every other message here says -- so a
+		// development box has to contradict it before it gives the commands,
+		// not after. Leading with "Commit and push, then build it from here"
+		// put the familiar half first and the contradiction three lines below
+		// it, and it was read as the trigger it usually is: the operator pushed
+		// and then asked why no workflow had run.
+		fmt.Println("\nThis box pins `development`, so THE PUSH WILL NOT BUILD IT.")
+		fmt.Println()
+		fmt.Println("It reads its charts from a branch rather than from a published version,")
+		fmt.Println("so there is nothing for a workflow to fetch and this repository carries no")
+		fmt.Println("bootstrap-cluster workflow at all. Day-0 runs from this clone instead --")
+		fmt.Println("the same orchestrator, admission check and escrow requirement the released")
+		fmt.Println("path runs, under your own credentials (ADR-072).")
+		fmt.Println()
+		fmt.Println("Two steps, and the second is the one that builds:")
 		fmt.Println()
 		fmt.Printf("  git add registry/clusters && git commit -m \"Declare %s\" && git push\n", name)
+		fmt.Println("      declares the cluster; creates nothing")
+		fmt.Println()
 		fmt.Printf("  kakt bootstrap-mgmt --name %s --gitops-dir . \\\n", name)
 		fmt.Printf("      --provider %s --region %s\n", box.Decl.Provider, box.Decl.Region)
-		fmt.Println()
-		fmt.Println("This box pins `development`: it reads its charts from a branch, so there is")
-		fmt.Println("no published version for a workflow to fetch and it carries no")
-		fmt.Println("bootstrap-cluster workflow. The commands above run the same Day-0 the")
-		fmt.Println("released path runs, from this clone, under your own credentials.")
-		fmt.Println()
-		fmt.Println("Committing declares the cluster. Building one costs money and takes hours,")
-		fmt.Println("so nothing is created until you run that second command.")
+		fmt.Println("      builds it: costs money, takes hours. Run from a platform checkout.")
 		return nil
 	}
 

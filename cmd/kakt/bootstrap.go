@@ -141,7 +141,7 @@ clusters run tenant workloads. This command builds the former.
 This is ONE STEP of a box. It stands up the management control plane and stops there:
 the gates that decide whether the box is usable -- secrets present, Infisical
 reachable, the database provisioned, the declared worker clusters actually up --
-are separate steps, and ` + "`kakt bootstrap`" + ` runs all of them in order.
+are separate steps.
 
 Running this directly gives you a reconciled management cluster and no assurance about anything
 else. That is a legitimate thing to want while developing; it is not a bootstrapped
