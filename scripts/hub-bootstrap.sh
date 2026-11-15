@@ -851,6 +851,12 @@ step1_bootstrap_hub() {
     require_credential GITOPS_REPO_WRITE_TOKEN "github/github-pat-token" \
         "a credential with write access to this box's GitOps repository"
 
+    # NO ENVIRONMENT FLAG. ADR-111 Revision 7 §2 made the management hub
+    # environment-independent and bootstrap.go states it: "There is no
+    # --environment flag and no default." The assignment went with that change
+    # and four $env_flag expansions did not, so `set -u` aborted step 1 before
+    # it ran -- on the released path only, because that is the only path that
+    # reaches this line without a developer watching.
     local gating_flag="--gating=${GATING}"
     local gitops_flag=""
     [[ -n "$GITOPS_DIR" ]] && gitops_flag="--gitops-dir=${GITOPS_DIR}"
@@ -879,22 +885,20 @@ step1_bootstrap_hub() {
         if [[ -n "${TAILNET_NAME:-}" ]]; then
             hybrid_flags="$hybrid_flags --tailnet-name=$TAILNET_NAME"
         fi
-        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --provider=hybrid --region=${REGION} $env_flag $topo_flag $gating_flag $hybrid_flags --debug"
+        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --provider=hybrid --region=${REGION} $topo_flag $gating_flag $hybrid_flags --debug"
         (cd "$ZERO_OPS_DIR" && "$KAKT_BINARY" bootstrap-mgmt \
             --name="${CLUSTER_NAME}" \
             --provider=hybrid \
             --region="${REGION}" \
-            $env_flag \
             $topo_flag \
             $gating_flag $gitops_flag \
             $hybrid_flags \
             --debug 2>&1 | tee "$LOG_DIR/bootstrap-hub.log")
     else
-        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --region=${REGION} $env_flag $gating_flag --debug"
+        log "Running: $KAKT_BINARY bootstrap-mgmt --name=${CLUSTER_NAME} --region=${REGION} $gating_flag --debug"
         (cd "$ZERO_OPS_DIR" && "$KAKT_BINARY" bootstrap-mgmt \
             --name="${CLUSTER_NAME}" \
             --region="${REGION}" \
-            $env_flag \
             $topo_flag \
             $gating_flag $gitops_flag \
             --debug 2>&1 | tee "$LOG_DIR/bootstrap-hub.log")
