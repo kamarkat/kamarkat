@@ -43,6 +43,7 @@ func newEscrowCmd() *cobra.Command {
 		Short: "Manage this tenant's escrow",
 	}
 	cmd.AddCommand(newEscrowInitCmd())
+	cmd.AddCommand(newEscrowCleanCmd())
 	cmd.AddCommand(newEscrowVerifyCmd())
 	cmd.AddCommand(newEscrowMigratePathsCmd())
 	cmd.AddCommand(newEscrowDeliverBackupCredentialsCmd())
@@ -147,23 +148,45 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// THE PROJECT THIS MACHINE ALREADY RECORDED, adopted rather than refused.
+	// ONE CONFIGURED ESCROW PER WORKSTATION, refused here rather than adopted.
 	//
-	// This used to refuse outright: "already names project X; creating another
-	// would leave whatever that one holds reachable by nothing." The worry is
-	// right and the answer was wrong -- the way not to orphan that project is to
-	// PREPARE it, which is what this command does for a project a box declares,
-	// and there was no reason the same project read from this operator's store
-	// should be treated differently.
+	// This used to take the project id it found on disk and prepare THAT
+	// project, ignoring --name -- a required flag, discarded on that path. So a
+	// second `escrow init` silently joined the new box to the previous box's
+	// escrow, putting its master keys and its administrator credential in a
+	// project that belongs to another box.
 	//
-	// The refusal also made its own advice impossible to follow. `box init`
-	// refuses a box with no ESCROW_PROVIDER_ORG_ID and says to run
-	// `kakt escrow init`, which is the only thing that records it -- and this
-	// guard then refused, because a project id was on disk. An operator whose
-	// escrow predates that field had no route at all, from either command.
-	var storedProject string
-	if existing, rerr := os.ReadFile(idPath); rerr == nil {
-		storedProject = strings.TrimSpace(string(existing))
+	// Refused BEFORE the session is opened and before anything is created in
+	// the escrow, so a run that cannot proceed changes nothing remotely.
+	//
+	// A box that DECLARES this same project is not a second escrow: that is the
+	// box this workstation is already configured for, being prepared again,
+	// which is idempotent and the normal way to re-run.
+	configured := escrow.ConfiguredProject()
+	if configured != "" && configured != declared.EscrowProjectID {
+		store, _ := escrow.StorePath()
+		msg := fmt.Sprintf(`this workstation is already configured for escrow project %s.
+
+A workstation holds one escrow configuration, in %s, and nothing in it says
+which box it belongs to -- so configuring a second would make the next command
+reach the wrong escrow with no way to tell.`, configured, store)
+		if box := escrow.ActiveBox(); box != "" {
+			msg += fmt.Sprintf("\n\nIt is bound to box %s.", box)
+		}
+		if declared.EscrowProjectID != "" {
+			msg += fmt.Sprintf("\n\nBox %s declares project %s, which is a different one.",
+				declared.BoxID, declared.EscrowProjectID)
+		}
+		return fmt.Errorf(`%s
+
+To configure this workstation for another box:
+
+  kakt escrow clean          # forgets the configuration above, locally only
+  kakt escrow init --name %s
+
+Cleaning removes nothing remote. The project, its artefacts, the machine
+identity, the box's repository secrets and its clusters are all untouched, and
+the box it belongs to keeps running from its own CI.`, msg, escrowProjectName)
 	}
 
 	// The administrator's own session. Every call this makes is authorized by
@@ -191,15 +214,6 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		escrowURL = declared.EscrowURL
 		p, err = escrow.ProvisionEscrowInProject(ctx, escrowURL, s.Token, s.OrgID,
 			declared.EscrowProjectID, declaredFor)
-		clientID, clientSecret = p.ClientID, p.ClientSecret
-	} else if storedProject != "" {
-		// The project this machine already recorded. Prepared, not replaced:
-		// --name is not consulted, because the project exists and renaming it is
-		// not what was asked for.
-		fmt.Printf("escrow: preparing the project this machine already records, %s\n", storedProject)
-		fmt.Printf("        (no second escrow is created; --name is not used for one that exists)\n\n")
-		p, err = escrow.ProvisionEscrowInProject(ctx, escrowURL, s.Token, s.OrgID,
-			storedProject, "this operator's store")
 		clientID, clientSecret = p.ClientID, p.ClientSecret
 	} else {
 		p, err = escrow.ProvisionEscrow(ctx, escrowURL, s.Token, s.OrgID, escrowProjectName)
@@ -295,8 +309,6 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 	switch {
 	case declared.EscrowProjectID != "":
 		fmt.Printf("✓ box %s's escrow prepared: %s\n", declared.BoxID, projectID)
-	case storedProject != "":
-		fmt.Printf("✓ escrow prepared: %s\n", projectID)
 	default:
 		fmt.Printf("✓ escrow project %q created: %s\n", escrowProjectName, projectID)
 	}

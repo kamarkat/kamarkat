@@ -54,7 +54,12 @@ func newBoxInitCmd() *cobra.Command {
 	var b boxInit
 
 	cmd := &cobra.Command{
-		Use:   "init",
+		Use: "init",
+		// Every input is a named flag, so a bare word is a mistake rather than a
+		// shorthand -- and the mistake it usually is, is a value flag typed with
+		// no value: `--tenant --git-org acme-inc` leaves "acme-inc" standing
+		// alone, which was accepted and ignored.
+		Args:  cobra.NoArgs,
 		Short: "Create a box: the tenant's repository, with no clusters",
 		Long: `Create <box>/<tenant>-gitops from the platform template, with no clusters.
 
@@ -202,14 +207,43 @@ func (b *boxInit) run(cmd *cobra.Command, _ []string) error {
 
 	// NEW OR CONTINUATION, and the operator says which.
 	//
-	// Not inferred. Credentials staged under ~/.kamarkat/ cannot answer it:
-	// they are legitimately shared across several boxes, so their presence says
-	// nothing about whether this run means to create one or finish one. And the
-	// existence of other `<tenant>-gitops-*` repositories cannot answer it
-	// either -- a tenant may hold two boxes on purpose, which is the whole of
-	// ADR-111 Revision 9's replacement journey.
+	// Not inferred. The existence of other `<tenant>-gitops-*` repositories
+	// cannot answer it -- a tenant may hold two boxes on purpose, which is the
+	// whole of ADR-111 Revision 9's replacement journey.
 	if b.resume != "" {
 		return b.continueInit(ctx)
+	}
+	// ONE BOX PER CONFIGURED WORKSTATION.
+	//
+	// Refusing a second `escrow init` is not enough on its own: one escrow
+	// configuration could still be used to create any number of boxes, and each
+	// would escrow its master keys and its administrator credential into a
+	// project belonging to the first. Deleting that project would then destroy
+	// the recovery material of boxes that never named it.
+	//
+	// Checked here, before credentials are staged and before anything is
+	// created, so the explicit --escrow-* and credential flags cannot step past
+	// it -- they change where the escrow is read from, not which box this
+	// workstation is configured for.
+	if box := escrow.ActiveBox(); box != "" {
+		store, _ := escrow.StorePath()
+		return fmt.Errorf(`this workstation is already configured for box %s.
+
+Its escrow configuration is in %s, and it holds one box's -- so a second box
+created from here would escrow its master keys into the first box's project.
+
+To continue that box:
+
+  kakt box init --resume <its checkout>
+
+To configure this workstation for a different box:
+
+  kakt escrow clean          # forgets the configuration above, locally only
+  kakt escrow init --name <name>
+  kakt box init --tenant ... --git-org ...
+
+Box %s keeps running either way: cleaning removes nothing remote, and its CI
+authenticates with the secrets on its own repository.`, box, store, box)
 	}
 	// Only when actually passed. The sentinel keeps "zero workers" -- a box whose
 	// capacity is the tenant's own hardware (ADR-075) -- distinguishable from "no
@@ -290,6 +324,23 @@ none yet: %w`, err)
 	}
 
 	if err := b.spec.Validate(); err != nil {
+		return err
+	}
+
+	// WHERE THE CHECKOUT WILL LAND, checked BEFORE anything is asked for.
+	//
+	// A box's repository is cloned out as a working directory here, and that
+	// directory must not land inside anything else: run from a repository's own
+	// checkout it becomes untracked content in that repository, which is one
+	// `git add .` away from a tenant's box being committed into the platform's
+	// source -- or into another box's.
+	//
+	// It used to run after staging, so an operator answered seven credential
+	// prompts and was then told the directory was wrong. The check reads the
+	// filesystem and needs no credential, no session and no network, so there
+	// was never a reason for it to sit behind them. Every refusal this command
+	// can make without asking for something belongs before it asks.
+	if err := requireEmptyTarget(b.out, b.spec.TenantID); err != nil {
 		return err
 	}
 
@@ -424,17 +475,6 @@ func (b *boxInit) create(ctx context.Context) error {
 		return err
 	}
 
-	// WHERE THE CHECKOUT WILL LAND, checked before an identity is minted.
-	//
-	// A box's repository is cloned out as a working directory here, and that
-	// directory must not land inside anything else: run from a repository's own
-	// checkout it becomes untracked content in that repository, which is one
-	// `git add .` away from a tenant's box being committed into the platform's
-	// source -- or into another box's.
-	if err := requireEmptyTarget(b.out, b.spec.TenantID); err != nil {
-		return err
-	}
-
 	// MINTED HERE, immediately before the identity is first required. One
 	// timestamp, three names, and no other call to this function anywhere: a
 	// second call would be a second box.
@@ -469,6 +509,15 @@ func (b *boxInit) create(ctx context.Context) error {
 
 	existed, err := tenant.CreateRepo(ctx, b.spec, cred)
 	if err != nil {
+		return err
+	}
+	// THE BOX IS REAL NOW, so this workstation is configured for it.
+	//
+	// Recorded as soon as the repository exists rather than at the end, because
+	// a run that stops after this point has still created a box -- and the
+	// binding is what lets `--resume` find it and what stops a second box being
+	// created over its escrow.
+	if err := escrow.BindActiveBox(b.spec.BoxID); err != nil {
 		return err
 	}
 	if existed {
@@ -595,6 +644,22 @@ func (b *boxInit) continueInit(ctx context.Context) error {
 	if err := b.spec.RequireEscrowOrganization(); err != nil {
 		return fmt.Errorf("the box declared in %s is incomplete: %w", b.resume, err)
 	}
+	// RESUME ONLY THE BOX THIS WORKSTATION IS CONFIGURED FOR. A resume that
+	// adopted a different box would reach the first box's escrow under the
+	// second's name, which is the misrouting the binding exists to stop. A
+	// workstation with no binding yet takes this box as its own, which is how an
+	// interrupted first run continues.
+	if box := escrow.ActiveBox(); box != "" && box != b.spec.BoxID {
+		store, _ := escrow.StorePath()
+		return fmt.Errorf(`%s declares box %s, but this workstation is configured for box %s.
+
+Its escrow configuration is in %s and belongs to %s, so continuing %s from here
+would read the wrong escrow.
+
+  kakt box init --resume <%s's checkout>     continue the box this is configured for
+  kakt escrow clean                          forget it, locally only, then configure %s`,
+			b.resume, b.spec.BoxID, box, store, box, b.spec.BoxID, box, b.spec.BoxID)
+	}
 	fmt.Printf("[box] continuing %s, declared in %s\n", b.spec.BoxID, b.resume)
 	fmt.Printf("[box]   repository %s/%s, management cluster %s\n",
 		b.spec.GitOrg, b.spec.RepoName(), b.spec.ManagementCluster)
@@ -626,6 +691,15 @@ func (b *boxInit) continueInit(ctx context.Context) error {
 
 	existed, err := tenant.CreateRepo(ctx, b.spec, cred)
 	if err != nil {
+		return err
+	}
+	// THE BOX IS REAL NOW, so this workstation is configured for it.
+	//
+	// Recorded as soon as the repository exists rather than at the end, because
+	// a run that stops after this point has still created a box -- and the
+	// binding is what lets `--resume` find it and what stops a second box being
+	// created over its escrow.
+	if err := escrow.BindActiveBox(b.spec.BoxID); err != nil {
 		return err
 	}
 	if !existed {

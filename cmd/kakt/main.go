@@ -30,6 +30,10 @@ func newRootCmd() *cobra.Command {
 		Long: "Create and maintain the platform a tenant runs: render the tenant's\n" +
 			"repository, bootstrap the control plane it declares, and manage the\n" +
 			"bundle version it is pinned to.",
+		// Runs for every command, before any of them acts.
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return refuseSwallowedFlagValue(cmd)
+		},
 	}
 
 	// Authentication first, because every command below that reaches a hub now
