@@ -244,6 +244,13 @@ python3 scripts/validate/workflow-secrets.py
 ./scripts/package/embed-platform-assets.sh >/dev/null
 python3 scripts/validate/runtime-script-closure.py
 
+# Carrying the scripts is not enough if one of them can only run on the machine
+# it was written on. The prerequisite installer fetched Windows artefacts on
+# every host, which no local run could surface -- a workstation already has the
+# tools, so the installer never executes there -- and a tenant's first bootstrap
+# in CI died in it.
+python3 scripts/validate/portable-tool-install.py
+
 # The gate on the conversion, not a convenience: a published chart that renders
 # different objects is a silent change to every cluster that pulls it.
 for d in manifests/argocd/components/*/*.yaml; do

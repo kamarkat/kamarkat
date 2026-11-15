@@ -94,9 +94,25 @@ of them: what runs is what the release contains.`,
 				return err
 			}
 
+			// THIS BINARY IS THE ONE THE SCRIPT SHOULD USE.
+			//
+			// hub-bootstrap.sh takes the CLI from KAKT_BINARY when it is
+			// executable, and otherwise builds one from cmd/kakt. Unset, a
+			// released run found no source to build from and stopped with "no
+			// usable kakt binary, and no source to build one" -- while the
+			// binary it needed was the process running it.
+			//
+			// Resolved rather than assumed: a release is fetched to whatever
+			// name the launcher gave it, so the path cannot be spelled here.
+			self, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("cannot determine this binary's own path, which the "+
+					"bootstrap needs as its CLI: %w", err)
+			}
 			env := append(os.Environ(),
 				"ZERO_OPS_DIR="+ws,
 				"CLUSTER_NAME="+cluster,
+				"KAKT_BINARY="+self,
 			)
 			if versions.IsReleaseBuild() {
 				// Platform content from the release and nowhere else
@@ -123,6 +139,10 @@ of them: what runs is what the release contains.`,
 				"--provider", decl.Provider,
 				"--region", decl.Region,
 				"--gitops-dir", ws,
+				// Named, so the script's own check that the binary reports this
+				// version has something to compare against. Unset it compares
+				// nothing and a mismatched CLI passes.
+				"--bundle-version", versions.BundleVersion,
 			}
 			switch len(pools) {
 			case 0:

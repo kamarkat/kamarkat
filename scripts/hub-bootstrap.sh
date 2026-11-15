@@ -365,100 +365,170 @@ is_static_preflight_checkpointed() {
     fi
 }
 
-# Auto-install kind and clusterctl into ~/bin on Windows/Git Bash if missing
+# Install a required tool for THIS invocation, for the OS and CPU it is running on.
+#
+# Every branch here downloaded a Windows executable -- kind-windows-amd64,
+# clusterctl-windows-amd64.exe, a helm .zip, jq.exe -- whatever the host was.
+# On a Linux runner that produced "✓ clusterctl installed to ~/bin/clusterctl.exe"
+# followed immediately by "could not be auto-installed": it had downloaded a PE
+# binary, chmod'ed it, and found it unrunnable. Written for a Windows
+# workstation, and unreachable from CI until the tenant launcher started getting
+# this far.
+#
+# PINNED, never /latest/: a bootstrap that resolves a different tool version on
+# each run is not the same bootstrap. VERIFIED, because an unauthenticated
+# download that becomes a cluster's control plane deserves a checksum. And
+# installed into a directory owned by this run, added to this PATH only -- no
+# sudo, nothing global, and nothing appended to a shell profile, which outlives
+# the run that wrote it.
+TOOLS_DIR="${TOOLS_DIR:-}"
+
+# tool_platform -> "<os>-<arch>" in the spelling upstream uses, or a refusal.
+tool_platform() {
+    local os arch
+    case "$(uname -s)" in
+        Linux)                      os="linux" ;;
+        Darwin)                     os="darwin" ;;
+        MINGW*|MSYS*|CYGWIN*)       os="windows" ;;
+        *) log "ERROR: $(uname -s) is not a platform this bootstrap installs tools for"
+           return 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64)               arch="amd64" ;;
+        arm64|aarch64)              arch="arm64" ;;
+        *) log "ERROR: $(uname -m) is not an architecture this bootstrap installs tools for"
+           return 1 ;;
+    esac
+    printf '%s-%s' "$os" "$arch"
+}
+
+# sha256_of <file> -- GNU coreutils on Linux, BSD shasum on macOS.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+# fetch_tool <url> <dest> [checksum_url]
+#
+# Verified against the checksum upstream publishes for that exact artefact.
+# kind, helm and jq each publish one; the Cluster API project publishes none for
+# clusterctl, so for that one the version pin and the release URL over TLS are
+# the whole of what is trusted, and the run says so rather than leaving silence
+# to be read as verification.
+#
+# A checksum served from the same release proves the transfer, not the
+# provenance. It catches a truncated download, a proxy's error page saved as a
+# binary, and a mutated asset -- which is what was actually failing here.
+fetch_tool() {
+    local url="$1" dest="$2" sum_url="${3:-}" name
+    name="$(basename "$url")"
+    curl -fsSL --retry 3 --retry-connrefused -o "$dest" "$url" || {
+        log "ERROR: could not download $url"
+        return 1
+    }
+    if [[ -z "$sum_url" ]]; then
+        log "  (upstream publishes no checksum for $name; pinned by version and URL)"
+        chmod +x "$dest"
+        return 0
+    fi
+
+    local sums="${dest}.sums" want got
+    curl -fsSL --retry 3 -o "$sums" "$sum_url" || {
+        log "ERROR: could not download the checksum for $name from $sum_url"
+        rm -f "$dest"
+        return 1
+    }
+    # "<digest>  <name>", or "<digest> *<name>" in binary mode. The artefact is
+    # named explicitly: a multi-entry file lists every platform, and verifying
+    # against whichever line came first would pass a mismatched binary.
+    want="$(awk -v n="$name" '{sub(/^\*/, "", $2); if ($2 == n) {print $1; exit}}' "$sums")"
+    rm -f "$sums"
+    if [[ -z "$want" ]]; then
+        log "ERROR: $sum_url does not list $name"
+        rm -f "$dest"
+        return 1
+    fi
+    got="$(sha256_of "$dest")"
+    if [[ "$got" != "$want" ]]; then
+        log "ERROR: $name does not match its published checksum"
+        log "       expected $want"
+        log "       got      $got"
+        rm -f "$dest"
+        return 1
+    fi
+    log "  ✓ $name checksum verified"
+    chmod +x "$dest"
+}
+
 auto_install_tool() {
-    local tool="$1"
-    local install_dir="$HOME/bin"
-    mkdir -p "$install_dir"
+    local tool="$1" plat
+    plat="$(tool_platform)" || return 1
+
+    # Owned by this invocation. The previous installer wrote to ~/bin and
+    # appended to ~/.bashrc, so the tools a run installed were found only by a
+    # later interactive shell -- not by the run that installed them.
+    if [[ -z "$TOOLS_DIR" ]]; then
+        TOOLS_DIR="$(mktemp -d)"
+        export PATH="$TOOLS_DIR:$PATH"
+        log "  tools for this run: $TOOLS_DIR"
+    fi
+    local ext=""
+    [[ "$plat" == windows-* ]] && ext=".exe"
 
     case "$tool" in
         kind)
-            log "  Auto-installing kind..."
-            if curl -fsSLo "$install_dir/kind.exe" "https://kind.sigs.k8s.io/dl/latest/kind-windows-amd64" 2>/dev/null; then
-                chmod +x "$install_dir/kind.exe"
-                export PATH="$PATH:$install_dir"
-                log "  ✓ kind installed to $install_dir/kind.exe"
-            else
-                return 1
-            fi
+            local v="v0.27.0"
+            log "  Auto-installing kind $v for $plat..."
+            local kind_url="https://github.com/kubernetes-sigs/kind/releases/download/${v}/kind-${plat}${ext}"
+            fetch_tool "$kind_url" "$TOOLS_DIR/kind${ext}" "${kind_url}.sha256sum" || return 1
             ;;
         clusterctl)
-            log "  Auto-installing clusterctl..."
-            if curl -fsSLo "$install_dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe" 2>/dev/null; then
-                chmod +x "$install_dir/clusterctl.exe"
-                export PATH="$PATH:$install_dir"
-                log "  ✓ clusterctl installed to $install_dir/clusterctl.exe"
-            else
-                return 1
-            fi
+            # The version this release is tested with. Unpinning it means a
+            # bootstrap whose Cluster API client changes under it.
+            local v="v1.13.7"
+            log "  Auto-installing clusterctl $v for $plat..."
+            fetch_tool "https://github.com/kubernetes-sigs/cluster-api/releases/download/${v}/clusterctl-${plat}${ext}" \
+                "$TOOLS_DIR/clusterctl${ext}" || return 1
             ;;
         helm)
-            log "  Auto-installing helm..."
-            local helm_version="v3.17.3"
-            local helm_zip="$install_dir/helm.zip"
-            if curl -fsSLo "$helm_zip" "https://get.helm.sh/helm-${helm_version}-windows-amd64.zip" 2>/dev/null; then
-                unzip -jo "$helm_zip" "windows-amd64/helm.exe" -d "$install_dir" 2>/dev/null
-                rm -f "$helm_zip"
-                chmod +x "$install_dir/helm.exe"
-                export PATH="$PATH:$install_dir"
-                log "  ✓ helm installed to $install_dir/helm.exe"
-            else
+            local v="v3.17.3" tgz="$TOOLS_DIR/helm.tgz"
+            log "  Auto-installing helm $v for $plat..."
+            if [[ "$plat" == windows-* ]]; then
+                log "ERROR: install helm yourself on Windows; its archive is a zip and"
+                log "       this bootstrap does not carry an unzip dependency"
                 return 1
             fi
-            ;;
-        aws)
-            log "  Auto-installing aws CLI..."
-            # Use winget if aws not already installed via MSI
-            local aws_dir="/c/Program Files/Amazon/AWSCLIV2"
-            if [[ ! -f "$aws_dir/aws.exe" ]]; then
-                if winget install -e --id Amazon.AWSCLI --silent --accept-package-agreements 2>/dev/null; then
-                    log "  ✓ aws installed via winget"
-                else
-                    log "  Attempting AWS CLI MSI install..."
-                    local msi="$install_dir/AWSCLIV2.msi"
-                    if curl -fsSLo "$msi" "https://awscli.amazonaws.com/AWSCLIV2.msi" 2>/dev/null; then
-                        msiexec //i "$msi" //quiet //norestart 2>/dev/null || true
-                        rm -f "$msi"
-                    fi
-                fi
-            fi
-            # Add the real AWSCLIV2 dir to PATH (aws.exe needs sibling DLLs)
-            if [[ -f "$aws_dir/aws.exe" ]]; then
-                case ":$PATH:" in
-                    *":$aws_dir:"*) ;;
-                    *) export PATH="$aws_dir:$PATH" ;;
-                esac
-                log "  ✓ aws found: $aws_dir/aws.exe"
-            else
+            local helm_url="https://get.helm.sh/helm-${v}-${plat}.tar.gz"
+            fetch_tool "$helm_url" "$tgz" "${helm_url}.sha256sum" || return 1
+            tar -xzf "$tgz" -C "$TOOLS_DIR" --strip-components=1 "${plat}/helm" || {
+                log "ERROR: could not unpack helm from $tgz"
                 return 1
-            fi
+            }
+            rm -f "$tgz"
+            chmod +x "$TOOLS_DIR/helm"
             ;;
         jq)
-            log "  Auto-installing jq..."
-            if curl -fsSLo "$install_dir/jq.exe" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" 2>/dev/null; then
-                chmod +x "$install_dir/jq.exe"
-                export PATH="$PATH:$install_dir"
-                log "  ✓ jq installed to $install_dir/jq.exe"
-            else
-                return 1
-            fi
+            local v="1.7.1" name
+            case "$plat" in
+                linux-amd64)  name="jq-linux-amd64" ;;
+                linux-arm64)  name="jq-linux-arm64" ;;
+                darwin-amd64) name="jq-macos-amd64" ;;
+                darwin-arm64) name="jq-macos-arm64" ;;
+                windows-*)    name="jq-windows-amd64.exe" ;;
+            esac
+            log "  Auto-installing jq $v for $plat..."
+            local jq_base="https://github.com/jqlang/jq/releases/download/jq-${v}"
+            fetch_tool "${jq_base}/${name}" "$TOOLS_DIR/jq${ext}" "${jq_base}/sha256sum.txt" || return 1
             ;;
         *)
+            log "ERROR: no installer for '$tool'; install it and re-run"
             return 1
             ;;
     esac
-
-    # Persist to ~/.bashrc if not already there
-    local bashrc="$HOME/.bashrc"
-    # For aws, use the Program Files dir instead of ~/bin
-    local persist_dir="$install_dir"
-    if [[ "$tool" == "aws" ]]; then
-        persist_dir="/c/Program Files/Amazon/AWSCLIV2"
-    fi
-    local path_line="export PATH=\"\$PATH:$persist_dir\""
-    if ! grep -qF "$persist_dir" "$bashrc" 2>/dev/null; then
-        echo -e "\n# auto-installed tools\n$path_line" >> "$bashrc"
-    fi
+    log "  ✓ $tool installed to $TOOLS_DIR"
 }
 
 # Check prerequisites
@@ -467,47 +537,44 @@ check_prerequisites() {
     local failed=0
 
     # --- Required CLI tools ---
-    for tool in kubectl aws jq kind clusterctl helm; do
-        # Also check ~/bin since auto-installed tools live there but
-        # non-interactive shells don't source ~/.bashrc (where PATH is persisted)
+    for tool in kubectl jq kind clusterctl helm; do
+        # Tools this run installs go in a directory already on this PATH. ~/bin
+        # is still honoured so a tool the operator put there is found by a
+        # non-interactive shell, which sources no profile.
         if [[ -x "$HOME/bin/$tool" ]]; then
             export PATH="$HOME/bin:$PATH"
         fi
         if ! command -v "$tool" >/dev/null 2>&1; then
             case "$tool" in
-                kind|clusterctl|helm|aws|jq)
+                kind|clusterctl|helm|jq)
                     log "  '$tool' not found — attempting auto-install..."
                     if auto_install_tool "$tool" && command -v "$tool" >/dev/null 2>&1; then
                         log "  ✓ $tool found: $(command -v "$tool")"
                     else
                         log "ERROR: '$tool' could not be auto-installed"
+                        # Upstream's own instructions for the host this is
+                        # running on. The previous text named winget and
+                        # .exe artefacts whatever the platform was, so a Linux
+                        # runner was told to install a Windows binary.
                         case "$tool" in
                             kind)
-                                log "  Install (Windows): winget install -e --id Kubernetes.kind"
-                                log "  Or download: https://kind.sigs.k8s.io/dl/latest/kind-windows-amd64"
+                                log "  Install kind v0.27.0 for $(tool_platform 2>/dev/null || uname -sm)"
                                 log "  Docs: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
                                 ;;
                             clusterctl)
-                                log "  Install (Windows): curl -Lo clusterctl.exe https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe"
-                                log "  Then add to PATH"
+                                log "  Install clusterctl v1.13.7 — the version this release is tested with"
                                 log "  Docs: https://cluster-api.sigs.k8s.io/user/quick-start#install-clusterctl"
                                 ;;
                             helm)
-                                log "  Install (Windows): winget install -e --id Helm.Helm"
-                                log "  Or download: https://get.helm.sh/helm-v3.17.3-windows-amd64.zip"
+                                log "  Install helm v3.17.3"
                                 log "  Docs: https://helm.sh/docs/intro/install/"
                                 ;;
-                            aws)
-                                log "  Install (Windows): https://awscli.amazonaws.com/AWSCLIV2.msi"
-                                log "  Or: winget install -e --id Amazon.AWSCLI"
-                                log "  Docs: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
-                                ;;
                             jq)
-                                log "  Install (Git Bash): curl -L -o ~/jq.exe https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe && chmod +x ~/jq.exe && export PATH=\$PATH:~"
-                                log "  Or (Windows): winget install -e --id jqlang.jq"
+                                log "  Install jq 1.7.1"
                                 log "  Docs: https://jqlang.github.io/jq/download/"
                                 ;;
                         esac
+                        log "  Then re-run; a tool already on PATH is used as-is."
                         failed=1
                     fi
                     ;;
@@ -515,9 +582,8 @@ check_prerequisites() {
                     log "ERROR: '$tool' is not installed or not in PATH"
                     case "$tool" in
                         kubectl)
-                            log "  Install (Windows): winget install -e --id Kubernetes.kubectl"
-                            log "  Or download: https://dl.k8s.io/release/v1.30.0/bin/windows/amd64/kubectl.exe"
-                            log "  Docs: https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/"
+                            log "  Install kubectl for $(tool_platform 2>/dev/null || uname -sm)"
+                            log "  Docs: https://kubernetes.io/docs/tasks/tools/"
                             ;;
                     esac
                     failed=1
@@ -545,9 +611,9 @@ check_prerequisites() {
     fi
     if ! command -v docker >/dev/null 2>&1; then
         log "ERROR: 'docker' not found"
-        log "  Install Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/"
-        log "  Or: winget install -e --id Docker.DockerDesktop"
-        log "  Then start Docker Desktop and re-run."
+        log "  kind builds its bootstrap cluster in docker; install it for $(uname -s)"
+        log "  Docs: https://docs.docker.com/engine/install/"
+        log "  Then start it and re-run."
         failed=1
     else
         # The kind bootstrap cluster may run on a REMOTE docker context
@@ -663,10 +729,10 @@ check_prerequisites() {
     #
     # KAKT_BUILD=always forces a rebuild for the case a developer wants one
     # despite an existing binary.
-    # Skip the build, NOT the rest of this function. check_prerequisites keeps
-    # checking tokens and the AWS profile after this block, and returning early
-    # would silently drop those -- the same class of bug as a gate that exists
-    # and is never called.
+    # Skip the build, NOT the rest of this function. check_prerequisites still
+    # checks the GitOps repository credential after this block, and returning
+    # early would silently drop it -- the same class of bug as a gate that
+    # exists and is never called.
     local skip_build=""
     if [[ "${KAKT_BUILD:-}" != "always" && -x "$KAKT_BINARY" ]]; then
         local existing_version
@@ -734,23 +800,25 @@ check_prerequisites() {
     # the file here would fail a box that is correctly enrolled, and passing on it
     # would say nothing about whether the box has a credential at all.
 
-    if [[ ! -f "$(owned_secret github/github-pat-token)" ]]; then
-        log "ERROR: GitHub token not found at $(owned_secret github/github-pat-token)"
-        failed=1
-    else
-        log "  ✓ GitHub token found in this operator's store"
-    fi
+    # THE CREDENTIAL, not a file. require_credential takes the environment
+    # first and the operator's store second, which is the contract every other
+    # caller here uses (:943, :1116). This check demanded the FILE
+    # unconditionally, so a CI run holding GITOPS_REPO_WRITE_TOKEN as a
+    # repository secret -- the only way it ever arrives there -- failed on a
+    # credential it had.
+    #
+    # Nothing is copied into the store: a token that belongs to a workflow run
+    # has no business outliving it on a disk.
+    require_credential GITOPS_REPO_WRITE_TOKEN "github/github-pat-token" \
+        "a credential with write access to this box's GitOps repository"
+    log "  ✓ GitOps repository credential present"
 
-    # --- AWS profile ---
-    if ! command -v aws >/dev/null 2>&1; then
-        : # already reported above
-    elif ! aws configure list --profile zerotouch-platform-admin >/dev/null 2>&1; then
-        log "ERROR: AWS profile 'zerotouch-platform-admin' not configured"
-        log "  Fix: aws configure --profile zerotouch-platform-admin"
-        failed=1
-    else
-        log "  ✓ AWS profile 'zerotouch-platform-admin' configured"
-    fi
+    # NO AWS PREREQUISITE. Nothing on this path invokes the AWS CLI: its only
+    # appearances were its own install branch, this check, and the required-tool
+    # list. The profile name predates Hetzner, and requiring it failed every
+    # runner that had no reason to have it. Object storage being S3-compatible
+    # does not make a configured AWS profile a prerequisite -- the backup
+    # credential is escrowed and delivered to the cluster.
 
     if [[ $failed -ne 0 ]]; then
         error_exit "Prerequisites check failed. Fix the errors above and re-run."

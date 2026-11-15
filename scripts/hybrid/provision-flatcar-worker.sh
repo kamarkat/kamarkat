@@ -321,18 +321,21 @@ phase_prep_binaries() {
 
   if [[ ! -f "${CACHE_DIR}/kubelet" ]]; then
     echo "      → Downloading kubelet ${K8S_VERSION}..."
+    # portable-tool-install: cross-target cached on this machine FOR the Flatcar worker, which is linux/amd64
     curl -sSL -o "${CACHE_DIR}/kubelet" "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubelet"
     chmod +x "${CACHE_DIR}/kubelet"
   fi
 
   if [[ ! -f "${CACHE_DIR}/kubeadm" ]]; then
     echo "      → Downloading kubeadm ${K8S_VERSION}..."
+    # portable-tool-install: cross-target cached on this machine FOR the Flatcar worker, which is linux/amd64
     curl -sSL -o "${CACHE_DIR}/kubeadm" "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubeadm"
     chmod +x "${CACHE_DIR}/kubeadm"
   fi
 
   if [[ ! -f "${CACHE_DIR}/kubectl" ]]; then
     echo "      → Downloading kubectl ${K8S_VERSION}..."
+    # portable-tool-install: cross-target cached on this machine FOR the Flatcar worker, which is linux/amd64
     curl -sSL -o "${CACHE_DIR}/kubectl" "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
     chmod +x "${CACHE_DIR}/kubectl"
   fi
@@ -354,6 +357,7 @@ phase_prep_binaries() {
     echo "      → Downloading CNI plugins ${CNI_VERSION}..."
     local CNI_TMP
     CNI_TMP=$(mktemp -d /tmp/cni-dl-XXXXXX)
+    # portable-tool-install: cross-target cached on this machine FOR the Flatcar worker, which is linux/amd64
     curl -sSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" | tar -xz -C "$CNI_TMP"
     cp "$CNI_TMP"/* "${CACHE_DIR}/" 2>/dev/null || true
     chmod +x "${CACHE_DIR}"/* 2>/dev/null || true
