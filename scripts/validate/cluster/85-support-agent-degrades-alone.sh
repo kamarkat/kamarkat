@@ -21,6 +21,8 @@
 validate_support_agent_degrades_alone() {
     section "The Support Agent degrades alone (ADR-077)"
 
+    platform_source_available "manifests/hub-core-services/support-agent" "manifests/spoke/spoke-catalog/infra/support-agent.yaml" || return 0
+
     local hub="$VALIDATE_ROOT/manifests/hub-core-services/support-agent"
     local spoke="$VALIDATE_ROOT/manifests/spoke/spoke-catalog/infra/support-agent.yaml"
 

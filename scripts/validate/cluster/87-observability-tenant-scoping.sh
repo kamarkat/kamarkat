@@ -22,6 +22,9 @@
 validate_observability_tenant_scoping() {
     section "Collection is scoped and identified (ADR-078 §3)"
 
+    platform_source_available "manifests/hub-core-services/grafana-alloy/deployment.yaml" \
+        "manifests/spoke/spoke-catalog/infra/grafana-alloy.yaml" || return 0
+
     local -a configs=(
         "$VALIDATE_ROOT/manifests/hub-core-services/grafana-alloy/deployment.yaml"
         "$VALIDATE_ROOT/manifests/spoke/spoke-catalog/infra/grafana-alloy.yaml"

@@ -33,6 +33,8 @@ validate_support_agent_no_ingress() {
     # Both agents (ADR-077: one per cluster). The spoke's is a single
     # multi-document file rather than a directory, so the checker takes paths and
     # globs them itself.
+    platform_source_available "manifests/hub-core-services/support-agent" "manifests/spoke/spoke-catalog/infra/support-agent.yaml" || return 0
+
     local dir="$VALIDATE_ROOT/manifests/hub-core-services/support-agent"
     local spoke="$VALIDATE_ROOT/manifests/spoke/spoke-catalog/infra/support-agent.yaml"
 

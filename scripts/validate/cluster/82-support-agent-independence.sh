@@ -42,6 +42,9 @@ validate_support_agent_independence() {
     # checked against each other -- a spoke reporting under a different contract
     # would make "the allowlist is what leaves" true of only half the fleet, and
     # nothing else in the repository compares them.
+    platform_source_available "manifests/hub-core-services/support-agent/allowlist.yaml" \
+        "manifests/spoke/spoke-catalog/infra/support-agent.yaml" || return 0
+
     local hub="$VALIDATE_ROOT/manifests/hub-core-services/support-agent/allowlist.yaml"
     local spoke="$VALIDATE_ROOT/manifests/spoke/spoke-catalog/infra/support-agent.yaml"
 

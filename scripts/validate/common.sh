@@ -52,6 +52,36 @@ soft_fail() {
 
 note() { echo "     $1"; }
 
+# platform_source_available <rel>... -- may this module judge its subject?
+#
+# A RELEASED run reads the platform's content out of the binary, and the embedded
+# set is deliberately narrow: environments, providers, argocd/components, the
+# gitops template, and a handful of named files. A module whose subject is not in
+# it -- manifests/hub-core-services/support-agent, manifests/spoke/spoke-catalog
+# -- has nothing to read, and "the file is missing" is then a fact about the
+# release's packaging rather than about the box being validated.
+#
+# Reported as a WARNING and never as a pass. A check that cannot see its subject
+# has not been satisfied, and saying so is the difference between this and the
+# false green the project refuses elsewhere.
+#
+# IN A CHECKOUT this always returns 0, so the module's own existence checks run
+# and a genuinely missing manifest still fails. Keyed on the released-run
+# contract rather than on file absence, because keying on absence would convert
+# every deleted manifest into a warning -- the defect these modules exist to
+# catch, silenced by the mechanism meant to accommodate packaging.
+platform_source_available() {
+    [[ -n "${KAKT_RELEASED_SCRIPTS:-}" ]] || return 0
+    local rel
+    for rel in "$@"; do
+        if [[ ! -e "$VALIDATE_ROOT/$rel" ]]; then
+            warn "not applicable to a released box: this check reads $rel, which the release does not carry (it is gated on the platform repository, where the tree exists)"
+            return 1
+        fi
+    done
+    return 0
+}
+
 section() {
     echo ""
     echo "── $1 $(printf '─%.0s' $(seq 1 $((60 - ${#1} > 0 ? 60 - ${#1} : 0))))"

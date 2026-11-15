@@ -25,6 +25,14 @@ the script it calls. Flags that come from shell arrays or variables are not
 literal and are not checked -- those expand at run time, and a validator that
 guessed at them would report failures nobody can act on.
 
+AND, the same disagreement one level up: every `workflow_dispatch` input a
+workflow declares must be read somewhere in that workflow. bootstrap-cluster.yml
+asked an operator for provider, region, on-prem and tailnet -- two of them
+required -- and the resolver read all four from the cluster's declaration and
+discarded the inputs. Nothing failed; the values simply had no effect, so a
+dispatch could name a provider that disagreed with git while appearing to have
+chosen it.
+
 Usage: workflow-script-flags.py [repo-root]
 """
 import os
@@ -85,6 +93,39 @@ def invocation_span(lines, start):
     return "\n".join(span)
 
 
+def dead_dispatch_inputs(body):
+    """Inputs the workflow declares and never reads, in declaration order.
+
+    Parsed from the text rather than with a YAML loader so the line number can
+    be reported, and because `on:` loads as the boolean True.
+    """
+    inputs, dead = [], []
+    in_dispatch = in_inputs = False
+    for n, line in enumerate(body.splitlines(), 1):
+        if re.match(r"^\s{0,2}workflow_dispatch:", line):
+            in_dispatch, in_inputs = True, False
+            continue
+        if in_dispatch and re.match(r"^\s{2,6}inputs:\s*$", line):
+            in_inputs = True
+            continue
+        if in_inputs:
+            m = re.match(r"^(\s+)([A-Za-z0-9_-]+):\s*$", line)
+            if m and len(m.group(1)) <= 8:
+                inputs.append((m.group(2), n))
+                continue
+            # Dedented back out of the inputs block.
+            if line.strip() and not line.startswith(" " * 8):
+                in_dispatch = in_inputs = False
+    for name, n in inputs:
+        read = (
+            re.search(r"(?:github\.event\.)?inputs\.%s\b" % re.escape(name), body)
+            or re.search(r"inputs\[['\"]%s['\"]\]" % re.escape(name), body)
+        )
+        if not read:
+            dead.append((name, n))
+    return dead
+
+
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     failures = []
@@ -98,7 +139,12 @@ def main():
             if not name.endswith((".yml", ".yaml")):
                 continue
             wf = os.path.join(wd, name)
-            lines = open(wf, encoding="utf-8").read().splitlines()
+            body = open(wf, encoding="utf-8").read()
+            lines = body.splitlines()
+            for inp, n in dead_dispatch_inputs(body):
+                failures.append(
+                    f"{d}/{name}:{n} declares the dispatch input '{inp}', which "
+                    f"nothing in the workflow reads; remove it or read it")
             for n, line in enumerate(lines):
                 m = INVOCATION.search(line)
                 if not m:

@@ -450,8 +450,9 @@ func (s Spec) boxTokens() map[string]string {
 		"<MANAGEMENT_CLUSTER>": s.ManagementCluster,
 		"<DOMAIN>":             strings.TrimSpace(strings.TrimSuffix(s.Domain, ".")),
 		"<SUBDOMAIN>":          strings.TrimSpace(strings.Trim(s.Subdomain, ".")),
-		// Defaults a cluster declaration starts from, and the dispatch defaults
-		// of the workflow that bootstraps one.
+		// Defaults a cluster declaration starts from. NOT a workflow input:
+		// the bootstrap workflow reads provider and region from the declaration,
+		// so there is one place to state them.
 		"<CLOUD_PROVIDER>": s.Provider,
 		"<CLOUD_REGION>":   s.Region,
 		"<WORKER_COUNT>":   strconv.Itoa(s.workerCount()),

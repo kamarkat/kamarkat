@@ -2244,11 +2244,30 @@ main() {
     # server is billed rather than after a 40-minute provision. Fatal by design:
     # what it reports cannot be fixed forward from a half-built platform.
     #
+    # WHICH repo, though. 37 of these 58 checks read the PLATFORM's own source --
+    # manifests/, internal/, scripts/package/, .github/CODEOWNERS -- and exactly
+    # one reads a tenant box. They are invariants of the release, and they gate
+    # every pull request on the platform repository (pr-validate.yaml), which is
+    # where they have a tree to read and someone who can act on a failure.
+    #
+    # A released run has neither. The workspace is a TENANT's repository and the
+    # materialised tree carries scripts/ alone, so the suite reported 20+
+    # failures about files a box has no reason to hold -- a missing CODEOWNERS,
+    # an unvendored CRD provenance -- and refused to build a cluster whose own
+    # declaration was sound. The box cannot fix any of it, and the release it
+    # describes was already green when it was published.
+    #
+    # So the platform-tree gate runs where the platform tree is. In a checkout
+    # that is unchanged, which is the dev loop and the only place it ever ran.
+    #
     # Checkpoint-aware: Go infra-preflight is checkpointed via
     # .state/<cluster>.json (orchestrator.go:99, phaseDone).
     # Shell static validation (59 checks) is gated only on that state —
     # no hash, per user request. If Go says preflight completed, skip.
-    if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
+    if [[ -n "${KAKT_RELEASED_SCRIPTS:-}" ]]; then
+        log "Static repo validation skipped — it checks the platform's own source tree, which a released box does not carry (pr-validate.yaml gates it where it can be read)"
+        log "  Go infra-preflight still runs, checkpointed via .state/${CLUSTER_NAME}.json: the box's declaration and credentials ARE validated before anything is created"
+    elif [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
         log "⚠️  SKIP_PREFLIGHT=1 — static repo validation bypassed (Go infra-preflight still checkpointed via .state/${CLUSTER_NAME}.json)"
     elif is_static_preflight_checkpointed; then
         log "Static repo validation skipped (checkpointed — Go state shows preflight completed via .state/${CLUSTER_NAME}.json)"

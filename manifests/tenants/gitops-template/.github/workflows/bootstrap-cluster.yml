@@ -71,21 +71,12 @@ on:
         # runs that replaced it.
         description: The cluster to bootstrap, as named under registry/clusters/
         required: true
-      provider:
-        required: true
-        default: <CLOUD_PROVIDER>
-      region:
-        required: true
-        default: <CLOUD_REGION>
-      on-prem:
-        description: Accept nodes on your own premises, joining over your tailnet.
-        required: false
-        type: boolean
-        default: false
-      tailnet:
-        description: Your Tailscale tailnet, e.g. acme.ts.net. Required with on-prem.
-        required: false
-        default: ''
+      # AND NOTHING ELSE. A dispatch says WHICH cluster, never what it is made
+      # of. This form also asked for provider, region, on-prem and tailnet --
+      # two of them required -- and the resolver read every one of them from the
+      # declaration and discarded the inputs. So an operator retyped four values
+      # that could not take effect, and a dispatch could state a provider that
+      # disagreed with git while appearing to have chosen it.
 
 # GIT IS THE SOURCE OF TRUTH. Committing a management cluster's declaration to
 # main is what builds it: this workflow resolves the cluster and its shape from
