@@ -37,9 +37,9 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: v
@@ -61,7 +61,7 @@ jobs:
       # `helm version -c`, a flag Helm 4 removed, so a Helm 4 runner fails every
       # component that inflates a chart from its kustomization (headlamp,
       # infisical) with "unknown shorthand flag: 'c'".
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.4
       - name: Install kustomize
@@ -133,7 +133,7 @@ jobs:
       # The version is injected here and nowhere else. Nothing recomputes it, so
       # the version this binary requests and the version published above are the
       # same string by construction rather than by two implementations agreeing.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -151,7 +151,7 @@ jobs:
       # here. Releases keep using the release asset and are untouched.
       - name: Hand the CLI back to a dispatch run
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kakt-${{ steps.v.outputs.version }}
           path: dist/bin/
@@ -233,7 +233,7 @@ jobs:
       # key distribution of ours.
       - name: Attest the CLI binaries
         if: github.event_name == 'release'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/bin/kakt-*
 

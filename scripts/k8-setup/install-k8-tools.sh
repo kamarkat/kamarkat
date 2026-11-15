@@ -112,7 +112,11 @@ install_argocd() {
   fi
   echo "Installing argocd CLI..."
   rm -f ~/bin/argocd*
-  local url="https://github.com/argoproj/argo-cd/releases/latest/download/argocd-${OS}-${ARCH}${EXT:-}"
+  # PINNED to the server this platform runs (quay.io/argoproj/argocd:v3.5.7).
+  # /latest/ resolved whatever argo-cd had released that morning, so two
+  # workstations a week apart drove the same cluster with different clients.
+  local v="v3.5.7"
+  local url="https://github.com/argoproj/argo-cd/releases/download/${v}/argocd-${OS}-${ARCH}${EXT:-}"
   echo "Downloading: ${url}"
   curl -sSL -o ~/bin/argocd${EXT:-} "${url}"
   chmod +x ~/bin/argocd${EXT:-}
@@ -127,14 +131,21 @@ install_gh() {
   echo "Installing gh CLI..."
   rm -f ~/bin/gh*
 
+  # The version appears ONCE, in both the tag and the asset name it builds. The
+  # previous form asked /latest/download/ for an asset called gh_2.70.0_..., and
+  # /latest/ resolves to the newest release -- so this 404s the day gh ships
+  # anything newer than the number written here. Nothing would have caught it:
+  # the script only runs when gh is absent.
+  local v="2.70.0"
+  local base="https://github.com/cli/cli/releases/download/v${v}"
   if [ "${OS}" = "windows" ]; then
     local gh_zip="${HOME}/bin/gh.zip"
-    curl -sSL -o "${gh_zip}" "https://github.com/cli/cli/releases/latest/download/gh_2.70.0_windows_amd64.zip"
+    curl -sSL -o "${gh_zip}" "${base}/gh_${v}_windows_${ARCH}.zip"
     unzip -jo "${gh_zip}" "bin/gh.exe" -d "${HOME}/bin" 2>/dev/null
     rm -f "${gh_zip}"
   else
     local gh_tar="${HOME}/bin/gh.tar.gz"
-    curl -sSL -o "${gh_tar}" "https://github.com/cli/cli/releases/latest/download/gh_2.70.0_${OS}_${ARCH}.tar.gz"
+    curl -sSL -o "${gh_tar}" "${base}/gh_${v}_${OS}_${ARCH}.tar.gz"
     tar -xzf "${gh_tar}" -C /tmp
     mv /tmp/gh_*/bin/gh "${HOME}/bin/gh${EXT:-}"
     rm -rf /tmp/gh_*

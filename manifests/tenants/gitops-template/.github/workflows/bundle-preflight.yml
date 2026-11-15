@@ -33,9 +33,9 @@ permissions:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Which cluster this proposal is for, and to what. Read from the diff
       # rather than from an input: a proposal is opened by a bot that passes

@@ -25,13 +25,13 @@ on:
 jobs:
   validate-and-build:
     name: Validate & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.13.0"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.3
       - name: Install dependencies
@@ -53,18 +53,18 @@ jobs:
   publish:
     name: Publish to npm
     needs: validate-and-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/'))) || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.13.0"
           registry-url: "https://registry.npmjs.org"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.3
       - name: Install dependencies

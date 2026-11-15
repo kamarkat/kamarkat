@@ -135,11 +135,11 @@ jobs:
   # so a dispatch and a push build the same cluster the same way and there is no
   # second description of a cluster's shape to disagree with the declaration.
   resolve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       clusters: ${{ steps.pick.outputs.clusters }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Two commits, so a push can be diffed against what preceded it.
           fetch-depth: 2
@@ -248,7 +248,7 @@ jobs:
   bootstrap:
     needs: resolve
     if: needs.resolve.outputs.clusters != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       # One cluster at a time. Each build provisions servers, and a failure that
       # stops the others is the safer answer when the thing being created bills.
@@ -257,7 +257,7 @@ jobs:
       matrix:
         box: ${{ fromJSON(needs.resolve.outputs.clusters) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # THE RELEASE THIS CLUSTER DECLARES, fetched and verified.
       #
@@ -365,7 +365,7 @@ jobs:
       # way; this is for reading a failure, not for restoring one.
       - name: Keep the run's phase records
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: day0-${{ matrix.box.cluster }}
           path: |

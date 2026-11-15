@@ -74,21 +74,20 @@ if (-not (Test-Command "git")) {
     $gitUrl = "https://git-scm.com/download/win"
     Write-Host "Downloading Git from $gitUrl..." -ForegroundColor Green
     
-    try {
-        # Get the latest Git for Windows download URL
-        $response = Invoke-WebRequest -Uri $gitUrl -UseBasicParsing
-        $downloadLink = ($response.Links | Where-Object { $_.href -like "*64-bit.exe" } | Select-Object -First 1).href
-        if (-not $downloadLink) {
-            $downloadLink = "https://github.com/git-for-windows/git/releases/latest/download/Git-2.43.0-64-bit.exe"
-        }
-        
-        Install-FromUrl -Name "Git" -Url $downloadLink -InstallerArgs "/VERYSILENT /NORESTART"
-    }
-    catch {
-        Write-Host "Using fallback Git installer..." -ForegroundColor Yellow
-        $fallbackUrl = "https://github.com/git-for-windows/git/releases/latest/download/Git-2.43.0-64-bit.exe"
-        Install-FromUrl -Name "Git" -Url $fallbackUrl -InstallerArgs "/VERYSILENT /NORESTART"
-    }
+    # ONE PINNED URL, built from the release tag and the asset name.
+    #
+    # This was three paths to one value and two of them could not work. It
+    # scraped the downloads page for the first link ending 64-bit.exe, and on an
+    # empty result -- or on any exception -- fell back to
+    # releases/latest/download/Git-2.43.0-64-bit.exe twice. /latest/ resolves to
+    # the newest release, which has not carried an asset called Git-2.43.0 since
+    # 2.43.0 stopped being newest, so both fallbacks 404. A scraped page and a
+    # 404 are not a safety net; they are two ways to install nothing while
+    # reporting that Git was installed.
+    $gitVersion = "2.43.0"
+    $gitTag = "v${gitVersion}.windows.1"
+    $downloadLink = "https://github.com/git-for-windows/git/releases/download/${gitTag}/Git-${gitVersion}-64-bit.exe"
+    Install-FromUrl -Name "Git" -Url $downloadLink -InstallerArgs "/VERYSILENT /NORESTART"
 } else {
     Write-Host "Git is already installed." -ForegroundColor Green
 }

@@ -26,16 +26,16 @@ jobs:
     # Only Renovate's own branches. A person editing these files has a reason,
     # and re-rendering over their edit would discard it silently.
     if: startsWith(github.head_ref, 'renovate/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
 
       # Pinned, because the rendered output is what gets committed: a different
       # Helm would produce a different digest and the change would look like a
       # content change rather than a tooling one.
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.4
 

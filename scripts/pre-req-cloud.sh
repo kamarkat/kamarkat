@@ -27,8 +27,14 @@ mark_completed() {
     local c="$1" existing arr=()
     existing=$(jq -r '.completedChecks[]?' "$STATE_FILE" 2>/dev/null | tr -d '\r' || echo "")
     for x in $existing; do arr+=("$x"); done
+    # ${arr[@]} on an EMPTY array is an unbound variable under `set -u` in bash
+    # 3.2, which is what macOS ships -- so the first check of a fresh run died
+    # here, before any check had been recorded. Guarded by length rather than by
+    # relaxing set -u.
     local found=false
-    for x in "${arr[@]}"; do [[ "$x" == "$c" ]] && { found=true; break; }; done
+    if (( ${#arr[@]} )); then
+        for x in "${arr[@]}"; do [[ "$x" == "$c" ]] && { found=true; break; }; done
+    fi
     $found || arr+=("$c")
     local json="["
     for i in "${!arr[@]}"; do
@@ -39,27 +45,13 @@ mark_completed() {
     printf '{"completedChecks":%s}' "$json" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 
-auto_install() {
-    local tool="$1" dir="$HOME/bin"
-    mkdir -p "$dir"
-    case "$tool" in
-        kind) curl -fsSLo "$dir/kind.exe" "https://kind.sigs.k8s.io/dl/latest/kind-windows-amd64" && chmod +x "$dir/kind.exe" && export PATH="$PATH:$dir" ;;
-        clusterctl) curl -fsSLo "$dir/clusterctl.exe" "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/clusterctl-windows-amd64.exe" && chmod +x "$dir/clusterctl.exe" && export PATH="$PATH:$dir" ;;
-        helm) curl -fsSLo "$dir/helm.zip" "https://get.helm.sh/helm-v3.17.3-windows-amd64.zip" && unzip -jo "$dir/helm.zip" "windows-amd64/helm.exe" -d "$dir" 2>/dev/null && rm -f "$dir/helm.zip" && chmod +x "$dir/helm.exe" && export PATH="$PATH:$dir" ;;
-        jq) curl -fsSLo "$dir/jq.exe" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" && chmod +x "$dir/jq.exe" && export PATH="$PATH:$dir" ;;
-        aws)
-            local aws_dir="/c/Program Files/Amazon/AWSCLIV2"
-            [[ -f "$aws_dir/aws.exe" ]] && { case ":$PATH:" in *":$aws_dir:"*) ;; *) export PATH="$aws_dir:$PATH" ;; esac; return 0; }
-            winget install -e --id Amazon.AWSCLI --silent --accept-package-agreements 2>/dev/null && return 0
-            local msi="$dir/AWSCLIV2.msi"
-            curl -fsSLo "$msi" "https://awscli.amazonaws.com/AWSCLIV2.msi" 2>/dev/null || return 1
-            msiexec //i "$msi" //quiet //norestart 2>/dev/null || true; rm -f "$msi"
-            [[ -f "$aws_dir/aws.exe" ]] && { export PATH="$aws_dir:$PATH"; return 0; }
-            return 1
-            ;;
-        *) return 1 ;;
-    esac
-}
+# Installing a missing tool is lib/tool-install.sh's job, not a second copy of
+# it. This script had its own: four branches that each downloaded a Windows
+# artefact whatever the host was, one of them from /latest/, plus an AWS CLI
+# branch that shelled out to winget and msiexec. None of it had run in a long
+# time -- see the note in main() about the subshell.
+# shellcheck source=lib/tool-install.sh
+source "$SCRIPT_DIR/lib/tool-install.sh"
 
 check() {
     local name="$1" desc="$2"
@@ -73,12 +65,26 @@ main() {
     log "Zero-Ops Cloud Provider Prerequisite Check"
     [[ -f "$STATE_FILE" ]] && log "Resuming. Delete $STATE_FILE to re-check."
 
-    check "kubectl" "kubectl CLI" bash -c "command -v kubectl >/dev/null 2>&1" || failed=1
-    check "jq" "jq" bash -c "command -v jq >/dev/null 2>&1 || auto_install jq" || failed=1
-    check "kind" "kind" bash -c "command -v kind >/dev/null 2>&1 || auto_install kind" || failed=1
-    check "clusterctl" "clusterctl" bash -c "command -v clusterctl >/dev/null 2>&1 || auto_install clusterctl" || failed=1
-    check "helm" "helm" bash -c "command -v helm >/dev/null 2>&1 || auto_install helm" || failed=1
-    check "aws" "AWS CLI" bash -c "command -v aws >/dev/null 2>&1 || auto_install aws" || failed=1
+    # NOT `bash -c "... || auto_install x"`, which is how these read. A shell
+    # function does not exist in a child process, so every auto-install branch
+    # here failed with "auto_install: command not found" -- reported as the TOOL
+    # being missing, which is why nobody chased it.
+    #
+    # No AWS. Nothing on this path invokes the AWS CLI; the entry existed because
+    # object storage is S3-compatible, and the backup credential is escrowed and
+    # delivered to the cluster instead.
+    have() { command -v "$1" >/dev/null 2>&1; }
+    check "kubectl" "kubectl CLI" have kubectl || failed=1
+    for t in jq kind clusterctl helm; do
+        if is_completed "$t"; then
+            log "  ✓ $t (previously checked)"
+        elif have "$t" || auto_install_tool "$t"; then
+            mark_completed "$t"
+            log "  ✓ $t"
+        else
+            failed=1
+        fi
+    done
 
     check "docker_cli" "docker CLI" bash -c "command -v docker >/dev/null 2>&1" || failed=1
     check "docker_daemon" "docker daemon" bash -c "docker info >/dev/null 2>&1" || failed=1
@@ -88,8 +94,16 @@ main() {
     # The operator's own store, not a checkout: these outlive every clone.
     KAMARKAT_STORE="${KAMARKAT_HOME:-$HOME/.kamarkat}"
     check "hetzner_token" "Hetzner token to enrol" test -f "$KAMARKAT_STORE/hetzner/token" || { log "  Fix: put the token in $KAMARKAT_STORE/hetzner/token, then enrol it: kakt escrow enroll-provider-credential --gitops-dir . --cluster <cluster> < $KAMARKAT_STORE/hetzner/token"; failed=1; }
-    check "github_pat" "GitHub PAT" test -f "$KAMARKAT_STORE/github/github-pat-token" || { log "  Fix: create $KAMARKAT_STORE/github/github-pat-token"; failed=1; }
-    check "aws_profile" "AWS profile" bash -c "aws configure list --profile zerotouch-platform-admin >/dev/null 2>&1" || { log "  Fix: aws configure --profile zerotouch-platform-admin"; failed=1; }
+    # ENVIRONMENT FIRST, matching require_credential in hub-bootstrap.sh: a CI run
+    # holds this in the environment and has no file, and demanding the file
+    # refused every runner. No AWS profile check either -- there is no AWS
+    # consumer to have one for.
+    if [[ -n "${GITOPS_REPO_WRITE_TOKEN:-}" ]] || [[ -f "$KAMARKAT_STORE/github/github-pat-token" ]]; then
+        mark_completed "github_pat"; log "  ✓ GitHub credential with write access to the GitOps repository"
+    else
+        log "  Fix: export GITOPS_REPO_WRITE_TOKEN, or create $KAMARKAT_STORE/github/github-pat-token"
+        failed=1
+    fi
 
     [[ $failed -ne 0 ]] && error_exit "Missing prerequisites. Fix and re-run."
     log "" && log "✅ All prerequisites satisfied! Run: bash scripts/hub-bootstrap.sh --provider=hetzner"

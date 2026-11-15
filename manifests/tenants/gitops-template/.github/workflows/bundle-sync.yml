@@ -55,11 +55,11 @@ concurrency:
 
 jobs:
   resolve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       clusters: ${{ steps.p.outputs.clusters }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -141,9 +141,9 @@ jobs:
       fail-fast: true
       matrix:
         box: ${{ fromJSON(needs.resolve.outputs.clusters) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The CLI that carries the version being converged to, from the release
       # that published it -- not the one this repository was scaffolded with. The

@@ -71,6 +71,21 @@ def closure(root):
         for name in sorted(os.listdir(full)):
             if os.path.isfile(os.path.join(full, name)):
                 seen.add(f"{d}/{name}")
+    # UNTRACKED IS A FAILURE, NOT AN OMISSION. The closure is filtered to
+    # git-tracked files so a scratch copy in a working tree cannot enter a
+    # release. But a NEW script an entry point already sources is a different
+    # thing: dropping it silently produced a green gate for a release that would
+    # not carry it. lib/tool-install.sh was extracted, sourced by
+    # hub-bootstrap.sh, and invisible here until it was staged.
+    untracked = sorted(f for f in seen if f not in tracked and os.path.isfile(os.path.join(root, f)))
+    if untracked:
+        for f in untracked:
+            print(f"::error::{f} is referenced by the Day-0 entry points but is not "
+                  f"tracked by git, so the release would not carry it; git add it"
+                  if os.environ.get("GITHUB_ACTIONS") else
+                  f"FAIL {f} is referenced by the Day-0 entry points but is not tracked "
+                  f"by git, so the release would not carry it; git add it", file=sys.stderr)
+        raise SystemExit(1)
     return sorted(f for f in seen if f in tracked)
 
 

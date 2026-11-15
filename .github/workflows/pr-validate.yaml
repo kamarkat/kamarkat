@@ -31,10 +31,10 @@ jobs:
   # change under review. kube-sbt and hub-operator are tested by their own
   # workflows before their images are built.
   validate-cli:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Test the CLI and the platform content it carries
@@ -103,10 +103,10 @@ jobs:
   # running the set here is its own piece of work. This one needs bash and the
   # checkout, and it is the hook this release path depends on.
   validate-embedded-assets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - name: Refuse an embedded tree that has drifted from its source
@@ -115,12 +115,12 @@ jobs:
           pre-commit run embedded-platform-assets --all-files --show-diff-on-failure
 
   validate-manifests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Kustomize
-        uses: imranismail/setup-kustomize@v2
+        uses: imranismail/setup-kustomize@v3
 
       - name: Build and Validate Dev Environment
         run: |
