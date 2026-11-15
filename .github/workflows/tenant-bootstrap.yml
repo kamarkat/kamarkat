@@ -438,8 +438,7 @@ jobs:
             --region "${{ inputs.region }}" \
             --gating "${{ inputs.gating }}" \
             "${onprem[@]}" \
-                      --gitops-dir . \
-            --debug
+            --gitops-dir .
 
       # Bootstrap succeeding means its phases completed, not that the platform is
       # serving. Everything after the last phase is convergence -- ArgoCD pulling

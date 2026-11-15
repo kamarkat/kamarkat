@@ -219,6 +219,17 @@ echo "source annotation: $(ls -d dist/charts/*/ | wc -l | tr -d ' ') chart(s) de
 # that received it.
 ./scripts/validate/bundle-portability.sh "$VERSION"
 
+# THE CONTRACT BETWEEN A WORKFLOW AND THE SCRIPT IT CALLS, both halves of which
+# live here and can therefore be checked here.
+#
+# Neither of these could fail locally. The local loop calls these scripts with
+# its own argument list and forwards its own secrets, so a workflow passing a
+# flag the script refuses, or reading a secret it never declared, surfaced in a
+# TENANT's CI hours into a bootstrap. --box, --workers and --debug each shipped
+# that way; no released box ever got past the last one.
+python3 scripts/validate/workflow-script-flags.py
+python3 scripts/validate/workflow-secrets.py
+
 # The gate on the conversion, not a convenience: a published chart that renders
 # different objects is a silent change to every cluster that pulls it.
 for d in manifests/argocd/components/*/*.yaml; do
