@@ -234,6 +234,14 @@ python3 scripts/validate/workflow-secrets.py
 # Derived from the entry points rather than listed, because a validator nobody
 # named today is still run tomorrow -- and an absent one makes validate-all.sh
 # SKIP a suite, which reads as a pass.
+#
+# GENERATED FIRST. The embedded tree is build output and is git-ignored, so a
+# fresh checkout -- which is every CI run -- has none of it, and a gate that
+# only inspects it reported all 111 scripts missing on a release that was
+# perfectly well-formed. The generator is idempotent and takes no measurable
+# time, so it runs here for the same reason build-cli.sh runs it: the thing
+# being checked is produced, not committed.
+./scripts/package/embed-platform-assets.sh >/dev/null
 python3 scripts/validate/runtime-script-closure.py
 
 # The gate on the conversion, not a convenience: a published chart that renders
