@@ -151,7 +151,7 @@ _validate_s3_backup_credentials() {
         # a place nothing on this hub reads.
         local scope
         scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
-            -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}')
+            -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}')
         note "Seed in Infisical: project=hub-secrets env=${scope:-<undeclared>} path=/ keys=S3_ACCESS_KEY_ID,S3_SECRET_ACCESS_KEY"
     fi
 
@@ -160,7 +160,7 @@ _validate_s3_backup_credentials() {
     note "Infisical API: ${host:-http://infisical-standalone-infisical.platform-security.svc:8080}"
     local console_scope
     console_scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
-        -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}')
+        -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}')
     note "Console path:  Projects -> hub-secrets -> ${console_scope:-<undeclared>} -> Secrets, at the root path '/'"
     note "Use Hetzner Object Storage keys (these start 0A…), NOT the hcloud API token (HT…)."
 }

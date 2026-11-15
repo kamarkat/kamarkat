@@ -41,10 +41,10 @@ the identity provider is down, the cluster is broken, or nobody can log in.
 The escrow is the Infisical you supplied when the box is rendered, reached with the same
 four values the cluster uses:
 
-  INFISICAL_ESCROW_URL         usually https://app.infisical.com
-  INFISICAL_ESCROW_PROJECT_ID
-  INFISICAL_ESCROW_CLIENT_ID
-  INFISICAL_ESCROW_CLIENT_SECRET
+  ESCROW_PROVIDER_URL         usually https://app.infisical.com
+  ESCROW_PROVIDER_PROJECT_ID
+  ESCROW_PROVIDER_CLIENT_ID
+  ESCROW_PROVIDER_CLIENT_SECRET
 
 The credential it returns is cluster-admin and is not scoped to a person. Prefer
 the identity provider wherever it is working, and treat what this prints as
@@ -58,7 +58,7 @@ something to use and discard.`,
 			// fresh workstation has: the box's repository declares its escrow, and
 			// the read is performed with whoever is authenticated -- `kakt login`,
 			// or the machine identity when this is automation. The second is the
-			// original: the four INFISICAL_ESCROW_* values in the environment, for
+			// original: the four ESCROW_PROVIDER_* values in the environment, for
 			// a caller that has them and no checkout.
 			//
 			// An in-cluster URL is not passed in either: there is no cluster to
@@ -95,7 +95,7 @@ something to use and discard.`,
 				if err != nil {
 					return fmt.Errorf("%w.\n\n"+
 						"Either pass --gitops-dir, so the box's declaration names its escrow and\n"+
-						"your own `kakt login` reads it, or set the four INFISICAL_ESCROW_* values.", err)
+						"your own `kakt login` reads it, or set the four ESCROW_PROVIDER_* values.", err)
 				}
 				payload, err = store.RestoreArtifact(cmd.Context(), escrow.ForCluster(boxID, clusterName), escrow.ArtifactKubeconfig)
 				if err != nil {

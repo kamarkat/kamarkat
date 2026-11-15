@@ -724,14 +724,14 @@ func printState(name string, present bool, why string) {
 func printEscrowState() {
 	have := 0
 	for _, n := range []string{
-		"INFISICAL_ESCROW_URL", "INFISICAL_ESCROW_PROJECT_ID",
-		"INFISICAL_ESCROW_CLIENT_ID", "INFISICAL_ESCROW_CLIENT_SECRET",
+		"ESCROW_PROVIDER_URL", "ESCROW_PROVIDER_PROJECT_ID",
+		"ESCROW_PROVIDER_CLIENT_ID", "ESCROW_PROVIDER_CLIENT_SECRET",
 	} {
 		if escrow.StoredValue(n) != "" {
 			have++
 		}
 	}
-	printState("INFISICAL_ESCROW_* (4)", have == 4,
+	printState("ESCROW_PROVIDER_* (4)", have == 4,
 		fmt.Sprintf("where this box's master keys are kept (%d/4)", have))
 }
 
@@ -744,8 +744,8 @@ func boxInitVerdict(ctx context.Context, skipped []string) error {
 
 	escrowComplete := true
 	for _, n := range []string{
-		"INFISICAL_ESCROW_URL", "INFISICAL_ESCROW_PROJECT_ID",
-		"INFISICAL_ESCROW_CLIENT_ID", "INFISICAL_ESCROW_CLIENT_SECRET",
+		"ESCROW_PROVIDER_URL", "ESCROW_PROVIDER_PROJECT_ID",
+		"ESCROW_PROVIDER_CLIENT_ID", "ESCROW_PROVIDER_CLIENT_SECRET",
 	} {
 		if escrow.StoredValue(n) == "" {
 			escrowComplete = false

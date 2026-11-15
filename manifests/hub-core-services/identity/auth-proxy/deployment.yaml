@@ -45,14 +45,14 @@ spec:
         # equals and what a relying party compares byte-for-byte, so it is NOT
         # interchangeable with the in-cluster address below. Environment-zoned
         # (ADR-051).
-        - name: ZITADEL_ISSUER_URL
+        - name: IDENTITY_PROVIDER_ISSUER_URL
           value: "https://id.dev.nutgraf.in"
         # Where the documents are actually fetched from.
         #
         # In-cluster, so serving discovery does not depend on this service's own
         # gateway, DNS and certificate being up. Zitadel serves plain HTTP on 8080
         # inside the mesh; the gateway terminates TLS.
-        - name: ZITADEL_INTERNAL_URL
+        - name: IDENTITY_PROVIDER_INTERNAL_URL
           value: "http://zitadel.platform-identity.svc.cluster.local:8080"
         - name: JWKS_CACHE_TTL
           value: "1h"

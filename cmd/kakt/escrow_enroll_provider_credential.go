@@ -116,8 +116,8 @@ func runEnrollProviderCredential(ctx context.Context, o enrollProviderOpts, in i
 			return fmt.Errorf("--box is required without --gitops-dir: artefacts are escrowed " +
 				"under the logical hub (ADR-111 §1), and it cannot be inferred from the cluster name")
 		}
-		coords.EscrowURL = escrowEnvValue("INFISICAL_ESCROW_URL")
-		coords.EscrowProjectID = escrowEnvValue("INFISICAL_ESCROW_PROJECT_ID")
+		coords.EscrowURL = escrowEnvValue("ESCROW_PROVIDER_URL")
+		coords.EscrowProjectID = escrowEnvValue("ESCROW_PROVIDER_PROJECT_ID")
 	}
 
 	// Establishing, not merely opening: a first enrolment is where this box's

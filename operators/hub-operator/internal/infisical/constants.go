@@ -21,7 +21,7 @@ const (
 	IdentityRole     = "admin"
 	// No EnvironmentSlug here. It was `"dev"`, and both uploaders used it as the
 	// Infisical environment they write to -- while every READER takes
-	// INFISICAL_ENVIRONMENT_SLUG from hub-bootstrap-config, rendered from the box's
+	// SECRET_STORE_ENVIRONMENT_SLUG from hub-bootstrap-config, rendered from the box's
 	// declared management.infisicalEnvironmentSlug. The two agreed only on a box
 	// whose scope happened to be `dev`: anywhere else the writers filled `dev` and
 	// the ExternalSecrets read the declared scope, so every secret these uploaders
@@ -78,17 +78,22 @@ const (
 	ValueBootstrap = "infisical-bootstrap"
 )
 
-// Admin Credentials — overridable via environment variables.
-// The .env file at the project root is sourced by hub-bootstrap.sh.
-var (
-	// No defaults. See the same pair in internal/kakt-cli/infisical/bootstrap.go:
-	// these were a personal email and the literal "Password@123" on every box,
-	// which is a shared administrator credential for every tenant's secret store.
-	// Empty here, and the operator refuses to use an empty one rather than falling
-	// back to a value the platform chose.
-	AdminEmail    = os.Getenv("INFISICAL_ADMIN_EMAIL")
-	AdminPassword = os.Getenv("INFISICAL_ADMIN_PASSWORD")
-)
+// AdminEmail is the address stamped into the infisical-admin Secret's
+// admin-email field (bootstrap_client.go).
+//
+// DEFECT, recorded rather than papered over: nothing sets SECRET_STORE_ADMIN_EMAIL
+// on this operator. No chart, overlay or Day-0 step puts it in the operator's
+// environment, so this is the empty string at runtime and admin-email is stamped
+// empty. The comment here previously claimed the operator "refuses to use an
+// empty one", which it does not -- it writes it.
+//
+// The address belongs to the escrowed administrator (ADR-076,
+// infisical-admin-credential) or to the bootstrap result that created the
+// account, not to an unset environment variable. Fixing that is a change to this
+// operator's bootstrap client, not to the credential's storage.
+//
+// SECRET_STORE_ADMIN_PASSWORD was read here too and used by nothing.
+var AdminEmail = os.Getenv("SECRET_STORE_ADMIN_EMAIL")
 
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

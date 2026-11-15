@@ -19,7 +19,7 @@ Three checks, because each fails differently:
     by a caller              declared secret, optional ones included: an
                              optional credential a caller drops is a box that
                              quietly lacks a capability (the tenant template
-                             never forwarded ZITADEL_SMTP_URL, so no box it
+                             never forwarded IDENTITY_PROVIDER_SMTP_URL, so no box it
                              bootstrapped could send mail)
   forwarded but not declared GitHub refuses the whole run
 

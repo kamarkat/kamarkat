@@ -15,42 +15,52 @@ import (
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 )
 
-var (
-	// Resolved on USE, not at package init. Initialising these eagerly made every
-	// kakt subcommand panic before it parsed its flags -- `kakt --help` included
-	// -- because a package-level var is evaluated when the package is imported,
-	// not when Infisical is reached.
-	adminEmail    = func() string { return mustEnv("INFISICAL_ADMIN_EMAIL", "the administrator's email address") }
-	adminPassword = func() string { return mustEnv("INFISICAL_ADMIN_PASSWORD", "the administrator's password") }
-	// The organisation NAME is not a credential and not per-box: it is a label
-	// inside the box's own Infisical, the same on every one by design.
-	orgName = envOrDefault("INFISICAL_ORG_NAME", "Zero-Ops")
-)
+// The organisation NAME is not a credential and not per-box: it is a label
+// inside the box's own Infisical, the same on every one by design.
+var orgName = envOrDefault("SECRET_STORE_ORG_NAME", "Zero-Ops")
 
-// Required. No defaults, and the ones removed here were a personal email address
-// and the literal password "Password@123" -- on EVERY box, platform and tenant
-// alike, because nothing set these variables anywhere in the repository.
+// Administrator is the account this box's own Infisical is reached with.
 //
-// That is a shared, known credential on the administrator account of each
-// tenant's secret store: the account that can read every secret the platform
-// manages for them. ADR-003 makes Infisical the system of record for secret
-// material, and ADR-065 says the platform holds no secret belonging to a tenant
-// -- a default admin the platform chose, identical on every box, is both.
+// Passed in, never read from the environment. The escrow holds it, under
+// infisical-admin-credential, and that is the single durable source: it is
+// generated once when the box is initialized and read back on every bootstrap,
+// retry and reconstruction (ADR-076). There is exactly one resolution path, so
+// a caller that cannot reach the escrow fails rather than finding a second one.
 //
-// Mandatory rather than generated here: these must be collected with the
-// tenant's other credentials and stored on their repository, the way the escrow
-// credentials are (ADR-076), so the platform never holds them.
-func mustEnv(key, what string) string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		// Empty, and every caller checks. Returning "" rather than exiting keeps
-		// the refusal at the point Infisical is actually reached, with the
-		// surrounding operation's context, instead of killing an unrelated command.
-		fmt.Fprintf(os.Stderr, "\n%s is not set. It is %s for THIS box's Infisical.\n"+
-			"There is no default: the one that existed was identical on every box,\n"+
-			"so every tenant's secret store shared one administrator credential.\n\n", key, what)
+// Mutable package state is the wrong shape for a credential: whether it holds
+// the right value would depend on what an earlier caller had done to it, and the
+// failure when nothing had would be a login refused by the secret store rather
+// than a missing input named at the boundary.
+type Administrator struct {
+	Email    string
+	Password string
+}
+
+// Validate refuses an administrator that cannot be delivered or used.
+//
+// The newline check is not pedantry. Both values are handed to the pod one per
+// line on standard input, precisely so neither appears in a process argument
+// list, and a value containing a newline would be silently truncated into the
+// next field.
+func (a Administrator) Validate() error {
+	for _, f := range []struct {
+		what, value string
+	}{
+		{"address", a.Email},
+		{"password", a.Password},
+	} {
+		if strings.TrimSpace(f.value) == "" {
+			return fmt.Errorf("this box's Infisical administrator has no %s.\n\n"+
+				"It is read from the escrow, under infisical-admin-credential, and both\n"+
+				"halves are required: an address with no password logs in as the right\n"+
+				"user with the wrong secret, which Infisical reports as bad credentials.", f.what)
+		}
+		if strings.ContainsAny(f.value, "\r\n") {
+			return fmt.Errorf("this box's Infisical administrator's %s contains a line break, "+
+				"and it is delivered one value per line", f.what)
+		}
 	}
-	return v
+	return nil
 }
 
 func envOrDefault(key, fallback string) string {
@@ -172,14 +182,17 @@ type createClientSecretResponse struct {
 // by the surrounding Go code. Calls where HTTP errors are unambiguous
 // hard failures (login, select-org, PATCH grant) do use `curl -f` so
 // a non-2xx response surfaces immediately as a non-nil error.
-func getExistingOrgData(ctx context.Context, podName string) (*bootstrapOutput, error) {
+func getExistingOrgData(ctx context.Context, podName string, admin Administrator) (*bootstrapOutput, error) {
 	// 1. Log in as the bootstrap admin to get a JWT.
-	loginPayload := fmt.Sprintf(`{"email":"%s","password":"%s"}`, adminEmail(), adminPassword())
-	loginOut, err := kubectlExec(ctx, podName,
+	loginPayload, err := adminLoginBody(admin)
+	if err != nil {
+		return nil, err
+	}
+	loginOut, err := kubectlExecStdin(ctx, podName, loginPayload,
 		"curl", "-s", "-f", "-X", "POST",
 		"http://localhost:"+infisicalPort+PathAuthLoginV3,
 		"-H", "Content-Type: application/json",
-		"-d", loginPayload,
+		"-d", "@-",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("admin login failed: %w", err)
@@ -374,9 +387,9 @@ func hostKubectl(ctx context.Context, args ...string) (string, error) {
 var staleCacheSuppressed atomic.Bool
 
 func invalidateStaleBootstrapCache(ctx context.Context, liveOrgID string) {
-	cachedOrgID := getCachedConfigValue(ctx, "INFISICAL_ORGANIZATION_ID")
-	cachedProject := getCachedConfigValue(ctx, "INFISICAL_PROJECT_ID")
-	cachedSecrets := getCachedConfigValue(ctx, "INFISICAL_SECRETS_PROJECT_ID")
+	cachedOrgID := getCachedConfigValue(ctx, "SECRET_STORE_ORGANIZATION_ID")
+	cachedProject := getCachedConfigValue(ctx, "SECRET_STORE_PROJECT_ID")
+	cachedSecrets := getCachedConfigValue(ctx, "SECRET_STORE_SECRETS_PROJECT_ID")
 	orphanedProjects := cachedOrgID == "" && (cachedProject != "" || cachedSecrets != "")
 
 	switch {
@@ -405,7 +418,7 @@ func invalidateStaleBootstrapCache(ctx context.Context, liveOrgID string) {
 	// the environment slug) are unrelated to Infisical and are still valid. The
 	// generated artifact on disk is rewritten wholesale later in this phase, and
 	// the adr045 commit step publishes it.
-	patch := `{"data":{"INFISICAL_ORGANIZATION_ID":"","INFISICAL_PROJECT_ID":"","INFISICAL_PROJECT_SLUG":"","INFISICAL_SECRETS_PROJECT_ID":"","INFISICAL_SECRETS_PROJECT_SLUG":""}}`
+	patch := `{"data":{"SECRET_STORE_ORGANIZATION_ID":"","SECRET_STORE_PROJECT_ID":"","SECRET_STORE_PROJECT_SLUG":"","SECRET_STORE_SECRETS_PROJECT_ID":"","SECRET_STORE_SECRETS_PROJECT_SLUG":""}}`
 	if _, err := hostKubectl(ctx,
 		"patch", "configmap", "-n", constants.NamespaceOps, "hub-bootstrap-config",
 		"--type", "merge", "-p", patch,
@@ -426,7 +439,7 @@ func getCachedConfigValue(ctx context.Context, key string) string {
 	// organization fingerprint changes.
 	if staleCacheSuppressed.Load() {
 		switch key {
-		case "INFISICAL_ORGANIZATION_ID", "INFISICAL_PROJECT_ID", "INFISICAL_SECRETS_PROJECT_ID":
+		case "SECRET_STORE_ORGANIZATION_ID", "SECRET_STORE_PROJECT_ID", "SECRET_STORE_SECRETS_PROJECT_ID":
 			return ""
 		}
 	}
@@ -454,9 +467,9 @@ func getCachedProjectID(slug string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	key := "INFISICAL_PROJECT_ID"
+	key := "SECRET_STORE_PROJECT_ID"
 	if slug == SecretsProjectSlug {
-		key = "INFISICAL_SECRETS_PROJECT_ID"
+		key = "SECRET_STORE_SECRETS_PROJECT_ID"
 	}
 
 	out, err := hostKubectl(ctx,
@@ -518,6 +531,27 @@ func splitBodyStatus(out string) (string, int) {
 	return trimmed[:idx], code
 }
 
+// adminLoginBody encodes a login for the box's own Infisical.
+//
+// json.Marshal rather than fmt.Sprintf into a JSON-shaped string: a formatted
+// body makes the password's own characters part of the syntax, so a quote or a
+// backslash in it would produce a malformed request and an unexplainable 400
+// during Day-0. The password alphabet avoids those characters, but that is a
+// property of how it is generated, not of this call.
+func adminLoginBody(admin Administrator) (string, error) {
+	if err := admin.Validate(); err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}{Email: admin.Email, Password: admin.Password})
+	if err != nil {
+		return "", fmt.Errorf("encoding the administrator login: %w", err)
+	}
+	return string(body), nil
+}
+
 // apiError renders an API failure with the detail needed to act on it, truncating a
 // long body so a stack of retries stays readable.
 func apiError(op string, status int, body string) error {
@@ -529,11 +563,26 @@ func apiError(op string, status int, body string) error {
 }
 
 func kubectlExec(ctx context.Context, podName string, args ...string) (string, error) {
-	cmdArgs := append([]string{
-		"exec", "-n", infisicalNamespace, "pod/" + podName,
+	return kubectlExecStdin(ctx, podName, "", args...)
+}
+
+// kubectlExecStdin is kubectlExec with a body written to the remote process's
+// standard input, for the calls that carry a credential.
+//
+// Standard input, because a process argument list is not private: anything that
+// can read /proc in that container can read a password passed as a flag, and it
+// is the same rule the provider credential's enrolment already follows. The
+// body is re-created on each attempt, since a retry re-runs the command and a
+// reader that has already been consumed would deliver nothing.
+func kubectlExecStdin(ctx context.Context, podName, stdin string, args ...string) (string, error) {
+	cmdArgs := []string{"exec", "-n", infisicalNamespace}
+	if stdin != "" {
+		cmdArgs = append(cmdArgs, "-i")
+	}
+	cmdArgs = append(cmdArgs, "pod/"+podName,
 		"-c", "infisical-standalone-infisical",
-		"--",
-	}, args...)
+		"--")
+	cmdArgs = append(cmdArgs, args...)
 
 	const (
 		maxRetries = 30
@@ -554,6 +603,9 @@ func kubectlExec(ctx context.Context, podName string, args ...string) (string, e
 		}
 
 		cmd := exec.CommandContext(ctx, "kubectl", withKubeconfig(cmdArgs...)...)
+		if stdin != "" {
+			cmd.Stdin = strings.NewReader(stdin)
+		}
 		output, err = cmd.CombinedOutput()
 		if err == nil {
 			return strings.TrimSpace(string(output)), nil
@@ -606,15 +658,33 @@ func GetInfisicalPodName(ctx context.Context) (string, error) {
 // and re-bootstrap from scratch — that path orphaned any in-flight
 // cert-operator reconcile (which had cached the old project IDs at
 // startup) and is no longer invoked.
-func runBootstrapCLI(ctx context.Context, podName string) (string, error) {
-	output, err := kubectlExec(ctx, podName,
-		"infisical", "bootstrap",
-		"--email", adminEmail(),
-		"--password", adminPassword(),
-		"--organization", orgName,
-		"--domain", "http://localhost:"+infisicalPort,
-		"--ignore-if-bootstrapped",
-		"--output", "json",
+func runBootstrapCLI(ctx context.Context, podName string, admin Administrator) (string, error) {
+	// --email and --password are gone, not relocated. The secret store's own CLI
+	// reads INFISICAL_ADMIN_EMAIL, INFISICAL_ADMIN_PASSWORD and
+	// INFISICAL_ADMIN_ORGANIZATION when the matching flag is empty (upstream
+	// packages/cmd/bootstrap.go, packages/util/constants.go), so the three values
+	// arrive on standard input, one per line, and are exported by a shell that
+	// reads them. Nothing reaches the argument list of any process, and nothing
+	// is written to a file.
+	//
+	// These three names are the ONLY provider-named variables left in the
+	// platform's own code, and they are deliberate: they are not our
+	// configuration surface but that binary's documented interface, so renaming
+	// them would not hide a provider, it would stop the bootstrap being read.
+	// Our side of the same values is SECRET_STORE_*, resolved from the escrow.
+	//
+	// The organisation travels the same way rather than being interpolated into
+	// the script: it comes from SECRET_STORE_ORG_NAME, and a value substituted
+	// into a shell string is a value that can end the quoting.
+	const script = `IFS= read -r email; IFS= read -r password; IFS= read -r org; ` +
+		`export INFISICAL_ADMIN_EMAIL="$email" INFISICAL_ADMIN_PASSWORD="$password" ` +
+		`INFISICAL_ADMIN_ORGANIZATION="$org"; ` +
+		`exec infisical bootstrap --domain http://localhost:` + infisicalPort +
+		` --ignore-if-bootstrapped --output json`
+
+	output, err := kubectlExecStdin(ctx, podName,
+		admin.Email+"\n"+admin.Password+"\n"+orgName+"\n",
+		"sh", "-c", script,
 	)
 	if err != nil {
 		return "", fmt.Errorf("infisical bootstrap failed: %w", err)
@@ -632,16 +702,16 @@ func runBootstrapCLI(ctx context.Context, podName string) (string, error) {
 	return "", errAlreadyBootstrapped
 }
 
-func runBootstrap(ctx context.Context, podName string) (*bootstrapOutput, error) {
+func runBootstrap(ctx context.Context, podName string, admin Administrator) (*bootstrapOutput, error) {
 	if cachedBootstrap != nil {
 		fmt.Println("[infisical-bootstrap] Using cached bootstrap result")
 		return cachedBootstrap, nil
 	}
 
-	jsonOutput, err := runBootstrapCLI(ctx, podName)
+	jsonOutput, err := runBootstrapCLI(ctx, podName, admin)
 	if errors.Is(err, errAlreadyBootstrapped) {
 		fmt.Println("[infisical-bootstrap] Server already bootstrapped, recovering existing org/identity via API...")
-		existing, getErr := getExistingOrgData(ctx, podName)
+		existing, getErr := getExistingOrgData(ctx, podName, admin)
 		if getErr != nil {
 			return nil, fmt.Errorf("recover existing bootstrap: %w", getErr)
 		}
@@ -684,7 +754,7 @@ func runBootstrap(ctx context.Context, podName string) (*bootstrapOutput, error)
 	// has always worked, which is why a re-run against an existing instance
 	// succeeded while a first run on a fresh database failed at the first
 	// createProject.
-	existing, err := getExistingOrgData(ctx, podName)
+	existing, err := getExistingOrgData(ctx, podName, admin)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap succeeded but could not obtain a usable org-scoped token: %w", err)
 	}
@@ -770,7 +840,7 @@ func createProject(ctx context.Context, podName, adminJWT, projectSlug, projectT
 	return projectResp.Project.ID, projectResp.Project.Slug, nil
 }
 
-func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projectID string) (string, string, string, error) {
+func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projectID string, admin Administrator) (string, string, string, error) {
 	// 1. Create the Machine Identity
 	body := fmt.Sprintf(`{"name":"%s","organizationId":"%s"}`, identityName, orgID)
 	output, status, err := curlAPI(ctx, podName,
@@ -871,7 +941,7 @@ func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projec
 	// tokens cannot manage org-level role assignments in Infisical 0.43.x
 	// (new privilege system: only user sessions can PATCH identity
 	// memberships at the org scope).
-	if err := grantOrgAdminRole(ctx, podName, orgID, identityID); err != nil {
+	if err := grantOrgAdminRole(ctx, podName, orgID, identityID, admin); err != nil {
 		return "", "", "", fmt.Errorf("grant org admin: %w", err)
 	}
 
@@ -920,14 +990,17 @@ func grantProjectAdminRole(ctx context.Context, podName, adminJWT, projectID, id
 //  3. The user JWT must have an org context. The V3 login returns a
 //     token without an org ID, so we call POST /api/v3/auth/select-organization
 //     to embed the org ID before calling the PATCH endpoint.
-func grantOrgAdminRole(ctx context.Context, podName, orgID, identityID string) error {
+func grantOrgAdminRole(ctx context.Context, podName, orgID, identityID string, admin Administrator) error {
 	// 1. Log in as the admin user to get a user-level JWT.
-	loginPayload := fmt.Sprintf(`{"email":"%s","password":"%s"}`, adminEmail(), adminPassword())
-	loginOut, err := kubectlExec(ctx, podName,
+	loginPayload, err := adminLoginBody(admin)
+	if err != nil {
+		return err
+	}
+	loginOut, err := kubectlExecStdin(ctx, podName, loginPayload,
 		"curl", "-s", "-f", "-X", "POST",
 		"http://localhost:"+infisicalPort+PathAuthLoginV3,
 		"-H", "Content-Type: application/json",
-		"-d", loginPayload,
+		"-d", "@-",
 	)
 	if err != nil {
 		return fmt.Errorf("admin user login failed: %w", err)
@@ -1070,8 +1143,8 @@ func getUniversalAuth(ctx context.Context, podName, adminJWT, identityID string)
 // the admin identity token + organization ID. Call this when you need a fresh
 // admin-scoped token for post-bootstrap health gates (e.g., cert-manager profile check).
 // The bootstrap is a no-op if already bootstrapped (--ignore-if-bootstrapped).
-func GetBootstrapToken(ctx context.Context, podName string) (adminJWT, orgID string, err error) {
-	boot, err := runBootstrap(ctx, podName)
+func GetBootstrapToken(ctx context.Context, podName string, admin Administrator) (adminJWT, orgID string, err error) {
+	boot, err := runBootstrap(ctx, podName, admin)
 	if err != nil {
 		return "", "", err
 	}
@@ -1143,7 +1216,7 @@ func CheckCertificateProfile(ctx context.Context, podName, adminJWT, projectID, 
 // WaitForCertificateProfile polls for the existence of a cert-manager profile.
 // If the profile is not found, it prints clear manual instructions for the UI step
 // and retries until the timeout expires.
-func WaitForCertificateProfile(ctx context.Context, podName, adminJWT, projectID, slug string, timeout time.Duration) error {
+func WaitForCertificateProfile(ctx context.Context, podName, adminJWT, projectID, slug string, admin Administrator, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	printed := false
 
@@ -1176,7 +1249,7 @@ func WaitForCertificateProfile(ctx context.Context, podName, adminJWT, projectID
 			fmt.Println("       svc/infisical-standalone-infisical 8080:8080")
 			fmt.Println()
 			fmt.Println("  2. Open http://localhost:8080 in your browser")
-			fmt.Printf("  3. Log in as %s with the password this box was bootstrapped with\n", adminEmail())
+			fmt.Printf("  3. Log in as %s with the password this box was bootstrapped with\n", admin.Email)
 			fmt.Println("  4. Navigate to: Certificates → Profiles → Create Profile")
 			fmt.Println("  5. Slug: argocd-bootstrap")
 			fmt.Println("  6. CA: Fleet Intermediate CA (NOT infisical-db-ca — per ADR-035)")
@@ -1217,7 +1290,7 @@ func declaredManagementScope(ctx context.Context) (string, error) {
 
 	out, err := hostKubectl(ctx,
 		"get", "configmap", "-n", constants.NamespaceOps, "hub-bootstrap-config",
-		"-o", "jsonpath={.data.INFISICAL_ENVIRONMENT_SLUG}",
+		"-o", "jsonpath={.data.SECRET_STORE_ENVIRONMENT_SLUG}",
 	)
 	if err != nil {
 		return "", fmt.Errorf("read the declared management scope from hub-bootstrap-config "+
@@ -1228,7 +1301,7 @@ func declaredManagementScope(ctx context.Context) (string, error) {
 	}
 	scope := strings.TrimSpace(out)
 	if scope == "" {
-		return "", fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG: it is " +
+		return "", fmt.Errorf("hub-bootstrap-config carries no SECRET_STORE_ENVIRONMENT_SLUG: it is " +
 			"the Infisical environment holding THIS HUB's own credentials (ADR-111 Revision 7 §2), " +
 			"rendered from the box's declared management.infisicalEnvironmentSlug. Day-0 creates " +
 			"that environment and writes the hub's secrets into it, so there is no value to assume")
@@ -1316,7 +1389,7 @@ func ensureEnvironment(ctx context.Context, podName, adminJWT, projectID, slug s
 // projects a hub addresses as a secret scope.
 //
 // Both, because both are read as one: the hub's secrets live in hub-secrets, and
-// GetInfisicalConfig falls back to INFISICAL_PROJECT_SLUG for a box that carries
+// GetInfisicalConfig falls back to SECRET_STORE_PROJECT_SLUG for a box that carries
 // only the cert project's slug. An environment missing from either project is a
 // reader resolving nothing, so neither is left to chance.
 func ensureManagementScope(ctx context.Context, podName, adminJWT, certProjectID, secretsProjectID string) error {
@@ -1331,7 +1404,7 @@ func ensureManagementScope(ctx context.Context, podName, adminJWT, certProjectID
 	return ensureEnvironment(ctx, podName, adminJWT, certProjectID, scope)
 }
 
-func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
+func BootstrapInfisicalDayZero(ctx context.Context, admin Administrator) (*BootstrapResult, error) {
 	fmt.Println("[infisical-bootstrap] Starting Infisical Day-0 bootstrap...")
 
 	podName, err := GetInfisicalPodName(ctx)
@@ -1340,7 +1413,7 @@ func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 	}
 	fmt.Printf("[infisical-bootstrap] Using pod: %s\n", podName)
 
-	boot, err := runBootstrap(ctx, podName)
+	boot, err := runBootstrap(ctx, podName, admin)
 	if err != nil {
 		return nil, err
 	}
@@ -1424,7 +1497,7 @@ func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 		return nil, err
 	}
 
-	clientID, clientSecret, identityID, err := createMachineIdentity(ctx, podName, boot.Identity.Credentials.Token, orgID, certProjectID)
+	clientID, clientSecret, identityID, err := createMachineIdentity(ctx, podName, boot.Identity.Credentials.Token, orgID, certProjectID, admin)
 	if err != nil {
 		return nil, err
 	}
@@ -1468,7 +1541,7 @@ func BootstrapInfisicalDayZero(ctx context.Context) (*BootstrapResult, error) {
 	return result, nil
 }
 
-func BootstrapInfisicalDayZeroWithRetry(ctx context.Context, timeout time.Duration) (*BootstrapResult, error) {
+func BootstrapInfisicalDayZeroWithRetry(ctx context.Context, admin Administrator, timeout time.Duration) (*BootstrapResult, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 
@@ -1479,7 +1552,7 @@ func BootstrapInfisicalDayZeroWithRetry(ctx context.Context, timeout time.Durati
 		default:
 		}
 
-		result, err := BootstrapInfisicalDayZero(ctx)
+		result, err := BootstrapInfisicalDayZero(ctx, admin)
 		if err == nil {
 			return result, nil
 		}

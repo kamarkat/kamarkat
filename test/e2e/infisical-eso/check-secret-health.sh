@@ -9,7 +9,7 @@ echo "=== Infisical External Secrets Health Check ==="
 echo ""
 
 # Configuration
-INFISICAL_API="https://infisical.hub-platform-data.svc"
+SECRET_STORE_API="https://infisical.hub-platform-data.svc"
 
 # Step 1: Verify Infisical API is accessible
 echo "1. Verifying Infisical API is accessible..."

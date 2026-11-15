@@ -25,7 +25,7 @@
     - path: [spec, boxId]
       value: '{{ .Values.global.boxId }}'
     # The management secret scope (ADR-111 Revision 7 §2). Rendered here and into
-    # hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG below from the SAME declared
+    # hub-bootstrap-config's SECRET_STORE_ENVIRONMENT_SLUG below from the SAME declared
     # input, because the operator reads one and ExternalSecrets resolve through the
     # other: two literals would be two sources of truth for one scope, and a writer
     # on one with a reader on the other is a secret that exists and is never updated.
@@ -59,19 +59,19 @@
 - kind: ConfigMap
   name: hub-bootstrap-config
   fields:
-    - path: [data, INFISICAL_ORGANIZATION_ID]
+    - path: [data, SECRET_STORE_ORGANIZATION_ID]
       value: '{{ (.Values.global.infisical | default dict).organizationId }}'
-    - path: [data, INFISICAL_PROJECT_ID]
+    - path: [data, SECRET_STORE_PROJECT_ID]
       value: '{{ (.Values.global.infisical | default dict).projectId }}'
     # The box's tenant id. hub-operator writes the owner's own credentials (the
     # Zitadel SMTP password) to /<tenant>-mgmt, the folder ESO reads them from.
     - path: [data, TENANT_ID]
       value: '{{ .Values.global.tenantId }}'
-    - path: [data, INFISICAL_SECRETS_PROJECT_ID]
+    - path: [data, SECRET_STORE_SECRETS_PROJECT_ID]
       value: '{{ (.Values.global.infisical | default dict).secretsProjectId }}'
     # The same management scope the HubEnvironment above declares. managementEnvironmentSlug()
     # in the hub-operator reads it from here and refuses an empty value rather than
     # defaulting -- the only possible default is a guess at which environment someone
     # else's secrets are in.
-    - path: [data, INFISICAL_ENVIRONMENT_SLUG]
+    - path: [data, SECRET_STORE_ENVIRONMENT_SLUG]
       value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'

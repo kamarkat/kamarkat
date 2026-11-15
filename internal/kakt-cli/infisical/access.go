@@ -14,11 +14,17 @@ type AccessOption struct {
 	SetupCmd string
 }
 
+// AccessInfo is how to REACH this box's Infisical, and deliberately not how to
+// authenticate to it.
+//
+// It carried the administrator's address and password, and its one consumer
+// printed both to standard output -- which during a bootstrap is a CI log. The
+// credential lives in the box's escrow (ADR-076) and is read from there by
+// whoever needs it, so the way to obtain it is a command, not a line of output
+// that persists wherever the run was recorded.
 type AccessInfo struct {
-	Options    []AccessOption
-	AdminEmail string
-	Password   string
-	PodName    string
+	Options []AccessOption
+	PodName string
 }
 
 func kubectl(args ...string) (string, error) {
@@ -36,11 +42,7 @@ func GetAccessInfo(ctx context.Context) *AccessInfo {
 		podName = "infisical-standalone-infisical"
 	}
 
-	info := &AccessInfo{
-		AdminEmail: adminEmail(),
-		Password:   adminPassword(),
-		PodName:    podName,
-	}
+	info := &AccessInfo{PodName: podName}
 
 	if u, ok := probeIngress(ctx); ok {
 		info.Options = append(info.Options, AccessOption{

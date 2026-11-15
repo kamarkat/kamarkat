@@ -86,7 +86,7 @@ project is still created by you, and that identity is added to it.`,
 	f.StringVar(&escrowURL, "url", "https://app.infisical.com", "the escrow Infisical")
 	f.StringVar(&escrowProjectName, "name", "", "project name (required)")
 	f.StringVar(&escrowOut, "out", "",
-		"write the INFISICAL_ESCROW_* files here instead of this operator's own store "+
+		"write the ESCROW_PROVIDER_* files here instead of this operator's own store "+
 			"(~/.kamarkat/infisical, or $KAMARKAT_HOME/infisical)")
 	// The escape hatch, and nothing more. An organisation whose policy forbids
 	// the CLI creating identities supplies one; everyone else lets this manage
@@ -133,7 +133,7 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		}
 		guardDir = d
 	}
-	idPath := filepath.Join(guardDir, "INFISICAL_ESCROW_PROJECT_ID")
+	idPath := filepath.Join(guardDir, "ESCROW_PROVIDER_PROJECT_ID")
 	if declared.EscrowProjectID != "" {
 		// The declaration wins over whatever this machine last recorded: a stale
 		// local value is corrected rather than treated as a conflict.
@@ -157,7 +157,7 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 	// should be treated differently.
 	//
 	// The refusal also made its own advice impossible to follow. `box init`
-	// refuses a box with no INFISICAL_ESCROW_ORG_ID and says to run
+	// refuses a box with no ESCROW_PROVIDER_ORG_ID and says to run
 	// `kakt escrow init`, which is the only thing that records it -- and this
 	// guard then refused, because a project id was on disk. An operator whose
 	// escrow predates that field had no route at all, from either command.
@@ -240,13 +240,13 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 	// material has nothing to compare against -- see
 	// hubaccess.authorizeAdministrator, which now refuses instead of skipping.
 	values := map[string]string{
-		"INFISICAL_ESCROW_URL":        escrowURL,
-		"INFISICAL_ESCROW_CLIENT_ID":  clientID,
-		"INFISICAL_ESCROW_PROJECT_ID": projectID,
-		"INFISICAL_ESCROW_ORG_ID":     strings.TrimSpace(s.OrgID),
+		"ESCROW_PROVIDER_URL":        escrowURL,
+		"ESCROW_PROVIDER_CLIENT_ID":  clientID,
+		"ESCROW_PROVIDER_PROJECT_ID": projectID,
+		"ESCROW_PROVIDER_ORG_ID":     strings.TrimSpace(s.OrgID),
 	}
 	if strings.TrimSpace(clientSecret) != "" {
-		values["INFISICAL_ESCROW_CLIENT_SECRET"] = clientSecret
+		values["ESCROW_PROVIDER_CLIENT_SECRET"] = clientSecret
 	}
 	for name, value := range values {
 		pth := filepath.Join(out, name)
@@ -317,7 +317,7 @@ func runEscrowInit(cmd *cobra.Command, args []string) error {
 		// Only reachable when an identity was supplied with --client-id and its
 		// secret was not: the operator is managing that identity themselves, so
 		// this does not issue one for it.
-		secretPath := filepath.Join(out, "INFISICAL_ESCROW_CLIENT_SECRET")
+		secretPath := filepath.Join(out, "ESCROW_PROVIDER_CLIENT_SECRET")
 		if _, statErr := os.Stat(secretPath); statErr != nil {
 			fmt.Printf("\n! No client secret recorded for the identity you supplied.\n")
 			fmt.Printf("  Pass --client-secret with it, or put the value in\n    %s\n", secretPath)

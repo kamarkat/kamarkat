@@ -19,7 +19,7 @@ This ADR consolidates bootstrap logic into a single state machine with explicit 
   NEW
     │
     ▼
-  INFISICAL_READY
+  SECRET_STORE_READY
     │
     ▼
   PKI_READY
@@ -45,7 +45,7 @@ The Hub cluster is provisioned (KinD or CAPH) but no platform components have be
 - **Exit Criteria:** `hub-platform` and `hub-secrets` Infisical projects exist. Machine Identity with admin access to both projects exists. Infisical access token is stored in Hub cluster.
 - **Failure Recovery:** Re-run CLI bootstrap from start. State is fully idempotent.
 
-#### INFISICAL_READY
+#### SECRET_STORE_READY
 
 Infisical projects and Machine Identities are created. Bootstrap secrets are generated and stored.
 
@@ -63,7 +63,7 @@ Infisical projects and Machine Identities are created. Bootstrap secrets are gen
 The PKI trust hierarchy is established and the Fleet Intermediate CA is hosted in Infisical.
 
 - **Owner:** CLI
-- **Entry Criteria:** `INFISICAL_READY` exit criteria satisfied.
+- **Entry Criteria:** `SECRET_STORE_READY` exit criteria satisfied.
 - **Operations:**
   - Generate Offline Root CA (outside Infisical, outside Kubernetes).
   - Upload Fleet Intermediate CA (signed by Offline Root CA) to Infisical `hub-platform` project.
@@ -165,7 +165,7 @@ SECRETS_READY
     │
     ├── SECRETS_GENERATED  (PhaseBoundary01 + PhaseBoundary02)
     │
-    ├── INFISICAL_READY    (init-secrets: encryption keys, CNPG CA, DB credentials)
+    ├── SECRET_STORE_READY    (init-secrets: encryption keys, CNPG CA, DB credentials)
     │
     ├── BOUNDARY_03_READY  (PhaseBoundary03: Secret Providers)
     │

@@ -228,7 +228,7 @@ load_credentials() {
     # ADR-076 makes the escrow mandatory: RequireEscrow refuses a box that would
     # have nowhere to keep its master keys. All four or none -- three of four
     # produces an operator that attempts a backup every reconcile and fails.
-    ESCROW_URL="$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_URL" \
+    ESCROW_URL="$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_URL" \
         "the escrow Infisical URL" "https://app.infisical.com")"
     # Read AFTER the escrow phase has had its chance to create it, because that
     # phase is what produces this file. Demanded up front it would refuse every
@@ -237,23 +237,17 @@ load_credentials() {
     #
     # Still required: load_credentials is called again below, and a run reaching
     # scaffold without it stops there.
-    ESCROW_PROJECT_ID="$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_PROJECT_ID" \
+    ESCROW_PROJECT_ID="$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_PROJECT_ID" \
         "the escrow project id" "${ESCROW_PROJECT_ID_OPTIONAL:-}")"
-    ESCROW_CLIENT_ID="$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_CLIENT_ID" \
+    ESCROW_CLIENT_ID="$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_CLIENT_ID" \
         "the escrow machine identity client id")"
-    ESCROW_CLIENT_SECRET="$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_CLIENT_SECRET" \
+    ESCROW_CLIENT_SECRET="$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_CLIENT_SECRET" \
         "the escrow machine identity client secret")"
 
-    # The box's own Infisical administrator. Required: the defaults these replace
-    # were a personal email and the literal "Password@123", identical on every box.
-    INFISICAL_ADMIN_EMAIL="$(read_secret "$SECRETS/infisical/INFISICAL_ADMIN_EMAIL" \
-        "the Infisical administrator's email")"
-    INFISICAL_ADMIN_PASSWORD="$(read_secret "$SECRETS/infisical/INFISICAL_ADMIN_PASSWORD" \
-        "the Infisical administrator's password")"
-    # Exported, not passed as flags. fillFromEnvironment reads them by the same
-    # name scaffolding stores on the repository and Day-0 reads at bootstrap --
-    # one spelling for all three, which is what the credential registry is for.
-    export INFISICAL_ADMIN_EMAIL INFISICAL_ADMIN_PASSWORD
+    # No administrator credential is collected or exported. `box init` generates
+    # this box's Infisical administrator and writes it to the escrow above, and
+    # Day-0 reads it back from there (ADR-076) -- so there is nothing to supply
+    # here, and an exported value would be ignored.
 
     # Exported, under the names Day-0 reads.
     #
@@ -267,10 +261,10 @@ load_credentials() {
     # secrets and the workflow passes them to the bootstrap step as env. Only the
     # local path collected them and dropped them, which is why the platform's own
     # runs hid it.
-    export INFISICAL_ESCROW_URL="$ESCROW_URL"
-    export INFISICAL_ESCROW_PROJECT_ID="$ESCROW_PROJECT_ID"
-    export INFISICAL_ESCROW_CLIENT_ID="$ESCROW_CLIENT_ID"
-    export INFISICAL_ESCROW_CLIENT_SECRET="$ESCROW_CLIENT_SECRET"
+    export ESCROW_PROVIDER_URL="$ESCROW_URL"
+    export ESCROW_PROVIDER_PROJECT_ID="$ESCROW_PROJECT_ID"
+    export ESCROW_PROVIDER_CLIENT_ID="$ESCROW_CLIENT_ID"
+    export ESCROW_PROVIDER_CLIENT_SECRET="$ESCROW_CLIENT_SECRET"
 
     # The tenant's registry credential (ADR-066: workloads are theirs).
     #
@@ -593,7 +587,7 @@ workspace_is_clear() {
 # cannot be otherwise: the escrow account is the tenant's and the platform holds
 # no credential to it (ADR-076). It is one-time per tenant, not per box.
 do_escrow() {
-    local id_file="$SECRETS/infisical/INFISICAL_ESCROW_PROJECT_ID"
+    local id_file="$SECRETS/infisical/ESCROW_PROVIDER_PROJECT_ID"
 
     if [ -s "$id_file" ]; then
         echo "[local-e2e] escrow project already recorded: $(cat "$id_file")"
@@ -602,14 +596,14 @@ do_escrow() {
 
     say "creating the escrow project for $TENANT"
     "$ROOT/bin/kakt" escrow init \
-        --url "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_URL" \
+        --url "$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_URL" \
                    "the escrow Infisical URL" "https://app.infisical.com")" \
-        --client-id "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_CLIENT_ID" \
+        --client-id "$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_CLIENT_ID" \
                          "the escrow machine identity client id")" \
-        --client-secret "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_CLIENT_SECRET" \
+        --client-secret "$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_CLIENT_SECRET" \
                              "the escrow machine identity client secret")" \
         --name "soloz-escrow-$TENANT" \
-        --owner-email "$(read_secret "$SECRETS/infisical/INFISICAL_ESCROW_OWNER_EMAIL" \
+        --owner-email "$(read_secret "$SECRETS/infisical/ESCROW_PROVIDER_OWNER_EMAIL" \
                            "the Infisical account that should own the escrow project")" \
         --out "$SECRETS/infisical"
 }

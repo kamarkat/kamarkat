@@ -1272,7 +1272,7 @@ SEED_SPECS=(
     # The issuer's outbound mail: the owner's Resend SMTP URL,
     # smtps://resend:<api-key>@smtp.resend.com:465. hub-operator uploads only its
     # password, to /<tenant>-mgmt, where zitadel-smtp-config reads it.
-    "smtp|platform-ops/zitadel-smtp|resend=resend=ZITADEL_SMTP_URL"
+    "smtp|platform-ops/zitadel-smtp|resend=resend=IDENTITY_PROVIDER_SMTP_URL"
 )
 
 step6b_seed_external_credentials() {

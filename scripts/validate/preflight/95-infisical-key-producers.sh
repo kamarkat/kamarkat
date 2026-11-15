@@ -34,10 +34,10 @@ EXTERNAL = {
     "GRAFANA_IRM_HEARTBEAT_URL":     "~/.kamarkat/grafana-cloud/irm-heartbeat-url (hub) and irm-heartbeat-url-<cell> (each spoke) — one IRM heartbeat per cluster",
     # Uploaded from the zitadel-smtp Secret as the URL's PASSWORD, at the root,
     # for every cluster's Alertmanager; hub-operator copies it into each cell.
-    "ALERT_SMTP_PASSWORD":           "~/.kamarkat/smtp/resend (or ZITADEL_SMTP_URL) — the same SMTP URL; its password",
+    "ALERT_SMTP_PASSWORD":           "~/.kamarkat/smtp/resend (or IDENTITY_PROVIDER_SMTP_URL) — the same SMTP URL; its password",
     # Uploaded from the zitadel-smtp Secret as the URL's PASSWORD only, to the
     # owner's /<tenant>-mgmt folder (CLISecretMappings, TransformURLPassword).
-    "zitadel_smtp_password":         "~/.kamarkat/smtp/resend (or ZITADEL_SMTP_URL) — the Resend SMTP URL, smtps://resend:<api-key>@smtp.resend.com:465",
+    "zitadel_smtp_password":         "~/.kamarkat/smtp/resend (or IDENTITY_PROVIDER_SMTP_URL) — the Resend SMTP URL, smtps://resend:<api-key>@smtp.resend.com:465",
 }
 
 # Known-missing producers awaiting a decision, reported as a WARNING rather than a

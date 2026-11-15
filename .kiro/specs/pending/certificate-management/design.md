@@ -252,21 +252,21 @@ metadata:
 data:
   CLUSTER_ID: "hub-production"
   CLUSTER_REGION: "ap-south-1"
-  INFISICAL_PROJECT_SLUG: "hub-platform"
-  INFISICAL_SECRETS_PROJECT_SLUG: "hub-secrets"
-  INFISICAL_ENVIRONMENT_SLUG: "dev"
+  SECRET_STORE_PROJECT_SLUG: "hub-platform"
+  SECRET_STORE_SECRETS_PROJECT_SLUG: "hub-secrets"
+  SECRET_STORE_ENVIRONMENT_SLUG: "dev"
   DOMAIN: "nutgraf.in"
-  INFISICAL_BOOTSTRAP_PROFILE_SLUG: "argocd-bootstrap"
+  SECRET_STORE_BOOTSTRAP_PROFILE_SLUG: "argocd-bootstrap"
 ```
 
 **File: `operators/hub-operator/config/manager/manager.yaml`**
 ```yaml
 # Under the container env section:
-        - name: INFISICAL_BOOTSTRAP_PROFILE_SLUG
+        - name: SECRET_STORE_BOOTSTRAP_PROFILE_SLUG
           valueFrom:
             configMapKeyRef:
               name: hub-bootstrap-config
-              key: INFISICAL_BOOTSTRAP_PROFILE_SLUG
+              key: SECRET_STORE_BOOTSTRAP_PROFILE_SLUG
 ```
 
 ### 5. Hub Operator Implementation
@@ -383,9 +383,9 @@ import (
 func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// ... fetch SpokePool CR ...
 
-	bootstrapProfileSlug := os.Getenv("INFISICAL_BOOTSTRAP_PROFILE_SLUG")
+	bootstrapProfileSlug := os.Getenv("SECRET_STORE_BOOTSTRAP_PROFILE_SLUG")
 	if bootstrapProfileSlug == "" {
-		return ctrl.Result{}, fmt.Errorf("INFISICAL_BOOTSTRAP_PROFILE_SLUG is not set")
+		return ctrl.Result{}, fmt.Errorf("SECRET_STORE_BOOTSTRAP_PROFILE_SLUG is not set")
 	}
 
 	// Resolve profile slug to ID (slugs survive backup/restore, UUIDs do not)

@@ -146,18 +146,18 @@ func main() {
 	// given a sender yet should start and serve everything that does not depend on
 	// mail. Failure to APPLY a sender that WAS configured is a warning for the
 	// same reason every other assertion here is.
-	if smtpHost := getEnv("ZITADEL_SMTP_HOST", ""); smtpHost != "" {
+	if smtpHost := getEnv("IDENTITY_PROVIDER_SMTP_HOST", ""); smtpHost != "" {
 		if mailer, ok := authProvider.(interface {
 			EnsureSMTP(context.Context, zitadel.SMTPConfig) error
 		}); ok {
 			cfg := zitadel.SMTPConfig{
 				Host:          smtpHost,
-				User:          getEnv("ZITADEL_SMTP_USER", ""),
-				Password:      getEnv("ZITADEL_SMTP_PASSWORD", ""),
-				TLS:           getEnv("ZITADEL_SMTP_TLS", "true") != "false",
-				SenderAddress: getEnv("ZITADEL_SMTP_FROM", ""),
-				SenderName:    getEnv("ZITADEL_SMTP_FROM_NAME", ""),
-				ReplyTo:       getEnv("ZITADEL_SMTP_REPLY_TO", ""),
+				User:          getEnv("IDENTITY_PROVIDER_SMTP_USER", ""),
+				Password:      getEnv("IDENTITY_PROVIDER_SMTP_PASSWORD", ""),
+				TLS:           getEnv("IDENTITY_PROVIDER_SMTP_TLS", "true") != "false",
+				SenderAddress: getEnv("IDENTITY_PROVIDER_SMTP_FROM", ""),
+				SenderName:    getEnv("IDENTITY_PROVIDER_SMTP_FROM_NAME", ""),
+				ReplyTo:       getEnv("IDENTITY_PROVIDER_SMTP_REPLY_TO", ""),
 			}
 			if err := mailer.EnsureSMTP(context.Background(), cfg); err != nil {
 				fmt.Printf("warning: could not configure the issuer's mail sender; "+

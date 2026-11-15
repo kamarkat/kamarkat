@@ -181,7 +181,7 @@ key with nowhere to put it, so this check is a courtesy, not a gate:
 
 ```bash
 # All four or none. A partial set produces a client that authenticates and fails.
-env | grep -c '^INFISICAL_ESCROW_' ; echo "expect 4"
+env | grep -c '^ESCROW_PROVIDER_' ; echo "expect 4"
 
 # What the escrow already holds for this cluster. Empty is fine on a first run —
 # the key is generated and escrowed. A value means a previous cluster used it, and

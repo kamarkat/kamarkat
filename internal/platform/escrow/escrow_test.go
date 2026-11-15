@@ -20,10 +20,10 @@ import (
 func TestEscrowRefusesTheBoxItProtects(t *testing.T) {
 	const inCluster = "http://infisical-standalone-infisical.platform-security.svc.cluster.local:8080"
 	withEnv(t, map[string]string{
-		"INFISICAL_ESCROW_URL":           inCluster,
-		"INFISICAL_ESCROW_PROJECT_ID":    "p",
-		"INFISICAL_ESCROW_CLIENT_ID":     "i",
-		"INFISICAL_ESCROW_CLIENT_SECRET": "s",
+		"ESCROW_PROVIDER_URL":           inCluster,
+		"ESCROW_PROVIDER_PROJECT_ID":    "p",
+		"ESCROW_PROVIDER_CLIENT_ID":     "i",
+		"ESCROW_PROVIDER_CLIENT_SECRET": "s",
 	})
 
 	_, err := NewEscrowClient(context.Background(), inCluster)
@@ -36,7 +36,7 @@ func TestEscrowRefusesTheBoxItProtects(t *testing.T) {
 
 	// A trailing slash is the same instance, and comparing strings naively would
 	// let it through.
-	withEnv(t, map[string]string{"INFISICAL_ESCROW_URL": inCluster + "/"})
+	withEnv(t, map[string]string{"ESCROW_PROVIDER_URL": inCluster + "/"})
 	if _, err := NewEscrowClient(context.Background(), inCluster); err == nil {
 		t.Error("a trailing slash defeated the check")
 	}
@@ -85,10 +85,10 @@ func TestSettingsComeFromTheOperatorStoreWhenTheEnvironmentIsSilent(t *testing.T
 		t.Fatalf("mkdir: %v", err)
 	}
 	for name, value := range map[string]string{
-		"INFISICAL_ESCROW_URL":           "https://app.infisical.com\n",
-		"INFISICAL_ESCROW_PROJECT_ID":    "proj-1\n",
-		"INFISICAL_ESCROW_CLIENT_ID":     "cid-1\n",
-		"INFISICAL_ESCROW_CLIENT_SECRET": "sec-1\n",
+		"ESCROW_PROVIDER_URL":           "https://app.infisical.com\n",
+		"ESCROW_PROVIDER_PROJECT_ID":    "proj-1\n",
+		"ESCROW_PROVIDER_CLIENT_ID":     "cid-1\n",
+		"ESCROW_PROVIDER_CLIENT_SECRET": "sec-1\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
 			t.Fatalf("write %s: %v", name, err)
@@ -97,15 +97,15 @@ func TestSettingsComeFromTheOperatorStoreWhenTheEnvironmentIsSilent(t *testing.T
 
 	// Trailing newlines are trimmed: a file written by a shell redirect has one, and
 	// a client id with a newline on the end authenticates as nobody.
-	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "cid-1" {
+	if got := escrowValue("ESCROW_PROVIDER_CLIENT_ID"); got != "cid-1" {
 		t.Fatalf("read %q from the operator store, want %q", got, "cid-1")
 	}
 
 	// The environment still wins, because an in-cluster caller has that and no
 	// store at all.
-	withEnv(t, map[string]string{"INFISICAL_ESCROW_CLIENT_ID": "from-env"})
+	withEnv(t, map[string]string{"ESCROW_PROVIDER_CLIENT_ID": "from-env"})
 	t.Setenv("KAMARKAT_HOME", home)
-	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "from-env" {
+	if got := escrowValue("ESCROW_PROVIDER_CLIENT_ID"); got != "from-env" {
 		t.Fatalf("the store overrode the environment: got %q", got)
 	}
 }
@@ -124,16 +124,16 @@ func TestTheOldCheckoutLocationIsNotRead(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "INFISICAL_ESCROW_CLIENT_ID"),
+	if err := os.WriteFile(filepath.Join(dir, "ESCROW_PROVIDER_CLIENT_ID"),
 		[]byte("from-checkout"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := escrowValue("INFISICAL_ESCROW_CLIENT_ID"); got != "" {
+	if got := escrowValue("ESCROW_PROVIDER_CLIENT_ID"); got != "" {
 		t.Errorf("a checkout still supplies escrow settings: got %q", got)
 	}
 	// And the operator is told where they are, rather than only that they are missing.
-	hint := MoveHint("INFISICAL_ESCROW_CLIENT_ID")
+	hint := MoveHint("ESCROW_PROVIDER_CLIENT_ID")
 	if !strings.Contains(hint, "no longer read") || !strings.Contains(hint, "mv ") {
 		t.Errorf("the hint does not say how to move them:\n%s", hint)
 	}
@@ -150,14 +150,14 @@ func TestEscrowIsCompleteOrAbsent(t *testing.T) {
 	}
 
 	withEnv(t, map[string]string{
-		"INFISICAL_ESCROW_URL":       "https://app.infisical.com",
-		"INFISICAL_ESCROW_CLIENT_ID": "i",
+		"ESCROW_PROVIDER_URL":       "https://app.infisical.com",
+		"ESCROW_PROVIDER_CLIENT_ID": "i",
 	})
 	_, err := NewEscrowClient(context.Background(), "")
 	if err == nil {
 		t.Fatal("a partially configured escrow was accepted")
 	}
-	for _, want := range []string{"INFISICAL_ESCROW_PROJECT_ID", "INFISICAL_ESCROW_CLIENT_SECRET"} {
+	for _, want := range []string{"ESCROW_PROVIDER_PROJECT_ID", "ESCROW_PROVIDER_CLIENT_SECRET"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not name the missing %s:\n%v", want, err)
 		}
@@ -173,10 +173,10 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	defer srv.Close()
 
 	withEnv(t, map[string]string{
-		"INFISICAL_ESCROW_URL":           srv.URL,
-		"INFISICAL_ESCROW_PROJECT_ID":    "proj",
-		"INFISICAL_ESCROW_CLIENT_ID":     "id",
-		"INFISICAL_ESCROW_CLIENT_SECRET": "secret",
+		"ESCROW_PROVIDER_URL":           srv.URL,
+		"ESCROW_PROVIDER_PROJECT_ID":    "proj",
+		"ESCROW_PROVIDER_CLIENT_ID":     "id",
+		"ESCROW_PROVIDER_CLIENT_SECRET": "secret",
 	})
 
 	e, err := NewEscrowClient(context.Background(), "")
@@ -279,8 +279,8 @@ func fakeInfisical(t *testing.T, store map[string]string) *httptest.Server {
 func withEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for _, name := range []string{
-		"INFISICAL_ESCROW_URL", "INFISICAL_ESCROW_PROJECT_ID",
-		"INFISICAL_ESCROW_CLIENT_ID", "INFISICAL_ESCROW_CLIENT_SECRET",
+		"ESCROW_PROVIDER_URL", "ESCROW_PROVIDER_PROJECT_ID",
+		"ESCROW_PROVIDER_CLIENT_ID", "ESCROW_PROVIDER_CLIENT_SECRET",
 	} {
 		os.Unsetenv(name)
 	}
@@ -504,10 +504,10 @@ func TestIdentityRefusesAMissingHalf(t *testing.T) {
 func testEscrow(t *testing.T, url string) *infisicalEscrow {
 	t.Helper()
 	withEnv(t, map[string]string{
-		"INFISICAL_ESCROW_URL":           url,
-		"INFISICAL_ESCROW_PROJECT_ID":    "proj",
-		"INFISICAL_ESCROW_CLIENT_ID":     "id",
-		"INFISICAL_ESCROW_CLIENT_SECRET": "secret",
+		"ESCROW_PROVIDER_URL":           url,
+		"ESCROW_PROVIDER_PROJECT_ID":    "proj",
+		"ESCROW_PROVIDER_CLIENT_ID":     "id",
+		"ESCROW_PROVIDER_CLIENT_SECRET": "secret",
 	})
 	c, err := NewEscrowClient(context.Background(), "")
 	if err != nil {

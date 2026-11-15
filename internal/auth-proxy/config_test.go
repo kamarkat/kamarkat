@@ -8,15 +8,15 @@ import (
 // required mirrors every variable LoadConfig demands. Kept explicit so that adding a
 // setting without a manifest entry fails a test rather than a production pod.
 var required = map[string]string{
-	"LISTEN_ADDR":               ":8080",
-	"ZITADEL_ISSUER_URL":        "https://id.dev.nutgraf.in",
-	"ZITADEL_INTERNAL_URL":      "http://zitadel.platform-identity.svc.cluster.local:8080",
-	"JWKS_CACHE_TTL":            "1h",
-	"JWKS_FETCH_TIMEOUT":        "5s",
-	"JWKS_REFRESH_MIN_INTERVAL": "10s",
-	"EXPECTED_JWT_AUDIENCE":     "https://api.dev.nutgraf.in",
-	"AUTH_PUBLIC_BASE_URL":      "https://auth.dev.nutgraf.in",
-	"MCP_GATEWAY_BASE_URL":      "https://api.dev.nutgraf.in",
+	"LISTEN_ADDR":                    ":8080",
+	"IDENTITY_PROVIDER_ISSUER_URL":   "https://id.dev.nutgraf.in",
+	"IDENTITY_PROVIDER_INTERNAL_URL": "http://zitadel.platform-identity.svc.cluster.local:8080",
+	"JWKS_CACHE_TTL":                 "1h",
+	"JWKS_FETCH_TIMEOUT":             "5s",
+	"JWKS_REFRESH_MIN_INTERVAL":      "10s",
+	"EXPECTED_JWT_AUDIENCE":          "https://api.dev.nutgraf.in",
+	"AUTH_PUBLIC_BASE_URL":           "https://auth.dev.nutgraf.in",
+	"MCP_GATEWAY_BASE_URL":           "https://api.dev.nutgraf.in",
 }
 
 func setAll(t *testing.T) {

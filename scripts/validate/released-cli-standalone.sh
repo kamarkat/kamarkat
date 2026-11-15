@@ -57,9 +57,9 @@ home="$sandbox/home"
 mkdir -p "$home"
 if ! out=$(cd "$sandbox" && \
         HOME="$home" XDG_CONFIG_HOME="$home/.config" \
-        INFISICAL_ESCROW_URL=https://escrow.probe.invalid \
-        INFISICAL_ESCROW_PROJECT_ID=probe-project \
-        INFISICAL_ESCROW_ORG_ID=probe-org \
+        ESCROW_PROVIDER_URL=https://escrow.probe.invalid \
+        ESCROW_PROVIDER_PROJECT_ID=probe-project \
+        ESCROW_PROVIDER_ORG_ID=probe-org \
         "$BIN" box init --dry-run \
         --tenant probe --git-org probe-org --domain probe.example \
         --provider hetzner --platform-admin probe-admin \

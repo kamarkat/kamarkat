@@ -516,12 +516,12 @@ func (c *InfisicalClient) DeleteSecret(ctx context.Context, secretPath, secretNa
 
 // getOrganizationID returns the pre-configured OrganizationID for this InfisicalClient.
 // Machine Identity access tokens do not include orgId in their JWT claims, so we
-// rely on the bootstrap-stored org ID (sourced from INFISICAL_ORGANIZATION_ID env var).
+// rely on the bootstrap-stored org ID (sourced from SECRET_STORE_ORGANIZATION_ID env var).
 func (c *InfisicalClient) getOrganizationID(ctx context.Context) (string, error) {
 	if c.OrganizationID != "" {
 		return c.OrganizationID, nil
 	}
-	return "", fmt.Errorf("OrganizationID not configured — set INFISICAL_ORGANIZATION_ID env var")
+	return "", fmt.Errorf("OrganizationID not configured — set SECRET_STORE_ORGANIZATION_ID env var")
 }
 
 // createMachineIdentityInInfisical creates a Machine Identity in Infisical

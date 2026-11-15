@@ -23,18 +23,18 @@
 #   GHCR_USERNAME   your container registry, for pulling YOUR private images.
 #   GHCR_TOKEN      The platform's own images are public; your workloads are
 #                   yours (ADR-066) and this is what runs them.
-#   INFISICAL_ADMIN_EMAIL     the administrator of this box's own Infisical --
-#   INFISICAL_ADMIN_PASSWORD  NOT the escrow's, which has no account here. The
-#                             address is whoever scaffolded the box; the password
-#                             is generated, escrowed as infisical-admin-credential
-#                             and set here in one step, so a re-run reads back the
-#                             one this instance was created with. No default: the
-#                             one that existed was identical on every box.
+#   ESCROW_PROVIDER_*   (4) the escrow, on an Infisical you control. It holds
+#                        this box's master keys -- without them, losing this
+#                        cluster loses every secret it manages -- AND the
+#                        administrator of the box's own Infisical, which Day-0
+#                        reads from there. There is no SECRET_STORE_ADMIN_EMAIL or
+#                        SECRET_STORE_ADMIN_PASSWORD secret to set: that credential
+#                        is generated when the box is initialized and kept in the
+#                        escrow, because a GitHub secret cannot be read back and
+#                        a copy nothing can compare is a copy that can drift.
 #
 # STRONGLY RECOMMENDED -- absent, the box bootstraps and runs, and says what it
 # is missing:
-#   INFISICAL_ESCROW_*   (4) where this box's master keys are kept. Without them,
-#                        losing this cluster loses every secret it manages.
 #   S3_ACCESS_KEY_ID     object storage for database backups. A production box
 #   S3_SECRET_ACCESS_KEY without these has no backups.
 #
@@ -44,7 +44,7 @@
 # dashboards run in the box and need no account.
 #   GRAFANA_IRM_ALERTMANAGER_URL, GRAFANA_IRM_HEARTBEAT_URL
 #
-# OPTIONAL -- ZITADEL_SMTP_URL, this box's outbound mail: identity mail and
+# OPTIONAL -- IDENTITY_PROVIDER_SMTP_URL, this box's outbound mail: identity mail and
 # alert email both send through it.
 #
 # TS_AUTHKEY is read only when this cluster accepts on-prem nodes (ADR-075).
@@ -204,13 +204,14 @@ jobs:
                   print(f"::error::{decl} declares no {' or '.join(missing)}, so this cluster cannot be built from git",
                         file=sys.stderr)
                   raise SystemExit(1)
+              # NOT the worker count. It is declared in this same file and read
+              # from there by Day-0, so resolving it here only to pass it back
+              # was a second route to one value -- and the flag it became was
+              # never accepted by the script that received it.
               picked.append({
                   "cluster":  name,
                   "provider": str(values["provider"]),
                   "region":   str(values["region"]),
-                  # Day-0 sizes the cluster from this, and reads the declaration
-                  # itself afterwards; absent means the chart's own default.
-                  "workers":  "" if values.get("workers") is None else str(values["workers"]),
                   "on-prem":  bool(on_prem.get("enabled", False)),
                   "tailnet":  str(on_prem.get("tailnet") or ""),
               })
@@ -241,26 +242,24 @@ jobs:
       provider: ${{ matrix.box.provider }}
       region: ${{ matrix.box.region }}
       bundle-version: <BUNDLE_VERSION>
-      workers: ${{ matrix.box.workers }}
       on-prem: ${{ matrix.box.on-prem }}
       tailnet: ${{ matrix.box.tailnet }}
     secrets:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
-      # The administrator of this box's own Infisical, set by the handover.
-      INFISICAL_ADMIN_EMAIL: ${{ secrets.INFISICAL_ADMIN_EMAIL }}
-      INFISICAL_ADMIN_PASSWORD: ${{ secrets.INFISICAL_ADMIN_PASSWORD }}
       # Read only when on-prem is enabled. Set it on this repository if this
       # cluster accepts nodes on your own premises: the control plane and those
       # nodes join your tailnet from this one key (ADR-046, ADR-075).
       TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
       # The escrow, on an Infisical you control. It holds this box's master keys,
-      # which cannot be kept inside the box they decrypt. Without these, losing
-      # this cluster loses every secret the platform manages for it.
-      INFISICAL_ESCROW_URL: ${{ secrets.INFISICAL_ESCROW_URL }}
-      INFISICAL_ESCROW_PROJECT_ID: ${{ secrets.INFISICAL_ESCROW_PROJECT_ID }}
-      INFISICAL_ESCROW_CLIENT_ID: ${{ secrets.INFISICAL_ESCROW_CLIENT_ID }}
-      INFISICAL_ESCROW_CLIENT_SECRET: ${{ secrets.INFISICAL_ESCROW_CLIENT_SECRET }}
+      # which cannot be kept inside the box they decrypt, and the administrator
+      # of the box's own Infisical. Required: without these, Day-0 cannot read
+      # that administrator, and losing this cluster loses every secret the
+      # platform manages for it.
+      ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+      ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+      ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+      ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
       # Your container registry, for pulling your OWN private images. Required:
       # the platform's images are public, but your workloads are yours (ADR-066)
       # and the pull secret built from these is what runs them.
@@ -276,4 +275,4 @@ jobs:
       GRAFANA_IRM_HEARTBEAT_URL: ${{ secrets.GRAFANA_IRM_HEARTBEAT_URL }}
       # This box's outbound mail (smtps://user:key@host:port). Optional; without it
       # the issuer sends no verification or reset mail and alerts send no email.
-      ZITADEL_SMTP_URL: ${{ secrets.ZITADEL_SMTP_URL }}
+      IDENTITY_PROVIDER_SMTP_URL: ${{ secrets.IDENTITY_PROVIDER_SMTP_URL }}

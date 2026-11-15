@@ -72,31 +72,29 @@ on:
       GITOPS_REPO_WRITE_TOKEN:
         description: Write access to this repository, so Day-0 can commit the artifacts it generates.
         required: true
-      INFISICAL_ADMIN_EMAIL:
-        description: >-
-          The administrator of this box's own Infisical. Day-0 creates it, and
-          hub-operator signs in as it; there is no default.
-        required: true
-      INFISICAL_ADMIN_PASSWORD:
-        description: That administrator's password.
-        required: true
-      INFISICAL_ESCROW_URL:
+      ESCROW_PROVIDER_URL:
         description: >-
           An Infisical the TENANT controls and this box does not host -- usually
           Infisical Cloud. hub-operator escrows this box's Infisical master keys
           there: the root secret without which its own secret store cannot be
           decrypted. The box's Infisical cannot hold them, being the thing they
           unlock, and the platform must not (ADR-065, ADR-076).
-        required: false
-      INFISICAL_ESCROW_PROJECT_ID:
+
+          Required. It was optional, from when the escrow only received writes:
+          a run could reach the end having escrowed nothing, and the box looked
+          bootstrapped. Day-0 now READS this box's Infisical administrator from
+          the escrow, so a bootstrap that cannot reach one cannot log in to the
+          instance it is building.
+        required: true
+      ESCROW_PROVIDER_PROJECT_ID:
         description: The project in that Infisical the backup is written to.
-        required: false
-      INFISICAL_ESCROW_CLIENT_ID:
+        required: true
+      ESCROW_PROVIDER_CLIENT_ID:
         description: A machine identity with write access to that project.
-        required: false
-      INFISICAL_ESCROW_CLIENT_SECRET:
+        required: true
+      ESCROW_PROVIDER_CLIENT_SECRET:
         description: The matching machine identity client secret.
-        required: false
+        required: true
       GHCR_USERNAME:
         description: >-
           The tenant's container registry username, for pulling their own private
@@ -125,7 +123,7 @@ on:
       GRAFANA_IRM_HEARTBEAT_URL:
         description: The same integration's heartbeat URL.
         required: true
-      ZITADEL_SMTP_URL:
+      IDENTITY_PROVIDER_SMTP_URL:
         description: >-
           The identity provider's outbound mail, as an SMTP URL
           (smtps://resend:<api-key>@smtp.resend.com:465). Without it the issuer
@@ -207,6 +205,37 @@ jobs:
             exit 1
           fi
 
+      # `required: true` on a reusable workflow's secret checks that the CALLER
+      # passed it, not that what it passed has a value. A repository secret that
+      # exists and is empty satisfies GitHub and fails here, several minutes in,
+      # as an escrow error from whichever command reached it first.
+      #
+      # Checked INSIDE the step for the same reason the enrolment below is: a
+      # step condition cannot read the secrets context.
+      - name: Check the credentials this bootstrap cannot proceed without
+        env:
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for v in ESCROW_PROVIDER_URL ESCROW_PROVIDER_PROJECT_ID \
+                   ESCROW_PROVIDER_CLIENT_ID ESCROW_PROVIDER_CLIENT_SECRET; do
+            [[ -n "${!v:-}" ]] || missing+=("$v")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::this repository has no value for: ${missing[*]}"
+            echo "::error::These four reach the escrow that holds this box's master keys AND"
+            echo "::error::the administrator its own Infisical is reached with. Without them"
+            echo "::error::Day-0 cannot read that administrator, and losing this cluster would"
+            echo "::error::lose every secret the platform manages for it (ADR-076)."
+            echo "::error::\`kakt box init\` sets them; \`kakt escrow verify\` reports what is held."
+            exit 1
+          fi
+          echo "the escrow's four credentials are present"
+
       # Step 1 of two. This builds the MANAGEMENT cluster and stops there:
       # `kakt bootstrap-mgmt` returns when the hub's phases are done, which says
       # nothing about the workload cluster the hub then composes. Splitting the
@@ -240,10 +269,10 @@ jobs:
       # every run -- it would have skipped the enrolment a first bootstrap needs.
       - name: Enrol the provider credential in this box's escrow
         env:
-          INFISICAL_ESCROW_URL: ${{ secrets.INFISICAL_ESCROW_URL }}
-          INFISICAL_ESCROW_PROJECT_ID: ${{ secrets.INFISICAL_ESCROW_PROJECT_ID }}
-          INFISICAL_ESCROW_CLIENT_ID: ${{ secrets.INFISICAL_ESCROW_CLIENT_ID }}
-          INFISICAL_ESCROW_CLIENT_SECRET: ${{ secrets.INFISICAL_ESCROW_CLIENT_SECRET }}
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
           KAKT_IDENTITY: machine
           PROVIDER_CREDENTIAL: ${{ secrets.HCLOUD_TOKEN }}
         run: |
@@ -282,18 +311,18 @@ jobs:
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           GRAFANA_IRM_ALERTMANAGER_URL: ${{ secrets.GRAFANA_IRM_ALERTMANAGER_URL }}
           GRAFANA_IRM_HEARTBEAT_URL: ${{ secrets.GRAFANA_IRM_HEARTBEAT_URL }}
-          ZITADEL_SMTP_URL: ${{ secrets.ZITADEL_SMTP_URL }}
+          IDENTITY_PROVIDER_SMTP_URL: ${{ secrets.IDENTITY_PROVIDER_SMTP_URL }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          # The box's own Infisical administrator. Required by Day-0 and by
-          # hub-operator: the defaults they replace were a personal email and the
-          # literal "Password@123" on every box, platform and tenant alike.
-          INFISICAL_ADMIN_EMAIL: ${{ secrets.INFISICAL_ADMIN_EMAIL }}
-          INFISICAL_ADMIN_PASSWORD: ${{ secrets.INFISICAL_ADMIN_PASSWORD }}
-          INFISICAL_ESCROW_URL: ${{ secrets.INFISICAL_ESCROW_URL }}
-          INFISICAL_ESCROW_PROJECT_ID: ${{ secrets.INFISICAL_ESCROW_PROJECT_ID }}
-          INFISICAL_ESCROW_CLIENT_ID: ${{ secrets.INFISICAL_ESCROW_CLIENT_ID }}
-          INFISICAL_ESCROW_CLIENT_SECRET: ${{ secrets.INFISICAL_ESCROW_CLIENT_SECRET }}
+          # No administrator credential. Day-0 reads this box's Infisical
+          # administrator from the escrow the four values below reach, under
+          # infisical-admin-credential (ADR-076) -- it was two more repository
+          # secrets, and a GitHub secret cannot be read back, so that copy could
+          # not be compared with the escrowed one by anything.
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           # Day-0 commits the artifacts it generates into this repository, so it

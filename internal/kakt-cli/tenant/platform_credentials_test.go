@@ -142,13 +142,13 @@ func TestSecretNamesMatchWhatDayZeroReads(t *testing.T) {
 	dayZero := map[string]bool{
 		"S3_ACCESS_KEY_ID": true, "S3_SECRET_ACCESS_KEY": true,
 		"GRAFANA_IRM_ALERTMANAGER_URL": true, "GRAFANA_IRM_HEARTBEAT_URL": true,
-		"ZITADEL_SMTP_URL": true,
-		"GHCR_USERNAME":    true, "GHCR_TOKEN": true,
-		// Read by internal/kakt-cli/infisical (Day-0) and by hub-operator, which
-		// both used to default them to a personal email and "Password@123" --
-		// identical on every box, on the account that can read every secret the
-		// platform manages for that tenant.
-		"INFISICAL_ADMIN_EMAIL": true, "INFISICAL_ADMIN_PASSWORD": true,
+		"IDENTITY_PROVIDER_SMTP_URL": true,
+		"GHCR_USERNAME":              true, "GHCR_TOKEN": true,
+		// SECRET_STORE_ADMIN_EMAIL and SECRET_STORE_ADMIN_PASSWORD are deliberately
+		// absent. The administrator of the box's own Infisical is not a
+		// repository secret: it is generated when the box is initialized, kept in
+		// the tenant's escrow, and read from there by Day-0 (ADR-076). Nothing
+		// collects it because nothing delivers it through this path.
 	}
 	for _, c := range platformCredentials() {
 		if !dayZero[c.Secret] {

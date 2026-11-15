@@ -131,7 +131,7 @@ func TestHandoverNamesTheMissingEscrow(t *testing.T) {
 
 	var buf bytes.Buffer
 	HandoverInstructions(spec, complete, bufio.NewWriter(&buf))
-	if !strings.Contains(buf.String(), "INFISICAL_ESCROW_URL") {
+	if !strings.Contains(buf.String(), "ESCROW_PROVIDER_URL") {
 		t.Errorf("a box with no escrow is not told so:\n%s", buf.String())
 	}
 

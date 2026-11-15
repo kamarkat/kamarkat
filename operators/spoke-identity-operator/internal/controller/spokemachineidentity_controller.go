@@ -33,14 +33,14 @@ import (
 // support-agent-client-cert among them, which surface as three unrelated
 // "certificate not Ready" warnings with nothing pointing here.
 //
-// INFISICAL_URL is supplied to the operator's Deployment from the box's own
+// SECRET_STORE_URL is supplied to the operator's Deployment from the box's own
 // HubEnvironment domain (ADR-051, the sole authority). No default: a wrong
 // Infisical is not a degraded mode, it is another tenant's secret store.
 func clusterIssuerURLFor() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("INFISICAL_URL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("SECRET_STORE_URL")); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("INFISICAL_URL is not set, so the spoke's ClusterIssuer has no signer. " +
+	return "", fmt.Errorf("SECRET_STORE_URL is not set, so the spoke's ClusterIssuer has no signer. " +
 		"It is this box's own Infisical (infisical.<the box's domain>); there is no default, " +
 		"because the one that existed pointed every box at the platform's")
 }

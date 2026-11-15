@@ -44,13 +44,13 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 
 	// Get project slug from environment variable (set via configmap hub-bootstrap-config)
 	// Use secrets project for secret operations (hub-secrets is type "secret-manager")
-	// Fall back to INFISICAL_PROJECT_SLUG for backward compatibility
-	projectSlug := os.Getenv("INFISICAL_SECRETS_PROJECT_SLUG")
+	// Fall back to SECRET_STORE_PROJECT_SLUG for backward compatibility
+	projectSlug := os.Getenv("SECRET_STORE_SECRETS_PROJECT_SLUG")
 	if projectSlug == "" {
-		projectSlug = os.Getenv("INFISICAL_PROJECT_SLUG")
+		projectSlug = os.Getenv("SECRET_STORE_PROJECT_SLUG")
 	}
 	if projectSlug == "" {
-		return fmt.Errorf("neither INFISICAL_SECRETS_PROJECT_SLUG nor INFISICAL_PROJECT_SLUG environment variable is set")
+		return fmt.Errorf("neither SECRET_STORE_SECRETS_PROJECT_SLUG nor SECRET_STORE_PROJECT_SLUG environment variable is set")
 	}
 
 	environmentSlug, err := managementEnvironmentSlug()
@@ -185,7 +185,7 @@ func resolveInfisicalPath(p, tenantID string) (string, error) {
 // all of which are read from a hub namespace and consumed by a hub component.
 //
 // Read from the same variable the readers use, so writer and reader cannot
-// disagree: hub-bootstrap-config carries INFISICAL_ENVIRONMENT_SLUG, rendered from
+// disagree: hub-bootstrap-config carries SECRET_STORE_ENVIRONMENT_SLUG, rendered from
 // the box's declared `management.infisicalEnvironmentSlug`. It is required, with no default,
 // because the only possible default is a guess at which environment someone
 // else's secrets are in -- and guessing wrong is silent, as the comment in
@@ -196,12 +196,12 @@ func resolveInfisicalPath(p, tenantID string) (string, error) {
 // label, and the slug the tenant names in `kakt fleet secrets set <env> …` --
 // and nothing here may stand in for either.
 func managementEnvironmentSlug() (string, error) {
-	slug := strings.TrimSpace(os.Getenv("INFISICAL_ENVIRONMENT_SLUG"))
+	slug := strings.TrimSpace(os.Getenv("SECRET_STORE_ENVIRONMENT_SLUG"))
 	if slug == "" {
-		return "", fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is not set: the hub's own " +
+		return "", fmt.Errorf("SECRET_STORE_ENVIRONMENT_SLUG is not set: the hub's own " +
 			"secrets have no environment to be written to, and defaulting would write them " +
 			"where their ExternalSecrets do not read (hub-bootstrap-config's " +
-			"INFISICAL_ENVIRONMENT_SLUG, rendered from management.infisicalEnvironmentSlug)")
+			"SECRET_STORE_ENVIRONMENT_SLUG, rendered from management.infisicalEnvironmentSlug)")
 	}
 	return slug, nil
 }

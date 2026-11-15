@@ -108,7 +108,7 @@ secrets are still absent without any value being disclosed.`,
 // withInfisical runs fn against this box's own Infisical.
 //
 // The port-forward is how the CLI reaches an instance that is not published,
-// and INFISICAL_API_URL is set by EnsureAPIAccess rather than defaulted: a
+// and SECRET_STORE_API_URL is set by EnsureAPIAccess rather than defaulted: a
 // default pointed every box at the platform's own instance, which is a
 // different tenant's secret store (ADR-065).
 func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Config) error) error {

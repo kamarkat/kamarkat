@@ -199,7 +199,7 @@ var boundaryContracts = []boundaryContract{
 		// writes the infisical-auth Secret, and that phase runs after this one.
 		// Waiting here waits for work that cannot begin until the wait ends --
 		// observed as a 15-minute timeout with the operator in CrashLoopBackOff
-		// on "INFISICAL_CLIENT_SECRET is missing". The requirement is real and is
+		// on "SECRET_STORE_CLIENT_SECRET is missing". The requirement is real and is
 		// declared by boundary 04, which is the first boundary able to wait for it.
 		assertsNothingBecause(
 			"the services this boundary deploys cannot complete their own work " +

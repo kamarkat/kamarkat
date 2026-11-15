@@ -97,11 +97,11 @@ environment of whatever provisioned it.
 ## The Management Secret Scope
 
 1. `manifests/environments/management/` carries the hub's ConfigMap patch
-   (`CLUSTER_ID`, `INFISICAL_ENVIRONMENT_SLUG`) and its HubEnvironment patch.
+   (`CLUSTER_ID`, `SECRET_STORE_ENVIRONMENT_SLUG`) and its HubEnvironment patch.
    No provider references.
 2. Both are rendered from the one declared input,
    `management.infisicalEnvironmentSlug`, so the hub-operator (which reads
-   `INFISICAL_ENVIRONMENT_SLUG`) and every `ClusterSecretStore` resolve one
+   `SECRET_STORE_ENVIRONMENT_SLUG`) and every `ClusterSecretStore` resolve one
    scope.
 3. The scope is `management`: not a workload environment, nothing is promoted
    into or out of it, and no managed cluster reads it. Infisical creates a

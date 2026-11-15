@@ -290,7 +290,7 @@ management:
   #
   # Reaches components as `global.management.infisicalEnvironmentSlug`, and the
   # hub-operator reads the same value from hub-bootstrap-config's
-  # INFISICAL_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
+  # SECRET_STORE_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
   #
   # NOT a workload environment: nothing is promoted into or out of it, and no
   # managed cluster reads it -- a managed cluster's store resolves from that

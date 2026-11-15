@@ -352,7 +352,7 @@ var CLISecretMappings = []SecretMapping{
 	// The issuer sends verification and password-reset mail through the box
 	// owner's own sending service (Resend). Only the password is secret; host,
 	// user and sender are in the Zitadel values. The owner keeps the whole SMTP
-	// URL in k8-secrets/smtp/resend (or ZITADEL_SMTP_URL), hub-bootstrap step 6b
+	// URL in k8-secrets/smtp/resend (or IDENTITY_PROVIDER_SMTP_URL), hub-bootstrap step 6b
 	// turns it into this Secret, and the password component is uploaded to the
 	// owner's /<tenant>-mgmt folder, where zitadel-smtp-config reads it through
 	// the infisical-tenant-mgmt store.

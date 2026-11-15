@@ -383,7 +383,7 @@ consequences, each observed rather than predicted:
   second authorized operator could authenticate to nothing, because the credential was
   a file rather than a grant.
 - Reading the escrow needed the escrow's own MACHINE identity, so its four
-  `INFISICAL_ESCROW_*` values had to be copied onto each workstation. A shared secret
+  `ESCROW_PROVIDER_*` values had to be copied onto each workstation. A shared secret
   authenticates everyone as the same identity, cannot be revoked for one of them, and
   records the box rather than the operator in the audit log.
 - The last resort failed OPEN. On a cloud box `--context=kind-<cluster>` resolves to
@@ -665,7 +665,7 @@ project per box — not a role and not a path. Nothing here depends on a paid ca
 
 ### 2. Human and automation identities are separated
 
-The machine identity in `INFISICAL_ESCROW_*` used to win whenever it was set. It now
+The machine identity in `ESCROW_PROVIDER_*` used to win whenever it was set. It now
 loses to a human session, so an operator at a terminal that also carries automation
 credentials acts as themselves and is subject to the check above. `KAKT_IDENTITY=machine`
 selects the other way explicitly, and refuses when no machine identity is configured;
@@ -801,3 +801,164 @@ is mirrored into the operational store.
 
 `kakt logout` still deletes only the local session; Infisical has no revocation endpoint
 this CLI can call, so a lost workstation is remediated in Infisical rather than in `kakt`.
+
+## Amendment 2026-11-15: the escrow is the only durable home for the box administrator
+
+### 1. What changed
+
+The administrator of a box's own Infisical has exactly one durable source: the
+artefact `infisical-admin-credential` in the tenant's escrow. It is generated
+once when the box is initialized, written there, and read back from there by
+every bootstrap, retry and reconstruction.
+
+`SECRET_STORE_ADMIN_EMAIL` and `SECRET_STORE_ADMIN_PASSWORD` no longer exist as
+repository secrets. The reusable workflow does not declare them, the tenant's
+workflow does not forward them, `box init` does not set them, the credential
+registry does not collect them, and nothing reads them from the environment. The
+four `ESCROW_PROVIDER_*` secrets, previously optional, are now required: they
+are how the CI job authenticates to the escrow, and they are not a copy of
+anything the box holds.
+
+### 2. Why a repository copy could not be a source of truth
+
+The escrow was already the idempotency anchor, for a reason that applies equally
+to reading: a GitHub Actions secret cannot be read back. A copy there which
+drifted from the escrowed one was undetectable by anything, and the drift
+surfaced as a Day-0 unable to log in to an Infisical this box had already
+bootstrapped — the running instance holding a password nothing knows.
+
+It also put the credential with the widest reach in the most broadly readable
+place. It is the break-glass account for the tenant's entire secret store, and a
+restored box still needs it because the restored database carries the old
+password hash. A repository secret is readable by any workflow in that
+repository, including ones added later.
+
+### 3. Fail closed, one resolution path
+
+An unreachable escrow, a missing artefact, or either field absent is a refusal.
+Never a generated password, never a value from the environment, never a default
+administrator, never an empty credential. Regenerating is the worst available
+outcome: the running instance was bootstrapped with a password that already
+exists, a new one would not log in to it, and writing it would destroy the one a
+successor needs.
+
+The credential is resolved before the bootstrap is entered and passed into it.
+It was mutable package-level state read from the environment, which is the wrong
+shape for a credential: whether it held the right value depended on what an
+earlier caller had done to it, and the failure when nothing had was a login
+refused by Infisical rather than a missing input named at the boundary.
+
+### 4. What this does not do
+
+It does not create a per-box authentication boundary. The same machine identity
+may hold membership in several escrow projects, and separation by secret path
+within one project (`/hub-operator/<boxID>`) is a convention, not an access
+control. GitHub still holds the credentials that reach the escrow. What the
+change removes is a second durable copy and the drift it made possible, not the
+shared identity's privileges.
+
+Project-scoped identity separation is available in the Infisical model we run
+against, and is a separate decision.
+
+### 5. The password no longer reaches a process argument list
+
+Inside the box it was passed to `infisical bootstrap` as `--password` and
+interpolated into two `curl -d` login bodies, all three visible to anything able
+to read process arguments in that container.
+
+It now travels on standard input. The Infisical CLI reads
+`INFISICAL_ADMIN_EMAIL`, `INFISICAL_ADMIN_PASSWORD` and
+`INFISICAL_ADMIN_ORGANIZATION` — the vendor's own names, which section 8
+explains are kept — when the matching flag is empty
+(upstream `packages/cmd/bootstrap.go`, `packages/util/constants.go`), so the
+three values are written to a shell that reads one per line and exports them;
+the organisation travels the same way rather than being substituted into the
+script, because a substituted value can end the quoting. The two logins use
+`curl -d @-` with a body built by the JSON encoder instead of by string
+formatting. This is the rule the provider credential's enrolment already
+followed.
+
+Nothing replaced that exposure with output: `kakt init-secrets` printed the
+administrator's password to standard output, which during a bootstrap is a CI
+log, and it now prints where the credential is held instead.
+
+### 6. Corrected facts about the secret store's plan model
+
+Recorded because earlier reasoning here conflated Infisical Cloud Free with
+self-hosted Infisical. Verified against the vendored source at
+`reference-projects/infiscial`:
+
+- A self-hosted unlicensed instance has **no** identity, member or project limit.
+  `getDefaultOnPremFeatures()` sets `identityLimit`, `memberLimit` and
+  `workspaceLimit` to `null`, and enforcement returns early on a null limit
+  (`backend/src/ee/services/license/license-fns.ts`).
+- Where a limit applies, human and machine identities share one allowance:
+  `identitiesUsed: users + identities` (`license-service.ts`). Cloud Free's
+  five-identity ceiling is a billing entitlement decided outside this source, so
+  a design minting an identity per box cannot be assumed to fit a tenant's
+  escrow — the quickstart points it at Cloud by default.
+- `rbac` gates **custom** roles only. Built-in project membership roles are not
+  licence-gated, so per-project scoping needs no paid plan.
+- Machine-identity OIDC authentication is not licence-gated in that source; the
+  only plan check on it covers auth *templates*. Universal Auth is retained
+  because it is already integrated here, not because OIDC is unavailable.
+- An unlicensed instance's default rate limits are 60 reads and 200 writes per
+  minute, which every escrow read in a bootstrap shares.
+
+### 7. Open defect in the hub operator
+
+`operators/hub-operator/internal/infisical/constants.go` reads
+`SECRET_STORE_ADMIN_EMAIL` from its environment and stamps it into the
+`infisical-admin` Secret's `admin-email` field. Nothing sets that variable on the
+operator — no chart, overlay or Day-0 step — so the field is stamped empty, and
+the comment claiming the operator refuses an empty value was wrong. The address
+belongs to the escrowed credential or to the bootstrap result that created the
+account. `SECRET_STORE_ADMIN_PASSWORD` was read there and used by nothing; it is
+removed.
+
+### 8. Provider names are out of the configuration surface
+
+Every environment variable, repository secret and ConfigMap key the platform
+owns is named for the capability, never the product behind it:
+
+| Was | Is |
+| :-- | :-- |
+| `INFISICAL_ESCROW_*` | `ESCROW_PROVIDER_*` |
+| `INFISICAL_*` | `SECRET_STORE_*` |
+| `ZITADEL_*` | `IDENTITY_PROVIDER_*` |
+
+Reader and writer move together: the ConfigMap keys on `hub-bootstrap-config`,
+the operators' flags and manager manifests, the reusable workflow's secret
+declarations, the tenant template, the validators and the quickstart were
+renamed in one change.
+
+**Two sets of names are deliberately kept, because they belong to the vendor's
+binary rather than to us.** Renaming these would not hide a provider; it would
+stop the provider reading its own configuration:
+
+- `ZITADEL_DATABASE_POSTGRES_DSN` and `ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN`
+  in the identity provider's chart values. That container takes its entire
+  configuration as `ZITADEL_*` environment variables.
+- `INFISICAL_ADMIN_EMAIL`, `INFISICAL_ADMIN_PASSWORD` and
+  `INFISICAL_ADMIN_ORGANIZATION`, exported by the shell inside
+  `runBootstrapCLI` for the secret store's own CLI. Our side of those same
+  values is `SECRET_STORE_*`, resolved from the escrow; the vendor's names exist
+  only in the two lines that hand them over.
+
+#### Still provider-named, and not renamed here
+
+These are not environment variables, and each carries a migration cost a rename
+of a variable does not. They are recorded so the gap is deliberate rather than
+forgotten:
+
+- **Keys in the secret store itself**, such as `remoteRef.key: zitadel_smtp_password`.
+  The key is where a value *is already stored* in a running box, so renaming it
+  is a data migration: every box would need the value re-uploaded under the new
+  key before its ExternalSecret resolved again.
+- **Kubernetes resource names**, such as the `infisical-tenant-mgmt` and
+  `infisical-backend` ClusterSecretStores, and Secrets like
+  `zitadel-smtp-password`. Renaming a store touches every ExternalSecret that
+  references it, and a live box reconciles through them.
+- **Declared schema fields**, such as `management.infisicalEnvironmentSlug` on a
+  box declaration and its CRD property. These are API, so a rename is a CRD
+  version change plus an edit to every tenant declaration already committed.

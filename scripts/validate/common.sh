@@ -62,7 +62,7 @@ VALIDATE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # No ENVIRONMENT. The hub has none (ADR-111 Revision 7), and this defaulted to
 # "dev" -- so a check that needed it silently judged every box as a dev one. What
 # the checks actually need is the box's own declaration: HUB_DOMAIN for hostnames,
-# and hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG for the management scope.
+# and hub-bootstrap-config's SECRET_STORE_ENVIRONMENT_SLUG for the management scope.
 
 # The public DNS zone for this environment. prod is un-prefixed (ADR-051); every
 # other environment is prefixed. Must stay in lockstep with the --domain-filter

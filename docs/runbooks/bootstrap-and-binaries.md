@@ -63,7 +63,7 @@ kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/platform-data \
 # TLS is enabled from Day 0 - no upgrade step needed
 # Step 3.5 automatically bootstraps Infisical (Org, Project, Machine Identity)
 # No port-forward needed - the CLI uses pod exec + REST API internally
-INFISICAL_API_URL=http://localhost:8080 ./bin/kakt init-secrets --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+SECRET_STORE_API_URL=http://localhost:8080 ./bin/kakt init-secrets --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
 
 # Step 6: Wait for ArgoCD to sync and deploy database
 kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \

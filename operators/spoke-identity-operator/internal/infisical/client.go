@@ -34,8 +34,8 @@ type Identity struct {
 }
 
 func NewClient(baseURL string) *Client {
-	clientID := os.Getenv("INFISICAL_CLIENT_ID")
-	clientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
+	clientID := os.Getenv("SECRET_STORE_CLIENT_ID")
+	clientSecret := os.Getenv("SECRET_STORE_CLIENT_SECRET")
 	return &Client{
 		BaseURL:      baseURL,
 		clientID:     clientID,
@@ -52,14 +52,14 @@ func (c *Client) authenticate(ctx context.Context) error {
 
 	clientID := c.clientID
 	if clientID == "" {
-		clientID = os.Getenv("INFISICAL_CLIENT_ID")
+		clientID = os.Getenv("SECRET_STORE_CLIENT_ID")
 	}
 	clientSecret := c.clientSecret
 	if clientSecret == "" {
-		clientSecret = os.Getenv("INFISICAL_CLIENT_SECRET")
+		clientSecret = os.Getenv("SECRET_STORE_CLIENT_SECRET")
 	}
 	if clientID == "" || clientSecret == "" {
-		return fmt.Errorf("INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET must be set")
+		return fmt.Errorf("SECRET_STORE_CLIENT_ID and SECRET_STORE_CLIENT_SECRET must be set")
 	}
 
 	loginReq := map[string]string{

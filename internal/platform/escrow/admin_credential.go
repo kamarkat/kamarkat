@@ -62,18 +62,9 @@ func ResolveAdminCredential(ctx context.Context, store EscrowClient, id Identity
 		return AdminCredential{}, false, fmt.Errorf("reading the escrowed Infisical administrator: %w", err)
 	}
 	if strings.TrimSpace(existing) != "" {
-		var cred AdminCredential
-		if err := json.Unmarshal([]byte(existing), &cred); err != nil {
-			return AdminCredential{}, false, fmt.Errorf(
-				"the escrowed Infisical administrator for box %s is not readable as one: %w.\n\n"+
-					"It is under %s. Day-0 logs in with it to re-enter an Infisical it has\n"+
-					"already bootstrapped, so this is repaired rather than replaced: replacing\n"+
-					"it would leave the running instance holding a password nothing knows.",
-				id.BoxID, err, ArtifactInfisicalAdmin)
-		}
-		if strings.TrimSpace(cred.Password) == "" {
-			return AdminCredential{}, false, fmt.Errorf(
-				"the escrowed Infisical administrator for box %s has no password", id.BoxID)
+		cred, parseErr := ParseAdminCredential(id.BoxID, existing)
+		if parseErr != nil {
+			return AdminCredential{}, false, parseErr
 		}
 		// The escrowed address wins over whoever happens to be signed in now. The
 		// account already exists in that Infisical under the address it was
@@ -88,7 +79,7 @@ func ResolveAdminCredential(ctx context.Context, store EscrowClient, id Identity
 			"no address for this box's Infisical administrator.\n\n" +
 				"The password is generated and escrowed, but the account needs an address.\n" +
 				"Sign in with `kakt login` and it is taken from that session, or set\n" +
-				"INFISICAL_ADMIN_EMAIL for this run.")
+				"SECRET_STORE_ADMIN_EMAIL for this run.")
 	}
 	password, err := generatePassword()
 	if err != nil {
@@ -110,6 +101,69 @@ func ResolveAdminCredential(ctx context.Context, store EscrowClient, id Identity
 				"Infisical this one bootstrapped.", err)
 	}
 	return cred, true, nil
+}
+
+// ParseAdminCredential decodes an escrowed administrator payload, refusing one
+// that cannot be logged in with.
+//
+// Shared by every reader so the refusal reads the same wherever the artefact was
+// fetched from: `box init` holds an EscrowClient, Day-0 holds an authorized
+// hubaccess.Access, and both arrive here rather than each deciding for itself
+// what a malformed credential means.
+func ParseAdminCredential(boxID, payload string) (AdminCredential, error) {
+	var cred AdminCredential
+	if err := json.Unmarshal([]byte(payload), &cred); err != nil {
+		return AdminCredential{}, fmt.Errorf(
+			"the escrowed Infisical administrator for box %s is not readable as one: %w.\n\n"+
+				"It is under %s. Day-0 logs in with it to re-enter an Infisical it has\n"+
+				"already bootstrapped, so this is repaired rather than replaced: replacing\n"+
+				"it would leave the running instance holding a password nothing knows.",
+			boxID, err, ArtifactInfisicalAdmin)
+	}
+	if strings.TrimSpace(cred.Password) == "" {
+		return AdminCredential{}, fmt.Errorf(
+			"the escrowed Infisical administrator for box %s has no password", boxID)
+	}
+	if strings.TrimSpace(cred.Email) == "" {
+		return AdminCredential{}, fmt.Errorf(
+			"the escrowed Infisical administrator for box %s has no address, so there is "+
+				"no account to log in as", boxID)
+	}
+	return cred, nil
+}
+
+// RequireAdminCredential is ParseAdminCredential for a reader, where an absent
+// artefact is a refusal rather than a cue to create one.
+func RequireAdminCredential(boxID, payload string) (AdminCredential, error) {
+	if strings.TrimSpace(payload) == "" {
+		return AdminCredential{}, fmt.Errorf(
+			"box %s has no escrowed Infisical administrator under %s.\n\n"+
+				"It is written when the box is initialized, and read back here rather than\n"+
+				"regenerated: the Infisical this box runs was bootstrapped with a password\n"+
+				"that already exists, and a new one would not log in to it.\n\n"+
+				"`kakt escrow verify --box %s --cluster <cluster>` reports what the escrow holds.",
+			boxID, ArtifactInfisicalAdmin, boxID)
+	}
+	return ParseAdminCredential(boxID, payload)
+}
+
+// FetchAdminCredential returns the box's escrowed Infisical administrator for a
+// caller holding an EscrowClient, and refuses when the escrow holds none.
+//
+// Read-only, and the difference from ResolveAdminCredential is the whole point.
+// This is the reader Day-0 wants, where generating a password is never the right
+// answer: the instance about to be logged in to was bootstrapped with one that
+// already exists, so minting a second would leave the running Infisical holding
+// a credential nothing knows -- the failure ResolveAdminCredential's
+// escrow-first ordering exists to prevent, arrived at from the other direction.
+func FetchAdminCredential(ctx context.Context, store EscrowClient, id Identity) (AdminCredential, error) {
+	payload, err := store.RestoreArtifact(ctx, id, ArtifactInfisicalAdmin)
+	if err != nil {
+		// Unreadable is not absent, and here neither is recoverable: a Day-0 that
+		// continued past this would bootstrap a second administrator.
+		return AdminCredential{}, fmt.Errorf("reading the escrowed Infisical administrator: %w", err)
+	}
+	return RequireAdminCredential(id.BoxID, payload)
 }
 
 // passwordAlphabet excludes the characters that break the paths this value

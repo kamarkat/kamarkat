@@ -88,43 +88,12 @@ func platformCredentials() []platformCredential {
 	always := func(Spec, Secrets) bool { return true }
 
 	return []platformCredential{
-		// The administrator of THIS box's own secret store. Always required:
-		// every box runs an Infisical and every box's is administered by someone.
-		//
-		// It was not asked for at all, and both the CLI and hub-operator supplied
-		// a default -- a personal email address and the literal "Password@123",
-		// identical on every box, on the account that can read every secret the
-		// platform manages for this tenant. ADR-003 makes Infisical the system of
-		// record for secret material and ADR-065 says the platform holds no
-		// secret belonging to a tenant; a platform-chosen administrator is both.
-		//
-		// Registered here rather than taken as a flag so it travels the way every
-		// other credential does: one name for the repository secret, the
-		// environment variable Day-0 reads, and the key the operator uploads
-		// under.
-		{
-			Secret: "INFISICAL_ADMIN_EMAIL", Tier: tierCapability,
-			Capability: "administering this box's own secret store",
-			Prompt:     "INFISICAL_ADMIN_EMAIL (the administrator of this box's Infisical): ",
-			Field:      func(s *Secrets) *string { return &s.InfisicalAdminEmail },
-			Needed:     always,
-			// The signed-in session's address. You proved who you are with
-			// `kakt login`, so asking again is asking you to copy a value the
-			// CLI is holding.
-			Derived: true,
-		},
-		{
-			Secret: "INFISICAL_ADMIN_PASSWORD", Tier: tierCapability,
-			Capability: "administering this box's own secret store",
-			Prompt:     "INFISICAL_ADMIN_PASSWORD: ",
-			Field:      func(s *Secrets) *string { return &s.InfisicalAdminPassword },
-			Needed:     always,
-			// Generated and escrowed, never asked for. A human invents a worse
-			// password than crypto/rand does and remembers it less reliably, for
-			// an account whose everyday user is Day-0; the escrow is where it is
-			// recovered from (internal/platform/escrow/admin_credential.go).
-			Derived: true,
-		},
+		// The administrator of this box's own secret store is NOT here, and is not
+		// a repository secret at all. It is generated when the box is initialized
+		// and lives in the tenant's escrow, which Day-0 reads it from (ADR-076).
+		// A GitHub secret cannot be read back, so a copy there could not be
+		// compared with the escrowed one by anything, and a divergence surfaced
+		// as a Day-0 unable to log in to an Infisical the box already ran.
 		{
 			Secret: "S3_ACCESS_KEY_ID", Tier: tierCapability,
 			Capability: "backups of the platform database",
@@ -176,9 +145,9 @@ func platformCredentials() []platformCredential {
 		{
 			// A destination: the issuer runs without it, and simply cannot send
 			// verification or password-reset mail.
-			Secret: "ZITADEL_SMTP_URL", Tier: tierDestination,
+			Secret: "IDENTITY_PROVIDER_SMTP_URL", Tier: tierDestination,
 			Capability: "the identity provider sending verification and password-reset mail",
-			Prompt:     "ZITADEL_SMTP_URL (smtps://resend:<api-key>@smtp.resend.com:465): ",
+			Prompt:     "IDENTITY_PROVIDER_SMTP_URL (smtps://resend:<api-key>@smtp.resend.com:465): ",
 			Field:      func(s *Secrets) *string { return &s.ZitadelSMTPURL },
 			Needed:     always,
 			Store:      "zitadel/smtp-url",

@@ -71,9 +71,9 @@ artifacts:
       - spec.authentication.universalAuth.clientId
   - file: hub-bootstrap-config-patch.yaml
     requiredFields:
-      - data.INFISICAL_PROJECT_ID
-      - data.INFISICAL_ORGANIZATION_ID
-      - data.INFISICAL_BOOTSTRAP_PROFILE_SLUG
+      - data.SECRET_STORE_PROJECT_ID
+      - data.SECRET_STORE_ORGANIZATION_ID
+      - data.SECRET_STORE_BOOTSTRAP_PROFILE_SLUG
 ```
 
 The CLI parses this registry, generates each artifact, and validates that every `requiredFields` path exists and is non-empty. This is the single source of truth for what artifacts must exist before bootstrap can proceed.
@@ -126,7 +126,7 @@ The base manifest uses a minimal valid structure containing only statically-know
 Two artifacts are the first consumers of this pattern:
 
 1. `infisical-fleet-issuer-patch.yaml` (written to `manifests/hub-core-services/security/generated/`) — patches the `infisical-fleet-issuer` ClusterIssuer with `projectId` and `clientId` known only after Day-0 bootstrap completes.
-2. `hub-bootstrap-config-patch.yaml` (written to `manifests/environments/base/generated/`) — patches the `hub-bootstrap-config` ConfigMap with `INFISICAL_PROJECT_ID`, `INFISICAL_ORGANIZATION_ID`, `INFISICAL_PROJECT_SLUG`, `INFISICAL_SECRETS_PROJECT_ID`, `INFISICAL_SECRETS_PROJECT_SLUG`, and `INFISICAL_ENVIRONMENT_SLUG`, replacing the previous CLI mutation pattern and eliminating the `ignoreDifferences` workaround.
+2. `hub-bootstrap-config-patch.yaml` (written to `manifests/environments/base/generated/`) — patches the `hub-bootstrap-config` ConfigMap with `SECRET_STORE_PROJECT_ID`, `SECRET_STORE_ORGANIZATION_ID`, `SECRET_STORE_PROJECT_SLUG`, `SECRET_STORE_SECRETS_PROJECT_ID`, `SECRET_STORE_SECRETS_PROJECT_SLUG`, and `SECRET_STORE_ENVIRONMENT_SLUG`, replacing the previous CLI mutation pattern and eliminating the `ignoreDifferences` workaround.
 
 ### Ownership
 

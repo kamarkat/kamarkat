@@ -82,7 +82,7 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_BASE_URL
+        name: SECRET_STORE_BASE_URL
         value: "http://infisical-standalone-infisical.platform-security.svc:8080"
   target:
     kind: Deployment
@@ -92,7 +92,7 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_CLIENT_ID
+        name: SECRET_STORE_CLIENT_ID
         valueFrom:
           secretKeyRef:
             name: infisical-auth
@@ -106,7 +106,7 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_CLIENT_SECRET
+        name: SECRET_STORE_CLIENT_SECRET
         valueFrom:
           secretKeyRef:
             name: infisical-auth
@@ -120,11 +120,11 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_PROJECT_ID
+        name: SECRET_STORE_PROJECT_ID
         valueFrom:
           configMapKeyRef:
             name: hub-bootstrap-config
-            key: INFISICAL_PROJECT_ID
+            key: SECRET_STORE_PROJECT_ID
   target:
     kind: Deployment
     name: hub-operator
@@ -133,11 +133,11 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_SECRETS_PROJECT_ID
+        name: SECRET_STORE_SECRETS_PROJECT_ID
         valueFrom:
           configMapKeyRef:
             name: hub-bootstrap-config
-            key: INFISICAL_SECRETS_PROJECT_ID
+            key: SECRET_STORE_SECRETS_PROJECT_ID
   target:
     kind: Deployment
     name: hub-operator
@@ -146,11 +146,11 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: INFISICAL_ORGANIZATION_ID
+        name: SECRET_STORE_ORGANIZATION_ID
         valueFrom:
           configMapKeyRef:
             name: hub-bootstrap-config
-            key: INFISICAL_ORGANIZATION_ID
+            key: SECRET_STORE_ORGANIZATION_ID
   target:
     kind: Deployment
     name: hub-operator
@@ -179,7 +179,7 @@ patches:
   target:
     kind: Deployment
     name: hub-operator
-# Note: the escrow env vars (INFISICAL_ESCROW_*) are already defined in
+# Note: the escrow env vars (ESCROW_PROVIDER_*) are already defined in
 # config/manager/manager.yaml — not duplicated here.
 # [CUSTOM] Patch resource requests/limits for production
 - patch: |-

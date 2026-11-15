@@ -117,7 +117,7 @@ func TestSuppressionKeepsSlugsReadable(t *testing.T) {
 	staleCacheSuppressed.Store(true)
 	t.Cleanup(func() { staleCacheSuppressed.Store(false) })
 
-	for _, key := range []string{"INFISICAL_ORGANIZATION_ID", "INFISICAL_PROJECT_ID", "INFISICAL_SECRETS_PROJECT_ID"} {
+	for _, key := range []string{"SECRET_STORE_ORGANIZATION_ID", "SECRET_STORE_PROJECT_ID", "SECRET_STORE_SECRETS_PROJECT_ID"} {
 		if got := getCachedConfigValue(context.Background(), key); got != "" {
 			t.Errorf("%s returned %q while suppressed", key, got)
 		}
@@ -125,9 +125,9 @@ func TestSuppressionKeepsSlugsReadable(t *testing.T) {
 	// Slug keys are not in the suppression list. Without a cluster they resolve to ""
 	// anyway, so assert the routing rather than the value: a slug key must not be
 	// short-circuited by the guard.
-	for _, key := range []string{"INFISICAL_PROJECT_SLUG", "INFISICAL_SECRETS_PROJECT_SLUG"} {
+	for _, key := range []string{"SECRET_STORE_PROJECT_SLUG", "SECRET_STORE_SECRETS_PROJECT_SLUG"} {
 		switch key {
-		case "INFISICAL_ORGANIZATION_ID", "INFISICAL_PROJECT_ID", "INFISICAL_SECRETS_PROJECT_ID":
+		case "SECRET_STORE_ORGANIZATION_ID", "SECRET_STORE_PROJECT_ID", "SECRET_STORE_SECRETS_PROJECT_ID":
 			t.Errorf("%s must not be in the suppressed set", key)
 		}
 	}

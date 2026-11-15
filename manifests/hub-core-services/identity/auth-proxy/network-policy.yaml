@@ -35,7 +35,7 @@ spec:
   # DNAT when bpf-lb-sock=false; ClusterIPs match no namespace selector. Ports
   # constrain accessible services; identity ingress policies restrict callers.)
   #
-  # 8080 is ZITADEL_INTERNAL_URL, which is where this workload fetches the
+  # 8080 is IDENTITY_PROVIDER_INTERNAL_URL, which is where this workload fetches the
   # discovery document and JWKS from; the public issuer it advertises is only
   # compared against a token's iss claim and is never dialled.
   #

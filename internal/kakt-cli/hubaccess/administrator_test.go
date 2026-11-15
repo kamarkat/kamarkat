@@ -225,7 +225,7 @@ func TestTheBindingRecordIsStableAcrossTrailingSlashes(t *testing.T) {
 // therefore subject to the administrator check. Only KAKT_IDENTITY=machine
 // selects the other way, and it refuses when no machine identity is configured.
 func TestSelectingTheMachineIdentityIsExplicit(t *testing.T) {
-	t.Setenv("INFISICAL_ESCROW_CLIENT_ID", "")
+	t.Setenv("ESCROW_PROVIDER_CLIENT_ID", "")
 	t.Setenv("KAKT_IDENTITY", "machine")
 	dir, cluster := box(t, declared)
 	c, _ := Declaration(dir, cluster)
@@ -233,7 +233,7 @@ func TestSelectingTheMachineIdentityIsExplicit(t *testing.T) {
 	if err == nil {
 		t.Fatal("KAKT_IDENTITY=machine was accepted with no machine identity configured")
 	}
-	if !strings.Contains(err.Error(), "INFISICAL_ESCROW_CLIENT_ID") {
+	if !strings.Contains(err.Error(), "ESCROW_PROVIDER_CLIENT_ID") {
 		t.Errorf("the refusal does not say what is missing:\n%v", err)
 	}
 	if !strings.Contains(err.Error(), "never borrows a human session") {

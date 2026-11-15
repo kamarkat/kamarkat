@@ -73,8 +73,8 @@ func LoadConfig() (*Config, error) {
 
 	cfg := &Config{
 		ListenAddr:             m.get("LISTEN_ADDR"),
-		ZitadelIssuerURL:       strings.TrimSuffix(m.get("ZITADEL_ISSUER_URL"), "/"),
-		ZitadelInternalURL:     strings.TrimSuffix(m.get("ZITADEL_INTERNAL_URL"), "/"),
+		ZitadelIssuerURL:       strings.TrimSuffix(m.get("IDENTITY_PROVIDER_ISSUER_URL"), "/"),
+		ZitadelInternalURL:     strings.TrimSuffix(m.get("IDENTITY_PROVIDER_INTERNAL_URL"), "/"),
 		JWKSCacheTTL:           m.duration("JWKS_CACHE_TTL"),
 		JWKSFetchTimeout:       m.duration("JWKS_FETCH_TIMEOUT"),
 		JWKSRefreshMinInterval: m.duration("JWKS_REFRESH_MIN_INTERVAL"),

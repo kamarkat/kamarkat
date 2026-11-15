@@ -592,26 +592,26 @@ func (r *SpokePKIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// 2. Resolve environment config
 	profileSlug := r.ProfileSlug
 	if profileSlug == "" {
-		profileSlug = os.Getenv("INFISICAL_BOOTSTRAP_PROFILE_SLUG")
+		profileSlug = os.Getenv("SECRET_STORE_BOOTSTRAP_PROFILE_SLUG")
 	}
 	if profileSlug == "" {
-		return ctrl.Result{}, fmt.Errorf("INFISICAL_BOOTSTRAP_PROFILE_SLUG not configured")
+		return ctrl.Result{}, fmt.Errorf("SECRET_STORE_BOOTSTRAP_PROFILE_SLUG not configured")
 	}
 
 	orgID := r.OrgID
 	if orgID == "" {
-		orgID = os.Getenv("INFISICAL_ORGANIZATION_ID")
+		orgID = os.Getenv("SECRET_STORE_ORGANIZATION_ID")
 	}
 	if orgID == "" {
-		return ctrl.Result{}, fmt.Errorf("INFISICAL_ORGANIZATION_ID not configured")
+		return ctrl.Result{}, fmt.Errorf("SECRET_STORE_ORGANIZATION_ID not configured")
 	}
 
 	projectID := r.ProjectID
 	if projectID == "" {
-		projectID = os.Getenv("INFISICAL_PROJECT_ID")
+		projectID = os.Getenv("SECRET_STORE_PROJECT_ID")
 	}
 	if projectID == "" {
-		return ctrl.Result{}, fmt.Errorf("INFISICAL_PROJECT_ID not configured")
+		return ctrl.Result{}, fmt.Errorf("SECRET_STORE_PROJECT_ID not configured")
 	}
 
 	// 3. Resolve profile slug to UUID
@@ -726,7 +726,7 @@ func indent(text string) string {
 #### 3. Setup Deployment for `cert-operator`
 Deploy `cert-operator` identically to `hub-operator` via ArgoCD, scheduled at `sync-wave: 1`.
 
-**File: `manifests/hub-core-services/cert-operator/deployment.yaml`** (Standard Kubebuilder deployment, omitted for brevity but ensure ENV vars `INFISICAL_BOOTSTRAP_PROFILE_SLUG` and Auth Tokens are mounted).
+**File: `manifests/hub-core-services/cert-operator/deployment.yaml`** (Standard Kubebuilder deployment, omitted for brevity but ensure ENV vars `SECRET_STORE_BOOTSTRAP_PROFILE_SLUG` and Auth Tokens are mounted).
 
 ---
 

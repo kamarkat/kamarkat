@@ -26,9 +26,9 @@ validate_environment_isolation() {
     # both are wrong in the same way.
     local declared
     declared=$(kc -n platform-ops get configmap hub-bootstrap-config \
-        -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}')
+        -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}')
     if [[ -z "$declared" ]]; then
-        soft_fail "hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG, so the management scope is undeclared and nothing can be checked against it"
+        soft_fail "hub-bootstrap-config carries no SECRET_STORE_ENVIRONMENT_SLUG, so the management scope is undeclared and nothing can be checked against it"
         return 0
     fi
     pass "declared management scope: $declared"

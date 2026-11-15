@@ -67,7 +67,7 @@ func init() {
 }
 
 // nolint:gocyclo
-// waitForInfisicalConfig blocks until INFISICAL_PROJECT_ID is present.
+// waitForInfisicalConfig blocks until SECRET_STORE_PROJECT_ID is present.
 //
 // The value arrives from the hub-bootstrap-config ConfigMap, which the ADR-045
 // bootstrap phase fills two phases after this operator is reconciled. Env vars
@@ -80,16 +80,16 @@ func waitForInfisicalConfig(ctx context.Context, log logr.Logger) {
 	for attempt := 1; ; attempt++ {
 		select {
 		case <-ctx.Done():
-			log.Info("Shutting down while waiting for INFISICAL_PROJECT_ID")
+			log.Info("Shutting down while waiting for SECRET_STORE_PROJECT_ID")
 			os.Exit(0)
 		case <-time.After(every):
 		}
-		if v := os.Getenv("INFISICAL_PROJECT_ID"); v != "" && v != "PLACEHOLDER_PROJECT_ID" {
-			log.Info("INFISICAL_PROJECT_ID now present", "attempts", attempt)
+		if v := os.Getenv("SECRET_STORE_PROJECT_ID"); v != "" && v != "PLACEHOLDER_PROJECT_ID" {
+			log.Info("SECRET_STORE_PROJECT_ID now present", "attempts", attempt)
 			return
 		}
 		if attempt%20 == 0 {
-			log.Info("Still waiting for INFISICAL_PROJECT_ID from hub-bootstrap-config",
+			log.Info("Still waiting for SECRET_STORE_PROJECT_ID from hub-bootstrap-config",
 				"waited", time.Duration(attempt)*every)
 		}
 	}
@@ -259,12 +259,12 @@ func main() {
 
 	// Initialize the Infisical Client for ADR-031 topology management
 	// These env vars are injected by your hub-operator Deployment manifest
-	projectID := os.Getenv("INFISICAL_PROJECT_ID")
-	secretsProjectID := os.Getenv("INFISICAL_SECRETS_PROJECT_ID")
-	orgID := os.Getenv("INFISICAL_ORGANIZATION_ID")
-	clientID := os.Getenv("INFISICAL_CLIENT_ID")
-	clientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
-	baseURL := os.Getenv("INFISICAL_BASE_URL")
+	projectID := os.Getenv("SECRET_STORE_PROJECT_ID")
+	secretsProjectID := os.Getenv("SECRET_STORE_SECRETS_PROJECT_ID")
+	orgID := os.Getenv("SECRET_STORE_ORGANIZATION_ID")
+	clientID := os.Getenv("SECRET_STORE_CLIENT_ID")
+	clientSecret := os.Getenv("SECRET_STORE_CLIENT_SECRET")
+	baseURL := os.Getenv("SECRET_STORE_BASE_URL")
 
 	// An absent project id and a wrong one are different states, and only the
 	// second is misconfiguration.
@@ -284,27 +284,27 @@ func main() {
 	// never rendered. An empty value waits.
 	if projectID == "PLACEHOLDER_PROJECT_ID" {
 		setupLog.Error(fmt.Errorf("project id is the unrendered placeholder"),
-			"operator misconfigured: INFISICAL_PROJECT_ID was never substituted")
+			"operator misconfigured: SECRET_STORE_PROJECT_ID was never substituted")
 		os.Exit(1)
 	}
 	if projectID == "" {
-		setupLog.Info("INFISICAL_PROJECT_ID is not set yet; Infisical-backed controllers stay idle " +
+		setupLog.Info("SECRET_STORE_PROJECT_ID is not set yet; Infisical-backed controllers stay idle " +
 			"until the bootstrap config carries it. This is expected before the Infisical " +
 			"bootstrap phase and is not an error.")
 		waitForInfisicalConfig(ctx, setupLog)
-		projectID = os.Getenv("INFISICAL_PROJECT_ID")
-		secretsProjectID = os.Getenv("INFISICAL_SECRETS_PROJECT_ID")
-		orgID = os.Getenv("INFISICAL_ORGANIZATION_ID")
+		projectID = os.Getenv("SECRET_STORE_PROJECT_ID")
+		secretsProjectID = os.Getenv("SECRET_STORE_SECRETS_PROJECT_ID")
+		orgID = os.Getenv("SECRET_STORE_ORGANIZATION_ID")
 	}
 	if secretsProjectID == "" {
-		setupLog.Info("INFISICAL_SECRETS_PROJECT_ID is missing, falling back to INFISICAL_PROJECT_ID for backward compatibility")
+		setupLog.Info("SECRET_STORE_SECRETS_PROJECT_ID is missing, falling back to SECRET_STORE_PROJECT_ID for backward compatibility")
 		secretsProjectID = projectID
 	}
 
 	setupLog.Info("Loaded Infisical configuration", "projectID", projectID)
 
 	if clientSecret == "" {
-		setupLog.Error(fmt.Errorf("missing client secret"), "operator misconfigured: INFISICAL_CLIENT_SECRET is missing")
+		setupLog.Error(fmt.Errorf("missing client secret"), "operator misconfigured: SECRET_STORE_CLIENT_SECRET is missing")
 		os.Exit(1)
 	}
 
@@ -325,11 +325,11 @@ func main() {
 	//
 	// Not fatal at startup: this operator also reconciles paths that need no
 	// Infisical at all (the hybrid home-worker join runs before the Infisical
-	// gate for exactly that reason), and INFISICAL_PROJECT_ID above already
+	// gate for exactly that reason), and SECRET_STORE_PROJECT_ID above already
 	// establishes that Infisical configuration can arrive after the operator does.
-	mgmtEnvironmentSlug := os.Getenv("INFISICAL_ENVIRONMENT_SLUG")
+	mgmtEnvironmentSlug := os.Getenv("SECRET_STORE_ENVIRONMENT_SLUG")
 	if mgmtEnvironmentSlug == "" {
-		setupLog.Error(fmt.Errorf("INFISICAL_ENVIRONMENT_SLUG is empty"),
+		setupLog.Error(fmt.Errorf("SECRET_STORE_ENVIRONMENT_SLUG is empty"),
 			"the hub's own secrets have no environment; every Infisical write will be "+
 				"refused until hub-bootstrap-config carries it (rendered from the box's "+
 				"declared management.infisicalEnvironmentSlug)")

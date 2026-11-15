@@ -1,5 +1,5 @@
-# Runtime-known fields (INFISICAL_PROJECT_ID, INFISICAL_ORGANIZATION_ID,
-# INFISICAL_BOOTSTRAP_PROFILE_SLUG) are supplied via ADR-045
+# Runtime-known fields (SECRET_STORE_PROJECT_ID, SECRET_STORE_ORGANIZATION_ID,
+# SECRET_STORE_BOOTSTRAP_PROFILE_SLUG) are supplied via ADR-045
 # Bootstrap-Generated GitOps Artifact: manifests/generated/hub-bootstrap-config-patch.yaml
 apiVersion: v1
 kind: ConfigMap
@@ -12,8 +12,8 @@ data:
   # no reader — it was wired into the operator as an env var nothing consumed.
   CLUSTER_ID: ""
   CLUSTER_REGION: ""
-  INFISICAL_ENVIRONMENT_SLUG: ""
-  INFISICAL_BOOTSTRAP_PROFILE_SLUG: "argocd-bootstrap"
+  SECRET_STORE_ENVIRONMENT_SLUG: ""
+  SECRET_STORE_BOOTSTRAP_PROFILE_SLUG: "argocd-bootstrap"
   # The box's own Infisical identity. Declared here, empty, so this ConfigMap
   # holds every key it will ever hold and ONE Application renders all of them.
   #
@@ -27,6 +27,6 @@ data:
   # Values, not a patch: templated-fields.yaml turns these into Helm expressions
   # at packaging time, so a box supplies them the way it supplies its domain, and
   # nothing competes with the object it was patching.
-  INFISICAL_ORGANIZATION_ID: ""
-  INFISICAL_PROJECT_ID: ""
-  INFISICAL_SECRETS_PROJECT_ID: ""
+  SECRET_STORE_ORGANIZATION_ID: ""
+  SECRET_STORE_PROJECT_ID: ""
+  SECRET_STORE_SECRETS_PROJECT_ID: ""

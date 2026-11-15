@@ -405,7 +405,7 @@ spec:
       containers:
       - name: manager
         env:
-        - name: INFISICAL_BASE_URL
+        - name: SECRET_STORE_BASE_URL
           value: "https://infisical.platform-ops.svc"
         - name: HYDRA_BASE_URL
           value: "https://hydra-admin.ory-system.svc"

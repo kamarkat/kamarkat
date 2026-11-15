@@ -26,15 +26,15 @@ spec:
         args:
         - --metrics-bind-address=:8443
         env:
-        - name: INFISICAL_API_URL
+        - name: SECRET_STORE_API_URL
           value: "http://infisical-standalone-infisical.platform-security.svc:8080"
-        - name: INFISICAL_CLIENT_ID
+        - name: SECRET_STORE_CLIENT_ID
           valueFrom:
             secretKeyRef:
               name: infisical-auth
               key: client-id
               optional: true
-        - name: INFISICAL_CLIENT_SECRET
+        - name: SECRET_STORE_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
               name: infisical-auth

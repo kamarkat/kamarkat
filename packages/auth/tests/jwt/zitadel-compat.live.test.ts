@@ -14,11 +14,11 @@ import { CallerNotAllowedError, IdTokenPresentedError, TenantMismatchError } fro
 //
 // SKIPPED unless pointed at an instance, so `vitest run` stays hermetic:
 //
-//   ZITADEL_ISSUER=https://id.example        the issuer
-//   ZITADEL_EXCHANGE_CLIENT_ID=...           the gateway's confidential client
-//   ZITADEL_EXCHANGE_CLIENT_SECRET=...       its secret
-//   ZITADEL_SUBJECT_ID_TOKEN=...             an ID token from a real login
-//   ZITADEL_PROJECT_ID=...                   the audience to exchange for
+//   IDENTITY_PROVIDER_ISSUER=https://id.example        the issuer
+//   IDENTITY_PROVIDER_EXCHANGE_CLIENT_ID=...           the gateway's confidential client
+//   IDENTITY_PROVIDER_EXCHANGE_CLIENT_SECRET=...       its secret
+//   IDENTITY_PROVIDER_SUBJECT_ID_TOKEN=...             an ID token from a real login
+//   IDENTITY_PROVIDER_PROJECT_ID=...                   the audience to exchange for
 //
 // The ID token is obtained by logging in and reading the session cookie the
 // gateway set, or from the token endpoint directly. It expires quickly; this is
@@ -29,11 +29,11 @@ import { CallerNotAllowedError, IdTokenPresentedError, TenantMismatchError } fro
 // run without the first block's.
 
 const env = (k: string) => process.env[k] ?? "";
-const ISSUER = env("ZITADEL_ISSUER");
-const CLIENT_ID = env("ZITADEL_EXCHANGE_CLIENT_ID");
-const CLIENT_SECRET = env("ZITADEL_EXCHANGE_CLIENT_SECRET");
-const SUBJECT = env("ZITADEL_SUBJECT_ID_TOKEN");
-const PROJECT_ID = env("ZITADEL_PROJECT_ID");
+const ISSUER = env("IDENTITY_PROVIDER_ISSUER");
+const CLIENT_ID = env("IDENTITY_PROVIDER_EXCHANGE_CLIENT_ID");
+const CLIENT_SECRET = env("IDENTITY_PROVIDER_EXCHANGE_CLIENT_SECRET");
+const SUBJECT = env("IDENTITY_PROVIDER_SUBJECT_ID_TOKEN");
+const PROJECT_ID = env("IDENTITY_PROVIDER_PROJECT_ID");
 
 const configured = Boolean(ISSUER && CLIENT_ID && CLIENT_SECRET && SUBJECT && PROJECT_ID);
 
@@ -150,15 +150,15 @@ describe.skipIf(!configured)("ADR-095 gate: the Zitadel at_hash invariant, live"
 // early-returns on it, so false yields no roles at all rather than unfiltered
 // ones.
 //
-//   ZITADEL_PEER_PROJECT_ID=...   the OTHER project (e.g. waypoint's)
-//   ZITADEL_PEER_ROLE=...         a role the test user holds in THAT project
+//   IDENTITY_PROVIDER_PEER_PROJECT_ID=...   the OTHER project (e.g. waypoint's)
+//   IDENTITY_PROVIDER_PEER_ROLE=...         a role the test user holds in THAT project
 //
 // A failure here is a FINDING, not a broken build: it decides between the
 // audience-carried roles below and receiver-side exchange. Read the assertion
 // messages rather than only the pass/fail.
 
-const PEER_PROJECT = env("ZITADEL_PEER_PROJECT_ID");
-const PEER_ROLE = env("ZITADEL_PEER_ROLE");
+const PEER_PROJECT = env("IDENTITY_PROVIDER_PEER_PROJECT_ID");
+const PEER_ROLE = env("IDENTITY_PROVIDER_PEER_ROLE");
 const crossConfigured = configured && Boolean(PEER_PROJECT && PEER_ROLE);
 
 describe.skipIf(!crossConfigured)("ADR-094 experiment: cross-project roles in one exchanged token", () => {
@@ -227,29 +227,29 @@ describe.skipIf(!crossConfigured)("ADR-094 experiment: cross-project roles in on
 //
 // SKIPPED unless pointed at an instance:
 //
-//   ZITADEL_ISSUER=https://id.example
-//   ZITADEL_TARGET_PROJECT_ID=...         the receiver's project (its audience)
-//   ZITADEL_TENANT_ORG_ID=...             the receiver's organisation
-//   ZITADEL_DELEGATED_CLIENT_ID=...       the consumer's actsForUser client
-//   ZITADEL_DELEGATED_ACCESS_TOKEN=...    a token that client obtained for a
+//   IDENTITY_PROVIDER_ISSUER=https://id.example
+//   IDENTITY_PROVIDER_TARGET_PROJECT_ID=...         the receiver's project (its audience)
+//   IDENTITY_PROVIDER_TENANT_ORG_ID=...             the receiver's organisation
+//   IDENTITY_PROVIDER_DELEGATED_CLIENT_ID=...       the consumer's actsForUser client
+//   IDENTITY_PROVIDER_DELEGATED_ACCESS_TOKEN=...    a token that client obtained for a
 //                                         real person (read from the consumer's
 //                                         token store after authorizing)
-//   ZITADEL_SERVICE_CLIENT_ID=...         the consumer's machine client
-//   ZITADEL_SERVICE_CLIENT_SECRET=...
-//   ZITADEL_ID_TOKEN=...                  an ID token from a real login
-//   ZITADEL_MAX_ACCESS_TOKEN_SECONDS=900  optional: the lifetime to assert
+//   IDENTITY_PROVIDER_SERVICE_CLIENT_ID=...         the consumer's machine client
+//   IDENTITY_PROVIDER_SERVICE_CLIENT_SECRET=...
+//   IDENTITY_PROVIDER_ID_TOKEN=...                  an ID token from a real login
+//   IDENTITY_PROVIDER_MAX_ACCESS_TOKEN_SECONDS=900  optional: the lifetime to assert
 //
 // A gate to run before enabling delegated-user authentication, not a watch: the
 // delegated token expires within the instance's lifetime.
 
-const T_PROJECT = env("ZITADEL_TARGET_PROJECT_ID");
-const T_ORG = env("ZITADEL_TENANT_ORG_ID");
-const DELEGATED_CLIENT = env("ZITADEL_DELEGATED_CLIENT_ID");
-const DELEGATED_TOKEN = env("ZITADEL_DELEGATED_ACCESS_TOKEN");
-const SERVICE_CLIENT = env("ZITADEL_SERVICE_CLIENT_ID");
-const SERVICE_SECRET = env("ZITADEL_SERVICE_CLIENT_SECRET");
-const ID_TOKEN = env("ZITADEL_ID_TOKEN");
-const MAX_LIFETIME = Number(env("ZITADEL_MAX_ACCESS_TOKEN_SECONDS") || "0");
+const T_PROJECT = env("IDENTITY_PROVIDER_TARGET_PROJECT_ID");
+const T_ORG = env("IDENTITY_PROVIDER_TENANT_ORG_ID");
+const DELEGATED_CLIENT = env("IDENTITY_PROVIDER_DELEGATED_CLIENT_ID");
+const DELEGATED_TOKEN = env("IDENTITY_PROVIDER_DELEGATED_ACCESS_TOKEN");
+const SERVICE_CLIENT = env("IDENTITY_PROVIDER_SERVICE_CLIENT_ID");
+const SERVICE_SECRET = env("IDENTITY_PROVIDER_SERVICE_CLIENT_SECRET");
+const ID_TOKEN = env("IDENTITY_PROVIDER_ID_TOKEN");
+const MAX_LIFETIME = Number(env("IDENTITY_PROVIDER_MAX_ACCESS_TOKEN_SECONDS") || "0");
 
 const delegationConfigured = Boolean(
   ISSUER && T_PROJECT && T_ORG && DELEGATED_CLIENT && DELEGATED_TOKEN && SERVICE_CLIENT && SERVICE_SECRET && ID_TOKEN,

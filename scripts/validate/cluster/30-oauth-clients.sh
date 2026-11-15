@@ -73,12 +73,12 @@ validate_oauth_clients() {
     # so it is what this asks.
     local secrets_project_id env_slug
     secrets_project_id=$(kc get configmap hub-bootstrap-config -n platform-ops \
-        -o jsonpath='{.data.INFISICAL_SECRETS_PROJECT_ID}' 2>/dev/null)
+        -o jsonpath='{.data.SECRET_STORE_SECRETS_PROJECT_ID}' 2>/dev/null)
     env_slug=$(kc get configmap hub-bootstrap-config -n platform-ops \
-        -o jsonpath='{.data.INFISICAL_ENVIRONMENT_SLUG}' 2>/dev/null)
+        -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}' 2>/dev/null)
 
     if [[ -z "$secrets_project_id" ]]; then
-        soft_fail "hub-bootstrap-config carries no INFISICAL_SECRETS_PROJECT_ID — bootstrap has not reached the Infisical API phase, or its generated values are not committed"
+        soft_fail "hub-bootstrap-config carries no SECRET_STORE_SECRETS_PROJECT_ID — bootstrap has not reached the Infisical API phase, or its generated values are not committed"
         return 0
     fi
 
@@ -138,28 +138,28 @@ for x in d.get('items',[]):
     read -r zitadel_pid zitadel_port <<< "$pf_zitadel"
 
     local out
-    out=$(INFISICAL_BASE="http://127.0.0.1:$infisical_port" \
-          ZITADEL_BASE="http://127.0.0.1:$zitadel_port" \
-          ZITADEL_HOST="id.${ENV_ZONE}" \
-          INFISICAL_CLIENT_ID="$infisical_client_id" \
-          INFISICAL_CLIENT_SECRET="$infisical_client_secret" \
-          INFISICAL_PROJECT_ID="$secrets_project_id" \
-          INFISICAL_ENV="$env_slug" \
+    out=$(SECRET_STORE_BASE="http://127.0.0.1:$infisical_port" \
+          IDENTITY_PROVIDER_BASE="http://127.0.0.1:$zitadel_port" \
+          IDENTITY_PROVIDER_HOST="id.${ENV_ZONE}" \
+          SECRET_STORE_CLIENT_ID="$infisical_client_id" \
+          SECRET_STORE_CLIENT_SECRET="$infisical_client_secret" \
+          SECRET_STORE_PROJECT_ID="$secrets_project_id" \
+          SECRET_STORE_ENV="$env_slug" \
           TENANTS="$tenants" \
           python3 - <<'PY'
 import json, os, sys, urllib.error, urllib.parse, urllib.request
 
-INF   = os.environ["INFISICAL_BASE"]
-ZIT   = os.environ["ZITADEL_BASE"]
+INF   = os.environ["SECRET_STORE_BASE"]
+ZIT   = os.environ["IDENTITY_PROVIDER_BASE"]
 # Zitadel is MULTI-INSTANCE: it resolves which instance serves a request from
 # the request's origin. Reached through a port-forward the origin is
 # 127.0.0.1:<port>, which matches no instance, and every management call answers
 # 404 -- not "unauthorized", not "not found in this org", just 404, which reads
 # as a wrong endpoint rather than a wrong host. Sending the public issuer as the
 # Host header is what auth-proxy does for the same reason.
-ZIT_HOST = os.environ["ZITADEL_HOST"]
-PROJ  = os.environ["INFISICAL_PROJECT_ID"]
-ENVS  = os.environ["INFISICAL_ENV"]
+ZIT_HOST = os.environ["IDENTITY_PROVIDER_HOST"]
+PROJ  = os.environ["SECRET_STORE_PROJECT_ID"]
+ENVS  = os.environ["SECRET_STORE_ENV"]
 
 def http(method, url, body=None, headers=None, timeout=15):
     data = json.dumps(body).encode() if body is not None else None
@@ -173,8 +173,8 @@ def http(method, url, body=None, headers=None, timeout=15):
 # 1. Authenticate to Infisical as the platform's own machine identity.
 try:
     tok = http("POST", f"{INF}/api/v1/auth/universal-auth/login", {
-        "clientId": os.environ["INFISICAL_CLIENT_ID"].strip(),
-        "clientSecret": os.environ["INFISICAL_CLIENT_SECRET"].strip(),
+        "clientId": os.environ["SECRET_STORE_CLIENT_ID"].strip(),
+        "clientSecret": os.environ["SECRET_STORE_CLIENT_SECRET"].strip(),
     })["accessToken"].strip()
 except Exception as e:
     print(f"SOFT|Infisical authentication failed ({e}) — the machine identity is not usable yet")

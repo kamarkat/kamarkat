@@ -71,7 +71,15 @@ func (i *Installer) InstallInfisicalAuthFromInfisical(ctx context.Context) (bool
 	// cluster (or localhost:8080) when KUBECONFIG is not exported.
 	infisical.SetKubeconfig(i.Kubeconfig)
 
-	result, err := infisical.BootstrapInfisicalDayZeroWithRetry(ctx, 10*time.Minute)
+	// Resolved before Infisical is reached, and passed in: this is the one place
+	// that knows where the box's escrow is, and the bootstrap should be handed
+	// the credential rather than go looking for one.
+	admin, err := i.infisicalAdministrator(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	result, err := infisical.BootstrapInfisicalDayZeroWithRetry(ctx, admin, 10*time.Minute)
 	if err != nil {
 		return false, fmt.Errorf("infisical bootstrap failed: %w", err)
 	}

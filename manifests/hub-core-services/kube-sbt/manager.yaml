@@ -119,23 +119,23 @@ spec:
         #
         # :465 is implicit TLS, which is what ZITADEL dials first. Unset HOST makes
         # the whole reconcile a no-op, so a box with no sender still starts.
-        - name: ZITADEL_SMTP_HOST
+        - name: IDENTITY_PROVIDER_SMTP_HOST
           value: "smtp.resend.com:465"
-        - name: ZITADEL_SMTP_USER
+        - name: IDENTITY_PROVIDER_SMTP_USER
           value: "resend"
-        - name: ZITADEL_SMTP_TLS
+        - name: IDENTITY_PROVIDER_SMTP_TLS
           value: "true"
         # On the instance's OWN domain, so
         # DomainPolicy.SMTPSenderAddressMatchesInstanceDomain does not have to be
         # relaxed. An off-domain sender would require disabling that check.
-        - name: ZITADEL_SMTP_FROM
+        - name: IDENTITY_PROVIDER_SMTP_FROM
           value: "no-reply@dev.nutgraf.in"
-        - name: ZITADEL_SMTP_FROM_NAME
+        - name: IDENTITY_PROVIDER_SMTP_FROM_NAME
           value: "Nutgraf"
         # The API key, the only part that cannot sit in git. Same Secret the issuer
         # itself reads its SMTP fragment from (identity/zitadel/zitadel-smtp-es.yaml),
         # so there is one source for the credential and not two to rotate.
-        - name: ZITADEL_SMTP_PASSWORD
+        - name: IDENTITY_PROVIDER_SMTP_PASSWORD
           valueFrom:
             secretKeyRef:
               name: zitadel-smtp-password

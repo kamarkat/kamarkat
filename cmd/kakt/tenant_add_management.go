@@ -103,7 +103,7 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		// never asked for: the address comes from the session that created the
 		// box, the password is generated, and the escrow is where it is
 		// recovered from on a re-run.
-		if err := deliverAdminCredential(ctx, box, name); err != nil {
+		if err := escrowAdminCredential(ctx, box, name); err != nil {
 			return err
 		}
 	} else {
@@ -148,15 +148,17 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	return nil
 }
 
-// deliverAdminCredential generates this box's own Infisical administrator,
-// escrows it, and sets it on the repository.
+// escrowAdminCredential generates this box's own Infisical administrator and
+// writes it to the box's escrow, which is the only place it is kept.
 //
-// Two secrets, and neither is asked for. The address is the account that created
-// the box; the password is generated and written to the escrow before it is
-// written anywhere else, because a password that reached the repository and not
-// the escrow could not be recovered by anyone -- and a re-run reads back the one
-// the instance was created with rather than minting a second over the live one.
-func deliverAdminCredential(ctx context.Context, box tenant.Box, cluster string) error {
+// Neither half is asked for: the address is the account that created the box,
+// the password is generated. It was also set on the repository as two Actions
+// secrets, and that copy is gone -- Day-0 reads the escrowed artefact, so a
+// second durable copy bought nothing and could not be verified against this one.
+//
+// A re-run reads back the credential the instance was created with rather than
+// minting a second over the live one.
+func escrowAdminCredential(ctx context.Context, box tenant.Box, cluster string) error {
 	var email string
 	if sess, err := session.Current(ctx, box.Decl.Escrow.URL); err == nil {
 		email = sess.Email
@@ -175,5 +177,5 @@ func deliverAdminCredential(ctx context.Context, box tenant.Box, cluster string)
 		fmt.Printf("\n[box] reusing the escrowed Infisical administrator (%s)\n",
 			secrets.InfisicalAdminEmail)
 	}
-	return tenant.SetAdminSecrets(ctx, box.Decl.GitOrg, box.Decl.TenantID, secrets)
+	return nil
 }

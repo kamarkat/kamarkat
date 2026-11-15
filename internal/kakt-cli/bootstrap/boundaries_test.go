@@ -92,7 +92,7 @@ func TestAWaivedBoundaryGivesASubstantiveReason(t *testing.T) {
 // the hub-operator, the operator cannot authenticate until phase 11f writes
 // infisical-auth, and 11f runs after 03. The boundary waited 15 minutes for work
 // that could not start until it returned, with the operator in CrashLoopBackOff
-// on "INFISICAL_CLIENT_SECRET is missing".
+// on "SECRET_STORE_CLIENT_SECRET is missing".
 //
 // A guarantee belongs to the boundary that can satisfy it; a requirement belongs
 // to the boundary that needs it and can wait for it.

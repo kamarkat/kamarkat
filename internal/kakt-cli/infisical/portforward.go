@@ -167,7 +167,7 @@ func (pf *PortForwardManager) WaitForAPI(ctx context.Context, timeout time.Durat
 }
 
 // EnsureAPIAccess starts the port-forward (if not running), waits for the API
-// to respond, and sets INFISICAL_API_URL so infisical.NewClient picks it up.
+// to respond, and sets SECRET_STORE_API_URL so infisical.NewClient picks it up.
 func (pf *PortForwardManager) EnsureAPIAccess(ctx context.Context) error {
 	if !pf.IsRunning() {
 		fmt.Println("[port-forward] Starting kubectl port-forward to Infisical service...")
@@ -185,9 +185,9 @@ func (pf *PortForwardManager) EnsureAPIAccess(ctx context.Context) error {
 	}
 
 	localURL := pf.LocalURL()
-	if current := os.Getenv("INFISICAL_API_URL"); current != localURL {
-		os.Setenv("INFISICAL_API_URL", localURL)
-		fmt.Printf("[port-forward] INFISICAL_API_URL set to %s\n", localURL)
+	if current := os.Getenv("SECRET_STORE_API_URL"); current != localURL {
+		os.Setenv("SECRET_STORE_API_URL", localURL)
+		fmt.Printf("[port-forward] SECRET_STORE_API_URL set to %s\n", localURL)
 	}
 
 	return nil

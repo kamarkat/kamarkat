@@ -80,7 +80,7 @@ func optionalSecrets() []optionalSecret {
 			// uploads only its password, to /<tenant>-mgmt.
 			name: "zitadel-smtp", namespace: constants.NamespaceOps, dir: "smtp",
 			keys: map[string]string{
-				"resend": "ZITADEL_SMTP_URL",
+				"resend": "IDENTITY_PROVIDER_SMTP_URL",
 			},
 			secType:     corev1.SecretTypeOpaque,
 			what:        "the identity provider sending verification and password-reset mail",

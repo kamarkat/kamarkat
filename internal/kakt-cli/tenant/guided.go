@@ -108,7 +108,7 @@ func credentialGuidance(secret string) guidance {
 				"Ephemeral off: these nodes are meant to stay in the tailnet",
 			},
 		}
-	case "INFISICAL_ESCROW_CLIENT_SECRET":
+	case "ESCROW_PROVIDER_CLIENT_SECRET":
 		return guidance{
 			URL: "https://app.infisical.com/organization/identities",
 			Steps: []string{
@@ -329,9 +329,9 @@ func CredentialAsks(spec Spec, s *Secrets) []Ask {
 	// that fixes it.
 	if s.escrowNamedButUnauthenticated() {
 		asks = append(asks, Ask{
-			Secret: "INFISICAL_ESCROW_CLIENT_SECRET",
+			Secret: "ESCROW_PROVIDER_CLIENT_SECRET",
 			Why:    "what this box's automation authenticates to the escrow with",
-			Store:  escrowStorePath("INFISICAL_ESCROW_CLIENT_SECRET"),
+			Store:  escrowStorePath("ESCROW_PROVIDER_CLIENT_SECRET"),
 			Target: &s.EscrowClientSecret,
 		})
 	}

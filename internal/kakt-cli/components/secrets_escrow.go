@@ -18,10 +18,10 @@ import (
 // order a human supplies them. Declared once because three places must agree on
 // them: this installer, the operator's Deployment, and the rendering that asks.
 var escrowEnv = []string{
-	"INFISICAL_ESCROW_URL",
-	"INFISICAL_ESCROW_CLIENT_ID",
-	"INFISICAL_ESCROW_CLIENT_SECRET",
-	"INFISICAL_ESCROW_PROJECT_ID",
+	"ESCROW_PROVIDER_URL",
+	"ESCROW_PROVIDER_CLIENT_ID",
+	"ESCROW_PROVIDER_CLIENT_SECRET",
+	"ESCROW_PROVIDER_PROJECT_ID",
 }
 
 // InstallEscrowCredentials creates the Secret hub-operator reads to reach the

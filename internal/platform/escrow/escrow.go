@@ -363,10 +363,10 @@ func legacyPath(clusterName string) string {
 func escrowValue(name string) string { return StoredValue(name) }
 
 func NewEscrowClient(ctx context.Context, inClusterURL string) (EscrowClient, error) {
-	url := escrowValue("INFISICAL_ESCROW_URL")
-	clientID := escrowValue("INFISICAL_ESCROW_CLIENT_ID")
-	clientSecret := escrowValue("INFISICAL_ESCROW_CLIENT_SECRET")
-	projectID := escrowValue("INFISICAL_ESCROW_PROJECT_ID")
+	url := escrowValue("ESCROW_PROVIDER_URL")
+	clientID := escrowValue("ESCROW_PROVIDER_CLIENT_ID")
+	clientSecret := escrowValue("ESCROW_PROVIDER_CLIENT_SECRET")
+	projectID := escrowValue("ESCROW_PROVIDER_PROJECT_ID")
 
 	if url == "" && clientID == "" && clientSecret == "" && projectID == "" {
 		return nil, fmt.Errorf("no escrow configured")
@@ -376,10 +376,10 @@ func NewEscrowClient(ctx context.Context, inClusterURL string) (EscrowClient, er
 	// appears to exist and does not work, which is worse than none.
 	var missing []string
 	for _, kv := range []struct{ name, value string }{
-		{"INFISICAL_ESCROW_URL", url},
-		{"INFISICAL_ESCROW_PROJECT_ID", projectID},
-		{"INFISICAL_ESCROW_CLIENT_ID", clientID},
-		{"INFISICAL_ESCROW_CLIENT_SECRET", clientSecret},
+		{"ESCROW_PROVIDER_URL", url},
+		{"ESCROW_PROVIDER_PROJECT_ID", projectID},
+		{"ESCROW_PROVIDER_CLIENT_ID", clientID},
+		{"ESCROW_PROVIDER_CLIENT_SECRET", clientSecret},
 	} {
 		if kv.value == "" {
 			missing = append(missing, kv.name)

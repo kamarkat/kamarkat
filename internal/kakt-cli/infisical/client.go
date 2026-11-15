@@ -53,7 +53,7 @@ type Config struct {
 // It retrieves the Infisical URL and authenticates using Universal Auth
 // Reuses the same credentials that ESO uses (infisical-auth in external-secrets-system)
 func NewClient(ctx context.Context, clientset *kubernetes.Clientset) (*Client, error) {
-	// INFISICAL_API_URL, or nothing. There is no default.
+	// SECRET_STORE_API_URL, or nothing. There is no default.
 	//
 	// It defaulted to https://infisical.dev.nutgraf.in -- the PLATFORM's own
 	// Infisical. On a tenant's box that is not a fallback, it is a different
@@ -65,9 +65,9 @@ func NewClient(ctx context.Context, clientset *kubernetes.Clientset) (*Client, e
 	// Every caller sets it. EnsurePortForward does, for the in-cluster case; a box
 	// reaching its own Infisical over its public hostname derives that from its own
 	// domain. Not knowing which Infisical to talk to is an error, not a guess.
-	baseURL := strings.TrimSpace(os.Getenv("INFISICAL_API_URL"))
+	baseURL := strings.TrimSpace(os.Getenv("SECRET_STORE_API_URL"))
 	if baseURL == "" {
-		return nil, fmt.Errorf("INFISICAL_API_URL is not set, so there is no Infisical to talk to.\n\n" +
+		return nil, fmt.Errorf("SECRET_STORE_API_URL is not set, so there is no Infisical to talk to.\n\n" +
 			"It is this box's own instance -- infisical.<the box's domain>, or a\n" +
 			"port-forward to it. There is no default: the one that existed pointed at\n" +
 			"the platform's Infisical, which is a different tenant's secret store.")
@@ -397,18 +397,18 @@ func GetInfisicalConfig(ctx context.Context, clientset *kubernetes.Clientset) (*
 	}
 
 	// Use the secrets project slug for secret read/write operations
-	projectSlug := cm.Data["INFISICAL_SECRETS_PROJECT_SLUG"]
+	projectSlug := cm.Data["SECRET_STORE_SECRETS_PROJECT_SLUG"]
 	if projectSlug == "" {
-		projectSlug = cm.Data["INFISICAL_PROJECT_SLUG"]
+		projectSlug = cm.Data["SECRET_STORE_PROJECT_SLUG"]
 	}
-	environmentSlug := cm.Data["INFISICAL_ENVIRONMENT_SLUG"]
+	environmentSlug := cm.Data["SECRET_STORE_ENVIRONMENT_SLUG"]
 
 	if projectSlug == "" {
 		return nil, fmt.Errorf("hub-bootstrap-config carries neither " +
-			"INFISICAL_SECRETS_PROJECT_SLUG nor INFISICAL_PROJECT_SLUG")
+			"SECRET_STORE_SECRETS_PROJECT_SLUG nor SECRET_STORE_PROJECT_SLUG")
 	}
 	if environmentSlug == "" {
-		return nil, fmt.Errorf("hub-bootstrap-config carries no INFISICAL_ENVIRONMENT_SLUG " +
+		return nil, fmt.Errorf("hub-bootstrap-config carries no SECRET_STORE_ENVIRONMENT_SLUG " +
 			"(rendered from the box's declared management.infisicalEnvironmentSlug)")
 	}
 

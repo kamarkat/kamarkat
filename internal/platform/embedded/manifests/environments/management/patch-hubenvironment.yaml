@@ -30,7 +30,7 @@ spec:
       # The management secret scope (ADR-111 Revision 7 §2). Load-bearing: it forms
       # the Infisical API path in the hub-operator (internal/client/infisical.go:144),
       # and the operator reads the same value from hub-bootstrap-config's
-      # INFISICAL_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
+      # SECRET_STORE_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
       #
       # Overwritten at render from `management.infisicalEnvironmentSlug`, the one
       # declared input; the literal below is what this box declares.

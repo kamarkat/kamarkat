@@ -249,10 +249,10 @@ func (s *Secrets) fillEscrowFromStore() {
 		name  string
 		field *string
 	}{
-		{"INFISICAL_ESCROW_URL", &s.EscrowURL},
-		{"INFISICAL_ESCROW_PROJECT_ID", &s.EscrowProjectID},
-		{"INFISICAL_ESCROW_CLIENT_ID", &s.EscrowClientID},
-		{"INFISICAL_ESCROW_CLIENT_SECRET", &s.EscrowClientSecret},
+		{"ESCROW_PROVIDER_URL", &s.EscrowURL},
+		{"ESCROW_PROVIDER_PROJECT_ID", &s.EscrowProjectID},
+		{"ESCROW_PROVIDER_CLIENT_ID", &s.EscrowClientID},
+		{"ESCROW_PROVIDER_CLIENT_SECRET", &s.EscrowClientSecret},
 	} {
 		if strings.TrimSpace(*f.field) != "" {
 			continue
@@ -304,10 +304,10 @@ func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
 	// All three or none: a partial set produces a box that believes it has an
 	// escrow and cannot reach it, which is worse than having none.
 	if s.hasEscrow() {
-		values["INFISICAL_ESCROW_URL"] = strings.TrimSpace(s.EscrowURL)
-		values["INFISICAL_ESCROW_CLIENT_ID"] = strings.TrimSpace(s.EscrowClientID)
-		values["INFISICAL_ESCROW_CLIENT_SECRET"] = strings.TrimSpace(s.EscrowClientSecret)
-		values["INFISICAL_ESCROW_PROJECT_ID"] = strings.TrimSpace(s.EscrowProjectID)
+		values["ESCROW_PROVIDER_URL"] = strings.TrimSpace(s.EscrowURL)
+		values["ESCROW_PROVIDER_CLIENT_ID"] = strings.TrimSpace(s.EscrowClientID)
+		values["ESCROW_PROVIDER_CLIENT_SECRET"] = strings.TrimSpace(s.EscrowClientSecret)
+		values["ESCROW_PROVIDER_PROJECT_ID"] = strings.TrimSpace(s.EscrowProjectID)
 	}
 
 	// Whatever this box has. Capability credentials are refused earlier when
@@ -634,10 +634,10 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 		fmt.Fprintf(w, "Without it, losing this cluster loses every secret the platform manages\n")
 		fmt.Fprintf(w, "for it, and the escrow cannot be added after the fact.\n\n")
 		for _, name := range []string{
-			"INFISICAL_ESCROW_URL",
-			"INFISICAL_ESCROW_PROJECT_ID",
-			"INFISICAL_ESCROW_CLIENT_ID",
-			"INFISICAL_ESCROW_CLIENT_SECRET",
+			"ESCROW_PROVIDER_URL",
+			"ESCROW_PROVIDER_PROJECT_ID",
+			"ESCROW_PROVIDER_CLIENT_ID",
+			"ESCROW_PROVIDER_CLIENT_SECRET",
 		} {
 			fmt.Fprintf(w, "  gh secret set %s --repo %s\n", name, repo)
 		}
@@ -866,41 +866,6 @@ func checkTokenPlausible(token string) error {
 			"A paste into a no-echo prompt that does not register looks exactly like this: "+
 			"the command succeeds, the secret is created empty, and the build that reads it "+
 			"fails on \"Invalid username or token\" as though the credential were wrong", n)
-	}
-	return nil
-}
-
-// SetAdminSecrets sets the two secrets that are generated rather than supplied:
-// the administrator of this box's OWN Infisical.
-//
-// Separate from SetSecrets because the two are set at different moments by
-// different commands. Everything else is a credential the operator holds and is
-// delivered when the box is created; this pair is derived -- the address from the
-// session, the password generated and escrowed -- and cannot exist until the box
-// has a cluster to key its escrow artefact by (escrow.Identity takes a box AND a
-// cluster, even for a box-scoped artefact).
-//
-// Create-only in effect: the value written is the one the escrow holds, so a
-// re-run sets the same two values rather than rotating a password the instance
-// is already using.
-func SetAdminSecrets(ctx context.Context, gitOrg, tenantID string, s Secrets) error {
-	repo := fmt.Sprintf("%s/%s-gitops", gitOrg, tenantID)
-	values := map[string]string{
-		"INFISICAL_ADMIN_EMAIL":    strings.TrimSpace(s.InfisicalAdminEmail),
-		"INFISICAL_ADMIN_PASSWORD": s.InfisicalAdminPassword,
-	}
-	for _, name := range []string{"INFISICAL_ADMIN_EMAIL", "INFISICAL_ADMIN_PASSWORD"} {
-		if values[name] == "" {
-			return fmt.Errorf("%s is empty, and Day-0 creates this box's Infisical with it.\n"+
-				"The pair is generated and escrowed together, so an empty one means the\n"+
-				"escrow write did not happen", name)
-		}
-		if err := setSecretWithRetry(ctx, repo, name, values[name]); err != nil {
-			return err
-		}
-		// The NAME, never the value: this is the one credential on the box that
-		// nobody has a copy of outside the escrow.
-		fmt.Printf("[box] ✓ %s set on %s\n", name, repo)
 	}
 	return nil
 }

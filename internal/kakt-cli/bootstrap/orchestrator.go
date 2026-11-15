@@ -615,7 +615,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	// way anything in a GitOps box can: through git, rendered by ArgoCD. The
 	// commit used to run after boundaries 04, 05 and 06, which meant boundary 04
 	// waited on values that were sitting uncommitted on disk a few lines above
-	// it. hub-bootstrap-config rendered INFISICAL_PROJECT_ID="", the hub-operator
+	// it. hub-bootstrap-config rendered SECRET_STORE_PROJECT_ID="", the hub-operator
 	// shut down waiting for it and crash-looped, DatabaseRolesProvisioned was
 	// never published, and the gate timed out after 45 minutes on a condition
 	// that could not arrive. A fresh box could not pass it, ever -- and no run

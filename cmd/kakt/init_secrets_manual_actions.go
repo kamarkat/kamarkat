@@ -36,8 +36,13 @@ func printManualActions(info *infisical.AccessInfo) {
 
 	fmt.Println()
 	fmt.Println("  Credentials:")
-	fmt.Printf("    Email:    %s\n", info.AdminEmail)
-	fmt.Printf("    Password: %s\n", info.Password)
+	fmt.Println("    Held in this box's escrow, as infisical-admin-credential.")
+	fmt.Println("    $ kakt escrow verify --box <box> --cluster <cluster>")
+	fmt.Println()
+	// The password was printed here. During a bootstrap this output is a CI log,
+	// so the administrator of the tenant's entire secret store was written to
+	// wherever that run is retained -- and masking is not the same as not
+	// disclosing. The escrow is where it is read from.
 	fmt.Println()
 
 	fmt.Println("  Bootstrap summary:")

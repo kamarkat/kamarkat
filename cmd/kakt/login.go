@@ -25,7 +25,7 @@ const defaultEscrowDomain = "https://app.infisical.com"
 // box escrows to.
 //
 // WHAT THIS REPLACES. Reaching a hub used to require the escrow MACHINE identity:
-// four INFISICAL_ESCROW_* values exported into the environment or left in
+// four ESCROW_PROVIDER_* values exported into the environment or left in
 // k8-secrets/infisical/ by whoever ran `kakt escrow init`. A shared secret copied
 // onto every workstation authenticates everyone as the same identity, cannot be
 // revoked for one person, and records the box rather than the operator in the
@@ -60,8 +60,8 @@ with your identity, used, and discarded.
 Automation does not log in. It sets the machine identity instead, which every
 command prefers when present:
 
-  INFISICAL_ESCROW_URL  INFISICAL_ESCROW_PROJECT_ID
-  INFISICAL_ESCROW_CLIENT_ID  INFISICAL_ESCROW_CLIENT_SECRET`,
+  ESCROW_PROVIDER_URL  ESCROW_PROVIDER_PROJECT_ID
+  ESCROW_PROVIDER_CLIENT_ID  ESCROW_PROVIDER_CLIENT_SECRET`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			domain = strings.TrimRight(strings.TrimSpace(domain), "/")
 			store, err := session.Open()
@@ -100,12 +100,12 @@ command prefers when present:
 	f.StringVar(&domain, "domain", defaultEscrowDomain, "the Infisical your boxes escrow to")
 	f.StringVar(&token, "token", "",
 		"the token Infisical shows when it could not push the login to this terminal; skips "+
-			"the browser step (also read from INFISICAL_TOKEN)")
+			"the browser step (also read from SECRET_STORE_TOKEN)")
 	f.StringVar(&org, "org", "",
 		"check the session can see this organization, by id, slug or name, and record it. The "+
 			"browser login is what scopes the token")
 	f.DurationVar(&timeout, "timeout", 3*time.Minute, "how long to wait for the browser login")
-	if env := strings.TrimSpace(os.Getenv("INFISICAL_TOKEN")); env != "" && token == "" {
+	if env := strings.TrimSpace(os.Getenv("SECRET_STORE_TOKEN")); env != "" && token == "" {
 		token = env
 	}
 	return cmd
@@ -368,10 +368,10 @@ func newWhoamiCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Reported in the order Open() tries them, so what is printed is what
 			// would be used rather than what exists.
-			if id := strings.TrimSpace(os.Getenv("INFISICAL_ESCROW_CLIENT_ID")); id != "" {
+			if id := strings.TrimSpace(os.Getenv("ESCROW_PROVIDER_CLIENT_ID")); id != "" {
 				fmt.Println("machine identity (from the environment)")
 				fmt.Printf("  client id  %s\n", id)
-				fmt.Printf("  escrow     %s\n", os.Getenv("INFISICAL_ESCROW_URL"))
+				fmt.Printf("  escrow     %s\n", os.Getenv("ESCROW_PROVIDER_URL"))
 				fmt.Println("\nThis takes precedence over any stored session, so automation and this")
 				fmt.Println("workstation behave the same way.")
 				return nil

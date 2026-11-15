@@ -217,7 +217,7 @@ func (s Secrets) RequireEscrow() error {
 		"  kakt escrow init --name <project-name>\n\n"+
 		"To use an escrow you already have, pass --escrow-url, --escrow-project-id,\n"+
 		"--escrow-client-id and --escrow-client-secret, or answer the prompts.%s",
-		escrow.MoveHint("INFISICAL_ESCROW_PROJECT_ID", "INFISICAL_ESCROW_CLIENT_ID"))
+		escrow.MoveHint("ESCROW_PROVIDER_PROJECT_ID", "ESCROW_PROVIDER_CLIENT_ID"))
 }
 
 // VerifyEscrow proves the escrow works before a box is built on it.
@@ -244,10 +244,10 @@ func (s Secrets) VerifyEscrow() error {
 
 	// The env is what the escrow client reads, and what the box will be given.
 	for k, v := range map[string]string{
-		"INFISICAL_ESCROW_URL":           s.EscrowURL,
-		"INFISICAL_ESCROW_PROJECT_ID":    s.EscrowProjectID,
-		"INFISICAL_ESCROW_CLIENT_ID":     s.EscrowClientID,
-		"INFISICAL_ESCROW_CLIENT_SECRET": s.EscrowClientSecret,
+		"ESCROW_PROVIDER_URL":           s.EscrowURL,
+		"ESCROW_PROVIDER_PROJECT_ID":    s.EscrowProjectID,
+		"ESCROW_PROVIDER_CLIENT_ID":     s.EscrowClientID,
+		"ESCROW_PROVIDER_CLIENT_SECRET": s.EscrowClientSecret,
 	} {
 		restore, err := setEnvFor(k, v)
 		if err != nil {
@@ -285,10 +285,10 @@ func (s Secrets) VerifyEscrow() error {
 // store it is meant to administer.
 func (s Secrets) WithAdminCredential(ctx context.Context, boxID, clusterName, sessionEmail string) (Secrets, bool, error) {
 	for k, v := range map[string]string{
-		"INFISICAL_ESCROW_URL":           s.EscrowURL,
-		"INFISICAL_ESCROW_PROJECT_ID":    s.EscrowProjectID,
-		"INFISICAL_ESCROW_CLIENT_ID":     s.EscrowClientID,
-		"INFISICAL_ESCROW_CLIENT_SECRET": s.EscrowClientSecret,
+		"ESCROW_PROVIDER_URL":           s.EscrowURL,
+		"ESCROW_PROVIDER_PROJECT_ID":    s.EscrowProjectID,
+		"ESCROW_PROVIDER_CLIENT_ID":     s.EscrowClientID,
+		"ESCROW_PROVIDER_CLIENT_SECRET": s.EscrowClientSecret,
 	} {
 		restore, err := setEnvFor(k, v)
 		if err != nil {
@@ -476,9 +476,9 @@ func (s Spec) boxTokens() map[string]string {
 // reads the coordinates the box itself recorded, which is what lets a second
 // workstation operate it -- see clusterTokens.
 func (s Spec) WithEscrowCoordinates() Spec {
-	s.EscrowURL = escrowCoordinate("INFISICAL_ESCROW_URL")
-	s.EscrowProjectID = escrowCoordinate("INFISICAL_ESCROW_PROJECT_ID")
-	s.EscrowOrgID = escrowCoordinate("INFISICAL_ESCROW_ORG_ID")
+	s.EscrowURL = escrowCoordinate("ESCROW_PROVIDER_URL")
+	s.EscrowProjectID = escrowCoordinate("ESCROW_PROVIDER_PROJECT_ID")
+	s.EscrowOrgID = escrowCoordinate("ESCROW_PROVIDER_ORG_ID")
 	return s
 }
 
@@ -511,9 +511,9 @@ It is read from the escrow you already have, never typed:
   kakt login
   kakt escrow init --name <project name>
 
-records INFISICAL_ESCROW_ORG_ID alongside the escrow's other settings, from the
+records ESCROW_PROVIDER_ORG_ID alongside the escrow's other settings, from the
 organization your session belongs to.%s`,
-		escrow.MoveHint("INFISICAL_ESCROW_ORG_ID", "INFISICAL_ESCROW_PROJECT_ID"))
+		escrow.MoveHint("ESCROW_PROVIDER_ORG_ID", "ESCROW_PROVIDER_PROJECT_ID"))
 }
 
 // clusterTokens are facts about ONE cluster, and are substituted only into the

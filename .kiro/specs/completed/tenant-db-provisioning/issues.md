@@ -278,7 +278,7 @@ spec:
       - name: upload
         image: curlimages/curl:8.5.0
         env:
-        - name: INFISICAL_TOKEN
+        - name: SECRET_STORE_TOKEN
           valueFrom:
             secretKeyRef:
               name: infisical-auth
@@ -293,7 +293,7 @@ spec:
         - -c
         - |
           curl -X POST "https://app.infisical.com/api/v3/secrets/spoke-pool-eu-prod-01-crossplane-admin-password" \
-            -H "Authorization: Bearer $INFISICAL_TOKEN" \
+            -H "Authorization: Bearer $SECRET_STORE_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{
               \"workspaceId\": \"hub-platform\",

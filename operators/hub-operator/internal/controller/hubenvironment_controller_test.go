@@ -127,8 +127,8 @@ var _ = Describe("HubEnvironment Controller", func() {
 			Expect(os.Chdir(GinkgoT().TempDir())).To(Succeed())
 			defer func() { Expect(os.Chdir(prevWd)).To(Succeed()) }()
 			for _, k := range []string{
-				"INFISICAL_ESCROW_URL", "INFISICAL_ESCROW_PROJECT_ID",
-				"INFISICAL_ESCROW_CLIENT_ID", "INFISICAL_ESCROW_CLIENT_SECRET",
+				"ESCROW_PROVIDER_URL", "ESCROW_PROVIDER_PROJECT_ID",
+				"ESCROW_PROVIDER_CLIENT_ID", "ESCROW_PROVIDER_CLIENT_SECRET",
 			} {
 				GinkgoT().Setenv(k, "")
 			}

@@ -3,7 +3,7 @@
 //
 // WHY A SESSION AT ALL. Every external command that reaches a hub needs a
 // credential for the box's escrow, and that credential used to be a machine
-// identity: four INFISICAL_ESCROW_* values exported into the environment or left
+// identity: four ESCROW_PROVIDER_* values exported into the environment or left
 // in k8-secrets/infisical/ by whoever ran `kakt escrow init`. A shared secret is
 // then the price of admission -- it has to be copied onto each workstation, it
 // authenticates every person as the same identity, it cannot be revoked for one
@@ -264,8 +264,8 @@ func Current(ctx context.Context, domain string) (Session, error) {
 			return Session{}, fmt.Errorf("%w.\n\n"+
 				"A session cannot be kept on this machine. Use a machine identity instead, "+
 				"which is what automation should use anyway:\n\n"+
-				"  INFISICAL_ESCROW_URL  INFISICAL_ESCROW_PROJECT_ID\n"+
-				"  INFISICAL_ESCROW_CLIENT_ID  INFISICAL_ESCROW_CLIENT_SECRET", err)
+				"  ESCROW_PROVIDER_URL  ESCROW_PROVIDER_PROJECT_ID\n"+
+				"  ESCROW_PROVIDER_CLIENT_ID  ESCROW_PROVIDER_CLIENT_SECRET", err)
 		}
 		return Session{}, err
 	}

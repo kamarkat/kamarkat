@@ -36,10 +36,10 @@ reads, one file per value:
 |---|---|
 | `k8-secrets/hetzner/token` | `--provider-token`, `HCLOUD_TOKEN` |
 | `k8-secrets/github/github-pat-token` | `--gitops-token` |
-| `k8-secrets/infisical/INFISICAL_ESCROW_PROJECT_ID` | `--escrow-project-id` |
-| `k8-secrets/infisical/INFISICAL_ESCROW_CLIENT_ID` | `--escrow-client-id` |
-| `k8-secrets/infisical/INFISICAL_ESCROW_CLIENT_SECRET` | `--escrow-client-secret` |
-| `k8-secrets/infisical/INFISICAL_ESCROW_URL` | `--escrow-url` (defaults to `https://app.infisical.com`) |
+| `k8-secrets/infisical/ESCROW_PROVIDER_PROJECT_ID` | `--escrow-project-id` |
+| `k8-secrets/infisical/ESCROW_PROVIDER_CLIENT_ID` | `--escrow-client-id` |
+| `k8-secrets/infisical/ESCROW_PROVIDER_CLIENT_SECRET` | `--escrow-client-secret` |
+| `k8-secrets/infisical/ESCROW_PROVIDER_URL` | `--escrow-url` (defaults to `https://app.infisical.com`) |
 | `k8-secrets/s3/*` | `S3_*`, CNPG Barman backups of the platform database. A **destination**: absent, the box bootstraps and runs with no backups, and the run says so. |
 | `k8-secrets/grafana-cloud/irm-*` | `GRAFANA_IRM_*`, where this box's alerts page (ADR-078 add.5 §5). A destination, same rule. |
 | `k8-secrets/ghcr/username`, `k8-secrets/ghcr/token` | `GHCR_USERNAME`/`GHCR_TOKEN`, for pulling the tenant's private images (ADR-066). Optional here: falls back to the GitHub PAT above, which carries `write:packages`, with the login from `gh`. A real tenant supplies a token scoped to their own images. |

@@ -31,7 +31,7 @@ import (
 const (
 	// StoreDirName is the per-operator directory under the home directory.
 	StoreDirName = ".kamarkat"
-	// StoreEscrowSubdir holds the INFISICAL_ESCROW_* values.
+	// StoreEscrowSubdir holds the ESCROW_PROVIDER_* values.
 	StoreEscrowSubdir = "infisical"
 	// legacyDir is where these files used to live, inside a checkout. It is
 	// never read -- it is looked for only to tell an operator where its
@@ -135,7 +135,7 @@ func MoveHint(names ...string) string {
 		return fmt.Sprintf("\n\nThese settings are in %s, which is no longer read:\n"+
 			"a checkout is not where they belong, and deleting one took the only copy\n"+
 			"of a client secret Infisical issues once. Move them:\n\n"+
-			"  mkdir -p %s && mv %s/INFISICAL_ESCROW_* %s/",
+			"  mkdir -p %s && mv %s/ESCROW_PROVIDER_* %s/",
 			old, store, old, store)
 	}
 	return fmt.Sprintf("\n\nThey are kept in %s, written by `kakt escrow init`.", store)

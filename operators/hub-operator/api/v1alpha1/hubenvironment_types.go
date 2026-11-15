@@ -268,7 +268,7 @@ type InfisicalConfig struct {
 	// Rendered from the box's declared `management.infisicalEnvironmentSlug`. This
 	// field is the operator-facing representation of that one input, not a second
 	// source of truth, and the hub-operator reads the same value from
-	// hub-bootstrap-config's INFISICAL_ENVIRONMENT_SLUG so reader and writer
+	// hub-bootstrap-config's SECRET_STORE_ENVIRONMENT_SLUG so reader and writer
 	// cannot disagree.
 	//
 	// Required and non-empty, with NO DEFAULT. It defaulted to "prod" while a

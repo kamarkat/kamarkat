@@ -19,11 +19,11 @@
 #   you add a key here, declare it there, or preflight will call it unproduced.
 #
 # USAGE
-#   INFISICAL_BASE_URL=https://infisical.<box-domain> \
+#   SECRET_STORE_BASE_URL=https://infisical.<box-domain> \
 #   KUBECONFIG=<hub kubeconfig> \
 #     scripts/secret/seed-external-secrets.sh <cell-id> [--dry-run]
 #
-#   e.g. INFISICAL_BASE_URL=https://infisical.dev.nutgraf.in \
+#   e.g. SECRET_STORE_BASE_URL=https://infisical.dev.nutgraf.in \
 #        KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfig \
 #          scripts/secret/seed-external-secrets.sh nutgraf-01 --dry-run
 #
@@ -31,7 +31,7 @@
 #   file and its Infisical path, and prints the command that writes them.
 #
 # AUTH
-#   Reads INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET from the environment, or
+#   Reads SECRET_STORE_CLIENT_ID / SECRET_STORE_CLIENT_SECRET from the environment, or
 #   from the live cluster (platform-security/infisical-auth) when a kubeconfig is
 #   available. Never prints a secret value — only key names and outcomes.
 #
@@ -45,7 +45,7 @@ SECRETS_DIR="${SECRETS_DIR:-${KAMARKAT_HOME:-$HOME/.kamarkat}}"
 # tenant running this seeded the platform's secret store instead of their own
 # (ADR-065). It is this box's instance -- infisical.<the box's domain> -- or a
 # port-forward to it.
-INFISICAL_URL="${INFISICAL_BASE_URL:-}"
+SECRET_STORE_URL="${SECRET_STORE_BASE_URL:-}"
 
 # Every refusal below names what is missing and then prints the whole command,
 # so the next attempt is a copy, not a reconstruction.
@@ -54,9 +54,9 @@ usage() {
     sed -n '/^# USAGE/,/^# AUTH/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
-[[ -z "$INFISICAL_URL" ]] && usage "INFISICAL_BASE_URL is not set. It names THIS box's Infisical; there is no default."
-PROJECT_SLUG="${INFISICAL_PROJECT_SLUG:-hub-secrets}"
-ENVIRONMENT="${INFISICAL_ENVIRONMENT:-dev}"
+[[ -z "$SECRET_STORE_URL" ]] && usage "SECRET_STORE_BASE_URL is not set. It names THIS box's Infisical; there is no default."
+PROJECT_SLUG="${SECRET_STORE_PROJECT_SLUG:-hub-secrets}"
+ENVIRONMENT="${SECRET_STORE_ENVIRONMENT:-dev}"
 
 CELL_ID="${1:-}"
 DRY_RUN=0
@@ -86,31 +86,31 @@ log()  { printf '%s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 # ── Credentials ─────────────────────────────────────────────────────────────
-if [[ -z "${INFISICAL_CLIENT_ID:-}" || -z "${INFISICAL_CLIENT_SECRET:-}" ]]; then
+if [[ -z "${SECRET_STORE_CLIENT_ID:-}" || -z "${SECRET_STORE_CLIENT_SECRET:-}" ]]; then
   if command -v kubectl >/dev/null && kubectl -n platform-security get secret infisical-auth >/dev/null 2>&1; then
     log "Reading Infisical credentials from platform-security/infisical-auth"
-    INFISICAL_CLIENT_ID=$(kubectl -n platform-security get secret infisical-auth -o jsonpath='{.data.client-id}' | base64 -d)
-    INFISICAL_CLIENT_SECRET=$(kubectl -n platform-security get secret infisical-auth -o jsonpath='{.data.client-secret}' | base64 -d)
+    SECRET_STORE_CLIENT_ID=$(kubectl -n platform-security get secret infisical-auth -o jsonpath='{.data.client-id}' | base64 -d)
+    SECRET_STORE_CLIENT_SECRET=$(kubectl -n platform-security get secret infisical-auth -o jsonpath='{.data.client-secret}' | base64 -d)
   else
-    usage "no Infisical credentials: set INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET, or point KUBECONFIG at the hub (it reads platform-security/infisical-auth)."
+    usage "no Infisical credentials: set SECRET_STORE_CLIENT_ID and SECRET_STORE_CLIENT_SECRET, or point KUBECONFIG at the hub (it reads platform-security/infisical-auth)."
   fi
 fi
 
 log "=== Seeding external secrets ==="
-log "    Infisical:  ${INFISICAL_URL}"
+log "    Infisical:  ${SECRET_STORE_URL}"
 log "    Project:    ${PROJECT_SLUG}  (env: ${ENVIRONMENT})"
 log "    Cell:       ${CELL_ID}"
 log "    Source:     ${SECRETS_DIR}"
 [[ $DRY_RUN -eq 1 ]] && log "    MODE:       dry run — nothing will be written"
 log ""
 
-TOKEN=$(curl -sS -X POST "${INFISICAL_URL}/api/v1/auth/universal-auth/login" \
+TOKEN=$(curl -sS -X POST "${SECRET_STORE_URL}/api/v1/auth/universal-auth/login" \
   -H 'Content-Type: application/json' \
-  -d "{\"clientId\":\"${INFISICAL_CLIENT_ID}\",\"clientSecret\":\"${INFISICAL_CLIENT_SECRET}\"}" \
+  -d "{\"clientId\":\"${SECRET_STORE_CLIENT_ID}\",\"clientSecret\":\"${SECRET_STORE_CLIENT_SECRET}\"}" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("accessToken",""))' 2>/dev/null || true)
 [[ -z "$TOKEN" ]] && fail "Infisical login failed — credentials rejected"
 
-WORKSPACE_ID=$(curl -sS "${INFISICAL_URL}/api/v1/workspace" -H "Authorization: Bearer ${TOKEN}" \
+WORKSPACE_ID=$(curl -sS "${SECRET_STORE_URL}/api/v1/workspace" -H "Authorization: Bearer ${TOKEN}" \
   | python3 -c "
 import json,sys
 for w in json.load(sys.stdin).get('workspaces',[]):
@@ -145,12 +145,12 @@ import json,sys
 print(json.dumps({'workspaceId':sys.argv[1],'environment':sys.argv[2],'secretPath':sys.argv[3],
                   'secretValue':sys.argv[4],'type':'shared'}))" "$WORKSPACE_ID" "$ENVIRONMENT" "$PATH_" "$VALUE")
 
-  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${INFISICAL_URL}/api/v3/secrets/raw/${KEY}" \
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${SECRET_STORE_URL}/api/v3/secrets/raw/${KEY}" \
     -H 'Content-Type: application/json' -H "Authorization: Bearer ${TOKEN}" -d "$body")
 
   # 409 means it already exists; update instead of failing the run.
   if [[ "$code" == "409" || "$code" == "400" ]]; then
-    code=$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH "${INFISICAL_URL}/api/v3/secrets/raw/${KEY}" \
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH "${SECRET_STORE_URL}/api/v3/secrets/raw/${KEY}" \
       -H 'Content-Type: application/json' -H "Authorization: Bearer ${TOKEN}" -d "$body")
     [[ "$code" =~ ^2 ]] && { log "  UPDATED  ${KEY}  -> ${PATH_}"; skipped=$((skipped+1)); continue; }
   fi
@@ -168,6 +168,6 @@ log "seeded=${seeded} updated=${skipped} missing=${missing}"
 if [[ $DRY_RUN -eq 1 ]]; then
   log ""
   log "To write these, run:"
-  log "  INFISICAL_BASE_URL=${INFISICAL_URL}${KUBECONFIG:+ KUBECONFIG=${KUBECONFIG}} $0 ${CELL_ID}"
+  log "  SECRET_STORE_BASE_URL=${SECRET_STORE_URL}${KUBECONFIG:+ KUBECONFIG=${KUBECONFIG}} $0 ${CELL_ID}"
 fi
 exit 0

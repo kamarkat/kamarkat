@@ -8,7 +8,7 @@ import { claimsFromPayload } from "../../src/jwt/claims";
  * interesting keys so that a future provider upgrade that renames or drops a
  * claim fails here, against the shape actually issued.
  */
-const ZITADEL_ID_TOKEN = {
+const IDENTITY_PROVIDER_ID_TOKEN = {
   amr: ["pwd"],
   aud: ["389096262521061709", "389096260524573005"],
   azp: "389096262521061709",
@@ -25,7 +25,7 @@ const ZITADEL_ID_TOKEN = {
 
 describe("Zitadel tenant claims", () => {
   it("reads the organisation as the tenant", () => {
-    const c = claimsFromPayload(ZITADEL_ID_TOKEN);
+    const c = claimsFromPayload(IDENTITY_PROVIDER_ID_TOKEN);
     expect(c.tenant_id).toBe("389091373187334477");
     expect(c.tenant_name).toBe("waypoint");
     expect(c.email).toBe("arun4infra@gmail.com");
@@ -37,13 +37,13 @@ describe("Zitadel tenant claims", () => {
   // that produced "Token missing required tenant_id claim".
   it("leaves tenant_id empty when the resourceowner scope was not requested", () => {
     const { ["urn:zitadel:iam:user:resourceowner:id"]: _id, ["urn:zitadel:iam:user:resourceowner:name"]: _n, ...rest } =
-      ZITADEL_ID_TOKEN;
+      IDENTITY_PROVIDER_ID_TOKEN;
     expect(claimsFromPayload(rest).tenant_id).toBe("");
   });
 
   // Hydra must be unaffected: this change is additive, not a migration.
   it("prefers tenant_id when the issuer emits it", () => {
-    const c = claimsFromPayload({ ...ZITADEL_ID_TOKEN, tenant_id: "waypoint" });
+    const c = claimsFromPayload({ ...IDENTITY_PROVIDER_ID_TOKEN, tenant_id: "waypoint" });
     expect(c.tenant_id).toBe("waypoint");
   });
 

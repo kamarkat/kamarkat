@@ -70,7 +70,7 @@ patches:
       name: hub-bootstrap-config
     patch: |-
       - op: replace
-        path: /data/INFISICAL_ENVIRONMENT_SLUG
+        path: /data/SECRET_STORE_ENVIRONMENT_SLUG
         value: "prod"
       - op: replace
         path: /data/DOMAIN

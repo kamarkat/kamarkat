@@ -224,7 +224,7 @@ type escrowAccess struct {
 //     automation credentials must act as themselves -- a machine identity that
 //     silently won would attribute their work to the pipeline and skip the
 //     administrator check below.
-//  2. The machine identity in INFISICAL_ESCROW_*, used when there is no session,
+//  2. The machine identity in ESCROW_PROVIDER_*, used when there is no session,
 //     or when KAKT_IDENTITY=machine says so. CI has no browser and must not hold
 //     a developer's session; `hub-operator` is the same case inside the box.
 //
@@ -254,14 +254,14 @@ func Open(ctx context.Context, c Coordinates) (Access, error) {
 // that binding. Every other caller uses Open, so a declaration that disagrees
 // with its own escrow is refused before anything is read or written.
 func OpenUnbound(ctx context.Context, c Coordinates) (Access, error) {
-	machineID := strings.TrimSpace(os.Getenv("INFISICAL_ESCROW_CLIENT_ID"))
+	machineID := strings.TrimSpace(os.Getenv("ESCROW_PROVIDER_CLIENT_ID"))
 	selected := strings.ToLower(strings.TrimSpace(os.Getenv("KAKT_IDENTITY")))
 
 	switch selected {
 	case "machine":
 		if machineID == "" {
 			return nil, fmt.Errorf("KAKT_IDENTITY=machine selects the machine identity, and " +
-				"INFISICAL_ESCROW_CLIENT_ID is not set. Automation authenticates with its own " +
+				"ESCROW_PROVIDER_CLIENT_ID is not set. Automation authenticates with its own " +
 				"identity; it never borrows a human session")
 		}
 	case "human", "":
@@ -299,7 +299,7 @@ func OpenUnbound(ctx context.Context, c Coordinates) (Access, error) {
 	}
 	return &escrowAccess{
 		store: store,
-		who:   "the machine identity in INFISICAL_ESCROW_CLIENT_ID",
+		who:   "the machine identity in ESCROW_PROVIDER_CLIENT_ID",
 	}, nil
 }
 
