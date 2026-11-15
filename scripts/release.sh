@@ -63,7 +63,13 @@ fi
 # The same rule from the other direction. A named stable version with no
 # --stable would be packaged and pushed from here, which is the one way to get
 # charts in the registry that no release, tag, binary or tap entry agrees with.
-if [ "$STABLE" = 0 ] && [ -n "$VERSION" ]; then
+#
+# PUBLISHING ONLY. --check rehearses and pushes nothing, so a stable version is
+# exactly what it should accept: rehearsing 0.3.0 is what you do BEFORE
+# publishing 0.3.0, and refusing it left the one safe way to test a stable
+# release unreachable. This guard was conditional on the publish path and lost
+# that condition when the variable carrying it was removed.
+if [ "$CHECK" = 0 ] && [ "$STABLE" = 0 ] && [ -n "$VERSION" ]; then
   case "$VERSION" in
     *-rc.*) ;;
     *) echo "$VERSION is a stable version, and a stable version is published by its" >&2
@@ -87,7 +93,9 @@ say "1. Decide the version"
 CURRENT="$(scripts/release/release-data.py newest --owner "$OWNER")" \
   || die "could not read the newest published version from ghcr.io/$OWNER (gh auth status)"
 note "newest published: $CURRENT"
+CHOSE_VERSION=0
 if [ -z "$VERSION" ]; then
+  CHOSE_VERSION=1
   case "$CURRENT" in
     *-rc.*) VERSION="${CURRENT%-rc.*}-rc.$((${CURRENT##*-rc.} + 1))" ;;
     # A STABLE VERSION IS NOT INCREMENTED FOR A PUBLISH. Whether the next one
@@ -114,8 +122,11 @@ if [ -z "$VERSION" ]; then
        fi ;;
   esac
 fi
-if [ "$CHECK" = 1 ]; then
-  note "rehearsing:       $VERSION (publishing a stable version requires --version)"
+# Said only when the rehearsal CHOSE the version. Printed unconditionally it
+# told an operator who had just passed --version that publishing "requires
+# --version", which reads as a contradiction of what they typed.
+if [ "$CHECK" = 1 ] && [ "$CHOSE_VERSION" = 1 ]; then
+  note "rehearsing:       $VERSION (chosen; publishing a stable version requires --version)"
 fi
 note "next:             $VERSION"
 
