@@ -27,6 +27,13 @@ type fakeOrg struct {
 	ua         map[string]string // identity id -> client id
 	members    map[string][]string
 
+	// projects this fake issued, so the read-back can refuse an id it never
+	// made -- which is the shape of the failure that read-back exists to catch.
+	projects []string
+	// orgID the created projects report; the provisioner compares it with the
+	// organisation it was called for.
+	orgID string
+
 	calls        map[string]int
 	nextID       int
 	denyFrom     string // path prefix that answers 403
@@ -38,6 +45,8 @@ func newFakeOrg(t *testing.T) *fakeOrg {
 	return &fakeOrg{
 		t: t, identities: map[string]string{}, ua: map[string]string{},
 		members: map[string][]string{}, calls: map[string]int{},
+		// The organisation every test provisions for.
+		orgID: "org-1",
 	}
 }
 
@@ -69,8 +78,42 @@ func (f *fakeOrg) server() *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == pathProjects:
 			f.nextID++
 			id := fmt.Sprintf("proj-%d", f.nextID)
+			f.projects = append(f.projects, id)
+			var body struct {
+				ProjectName string `json:"projectName"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			// name, slug and orgId are echoed because the provisioner checks
+			// them: a reply naming a different project than the one asked for is
+			// an existing project, and a create in another organisation 404s
+			// every call after it.
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"project": map[string]string{"id": id, "type": projectTypeSecretManager}})
+				"project": map[string]string{
+					"id": id, "type": projectTypeSecretManager,
+					"name": body.ProjectName, "slug": body.ProjectName,
+					"orgId": f.orgID}})
+
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, pathProjects+"/") &&
+			!strings.Contains(strings.TrimPrefix(r.URL.Path, pathProjects+"/"), "/"):
+			// The read-back that proves the project resolves before anything is
+			// configured on it. Only ids this fake issued are served, so the
+			// failure it guards against is itself exercised.
+			id := strings.TrimPrefix(r.URL.Path, pathProjects+"/")
+			known := false
+			for _, known2 := range f.projects {
+				if known2 == id {
+					known = true
+				}
+			}
+			if !known {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(fmt.Sprintf(
+					`{"statusCode":404,"message":"Project with %s not found"}`, id)))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"project": map[string]string{
+					"id": id, "type": projectTypeSecretManager, "orgId": f.orgID}})
 
 		case r.Method == http.MethodGet && r.URL.Path == pathIdentities:
 			// The query matters, and asserting only the path is what let a
@@ -431,6 +474,10 @@ func TestAnExistingProjectIsAdoptedRatherThanRecreated(t *testing.T) {
 	defer srv.Close()
 
 	const declared = "e532d07f-already-holds-the-master-keys"
+	// It exists already -- that is the premise. Adopting a project still reads it
+	// back, so a declaration naming a project that is gone is a refusal rather
+	// than a membership call against nothing.
+	f.projects = append(f.projects, declared)
 	p, err := ProvisionEscrowInProject(context.Background(), srv.URL, "jwt", "org-1",
 		declared, "nutgraf-hub")
 	if err != nil {

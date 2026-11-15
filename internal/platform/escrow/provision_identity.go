@@ -144,7 +144,7 @@ func ProvisionEscrow(ctx context.Context, baseURL, sessionToken, orgID, projectN
 	// 1. The project, created by the HUMAN -- which is what makes them its admin
 	// and removes the invitation step that existed because a machine-created
 	// project has no human members at all.
-	projectID, err := c.createProject(ctx, projectName)
+	projectID, err := c.createProject(ctx, projectName, orgID)
 	if err != nil {
 		return p, err
 	}
@@ -161,7 +161,26 @@ func ProvisionEscrow(ctx context.Context, baseURL, sessionToken, orgID, projectN
 func (c *provisioner) ensureAutomation(ctx context.Context, p Provisioned, orgID, label string) (Provisioned, error) {
 	projectID := p.ProjectID
 	projectName := label
-	// 2. The organisation's automation identity: found, or created once.
+
+	// 2. THE PROJECT, READ BACK, before any identity is touched.
+	//
+	// A create that answered 200 with an id is not proof the project can be
+	// resolved: this command has had a create succeed and the next call answer
+	// "Project with <id> not found" -- which upstream raises when
+	// projectDAL.findById returns no row (ee/services/permission/
+	// permission-service.ts), a different error from the one it raises for a
+	// project in another organisation.
+	//
+	// FIRST, before the identity is found or created, so a project that cannot
+	// be retrieved changes no identity state at all. On the adopting path it
+	// serves the same purpose from the other direction: a box declaring a
+	// project that has been deleted is refused here rather than at a membership
+	// call against nothing.
+	if err := c.confirmProject(ctx, projectID, orgID); err != nil {
+		return p, err
+	}
+
+	// 3. The organisation's automation identity: found, or created once.
 	id, clientID, found, err := c.findAutomationIdentity(ctx, orgID)
 	if err != nil {
 		return p, err
@@ -191,7 +210,7 @@ func (c *provisioner) ensureAutomation(ctx context.Context, p Provisioned, orgID
 		return p, e
 	}
 
-	// 3. Universal Auth, and the client ID it carries. Asked for first: an
+	// 4. Universal Auth, and the client ID it carries. Asked for first: an
 	// identity that already has it keeps the credential the running boxes use.
 	ua, err := c.universalAuth(ctx, id)
 	if err != nil {
@@ -210,7 +229,18 @@ func (c *provisioner) ensureAutomation(ctx context.Context, p Provisioned, orgID
 	}
 	p.ClientID = clientID
 
-	// 4. This box's own client secret, whether the identity is new or reused.
+	// 5. Membership of this project, as member rather than admin.
+	if err := c.addToProject(ctx, projectID, id, projectRoleMember); err != nil {
+		return fail(err)
+	}
+
+	// 6. This box's own client secret, LAST.
+	//
+	// After membership, because a Universal Auth client secret does not expire:
+	// issued before a step that fails, it stays on the identity forever, unused
+	// and indistinguishable from one a running box depends on. Issuing it first
+	// left one behind on every failed attempt.
+	//
 	// The existing one cannot be read back, and every box needs a credential of
 	// its own anyway: described by the project it was issued for, so a leak is
 	// revoked for one box rather than for the organisation.
@@ -220,12 +250,53 @@ func (c *provisioner) ensureAutomation(ctx context.Context, p Provisioned, orgID
 	}
 	p.ClientSecret = secret
 	p.SecretIssued = true
-
-	// 5. Membership of this project, as member rather than admin.
-	if err := c.addToProject(ctx, projectID, id, projectRoleMember); err != nil {
-		return fail(err)
-	}
 	return p, nil
+}
+
+// confirmProject reads the project back and checks it is the one this run means
+// to use.
+//
+// Reported with the project id and what was read, because a run that fails here
+// has created a project the operator now owns and the workstation store has not
+// recorded -- so the diagnostic is the only place that id exists.
+func (c *provisioner) confirmProject(ctx context.Context, projectID, orgID string) error {
+	status, raw, err := c.do(ctx, http.MethodGet, pathProjects+"/"+projectID, nil)
+	if err != nil {
+		return err
+	}
+	if permErr := c.refusedForPermission(status, raw, "read this escrow project"); permErr != nil {
+		return permErr
+	}
+	if !ok(status) {
+		return fmt.Errorf(
+			"the escrow created project %s and then could not read it back (%d): %s\n\n"+
+				"Nothing was configured on it and no credential was issued for it. The project\n"+
+				"exists under your account -- keep the id above: it is not recorded anywhere\n"+
+				"else, and `kakt escrow init` would create another rather than find this one.",
+			projectID, status, strings.TrimSpace(string(raw)))
+	}
+	var out struct {
+		Project struct {
+			ID    string `json:"id"`
+			Type  string `json:"type"`
+			OrgID string `json:"orgId"`
+			Name  string `json:"name"`
+		} `json:"project"`
+	}
+	// Parsed loosely: this call exists to prove the project RESOLVES, and a body
+	// this cannot read has already proved that much.
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	if got := strings.TrimSpace(out.Project.OrgID); got != "" && got != strings.TrimSpace(orgID) {
+		return fmt.Errorf("escrow project %s (%q) belongs to organisation %s, and this run is "+
+			"configured for %s", projectID, out.Project.Name, got, strings.TrimSpace(orgID))
+	}
+	if t := strings.TrimSpace(out.Project.Type); t != "" && t != projectTypeSecretManager {
+		return fmt.Errorf("escrow project %s is a %q project, and an escrow must be %q",
+			projectID, t, projectTypeSecretManager)
+	}
+	return nil
 }
 
 // provisioner performs the calls as the signed-in administrator.
@@ -283,7 +354,22 @@ run it again. Nothing was left half-created.
 Infisical said: %s`, what, status, strings.TrimSpace(string(raw)))
 }
 
-func (c *provisioner) createProject(ctx context.Context, name string) (string, error) {
+// createProject creates the escrow project and returns its id.
+//
+// NO organizationId IS SENT, because the endpoint does not take one: its body is
+// projectName, projectDescription, slug, kmsKeyId, template, type,
+// shouldCreateDefaultEnvs and hasDeleteProtection (upstream
+// routes/v1/project-router.ts), and the organisation comes from the caller's own
+// permission. A field added here would be silently dropped, which is worse than
+// absent -- it would read as a guarantee that nothing enforces.
+//
+// What the reply DOES carry is checked. It is a SanitizedProject, so it echoes
+// id, name, slug and orgId, and the id alone was all this used to keep. That is
+// why a create answering 200 and a next call unable to resolve what it named --
+// twice, with the same id, for two different names -- could not be explained
+// from the output: the only record of what the escrow actually did was thrown
+// away on success.
+func (c *provisioner) createProject(ctx context.Context, name, orgID string) (string, error) {
 	status, raw, err := c.do(ctx, http.MethodPost, pathProjects, map[string]interface{}{
 		"projectName": name,
 		"type":        projectTypeSecretManager,
@@ -300,8 +386,11 @@ func (c *provisioner) createProject(ctx context.Context, name string) (string, e
 	}
 	var out struct {
 		Project struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
+			ID    string `json:"id"`
+			Type  string `json:"type"`
+			OrgID string `json:"orgId"`
+			Name  string `json:"name"`
+			Slug  string `json:"slug"`
 		} `json:"project"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -311,6 +400,26 @@ func (c *provisioner) createProject(ctx context.Context, name string) (string, e
 	if out.Project.ID == "" {
 		return "", fmt.Errorf("the escrow created %q and returned no project id\n\nreply: %s",
 			name, strings.TrimSpace(string(raw)))
+	}
+	fmt.Printf("[escrow] created project %s (name %q, slug %q, org %s)\n",
+		out.Project.ID, out.Project.Name, out.Project.Slug, out.Project.OrgID)
+	// A reply naming a DIFFERENT project than the one asked for is an existing
+	// project, not a new one, and every call after this would be operating on
+	// somebody else's escrow.
+	if n := strings.TrimSpace(out.Project.Name); n != "" && n != strings.TrimSpace(name) {
+		return "", fmt.Errorf(
+			"asked the escrow to create project %q and it returned project %s, named %q "+
+				"(slug %q, organisation %s).\n\nThat is an existing project rather than the one "+
+				"requested. Nothing was configured on it and no credential was issued.",
+			name, out.Project.ID, out.Project.Name, out.Project.Slug, out.Project.OrgID)
+	}
+	if got := strings.TrimSpace(out.Project.OrgID); got != "" && got != strings.TrimSpace(orgID) {
+		return "", fmt.Errorf(
+			"the escrow created project %q (%s) in organisation %s, and this run is configured "+
+				"for %s.\n\nEvery call after this one would be refused, because a project is "+
+				"resolved within the caller's selected organisation. Select the right one with "+
+				"`kakt login` and re-run; the project above is unused.",
+			name, out.Project.ID, got, strings.TrimSpace(orgID))
 	}
 	// The type is asserted for the same reason it is sent: a project of another
 	// type authenticates identically and refuses every read and write.
@@ -558,8 +667,12 @@ func (c *provisioner) addToProject(ctx context.Context, projectID, identityID, r
 		return permErr
 	}
 	if !ok(status) {
-		return fmt.Errorf("the escrow refused to give the automation identity access to the "+
-			"project (%d): %s", status, strings.TrimSpace(string(raw)))
+		// Both ids named: the workstation store is not written until the whole
+		// sequence succeeds, so a failure here is the only record either exists.
+		return fmt.Errorf("the escrow refused to give identity %s access to project %s (%d): %s\n\n"+
+			"Keep those ids: the project was created by this run and is recorded nowhere\n"+
+			"else, and `kakt escrow init` would create another rather than find it.",
+			identityID, projectID, status, strings.TrimSpace(string(raw)))
 	}
 	return nil
 }
@@ -584,12 +697,18 @@ func ProvisionEscrowWithIdentity(ctx context.Context, baseURL, sessionToken, org
 	c := &provisioner{baseURL: baseURL, token: strings.TrimSpace(sessionToken),
 		http: &http.Client{Timeout: 30 * time.Second}}
 
-	projectID, err := c.createProject(ctx, projectName)
+	projectID, err := c.createProject(ctx, projectName, orgID)
 	if err != nil {
 		return p, err
 	}
 	p.ProjectID = projectID
 	p.ClientID = clientID
+
+	// Read back before the supplied identity is resolved or admitted, for the
+	// same reason as the automation path.
+	if err := c.confirmProject(ctx, projectID, orgID); err != nil {
+		return p, err
+	}
 
 	id, err := c.identityByClientID(ctx, orgID, clientID)
 	if err != nil {
