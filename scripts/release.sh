@@ -90,19 +90,32 @@ note "newest published: $CURRENT"
 if [ -z "$VERSION" ]; then
   case "$CURRENT" in
     *-rc.*) VERSION="${CURRENT%-rc.*}-rc.$((${CURRENT##*-rc.} + 1))" ;;
-    # A STABLE VERSION IS NOT INCREMENTED FOR YOU. Whether the next one is a
-    # patch, a minor or a major says what the release means, and a version is
-    # consumed the moment it is published (ADR-063) -- so a guess here spends
-    # a number that was meant for something else. The candidate is named
-    # because the refusal is about intent, not about arithmetic.
-    *) die "$CURRENT is a stable version, and the next one says what this release means:
+    # A STABLE VERSION IS NOT INCREMENTED FOR A PUBLISH. Whether the next one
+    # is a patch, a minor or a major says what the release means, and a version
+    # is consumed the moment it is published (ADR-063) -- so a guess there
+    # spends a number that was meant for something else.
+    #
+    # A REHEARSAL IS DIFFERENT, because it consumes nothing: --check runs with
+    # SKIP_PUSH=1 and pushes no artefact, so the number is still free when it
+    # finishes. Refusing to rehearse was stricter than the reason for the rule,
+    # and it made the cheapest step the one with the most friction. It takes the
+    # patch candidate and says which one it took, so a rehearsal of the wrong
+    # number is visible rather than assumed.
+    *) if [ "$CHECK" = 1 ]; then
+         VERSION="${CURRENT%.*}.$((${CURRENT##*.} + 1))"
+       else
+         die "$CURRENT is a stable version, and the next one says what this release means:
    a patch, a minor or a major. Name it:
 
      kakt release check --version ${CURRENT%.*}.$((${CURRENT##*.} + 1))   # patch
      kakt release check --version <X.Y.Z>
 
-   Only an -rc.N version is incremented automatically." ;;
+   Only an -rc.N version is incremented automatically."
+       fi ;;
   esac
+fi
+if [ "$CHECK" = 1 ]; then
+  note "rehearsing:       $VERSION (publishing a stable version requires --version)"
 fi
 note "next:             $VERSION"
 
@@ -216,6 +229,31 @@ if [ "$STABLE" = 1 ]; then
   command -v gh >/dev/null 2>&1 || die "gh is required to create a release"
   gh auth status >/dev/null 2>&1 || die "gh is not authenticated (gh auth login)"
 
+  # WHAT CI BUILDS IS A COMMIT, NOT THIS WORKING TREE.
+  #
+  # `kakt release check` rehearses the tree you have, and a candidate publishes
+  # that same tree -- `make publish-local` packages it directly. A stable
+  # version does neither: the run that publishes it checks out the commit the
+  # release names. Targeting a branch would publish whatever that branch held at
+  # the time, so the thing rehearsed and the thing published could differ with
+  # nothing saying so.
+  #
+  # So the release names a commit, and the checkout has to BE that commit.
+  DIRTY="$(git status --porcelain)"
+  [ -z "$DIRTY" ] || die "the platform checkout has uncommitted changes, and a stable release
+   publishes a COMMIT -- so these would be rehearsed here and absent from what CI builds:
+
+$(printf '%s\n' "$DIRTY" | sed 's/^/     /')
+
+   Commit and push them, or stash them, then run this again."
+
+  SHA="$(git rev-parse HEAD)"
+  git fetch -q origin || die "could not reach the remote to confirm HEAD is published"
+  [ -n "$(git branch -r --contains "$SHA" 2>/dev/null)" ] \
+    || die "HEAD ($SHA) is not on the remote, so there is nothing for the release to name.
+   Push this branch and run this again."
+  note "commit:           $SHA"
+
   # A version is published once (ADR-063). A re-created release with different
   # content is the one failure GitOps cannot diagnose, so an existing one stops
   # this before anything is promoted.
@@ -230,12 +268,15 @@ if [ "$STABLE" = 1 ]; then
   # NOT fire for a draft, nor for publishing an existing draft. A draft here
   # would create a release, publish nothing, and look like it worked.
   #
+  # --target is the SHA checked above, not a branch, so the version names the
+  # exact tree that was rehearsed -- which is what ADR-063 asks of a version.
+  #
   # --notes: the workflow writes the body itself at the end, pointing at the
   # version page, and a gate refuses a release that does not. Notes given here
   # are overwritten, so this passes the shortest placeholder that keeps
   # `gh release create` non-interactive.
   run gh release create "v$VERSION" --repo "$REPO" \
-    --target main --title "v$VERSION" --notes "Publishing." \
+    --target "$SHA" --title "v$VERSION" --notes "Publishing." \
     || die "could not create the release -- nothing was published or promoted"
 
   if [ "$DRY_RUN" = 1 ]; then

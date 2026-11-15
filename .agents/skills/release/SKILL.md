@@ -61,6 +61,16 @@ publishing is two burned versions.
   `--version`, an rc passed to `--stable`, and a stable `--version` without
   `--stable` are each refused -- the last one because it would push charts that
   no release, tag, binary or tap entry agrees with.
+
+  **A stable release publishes a COMMIT.** The run checks out what the release
+  names, so `--stable` refuses a dirty checkout (naming the files) or a HEAD
+  that is not on the remote, and targets the SHA rather than a branch. Without
+  that, `kakt release check` would rehearse your tree and the release would
+  publish whatever `main` happened to hold.
+
+  `kakt release check` with no `--version` rehearses the next patch when the
+  newest published version is stable, and names the version it chose. A
+  rehearsal pushes nothing, so it costs no number; publishing still requires one.
 - **A version is published once.** Never re-publish, re-tag or delete one. If a
   publish fails part way, the next attempt takes the next version.
 
