@@ -18,9 +18,18 @@
 #   BUNDLE_VERSION=0.1.16-rc.44 scripts/validate-all.sh --only=adr
 #   scripts/validate-all.sh --list               what the phases are
 #
-# Exit is non-zero if any phase failed. A skipped phase does not fail the run --
-# preflight needs cloud credentials and the cluster phases need a cluster, and
+# Exit is non-zero if any phase failed. A skipped phase does not fail a FULL run
+# -- preflight needs cloud credentials and the cluster phases need a cluster, and
 # refusing to report on a laptop with neither would make this unusable there.
+#
+# A phase the caller NAMED is different: `--only=platform` is a request to prove
+# the platform, and skipping is not an answer to it. That call is the tenant
+# bootstrap's final gate, and it skipped for a missing kubeconfig and exited 0 --
+# so a box nothing had checked reported success. A named phase that cannot run
+# fails.
+#
+# Inapplicability still skips, but it has to be read from what the box declares
+# rather than inferred from an absent file or an unset variable.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +72,11 @@ done
 
 wants() { [[ -z "$ONLY" || ",$ONLY," == *",$1,"* ]]; }
 
+# requested <phase> -- the caller NAMED it, rather than receiving it as part of
+# a full run. wants() cannot tell those apart, and the difference decides
+# whether a missing prerequisite is an excuse or a failure.
+requested() { [[ -n "$ONLY" && ",$ONLY," == *",$1,"* ]]; }
+
 # ─── Phase results, accumulated as JSON objects ──────────────────────────────
 PHASES_JSON=()
 ANY_FAILED=0
@@ -94,7 +108,38 @@ PY
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-skip() { record "$1" skipped "$(now)" "$(now)" - - - - "" "$2"; echo "  ⏭️  $1 — $2"; }
+# skip <phase> <why>
+#
+# Records a failure instead when the caller asked for this phase by name. See
+# the header: a skip is an answer only when nobody asked the question.
+skip() {
+    if requested "$1"; then
+        record "$1" failed "$(now)" "$(now)" - - - - "" \
+            "$2 (asked for by name with --only=$ONLY, so it cannot be skipped)"
+        echo "  ❌  $1 — $2"
+        echo "      --only=$ONLY asks for this phase. It cannot be answered by skipping," >&2
+        echo "      so this run fails rather than reporting a box nothing checked." >&2
+        return 0
+    fi
+    record "$1" skipped "$(now)" "$(now)" - - - - "" "$2"
+    echo "  ⏭️  $1 — $2"
+}
+
+# inapplicable <phase> <why>
+#
+# A genuine skip, even for a phase the caller named, because the question has an
+# answer and the answer is "nothing to assert". Read from what the box DECLARES
+# -- not from an absent file or an unset variable, which is skip()'s case and
+# fails.
+#
+# The distinction is the whole of it. "This box declares no workload cluster" is
+# a topology; "the pool name was not passed" is a check that could not run. The
+# first must not fail a management-only box, which is built on its own and is the
+# first bootstrap of every box; the second must not pass one.
+inapplicable() {
+    record "$1" skipped "$(now)" "$(now)" - - - - "" "$2 (not applicable to this box)"
+    echo "  ⏭️  $1 — $2"
+}
 
 # run_phase <name> <logfile> <command...>
 #
@@ -185,11 +230,23 @@ if wants platform; then
     fi
     if [[ -z "$kubeconfig" || ! -r "$kubeconfig" ]]; then
         skip platform "no readable kubeconfig (set KUBECONFIG, or CLUSTER_NAME for the conventional path)"
+    elif [[ -z "${SPOKEPOOL_NAME:-}" ]] \
+         && ! compgen -G "$ZERO_OPS_DIR/registry/clusters/*/infrastructure/spokepool.yaml" >/dev/null; then
+        # INAPPLICABLE, read from the declarations rather than from the unset
+        # variable. A management cluster is built on its own, so a box's first
+        # bootstrap has no workload cluster -- and the spoke checks then have
+        # nothing to assert, which is not the same as being unable to run.
+        #
+        # This is the one skip a NAMED phase is allowed, because the question was
+        # answered: there is no spoke. The branch below still fails when a pool
+        # IS declared and the name was not passed, which is the case that would
+        # otherwise validate a box against checks nobody ran.
+        inapplicable platform "this box declares no workload cluster; the spoke checks have nothing to assert against"
     elif [[ -z "${SPOKEPOOL_NAME:-}" ]]; then
-        # Required rather than guessed: post-bootstrap-validate refuses a default
-        # for the same reason, having once validated a dev box against the
+        # Declared but not named: required rather than guessed, because
+        # post-bootstrap-validate once validated a dev box against the
         # production pool name and blamed the box.
-        skip platform "SPOKEPOOL_NAME is not set; the spoke checks have nothing to assert against"
+        skip platform "this box declares a workload cluster and SPOKEPOOL_NAME is not set, so the spoke checks cannot run"
     else
         # The zone this box publishes on, from what it declares (ADR-051). Without
         # it the checks fall back to the PLATFORM's own zone and judge a tenant's

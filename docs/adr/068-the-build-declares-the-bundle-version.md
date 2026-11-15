@@ -180,3 +180,31 @@ override that must name its version.
 - ADR-063: The Platform Bundle and its Version
 - ADR-064: Bundle Promotion and Cell-Scoped Policy
 - ADR-065: The Control Plane Ships Into the Box
+
+## Amendment 2026-11-15: the version selects the executable, and the executable owns Day-0
+
+The bundle version a cluster declares now selects the binary that builds it. A
+tenant's launcher reads that version from the cluster's `bundle.yaml`, fetches
+that release, verifies it against the release's published checksum and against
+the binary's own `bundle-version`, and runs `kakt bootstrap` (ADR-072).
+
+So the rule this ADR states acquires a second consumer. It already meant that a
+build with no injected version reports `development` and reads platform content
+from the working tree; it now also means:
+
+- **A release builds clusters that declare it, and no others.** `kakt bootstrap`
+  compares the declaration against its own version and refuses a disagreement
+  rather than reconciling it — a box built by a version its declaration does not
+  name is a box nobody can reason about.
+
+- **A development build runs Day-0 from its checkout, and a release never does.**
+  The command selects its own script directory: a development build uses the
+  checkout it was built from, a release materializes its embedded copy, and
+  neither falls back to the other. There is no path by which an incomplete
+  release reads a checkout, because that would make a broken release look like a
+  working one.
+
+- **Nothing outside the CLI can supply that directory.** No flag and no
+  environment variable selects it. An externally supplied path would let whoever
+  sets it replace the released orchestration, which is the property the
+  arrangement exists to establish.

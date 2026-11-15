@@ -105,7 +105,6 @@ jobs:
               exit 1
           }
           rm -f manifests/spoke/spoke-catalog/infra/support-agent.yaml.bak
-          ./scripts/package/embed-platform-assets.sh
           )
 
           for attempt in 1 2 3 4 5; do
@@ -115,9 +114,13 @@ jobs:
             # apply runs in a subshell, so its own `exit` does not reach here.
             apply || exit 1
 
+            # The SOURCE manifests only. The embedded copy is generated at
+            # build time from these and is git-ignored, so there is nothing to
+            # commit for it -- and a `git add` of an ignored path fails, which
+            # is how this step once exited 1 and left a release pointing at an
+            # image the deployment never carried.
             git add manifests/hub-core-services/support-agent/kustomization.yaml \
-                    manifests/spoke/spoke-catalog/infra/support-agent.yaml \
-                    internal/platform/embedded
+                    manifests/spoke/spoke-catalog/infra/support-agent.yaml
             if git diff --cached --quiet; then
               echo "digest already pinned on ${GITHUB_REF_NAME} -- nothing to do"
               exit 0

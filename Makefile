@@ -1,4 +1,4 @@
-.PHONY: build clean test install sqlc-generate migrate-up migrate-down build-all build-auth-proxy build-mcp-server build-kube-sbt build-hub cli-release cli-fetch publish-local e2e e2e-fresh e2e-clean e2e-verify e2e-workload cnpg-bump-incarnation cnpg-settle-incarnation cnpg-incarnation-check
+.PHONY: embed build clean test install sqlc-generate migrate-up migrate-down build-all build-auth-proxy build-mcp-server build-kube-sbt build-hub cli-release cli-fetch publish-local e2e e2e-fresh e2e-clean e2e-verify e2e-workload cnpg-bump-incarnation cnpg-settle-incarnation cnpg-incarnation-check
 
 # Build variables
 AUTH_PROXY_BINARY=auth-proxy
@@ -19,8 +19,18 @@ build-all:
 	$(GO) build -o $(BUILD_DIR)/$(KAKT_BINARY) ./cmd/kakt
 	@echo "✓ All builds complete"
 
+# THE EMBEDDED TREE, regenerated before anything compiles.
+#
+# internal/platform/embedded/{manifests,scripts} is generated output and is
+# git-ignored, so a clean checkout has none of it and the go:embed directive
+# cannot be satisfied by `go build` alone. Every entry point that compiles
+# depends on this target; the release path regenerates in
+# scripts/package/build-cli.sh for the same reason.
+embed:
+	@./scripts/package/embed-platform-assets.sh
+
 # Build the hub binary (main CLI)
-build:
+build: embed
 	@echo "Building $(KAKT_BINARY)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build -o $(BUILD_DIR)/$(KAKT_BINARY) ./cmd/kakt
@@ -182,7 +192,7 @@ clean:
 	@echo "✓ Clean complete"
 
 # Run tests
-test:
+test: embed
 	@echo "Running tests..."
 	$(GO) test -v ./...
 	./scripts/validate-spokepool-compositions.sh

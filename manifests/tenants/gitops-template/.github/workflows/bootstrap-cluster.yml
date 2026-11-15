@@ -1,10 +1,15 @@
 # Bootstrap a cluster this repository declares.
 #
-# The work is done by a workflow the platform maintains, pinned below to the
-# bundle version this repository was scaffolded on. Pinned rather than tracking a
-# branch: the execution logic is then fixed for this repository until someone
-# here changes the pin, and a change to the platform's workflow cannot alter how
-# this repository bootstraps without that decision being made (ADR-072).
+# The work is done by the platform CLI at the version each cluster's bundle.yaml
+# pins. This file resolves which cluster to build, fetches and verifies that
+# release, runs its Day-0 command and keeps the record -- it holds no platform
+# logic and no version of its own, so it does not go stale (ADR-072).
+#
+# Nothing here is pinned to a version, because the version is in git. This file
+# used to call a reusable workflow at a ref substituted when the box was
+# created: that ref never moved, so a box promoted to a later version still
+# bootstrapped with the workflow of the version it was created on, and a fix to
+# Day-0 could not reach it without someone editing this repository.
 #
 # It runs under this repository's own secrets, in this organisation's own
 # runners. The platform holds neither (ADR-065).
@@ -175,7 +180,25 @@ jobs:
           fi
 
           CANDIDATES="$candidates" python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, pathlib, sys, yaml
+          import json, os, pathlib, re, sys, yaml
+
+          # THE VERSION THIS CLUSTER PINS, from the platform chart's source and
+          # only that. A cluster's bundle.yaml is a multi-source Application:
+          # one source is the platform chart, another is THIS repository, whose
+          # targetRevision names a branch. Taking the first match would read
+          # "main" as a bundle version and fetch a CLI that does not exist.
+          #
+          # Anchored on the environment-manager chart line, the same anchoring
+          # `kakt promote` uses when it rewrites these files -- and the CLI
+          # re-reads it and refuses if the two disagree.
+          PINNED = re.compile(r"chart:\s*environment-manager.*?targetRevision:\s*(\S+)", re.S)
+
+          def pinned_version(name):
+              bundle = pathlib.Path("registry/clusters") / name / "bundle.yaml"
+              if not bundle.is_file():
+                  return ""
+              m = PINNED.search(bundle.read_text())
+              return m.group(1).strip().strip("\"'") if m else ""
 
           picked, refused = [], []
           for name in os.environ["CANDIDATES"].split():
@@ -204,12 +227,21 @@ jobs:
               # from there by Day-0, so resolving it here only to pass it back
               # was a second route to one value -- and the flag it became was
               # never accepted by the script that received it.
+              version = pinned_version(name)
+              if not version:
+                  print(f"::error::registry/clusters/{name}/bundle.yaml pins no "
+                        f"environment-manager version, so there is no release to build it with",
+                        file=sys.stderr)
+                  raise SystemExit(1)
               picked.append({
                   "cluster":  name,
                   "provider": str(values["provider"]),
                   "region":   str(values["region"]),
                   "on-prem":  bool(on_prem.get("enabled", False)),
                   "tailnet":  str(on_prem.get("tailnet") or ""),
+                  # Read from git, never rendered into this file. The version a
+                  # cluster is built with is the version it declares.
+                  "version":  version,
               })
 
           for line in refused:
@@ -225,6 +257,7 @@ jobs:
   bootstrap:
     needs: resolve
     if: needs.resolve.outputs.clusters != '[]'
+    runs-on: ubuntu-latest
     strategy:
       # One cluster at a time. Each build provisions servers, and a failure that
       # stops the others is the safer answer when the thing being created bills.
@@ -232,43 +265,111 @@ jobs:
       fail-fast: true
       matrix:
         box: ${{ fromJSON(needs.resolve.outputs.clusters) }}
-    uses: kamarkat/kamarkat/.github/workflows/tenant-bootstrap.yml@v<BUNDLE_VERSION>
-    with:
-      cluster: ${{ matrix.box.cluster }}
-      provider: ${{ matrix.box.provider }}
-      region: ${{ matrix.box.region }}
-      bundle-version: <BUNDLE_VERSION>
-      on-prem: ${{ matrix.box.on-prem }}
-      tailnet: ${{ matrix.box.tailnet }}
-    secrets:
-      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-      GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
-      # Read only when on-prem is enabled. Set it on this repository if this
-      # cluster accepts nodes on your own premises: the control plane and those
-      # nodes join your tailnet from this one key (ADR-046, ADR-075).
-      TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
-      # The escrow, on an Infisical you control. It holds this box's master keys,
-      # which cannot be kept inside the box they decrypt, and the administrator
-      # of the box's own Infisical. Required: without these, Day-0 cannot read
-      # that administrator, and losing this cluster loses every secret the
-      # platform manages for it.
-      ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
-      ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
-      ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
-      ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
-      # Your container registry, for pulling your OWN private images. Required:
-      # the platform's images are public, but your workloads are yours (ADR-066)
-      # and the pull secret built from these is what runs them.
-      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-      # Object storage for database backups. Optional, and a production box
-      # without it has no backups -- the bootstrap says so and continues.
-      S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
-      S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-      # Where this box's alerts page you (ADR-078 add.5 §5). Optional: without
-      # them alerts are emailed only, and nothing pages when the hub goes silent.
-      GRAFANA_IRM_ALERTMANAGER_URL: ${{ secrets.GRAFANA_IRM_ALERTMANAGER_URL }}
-      GRAFANA_IRM_HEARTBEAT_URL: ${{ secrets.GRAFANA_IRM_HEARTBEAT_URL }}
-      # This box's outbound mail (smtps://user:key@host:port). Optional; without it
-      # the issuer sends no verification or reset mail and alerts send no email.
-      IDENTITY_PROVIDER_SMTP_URL: ${{ secrets.IDENTITY_PROVIDER_SMTP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # THE RELEASE THIS CLUSTER DECLARES, fetched and verified.
+      #
+      # The version comes from the cluster's own bundle.yaml, resolved above. It
+      # is not written into this file: a rendered literal froze at the version
+      # the box was created on, so a box promoted later still built with the old
+      # one -- and the orchestration came from a reusable workflow pinned by ref,
+      # which froze the same way and could not be updated without editing this
+      # repository.
+      #
+      # Checksum first, then the binary's own account of itself. A release asset
+      # that downloads and reports another version is not the release this
+      # cluster declares.
+      - name: Fetch the platform CLI this cluster declares
+        env:
+          VERSION: ${{ matrix.box.version }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/kamarkat/kamarkat/releases/download/v${VERSION}"
+          if ! curl -fsSL --retry 3 --retry-connrefused -o kakt "${base}/kakt-linux-amd64"; then
+            echo "::error::no kakt-linux-amd64 on release v${VERSION}"
+            echo "::error::registry/clusters/${{ matrix.box.cluster }}/bundle.yaml pins"
+            echo "::error::${VERSION}; a version with no published binary cannot build a cluster."
+            exit 1
+          fi
+          if curl -fsSL --retry 3 -o SHA256SUMS "${base}/SHA256SUMS"; then
+            sha256sum --ignore-missing -c SHA256SUMS < /dev/null \
+              || { echo "::error::kakt-linux-amd64 does not match the checksum published for v${VERSION}"; exit 1; }
+          else
+            echo "::error::release v${VERSION} publishes no SHA256SUMS; the download cannot be verified"
+            exit 1
+          fi
+          chmod +x kakt
+          got="$(./kakt bundle-version)"
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::the binary from v${VERSION} reports '${got}'"
+            exit 1
+          fi
+          echo "kakt ${got}, verified against the release's checksum"
+
+      # DAY-0, which is the released binary's own command.
+      #
+      # No platform checkout and no reusable workflow: the orchestration is
+      # carried by the binary above and extracted from it, so what runs is what
+      # that release contains and a file in this repository cannot stand in for
+      # any of it (ADR-063, ADR-072).
+      #
+      # Re-running continues: the phase state lives under .state/ in this
+      # repository, not in the job.
+      - name: Build ${{ matrix.box.cluster }}
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
+          # Read only when the cluster declares on-prem capacity: the control
+          # plane and those nodes join your tailnet from this one key.
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          # The escrow, on a secret store you control. It holds this box's master
+          # keys -- which cannot live inside the box they decrypt -- and the
+          # administrator of the box's own secret store.
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
+          # Your container registry, for pulling your OWN private images.
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          # Where this box's alerts page you. Optional.
+          GRAFANA_IRM_ALERTMANAGER_URL: ${{ secrets.GRAFANA_IRM_ALERTMANAGER_URL }}
+          GRAFANA_IRM_HEARTBEAT_URL: ${{ secrets.GRAFANA_IRM_HEARTBEAT_URL }}
+          # This box's outbound mail. Optional.
+          IDENTITY_PROVIDER_SMTP_URL: ${{ secrets.IDENTITY_PROVIDER_SMTP_URL }}
+        run: |
+          set -euo pipefail
+          ./kakt bootstrap --cluster "${{ matrix.box.cluster }}" --gitops-dir .
+
+      # THE PHASE RECORDS, and deliberately not everything beside them.
+      #
+      # These say which phases ran, which gates passed and what was outstanding,
+      # which is what a failed run needs read back. An artifact is downloadable
+      # by anyone who can read this repository, so what goes into one is chosen
+      # rather than swept up:
+      #
+      #   .state/logs/            NOT uploaded. Ten steps tee command output
+      #                           there, and that output is not audited for the
+      #                           tokens and kubeconfig contents it may quote.
+      #                           It stays on the runner and in the workspace.
+      #   .../generated/          NOT uploaded. This box's secret-store
+      #                           coordinates and control-plane address. They are
+      #                           the tenant's own and are committed to this
+      #                           repository, so an artifact copy adds exposure
+      #                           without adding information.
+      #
+      # The state that makes a re-run a continuation is in the repository either
+      # way; this is for reading a failure, not for restoring one.
+      - name: Keep the run's phase records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: day0-${{ matrix.box.cluster }}
+          path: |
+            .state/validation.json
+            .state/bootstrap-mgmt.json
+            .state/bootstrap-workload.json
+            .state/${{ matrix.box.cluster }}.json
+          if-no-files-found: ignore
+          retention-days: 30

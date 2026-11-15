@@ -230,6 +230,12 @@ echo "source annotation: $(ls -d dist/charts/*/ | wc -l | tr -d ' ') chart(s) de
 python3 scripts/validate/workflow-script-flags.py
 python3 scripts/validate/workflow-secrets.py
 
+# The released binary must carry the Day-0 orchestration it runs, not fetch it.
+# Derived from the entry points rather than listed, because a validator nobody
+# named today is still run tomorrow -- and an absent one makes validate-all.sh
+# SKIP a suite, which reads as a pass.
+python3 scripts/validate/runtime-script-closure.py
+
 # The gate on the conversion, not a convenience: a published chart that renders
 # different objects is a silent change to every cluster that pulls it.
 for d in manifests/argocd/components/*/*.yaml; do

@@ -59,7 +59,10 @@ owned_secret() {
     printf '%s' "${KAMARKAT_HOME:-$HOME/.kamarkat}/$1"
 }
 
-# resolve_owned <relative-path> -> the first of workspace, platform that has it.
+# resolve_owned <relative-path> -> where a platform-owned file is.
+#
+# In a checkout: the first of workspace, platform that has it. On a released run
+# (KAKT_RELEASED_SCRIPTS): the release, exclusively -- see the body.
 #
 # REPOSITORY CONTENT ONLY: manifests, scripts, validators, the built binary.
 # Credentials are not repository content and go through owned_secret.
@@ -70,6 +73,22 @@ owned_secret() {
 # it is expected to be.
 resolve_owned() {
     local rel="$1"
+    # A RELEASED RUN TAKES PLATFORM CONTENT FROM THE RELEASE, AND NOWHERE ELSE.
+    #
+    # The workspace-first order below is right in a checkout, where the two
+    # roots coincide. It is wrong once the scripts come from the binary and the
+    # workspace is a TENANT's repository: a file the tenant happens to have at
+    # the same relative path would take precedence over the versioned
+    # implementation, so what ran would depend on the contents of the repository
+    # being bootstrapped.
+    #
+    # Set by the CLI when it materialises this tree (embedded.ReleasedScriptsEnv).
+    # No fallback to the workspace: a release missing its own content is a broken
+    # release, and reading a tenant's copy instead would hide that.
+    if [[ -n "${KAKT_RELEASED_SCRIPTS:-}" ]]; then
+        printf '%s' "$PLATFORM_DIR/$rel"
+        return 0
+    fi
     if [[ -e "$ZERO_OPS_DIR/$rel" ]]; then
         printf '%s' "$ZERO_OPS_DIR/$rel"
     elif [[ -e "$PLATFORM_DIR/$rel" ]]; then
@@ -2233,34 +2252,50 @@ main() {
     # nothing unhealthy in the cluster — it fails in the browser only.
     run_gate "oauth-clients" "OAuth client registration"
 
+    # NO SPOKE DECLARED IS A TOPOLOGY, NOT A MISSING ARGUMENT.
+    #
+    # CI builds one declared cluster at a time, and a management cluster is built
+    # on its own: a box's first bootstrap legitimately has no workload cluster,
+    # because declaring one is a later, separate commit (ADR-072). This refused
+    # outright -- "SPOKEPOOL_NAME must be set via --spoke flag" -- while the
+    # caller that invoked it had already reported the gates as skipped, so the
+    # two disagreed and the first management cluster of every box could not be
+    # built through CI.
+    #
+    # The gates below all assert about a pool, so with none declared there is
+    # nothing for them to assert and they are skipped. Said once, here, rather
+    # than each one deciding for itself.
     if [[ -z "$SPOKEPOOL_NAME" ]]; then
-        error_exit "SPOKEPOOL_NAME must be set via --spoke flag or SPOKEPOOL_NAME env var for provider '$PROVIDER'"
+        log "No SpokePool declared for this box, so the spoke gates are skipped:"
+        log "  spoke readiness, spoke home worker, spoke database, tenant ingress."
+        log "  Declare a workload cluster and its own commit builds it."
+    else
+        step10_wait_spokepool
+
+        # Deliberately OUTSIDE the wait_spokepool checkpoint (ADR-046 §24.2).
+        #
+        # Worker convergence is live state, not a one-shot fact. "We once waited for the
+        # SpokePool" says nothing about whether a node is serving now — a home worker is
+        # an unmanaged Hyper-V VM that can stop, and its host can sleep. Checkpointing it
+        # produced exactly that: a resumed run logged "SpokePool already ready, skipping",
+        # never provisioned the spoke's worker, and still declared success.
+        #
+        # This mirrors the hub's home-worker-join phase, which re-checks readyHubWorker
+        # on every run rather than trusting a completed-phase marker. The SpokePool wait
+        # above stays checkpointed; the worker gate must not be.
+        step10e_spoke_home_worker "$SPOKEPOOL_NAME" || return 1
+
+        # AFTER 10e, because the spoke's database needs a node to run on and 10e is
+        # what puts one there. Ordered the other way -- which it was, inside
+        # step10_wait_spokepool above -- this waited 900s for a Postgres instance on
+        # a cluster whose only node was a tainted control plane, then failed naming
+        # the database instead of the missing capacity.
+        step10f_spoke_database || return 1
+
+        # The spoke is Ready, so its ingress path is decidable — and under ADR-051 it
+        # is the path that actually serves tenant traffic.
+        run_gate "tenant-ingress" "spoke tenant ingress"
     fi
-    step10_wait_spokepool
-
-    # Deliberately OUTSIDE the wait_spokepool checkpoint (ADR-046 §24.2).
-    #
-    # Worker convergence is live state, not a one-shot fact. "We once waited for the
-    # SpokePool" says nothing about whether a node is serving now — a home worker is
-    # an unmanaged Hyper-V VM that can stop, and its host can sleep. Checkpointing it
-    # produced exactly that: a resumed run logged "SpokePool already ready, skipping",
-    # never provisioned the spoke's worker, and still declared success.
-    #
-    # This mirrors the hub's home-worker-join phase, which re-checks readyHubWorker
-    # on every run rather than trusting a completed-phase marker. The SpokePool wait
-    # above stays checkpointed; the worker gate must not be.
-    step10e_spoke_home_worker "$SPOKEPOOL_NAME" || return 1
-
-    # AFTER 10e, because the spoke's database needs a node to run on and 10e is
-    # what puts one there. Ordered the other way -- which it was, inside
-    # step10_wait_spokepool above -- this waited 900s for a Postgres instance on
-    # a cluster whose only node was a tainted control plane, then failed naming
-    # the database instead of the missing capacity.
-    step10f_spoke_database || return 1
-
-    # The spoke is Ready, so its ingress path is decidable — and under ADR-051 it
-    # is the path that actually serves tenant traffic.
-    run_gate "tenant-ingress" "spoke tenant ingress"
 
     # NOT a gate. The public endpoints are checked at the END, by the
     # post-bootstrap validation below, which runs every cluster module at

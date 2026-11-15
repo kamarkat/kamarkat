@@ -122,3 +122,15 @@ manifests/argocd/environment-manager/descriptors/
 # Build artifact: `go build -o keystore-stub ./test/gate1/keystore-stub` drops a host
 # binary next to the module. The gate builds the stub inside a container.
 /operators/kms-plugin/keystore-stub
+
+# GENERATED, not source. scripts/package/embed-platform-assets.sh copies the
+# platform content a released binary carries -- manifests and the Day-0 script
+# closure -- out of the one authoritative tree into here, and go:embed compiles
+# it in. Committing the copy made it a second place a manifest could be edited,
+# and left the repository carrying every script twice.
+#
+# A clean checkout therefore has no copy, and `go build` alone cannot satisfy
+# the embed directive. The entry points regenerate first: `make build`,
+# `make test`, and scripts/package/build-cli.sh, which the release uses.
+/internal/platform/embedded/manifests/
+/internal/platform/embedded/scripts/

@@ -239,3 +239,33 @@ Because the tenant template moves with the bundle, a defective bundle reaches th
 - ADR-068: The Build Declares the Bundle Version
 - ADR-064: Bundle Promotion and Tenant Placement
 - ADR-071: How This Platform Differs From kubefirst
+
+## Amendment 2026-11-15: a release carries its own orchestration
+
+The binary carries the platform content Day-0 reads. That now includes the
+scripts Day-0 *runs*, not only the manifests it reads: the computed runtime
+script closure is embedded alongside them.
+
+It had to be fetched before. A tenant's workflow took a second checkout of this
+repository at the release tag to get `hub-bootstrap.sh` and the validators, so
+"the scripts belong to this release" was a property of a matching ref rather
+than of the artefact — and it needed the tenant's CI to be able to read this
+repository at all. Now a release is self-contained: the binary, the manifests,
+and the orchestration are one immutable thing.
+
+Two consequences worth naming:
+
+- **The embedded tree is generated and not tracked.** It is copied from the one
+  authoritative source by `scripts/package/embed-platform-assets.sh`, so a clean
+  checkout has no copy and `go build` alone cannot satisfy the directive. The
+  entry points regenerate first (`make build`, `make test`,
+  `scripts/package/build-cli.sh`). Committing the copy made it a second place a
+  manifest could be edited and carried every script twice.
+
+- **The closure is computed, not listed.** `scripts/validate/runtime-script-closure.py`
+  derives it from the entry points Day-0 invokes and takes the validator
+  directories whole, because `scripts/validate/run.sh` discovers modules by
+  glob. A hand-written manifest goes stale on the next validator, and the
+  failure is silent in the worst way: `validate-all.sh` *skips* a suite whose
+  script is absent, so a release missing one reports success with less coverage
+  than it claims. The release gate refuses an incomplete package.

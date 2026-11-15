@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: crossplane-provider-config-hetzner
-  namespace: platform-ops
-data:
-  provider: hetzner
-  composition-label: "provider=hetzner"

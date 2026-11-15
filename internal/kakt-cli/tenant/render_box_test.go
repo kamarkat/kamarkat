@@ -334,7 +334,7 @@ func TestRender_RenovateManagerMatchesTheBundleItProposesAgainst(t *testing.T) {
 // failure this guards is one GitHub reports as a missing workflow rather than as
 // a scaffolding fault: a pin left as @v<BUNDLE_VERSION> is a reference to a tag
 // by that literal name.
-func TestRender_BootstrapWorkflowIsPinnedAndSubstituted(t *testing.T) {
+func TestRender_BootstrapWorkflowCarriesNoVersionOfItsOwn(t *testing.T) {
 	dir := renderInto(t, t.TempDir(), testSpec())
 
 	path := filepath.Join(dir, ".github", "workflows", "bootstrap-cluster.yml")
@@ -345,26 +345,45 @@ func TestRender_BootstrapWorkflowIsPinnedAndSubstituted(t *testing.T) {
 	}
 	body := string(raw)
 
-	if strings.Contains(body, "<") && regexp.MustCompile(`<[A-Z_]{3,}>`).MatchString(body) {
+	if regexp.MustCompile(`<[A-Z_]{3,}>`).MatchString(body) {
 		t.Errorf("the workflow still carries placeholders:\n%s",
 			strings.Join(regexp.MustCompile(`<[A-Z_]{3,}>`).FindAllString(body, -1), " "))
 	}
 
-	// Pinned to a released tag, not a branch. The execution logic is then fixed
-	// for this repository until someone here moves the pin, so a change to the
-	// platform's workflow cannot alter how this repository bootstraps.
-	pin := regexp.MustCompile(`uses:\s+\S+/\.github/workflows/\S+@(\S+)`).FindStringSubmatch(body)
-	if pin == nil {
-		t.Fatal("the workflow does not call the platform's reusable workflow")
+	// NO PINNED REUSABLE WORKFLOW. This file used to call one at a ref
+	// substituted when the box was rendered, and that ref never moved: a box
+	// promoted to a later version still bootstrapped with the workflow of the
+	// version it was created on, and a fix to Day-0 could not reach it without
+	// someone editing the tenant's repository.
+	if m := regexp.MustCompile(`uses:\s+\S+/\.github/workflows/\S+@(\S+)`).FindStringSubmatch(body); m != nil {
+		t.Errorf("the workflow calls a reusable platform workflow pinned at %s. "+
+			"The orchestration belongs to the release the CLI is, so this file "+
+			"holds no platform logic and no ref that can go stale", m[1])
 	}
-	if pin[1] == "main" || pin[1] == "master" || strings.HasPrefix(pin[1], "refs/heads/") {
-		t.Errorf("the platform workflow is pinned to a branch (%s); it must be a "+
-			"released tag, or this repository's bootstrap changes without anyone "+
-			"here deciding it should", pin[1])
+
+	// AND NO VERSION. A rendered literal is the same defect one level down: it
+	// froze at box creation while bundle.yaml moved on. The version is read from
+	// git by the resolver.
+	if regexp.MustCompile(`(?m)^\s*bundle-version:\s*\S`).MatchString(body) {
+		t.Error("the workflow carries a bundle-version of its own; the version a " +
+			"cluster is built with is the one its bundle.yaml pins")
 	}
-	if want := "v" + testSpec().BundleVersion; pin[1] != want {
-		t.Errorf("pinned to %s, expected %s -- the workflow and the bundle a "+
-			"cluster runs are the same release", pin[1], want)
+	if v := testSpec().BundleVersion; v != "" && strings.Contains(body, v) {
+		t.Errorf("the workflow mentions %s, so it was rendered against a version "+
+			"rather than reading one from git", v)
+	}
+
+	// It must still fetch the CLI and run its Day-0 command, or it orchestrates
+	// nothing at all.
+	for _, want := range []string{
+		"matrix.box.version",
+		"releases/download/v${VERSION}",
+		"kakt bootstrap --cluster",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the workflow does not %q: it has to resolve the declared "+
+				"version, fetch that release and run its Day-0 command", want)
+		}
 	}
 }
 

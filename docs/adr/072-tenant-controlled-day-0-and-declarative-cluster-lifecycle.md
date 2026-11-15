@@ -138,3 +138,68 @@ Nothing changes for a spoke. Its lifecycle is already declarative, and this ADR 
 - ADR-065: The Control Plane Ships Into the Box
 - ADR-067: Support Telemetry and the Basis of Maintenance
 - ADR-071: How This Platform Differs From kubefirst
+
+## Amendment 2026-11-15: the release carries Day-0, and the tenant's CI carries no version
+
+### 1. What changed
+
+A tenant's repository called a reusable workflow this repository maintains,
+pinned at `@v<version>`. That ref was substituted when the box was rendered and
+never moved again, and the workflow's `bundle-version` input was a rendered
+literal beside it. So a box promoted to a later version still bootstrapped with
+the orchestration of the version it was created on, and a fix to Day-0 could not
+reach an existing box without someone hand-editing that repository.
+
+Day-0 is now one command on the released binary, `kakt bootstrap`, and the
+tenant's workflow is a launcher that holds no platform logic and no version:
+
+1. resolve which declared cluster to build;
+2. read that cluster's pinned version from its `bundle.yaml`;
+3. fetch the matching release, verify it against the release's `SHA256SUMS` and
+   against the binary's own `bundle-version`;
+4. run `kakt bootstrap --cluster <name> --gitops-dir .`;
+5. keep the state and generated artefacts, whether the run finished or not.
+
+`.github/workflows/tenant-bootstrap.yml` is deleted. Boxes created before this
+reference it by immutable tag and are unaffected.
+
+### 2. Why the version could not simply track the declaration
+
+GitHub does not allow an expression in `uses:`, so a reusable-workflow ref
+cannot follow a value in git. That is the whole of it: the orchestration had to
+stop being a workflow before the version could stop being a literal. A value
+can be read from anywhere, and the launcher reads it from `bundle.yaml`.
+
+The read is anchored on the `chart: environment-manager` source. A cluster's
+`bundle.yaml` is a multi-source Application whose other source is the tenant's
+own repository, with a `targetRevision` naming a branch — so an unanchored match
+returns `main` and fetches a release that does not exist. `kakt promote` anchors
+the same way when it rewrites these files, and `kakt bootstrap` re-reads the
+value and refuses when it disagrees with the binary running it.
+
+### 3. The scripts come from the release
+
+Day-0's orchestration is shell. The workflow used to take a second checkout of
+this repository at the release tag to get it, while the step above that claimed
+"the binary carries the platform content Day-0 needs, so nothing here checks out
+the platform's repository". Both halves are now true: the script closure is
+embedded in the binary (ADR-063), materialized into a private directory per
+invocation, and resolved from there exclusively.
+
+`hub-bootstrap.sh`'s `resolve_owned` looked in the workspace before the
+platform, which is right in a checkout — the two coincide — and wrong once the
+workspace is a tenant's repository, where a file at the same relative path would
+shadow the versioned implementation. On a released run it resolves from the
+release only, with no fallback: a release missing its own content is a broken
+release, and reading a tenant's copy instead would hide that.
+
+### 4. What did not change
+
+Execution is still the tenant's: their runners, their secrets, their repository,
+and the platform holds none of it (ADR-065). Day-0 remains distinct from GitOps
+reconciliation — promoting a bundle version moves a running cluster and does not
+bootstrap a new one. The phase state and resumability stay in the workspace, so
+re-running the command continues rather than restarts.
+
+A development build still runs Day-0 from the checkout it was built from
+(ADR-068), and there is no fallback from a released build to a checkout.
