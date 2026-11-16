@@ -13,6 +13,18 @@
 # That is a hypothesis, and this measures it rather than assuming it. It runs
 # where the failure happens, needs no cluster, creates nothing and costs nothing.
 #
+# MEASURED 2026-11-16 (run 43870533985), and it settles the first question:
+#
+#   anonymous   limit 60, remaining 58   the runner's IP is nowhere near its quota
+#   authenticated limit 5000             a credential would raise it, and nothing needs it to
+#   core-components.yaml  HTTP 200, 1,156,126 bytes   egress to the assets works
+#
+# So the rate limit is NOT the cause, and no provider-fetch credential is
+# warranted. What those three lines do NOT cover is the fetch the operator
+# actually performs: kubectl and curl run on the RUNNER, while the operator runs
+# in a pod inside Kind, and reaches the network through the node's own DNS and
+# NAT. Job `capi-init` below closes exactly that gap.
+#
 # WHAT THE RESULT MEANS:
 #
 #   anonymous remaining: 0     the limit is reached on this runner's IP. The
@@ -73,3 +85,92 @@ jobs:
           head -3 /tmp/core-components.yaml
           echo "::endgroup::"
           [ "$code" = "200" ] || { echo "::error::the operator cannot download its components (HTTP ${code})"; exit 1; }
+
+  # The failing operation itself, in the environment where it fails.
+  #
+  # Job `probe` proved the runner host can reach GitHub. This installs what the
+  # product installs -- the pinned cert-manager, the operator's own manifest and
+  # the CoreProvider declaration this platform ships -- into a throwaway Kind
+  # cluster on the same runner class, and then reports what the resource says
+  # about itself. The operator fetches from inside a pod, which is the one path
+  # no curl from the host can test.
+  #
+  # It creates nothing outside the runner and provisions no infrastructure.
+  capi-init:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Versions this platform pins
+        id: v
+        run: |
+          set -euo pipefail
+          # Read from the source of truth rather than restated here, so a probe
+          # cannot test a version the product does not ship.
+          capi=$(grep -oE 'CAPIVersion = "[^"]+"' internal/kakt-cli/versions/versions.go | cut -d'"' -f2)
+          cm=$(grep -oE 'CertManagerVersion = "[^"]+"' internal/kakt-cli/versions/versions.go | cut -d'"' -f2)
+          echo "capi=$capi" >> "$GITHUB_OUTPUT"
+          echo "certmanager=$cm" >> "$GITHUB_OUTPUT"
+          echo "cluster-api $capi, cert-manager $cm"
+
+      - name: Disposable cluster
+        run: kind create cluster --name capi-probe --wait 120s
+
+      - name: cert-manager
+        run: |
+          set -euo pipefail
+          kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${{ steps.v.outputs.certmanager }}/cert-manager.yaml"
+          for d in cert-manager cert-manager-webhook cert-manager-cainjector; do
+            kubectl -n cert-manager rollout status "deployment/$d" --timeout=5m
+          done
+
+      - name: The operator and the CoreProvider this platform ships
+        run: |
+          set -euo pipefail
+          kubectl apply --server-side -f internal/assets/manifests/core/capi-operator/install.yaml
+          kubectl -n platform-capi rollout status deployment/capi-operator-controller-manager --timeout=5m
+          kubectl apply -f internal/assets/manifests/core/capi-operator/providers/core-provider.yaml
+
+      - name: Does CoreProvider become Ready
+        id: ready
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 36); do
+            status=$(kubectl -n platform-capi get coreprovider cluster-api \
+              -o jsonpath="{.status.conditions[?(@.type=='Ready')].status}" 2>/dev/null || true)
+            if [ "$status" = "True" ]; then echo "CoreProvider is Ready"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::CoreProvider/cluster-api never reported Ready — the tenant's failure, reproduced"
+          exit 1
+
+      - name: What the resource says about itself
+        if: always()
+        run: |
+          echo "::group::conditions"
+          kubectl -n platform-capi get coreprovider cluster-api \
+            -o jsonpath='{range .status.conditions[*]}{.type}={.status} ({.reason}) {.message}{"\n"}{end}' || true
+          echo "::endgroup::"
+          echo "::group::generation"
+          kubectl -n platform-capi get coreprovider cluster-api \
+            -o jsonpath='generation={.metadata.generation} observedGeneration={.status.observedGeneration} installedVersion={.status.installedVersion}{"\n"}' || true
+          echo "::endgroup::"
+          echo "::group::pods"
+          kubectl -n platform-capi get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::events"
+          kubectl -n platform-capi get events --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::operator log"
+          kubectl -n platform-capi logs deployment/capi-operator-controller-manager --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::egress from inside the cluster"
+          kubectl run egress-probe --image=curlimages/curl:8.11.1 --restart=Never --rm -i --quiet --timeout=120s -- \
+            -sS -o /dev/null -w 'pod -> api.github.com: HTTP %{http_code}\n' \
+            https://api.github.com/repos/kubernetes-sigs/cluster-api/releases/tags/${{ steps.v.outputs.capi }} || true
+          echo "::endgroup::"
+
+      - name: Fail if the provider never became ready
+        if: steps.ready.outcome == 'failure'
+        run: exit 1
