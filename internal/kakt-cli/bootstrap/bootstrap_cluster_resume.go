@@ -103,7 +103,7 @@ func (o *Orchestrator) reconcileBootstrapCluster(stateMgr *state.StateManager, b
 			"Rebuilding the bootstrap cluster would not recover them: a new one knows\n"+
 			"nothing about servers it did not create. Tear this cluster down and build\n"+
 			"it again:\n\n"+
-			"  kakt teardown --cluster %s --gitops-dir <this repository>",
+			"  kakt teardown --name %s --gitops-dir <this repository> --confirm",
 			recorded, kubeContext, owned, o.ClusterName)
 	}
 

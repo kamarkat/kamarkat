@@ -400,7 +400,19 @@ spec:
             serviceSubnet: 10.96.0.0/12
           apiServer:
             extraArgs:
-              cloud-provider: external
+              # NO cloud-provider HERE. kube-apiserver has not had that flag
+              # since the in-tree cloud providers were removed, and an
+              # unrecognised flag is fatal: the static pod exits 1 with
+              # `Error: unknown flag: --cloud-provider` before it binds :6443,
+              # so kubeadm init never gets past wait-control-plane, the
+              # KubeadmControlPlane stays INITIALIZED=False, and every worker
+              # sits Pending behind it. Observed on a real box: the server was
+              # provisioned and healthy and nothing in CAPI's output named the
+              # flag.
+              #
+              # external belongs on the two components that still take it, and
+              # both still carry it below: controllerManager (so the in-tree
+              # controllers stand down for the hcloud CCM) and the kubelets.
               # Kubernetes Secrets are encrypted at rest (ADR-003 section 6).
               #
               # THIS IS THE LINE v3 DELIBERATELY WITHHELD. It makes the API server
