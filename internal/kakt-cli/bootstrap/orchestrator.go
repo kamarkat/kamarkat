@@ -65,6 +65,13 @@ type Orchestrator struct {
 	Provider    Provider
 	ClusterName string
 
+	// checkpointErr is why the last phase's state did not reach the tenant's
+	// repository, or nil. Held on the orchestrator rather than returned from
+	// each phase because what it changes is not that phase -- which succeeded --
+	// but whether the run may go on to create infrastructure it could not then
+	// record. See requireDurableState.
+	checkpointErr error
+
 	// OIDCIssuerURL and OIDCClientID name the identity provider this box's API
 	// server accepts tokens from (ADR-076). Empty on a first build; supplied on a
 	// rebuild of an environment whose issuer already runs, to avoid provisioning
@@ -278,6 +285,11 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		OIDCIssuerURL:       o.OIDCIssuerURL,
 		OIDCClientID:        o.OIDCClientID,
 		Encryption:          o.Encryption,
+	}
+	// THE LINE WHERE MONEY STARTS. Everything before this ran in the ephemeral
+	// Kind cluster; this phase creates servers.
+	if err := o.requireDurableState("cluster-provision"); err != nil {
+		return err
 	}
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseClusterProvision, "cluster-provision",
 		"",
@@ -870,23 +882,72 @@ func (o *Orchestrator) runPhase(
 	if err := stateMgr.Save(bs); err != nil {
 		return err
 	}
-	return o.persistTenantState(ctx, label)
+
+	// A FAILED CHECKPOINT DOES NOT FAIL THIS PHASE. The phase succeeded, and
+	// abandoning the run because its bookkeeping could not be pushed would turn
+	// a recoverable state into a lost one.
+	//
+	// It is remembered instead, and requireDurableState refuses before the first
+	// phase that creates infrastructure. The cost of continuing without a
+	// checkpoint changes completely at that line: before it, a repeat run redoes
+	// local work in a Kind cluster; after it, a repeat run buys a second set of
+	// servers that nothing records.
+	if err := o.persistTenantState(ctx, label); err != nil {
+		o.checkpointErr = err
+		fmt.Printf("[%s] ⚠️  state NOT checkpointed to the tenant's repository: %v\n", label, err)
+		fmt.Printf("[%s]    a fresh runner cannot resume from this phase\n", label)
+		return nil
+	}
+	o.checkpointErr = nil
+	return nil
+}
+
+// requireDurableState refuses to create infrastructure that nothing can record.
+//
+// Called before the phases that buy servers. The checkpoint is what lets a
+// second runner resume rather than start again, and on a GitHub-hosted runner it
+// had never worked -- so a failed provisioning run left servers behind that the
+// next run neither knew about nor adopted.
+//
+// It names the last failure rather than restating the rule, because the two
+// causes need different fixes: no identity on the runner is this platform's
+// problem, and a rejected push is the tenant's repository refusing a credential.
+func (o *Orchestrator) requireDurableState(phase string) error {
+	if o.checkpointErr == nil {
+		return nil
+	}
+	return fmt.Errorf("refusing to start %s: this run cannot record its progress in the "+
+		"tenant's repository, so a failure here would leave infrastructure that no later "+
+		"run can find or adopt.\n\nThe last checkpoint failed with:\n  %v\n\n"+
+		"Everything up to this point ran in a local cluster and costs nothing to repeat.",
+		phase, o.checkpointErr)
 }
 
 // persistTenantState pushes the bootstrap state to the tenant's repository after
-// a phase completes.
+// a phase completes, and says plainly whether it succeeded.
 //
-// Every phase, not once at the end. The state file already updates on disk at
-// this cadence; on a CI runner that disk is discarded when the job ends, so a
-// state committed only after the last phase would leave a run that failed at
+// Every phase, not once at the end. The state file updates on disk at this
+// cadence; on a CI runner that disk is discarded when the job ends, so a state
+// committed only after the last phase leaves a run that failed at
 // cluster-provision restarting from nothing -- and provisioning a cluster twice
 // is fifteen minutes and a second set of nodes.
 //
-// Failure is reported and does not stop the bootstrap. A phase that succeeded
-// has succeeded, and abandoning the run because its bookkeeping could not be
-// pushed would turn a recoverable state into a lost one. What it costs is that
-// the next run repeats from the last phase that did persist, which is the
-// behaviour without this at all.
+// WHAT CHANGED, and why it matters more than it looks. This returned nil on
+// every failure -- staging, committing, rebasing, pushing -- after printing a
+// warning. On a GitHub-hosted runner the commit failed at EVERY phase of EVERY
+// run, because such a runner has no git identity:
+//
+//	could not commit bootstrap state: exit status 128
+//	Author identity unknown ... empty ident name not allowed
+//
+// So the per-phase checkpointing this exists for had never once worked in the
+// only environment where it matters, every re-dispatch restarted from nothing,
+// and the run said nothing about it beyond a warning among thousands of lines.
+//
+// It now returns an error, and the caller decides. Durability is a precondition
+// for the phases that create infrastructure, not bookkeeping around them: a run
+// that cannot record where it got to must not go on to buy servers it will not
+// be able to tell anyone about.
 func (o *Orchestrator) persistTenantState(ctx context.Context, label string) error {
 	if o.GitopsDir == "" {
 		return nil
@@ -898,34 +959,64 @@ func (o *Orchestrator) persistTenantState(ctx context.Context, label string) err
 		return cmd.CombinedOutput()
 	}
 
+	// AN IDENTITY TO COMMIT AS, because a CI runner has none.
+	//
+	// Passed with -c rather than written to the repository's config: this is
+	// bookkeeping by the platform, and a developer running the same bootstrap on
+	// their own machine keeps authoring as themselves.
+	ident := []string{}
+	name, nameErr := git("config", "user.name")
+	email, emailErr := git("config", "user.email")
+	if nameErr != nil || emailErr != nil ||
+		len(bytes.TrimSpace(name)) == 0 || len(bytes.TrimSpace(email)) == 0 {
+		// .invalid is reserved and never routable (RFC 2606), so this names the
+		// automation without claiming an address that could belong to someone.
+		ident = []string{
+			"-c", "user.name=kakt Day-0",
+			"-c", "user.email=day0@kamarkat.invalid",
+		}
+	}
+
+	// NOTHING YET IS NOT A FAILURE. Before any phase has written state the
+	// directory does not exist, and `git add` on a path that matches nothing
+	// exits 128 -- which is indistinguishable from a real staging failure unless
+	// it is answered first.
+	if _, err := os.Stat(filepath.Join(o.GitopsDir, state.TenantStateDir)); os.IsNotExist(err) {
+		return nil
+	}
 	if out, err := git("add", state.TenantStateDir); err != nil {
-		fmt.Printf("[%s] ⚠️  could not stage bootstrap state: %v\n%s\n", label, err, out)
+		return fmt.Errorf("could not stage the bootstrap state in %s: %w\n%s",
+			o.GitopsDir, err, out)
+	}
+
+	// UNCHANGED IS NOT A FAILURE, and is the normal case for a phase that
+	// recorded nothing new. `git commit` treats it as an error, so it is
+	// answered before committing rather than after.
+	if _, err := git("diff", "--cached", "--quiet"); err == nil {
 		return nil
 	}
 
-	// Nothing to commit is the normal case for a phase that changed no state,
-	// and `git commit` treats it as an error.
-	if out, err := git("diff", "--cached", "--quiet"); err == nil {
-		_ = out
-		return nil
-	}
-
-	if out, err := git("commit", "-m",
-		fmt.Sprintf("chore(bootstrap): %s [skip ci]", label)); err != nil {
-		fmt.Printf("[%s] ⚠️  could not commit bootstrap state: %v\n%s\n", label, err, out)
-		return nil
+	commitArgs := append(append([]string{}, ident...), "commit", "-m",
+		fmt.Sprintf("chore(bootstrap): %s [skip ci]", label))
+	if out, err := git(commitArgs...); err != nil {
+		return fmt.Errorf("could not commit the bootstrap state: %w\n%s", err, out)
 	}
 
 	// Rebase before pushing: a promotion pull request may have merged while this
-	// bootstrap was running, and a rejected push would silently stop persisting
-	// state for the rest of the run.
+	// bootstrap was running, and a rejected push would stop the state being
+	// persisted for the rest of the run.
 	if out, err := git("pull", "--rebase", "--autostash"); err != nil {
-		fmt.Printf("[%s] ⚠️  could not rebase before pushing state: %v\n%s\n", label, err, out)
-		return nil
+		return fmt.Errorf("could not rebase before pushing the bootstrap state: %w\n%s",
+			err, out)
 	}
 	if out, err := git("push"); err != nil {
-		fmt.Printf("[%s] ⚠️  could not push bootstrap state: %v\n%s\n", label, err, out)
+		// THE ONE THAT DECIDES DURABILITY. A commit that is not pushed lives on a
+		// disk that ends with the job, so reporting a local commit as a
+		// checkpoint would be claiming a resumability that does not exist.
+		return fmt.Errorf("could not push the bootstrap state to the tenant's repository: "+
+			"%w\n%s", err, out)
 	}
+	fmt.Printf("[%s] ✓ state checkpointed to the tenant's repository\n", label)
 	return nil
 }
 

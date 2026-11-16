@@ -3,14 +3,19 @@ package bootstrap
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// A bootstrap that cannot push its bookkeeping has still done the work. Failing
-// the run because of it would turn a recoverable state into a lost one -- the
-// cluster exists either way, and the next run repeats from the last phase that
-// did persist.
-func TestPersistTenantStateSurvivesAFailedPush(t *testing.T) {
+// A push that cannot succeed is REPORTED, because a commit that never left the
+// runner is not a checkpoint: that disk ends with the job.
+//
+// The phase itself still succeeds -- runPhase records this and carries on, and
+// refuses only at the phase that creates infrastructure (requireDurableState).
+// Reporting it here is what makes that decision possible; returning nil, as this
+// did, is what let a runner with no git identity fail every checkpoint of every
+// run while the bootstrap claimed it could be resumed.
+func TestPersistTenantStateReportsAFailedPush(t *testing.T) {
 	dir := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-q"},
@@ -31,11 +36,16 @@ func TestPersistTenantStateSurvivesAFailedPush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := o.persistTenantState(t.Context(), "capi-init"); err != nil {
-		t.Errorf("a push that cannot succeed must not fail the bootstrap: %v", err)
+	err := o.persistTenantState(t.Context(), "capi-init")
+	if err == nil {
+		t.Fatal("a state that never reached the repository was reported as checkpointed")
+	}
+	if !strings.Contains(err.Error(), "push") && !strings.Contains(err.Error(), "rebase") {
+		t.Errorf("the failure does not say which step could not reach the repository: %v", err)
 	}
 
-	// It committed what it could, so a re-run on this checkout resumes.
+	// It still committed what it could, so a re-run on THIS checkout resumes;
+	// that is why the phase is not failed over it.
 	cmd := exec.Command("git", "log", "--oneline")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -49,7 +59,9 @@ func TestPersistTenantStateSurvivesAFailedPush(t *testing.T) {
 }
 
 // Nothing to commit is the normal case for a phase that changed no state, and
-// `git commit` treats it as an error.
+// must not be reported as a failed checkpoint -- neither `git commit` on an empty
+// index nor `git add` on a state directory that does not exist yet, both of which
+// exit non-zero.
 func TestPersistTenantStateIsQuietWhenNothingChanged(t *testing.T) {
 	dir := t.TempDir()
 	for _, args := range [][]string{{"init", "-q"},

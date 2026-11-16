@@ -1115,7 +1115,7 @@ step5_verify_secrets() {
 
         log "Waiting for infisical-auth secret (attempt $attempt/$max_attempts)..."
         sleep 10
-        ((attempt++))
+        attempt=$((attempt + 1))
     done
 
     if [[ $attempt -gt $max_attempts ]]; then
@@ -1157,7 +1157,7 @@ step6_wait_infisical() {
 
         log "Waiting for Infisical to be ready (attempt $attempt/$max_attempts, ready: $pod_ready)"
         sleep 10
-        ((attempt++))
+        attempt=$((attempt + 1))
     done
 
     if [[ $attempt -gt $max_attempts ]]; then
@@ -1222,11 +1222,18 @@ step6b_seed_external_credentials() {
         # operator's laptop, while a tenant's Day-0 runs in CI under the tenant's
         # secrets (ADR-072), where that directory does not exist and never will.
         #
-        # Values are passed on stdin rather than as --from-file or --from-literal:
-        # a literal would put the credential in this process's argument list,
-        # which is world-readable, and writing it to a file to satisfy --from-file
-        # would put it on disk in the tenant's repository.
-        local -a args=()
+        # VALUES ON STDIN, which is what this comment has always claimed and what
+        # the code below did not do: it built --from-literal=KEY=VALUE arguments,
+        # so every seeded credential appeared in this process's argument list --
+        # readable by anything on the machine for as long as the call runs, and
+        # by anything that captures a process table. --from-file would have put
+        # them on disk inside the tenant's repository instead.
+        #
+        # The Secret is assembled here and applied through `kubectl apply -f -`,
+        # so the values reach kubectl only through a pipe. base64 because that is
+        # what a Secret's data holds, and it keeps a value with newlines or
+        # colons from breaking the document it is written into.
+        local keys=() values=()
         local pair file key env_name value missing=0
         local IFS_SAVE="$IFS"
         IFS=','
@@ -1246,26 +1253,44 @@ step6b_seed_external_credentials() {
                 log "  $target: no $env_name in the environment and no value at $path"
                 missing=1
             else
-                args+=("--from-literal=$key=$value")
+                keys+=("$key")
+                values+=("$value")
             fi
             IFS=','
         done
         IFS="$IFS_SAVE"
 
-        if [[ "$missing" -eq 1 ]]; then
-            log "  ⏭️  $target not seeded — set the variables above, or fill the files, and re-run (idempotent)"
-            ((skipped++))
+        # An empty key set would reach "${!keys[@]}" below, which is an unbound
+        # variable under `set -u` on bash 3.2 -- the same hazard the counters
+        # above carried. A spec that names no files seeds nothing, and says so.
+        if [[ "$missing" -eq 0 && ${#keys[@]} -eq 0 ]]; then
+            log "  ⏭️  $target not seeded — its specification names no values"
+            skipped=$((skipped + 1))
             continue
         fi
 
-        kubectl --kubeconfig="$KUBECONFIG_PATH" -n "$ns" \
-            create secret generic "$name" "${args[@]}" \
-            --dry-run=client -o yaml \
-            | kubectl --kubeconfig="$KUBECONFIG_PATH" apply -f - >/dev/null \
+        if [[ "$missing" -eq 1 ]]; then
+            log "  ⏭️  $target not seeded — set the variables above, or fill the files, and re-run (idempotent)"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        # Built and piped, never passed. `printf | base64` keeps each value out of
+        # the argument list too -- `base64 <<< "$value"` would be a here-string,
+        # which bash materialises as a temporary FILE on disk.
+        {
+            printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  namespace: %s\ntype: Opaque\ndata:\n' \
+                "$name" "$ns"
+            local idx
+            for idx in "${!keys[@]}"; do
+                printf '  %s: %s\n' "${keys[$idx]}" \
+                    "$(printf '%s' "${values[$idx]}" | base64 | tr -d '\n')"
+            done
+        } | kubectl --kubeconfig="$KUBECONFIG_PATH" apply -f - >/dev/null \
             || error_exit "failed to create $target"
 
         log "  ✓ $target seeded"
-        ((seeded++))
+        seeded=$((seeded + 1))
     done
 
     log "Step 6b: $seeded seeded, $skipped awaiting values"
@@ -1310,7 +1335,7 @@ step8b_refresh_external_secrets() {
 
     while read -r ns name; do
         [[ -z "$ns" || -z "$name" ]] && continue
-        ((total++))
+        total=$((total + 1))
         kubectl --kubeconfig="$KUBECONFIG_PATH" -n "$ns" annotate externalsecret "$name" \
             force-sync="$stamp" --overwrite >/dev/null 2>&1 || true
     done <<< "$pairs"
@@ -1404,7 +1429,7 @@ step10_wait_spokepool() {
 
         log "Waiting for SpokePool readiness (attempt $attempt/$max_attempts, Ready: $spokepool_status, Synced: $spokepool_synced). It mostly get ready by 55"
         sleep 10
-        ((attempt++))
+        attempt=$((attempt + 1))
     done
 
     if [[ $attempt -gt $max_attempts ]]; then
@@ -1473,7 +1498,7 @@ step10_wait_spokepool() {
 
         log "Waiting for CAPI Cluster (attempt $cluster_attempt/$cluster_max_attempts): Phase=$cluster_phase, Infrastructure=$infra_ready${infra_reason:+ ($infra_reason)}, ControlPlane=$cp_ready, Workers=$workers_ready"
         sleep 10
-        ((cluster_attempt++))
+        cluster_attempt=$((cluster_attempt + 1))
     done
 
     if [[ $cluster_attempt -gt $cluster_max_attempts ]]; then
@@ -1497,7 +1522,7 @@ step10_wait_spokepool() {
 
         log "Waiting for ProviderConfig (attempt $providerconfig_attempt/$providerconfig_max_attempts): $cluster_name"
         sleep 10
-        ((providerconfig_attempt++))
+        providerconfig_attempt=$((providerconfig_attempt + 1))
     done
 
     if [[ $providerconfig_attempt -gt $providerconfig_max_attempts ]]; then
@@ -1550,7 +1575,7 @@ step10_wait_spokepool() {
 
         log "Waiting for bootstrap PKI. Usually becomes ready at 5th attempt. (attempt $pki_attempt/$pki_max_attempts): certificate=$cert_ready identity=$identity_ready"
         sleep 10
-        ((pki_attempt++))
+        pki_attempt=$((pki_attempt + 1))
     done
 
     if [[ $pki_attempt -gt $pki_max_attempts ]]; then
