@@ -6,6 +6,18 @@ metadata:
 spec:
   version: v1.13.7
   manager:
+    # ClusterTopology only. It is alpha and defaults to false upstream, so
+    # ClusterClass needs it named here.
+    #
+    # NOT ClusterResourceSet, which this set carried while the pin was v1.10.0.
+    # The feature went GA in v1.10 and its gate was deleted in v1.11, so the
+    # v1.13.7 manager rejects the name -- `unrecognized feature gate:
+    # ClusterResourceSet`, exit 2, CrashLoopBackOff. The operator still reported
+    # ProviderInstalled=True, because it had fetched and applied the components
+    # correctly; the controller those components deploy was the thing that could
+    # not start, so CoreProvider sat at Ready=False until Day-0 timed out.
+    # ClusterResourceSet itself is unconditional at v1.13.7 (main.go sets up
+    # ClusterResourceSetReconciler with no gate check and both CRDs ship), so
+    # the platform's CRS-delivered addons need nothing declared.
     featureGates:
       ClusterTopology: true
-      ClusterResourceSet: true
