@@ -570,7 +570,7 @@ func (p *Provisioner) WaitForReady(ctx context.Context) error {
 
 	// Use the health framework to do the actual wait, then on failure
 	// dump extra diagnostics (control-plane describe) for operators.
-	checker := health.NewCAPIResourceReadyHealth(health.CAPIClusterKind, p.Config.ClusterName, p.Config.Namespace)
+	checker := health.NewCAPIClusterAvailableHealth(p.Config.ClusterName, p.Config.Namespace)
 	waiter := &health.HealthWaiter{
 		Checkers: []health.HealthChecker{checker},
 		Interval: 30 * time.Second,

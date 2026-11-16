@@ -132,6 +132,13 @@ type CAPIResourceReadyHealth struct {
 	Kind         string
 	ResourceName string
 	Namespace    string
+	// Condition is the condition type that must be True. Empty means Ready.
+	//
+	// NOT every CAPI kind has a Ready condition, and asking for one that does
+	// not exist is indistinguishable from asking for one that is False: the
+	// jsonpath selects nothing, the check reads "", and it keeps reading "" for
+	// the whole timeout. See NewCAPIClusterAvailableHealth.
+	Condition string
 }
 
 // CAPIClusterKind is the CAPI Cluster resource, FULLY QUALIFIED.
@@ -159,27 +166,104 @@ func NewCAPIResourceReadyHealth(kind, name, namespace string) *CAPIResourceReady
 	return &CAPIResourceReadyHealth{Kind: kind, ResourceName: name, Namespace: namespace}
 }
 
+// NewCAPIClusterAvailableHealth returns a checker for a CAPI Cluster's
+// Available condition, which is the condition a Cluster actually has.
+//
+// A Cluster has NO Ready condition. Its v1beta2 conditions are Available,
+// InfrastructureReady, ControlPlaneInitialized, ControlPlaneAvailable,
+// WorkersAvailable, ControlPlaneMachinesReady, WorkerMachinesReady,
+// RemoteConnectionProbe and TopologyReconciled -- and Available is the summary
+// of them (api/core/v1beta2/cluster_types.go at v1.13.7: "true if the Cluster is
+// not deleted, and RemoteConnectionProbe, InfrastructureReady,
+// ControlPlaneAvailable, WorkersAvailable, TopologyReconciled (if present)
+// conditions are true").
+//
+// Waiting for Ready therefore waited for a condition no controller writes. On a
+// cluster that was coming up perfectly -- control plane Running and
+// INITIALIZED=true, workers joining -- the check reported `Ready condition not
+// True (got "")` every 30 seconds until it timed out thirty minutes later, and
+// the phase failed over a healthy cluster that had already been paid for. The
+// empty string was the whole signal that anything was wrong with the question.
+func NewCAPIClusterAvailableHealth(name, namespace string) *CAPIResourceReadyHealth {
+	return &CAPIResourceReadyHealth{
+		Kind:         CAPIClusterKind,
+		ResourceName: name,
+		Namespace:    namespace,
+		Condition:    "Available",
+	}
+}
+
 // Name returns the checker identifier.
 func (c *CAPIResourceReadyHealth) Name() string {
-	return fmt.Sprintf("%s/%s ready", c.Kind, c.ResourceName)
+	return fmt.Sprintf("%s/%s %s", c.Kind, c.ResourceName, strings.ToLower(c.condition()))
+}
+
+// condition is the condition type this checker reads.
+func (c *CAPIResourceReadyHealth) condition() string {
+	if t := strings.TrimSpace(c.Condition); t != "" {
+		return t
+	}
+	return "Ready"
 }
 
 // Check probes the Ready condition.
 func (c *CAPIResourceReadyHealth) Check(ctx context.Context, kubeconfig string) error {
-	args := []string{
+	want := c.condition()
+	query := func(field string) string {
+		return fmt.Sprintf("jsonpath={.status.conditions[?(@.type=='%s')].%s}", want, field)
+	}
+	out, err := runKubectl(ctx, []string{
 		"--kubeconfig", kubeconfig,
 		"get", c.Kind, c.ResourceName,
 		"-n", c.Namespace,
-		"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
-	}
-	out, err := runKubectl(ctx, args)
+		"-o", query("status"),
+	})
 	if err != nil {
 		return fmt.Errorf("get %s/%s: %w", c.Kind, c.ResourceName, err)
 	}
-	if strings.TrimSpace(string(out)) != "True" {
-		return fmt.Errorf("Ready condition not True (got %q)", strings.TrimSpace(string(out)))
+	status := strings.TrimSpace(string(out))
+	if status == "True" {
+		return nil
 	}
-	return nil
+
+	// WHY, not just "not True". An absent condition and a failing one both
+	// printed `got ""` before, so a check asking for a condition the resource
+	// does not have looked exactly like a resource that was not ready yet --
+	// for the whole timeout.
+	if status == "" {
+		types, _ := runKubectl(ctx, []string{
+			"--kubeconfig", kubeconfig,
+			"get", c.Kind, c.ResourceName,
+			"-n", c.Namespace,
+			"-o", "jsonpath={range .status.conditions[*]}{.type}{'='}{.status}{' '}{end}",
+		})
+		if present := strings.TrimSpace(string(types)); present != "" {
+			return fmt.Errorf("%s has no %s condition; it reports: %s",
+				c.ResourceName, want, present)
+		}
+		return fmt.Errorf("%s reports no conditions at all yet", c.ResourceName)
+	}
+
+	reason, _ := runKubectl(ctx, []string{
+		"--kubeconfig", kubeconfig,
+		"get", c.Kind, c.ResourceName,
+		"-n", c.Namespace,
+		"-o", query("reason"),
+	})
+	message, _ := runKubectl(ctx, []string{
+		"--kubeconfig", kubeconfig,
+		"get", c.Kind, c.ResourceName,
+		"-n", c.Namespace,
+		"-o", query("message"),
+	})
+	detail := strings.TrimSpace(string(reason))
+	if m := strings.TrimSpace(string(message)); m != "" {
+		detail = strings.TrimSpace(detail + ": " + m)
+	}
+	if detail == "" {
+		return fmt.Errorf("%s condition is %s", want, status)
+	}
+	return fmt.Errorf("%s condition is %s -- %s", want, status, detail)
 }
 
 // AllMachinesHaveNodesHealth is a HealthChecker that waits for every
