@@ -13,6 +13,12 @@
 # That is a hypothesis, and this measures it rather than assuming it. It runs
 # where the failure happens, needs no cluster, creates nothing and costs nothing.
 #
+# MEASURED 2026-11-16 (runs 43870533985, 43871005479):
+#
+#   pod -> api.github.com: HTTP 200   a pod inside Kind on this runner class
+#                                     reaches the API the operator fetches from,
+#                                     so node DNS and NAT are not the cause
+#
 # MEASURED 2026-11-16 (run 43870533985), and it settles the first question:
 #
 #   anonymous   limit 60, remaining 58   the runner's IP is nowhere near its quota
@@ -129,7 +135,29 @@ jobs:
           set -euo pipefail
           kubectl apply --server-side -f internal/assets/manifests/core/capi-operator/install.yaml
           kubectl -n platform-capi rollout status deployment/capi-operator-controller-manager --timeout=5m
-          kubectl apply -f internal/assets/manifests/core/capi-operator/providers/core-provider.yaml
+
+          # RETRIED, because the product retries. A Deployment reporting Available
+          # says nothing about whether the operator's own webhook server has bound
+          # its port: the first attempt of this probe failed with
+          #
+          #   failed calling webhook "vcoreprovider.kb.io": dial tcp ...:443:
+          #   connect: connection refused
+          #
+          # 230ms before the operator logged "Serving webhook server". The
+          # installer handles exactly this (applyWithWebhookRetry), so a probe
+          # that does not is testing a race the product already survives -- and
+          # it never reaches the state being investigated.
+          for attempt in $(seq 1 30); do
+            if out=$(kubectl apply -f internal/assets/manifests/core/capi-operator/providers/core-provider.yaml 2>&1); then
+              echo "$out"; break
+            fi
+            case "$out" in
+              *"failed calling webhook"*|*"connection refused"*|*"certificate signed by unknown authority"*)
+                echo "attempt ${attempt}: webhook not serving yet, retrying"; sleep 2 ;;
+              *) echo "$out" >&2; exit 1 ;;
+            esac
+            [ "$attempt" = 30 ] && { echo "::error::the webhook never accepted the CoreProvider"; exit 1; }
+          done
 
       - name: Does CoreProvider become Ready
         id: ready
