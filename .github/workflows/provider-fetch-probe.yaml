@@ -1,0 +1,75 @@
+# What the CAPI operator's provider fetch sees from a GitHub-hosted runner.
+#
+# WHY THIS EXISTS. A tenant's Day-0 fails at capi-init with
+#
+#   timeout waiting for CoreProvider/cluster-api
+#
+# and the operator reaches GitHub to fetch that provider's components: the
+# CoreProvider declares a version and no fetchConfig, so the operator resolves
+# the release through the GitHub API and downloads its assets. Unauthenticated
+# API calls are limited per source IP and hosted runners share source IPs, which
+# would produce exactly this symptom -- a provider that never reports Ready.
+#
+# That is a hypothesis, and this measures it rather than assuming it. It runs
+# where the failure happens, needs no cluster, creates nothing and costs nothing.
+#
+# WHAT THE RESULT MEANS:
+#
+#   anonymous remaining: 0     the limit is reached on this runner's IP. The
+#                              operator's fetch fails for that reason, and the
+#                              fix is its documented provider-fetch credential.
+#   anonymous remaining: high  the rate limit is NOT the cause. Look at egress
+#                              and image pulls instead, with the diagnostics the
+#                              installer now prints.
+#   asset download fails       egress to the release assets is blocked or
+#                              proxied, which no credential fixes.
+#
+# Delete this workflow once the question is settled. It is a probe, not a gate.
+name: Provider fetch probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Anonymous — what the operator does today
+        run: |
+          set -euo pipefail
+          echo "::group::API rate limit, unauthenticated"
+          curl -sS -D- -o /dev/null \
+            https://api.github.com/repos/kubernetes-sigs/cluster-api/releases/tags/v1.13.7 \
+            | grep -iE '^(HTTP/|x-ratelimit|retry-after)' || true
+          echo "::endgroup::"
+
+      - name: Authenticated — whether a credential would change it
+        env:
+          # The run's own token, used for a read of a public repository. It is
+          # NOT being introduced into the product: this answers whether
+          # authentication is the difference, which decides whether the operator
+          # needs a credential at all.
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::group::API rate limit, authenticated"
+          curl -sS -D- -o /dev/null -H "Authorization: Bearer ${TOKEN}" \
+            https://api.github.com/repos/kubernetes-sigs/cluster-api/releases/tags/v1.13.7 \
+            | grep -iE '^(HTTP/|x-ratelimit|retry-after)' || true
+          echo "::endgroup::"
+
+      - name: Can the components actually be downloaded
+        run: |
+          set -euo pipefail
+          # The asset the operator installs CoreProvider from. Served from a
+          # different host than the API, so this tests egress rather than quota.
+          url=https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.13.7/core-components.yaml
+          echo "::group::core-components.yaml"
+          code=$(curl -sS -L -o /tmp/core-components.yaml -w '%{http_code}' --max-time 60 "$url")
+          echo "HTTP ${code}, $(wc -c < /tmp/core-components.yaml) bytes"
+          head -3 /tmp/core-components.yaml
+          echo "::endgroup::"
+          [ "$code" = "200" ] || { echo "::error::the operator cannot download its components (HTTP ${code})"; exit 1; }
