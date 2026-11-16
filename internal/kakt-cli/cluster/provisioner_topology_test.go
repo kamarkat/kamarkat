@@ -47,8 +47,8 @@ func baseConfig() *Config {
 		KubernetesVersion:       "v1.35.10",
 		NetworkCIDR:             "10.0.0.0/16",
 		SubnetCIDR:              "10.0.0.0/24",
-		ControlPlaneMachineType: "cx33",
-		WorkerMachineType:       "cx33",
+		ControlPlaneMachineType: "cpx32",
+		WorkerMachineType:       "cpx32",
 		ControlPlaneReplicas:    1,
 		SSHKeyName:              "mac-mini-ssh",
 	}

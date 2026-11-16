@@ -83,7 +83,7 @@ spec:
   # that exists, so it must be schedulable or every platform workload sits Pending
   # and the bootstrap stalls.
   #
-  # Defaults to false so the pure-Hetzner hub (2 cx33 workers) keeps its
+  # Defaults to false so the pure-Hetzner hub (2 cpx32 workers) keeps its
   # control-plane taint exactly as tested. Only the hybrid driver turns it on.
   # The spoke is unaffected and deliberately keeps its taint (d74cbeaa).
   - name: controlPlaneSchedulable
@@ -97,13 +97,13 @@ spec:
     schema:
       openAPIV3Schema:
         type: string
-        default: cpx31
+        default: cpx32
   - name: hcloudWorkerMachineType
     required: false
     schema:
       openAPIV3Schema:
         type: string
-        default: cpx31
+        default: cpx32
   - name: hcloudNetwork
     required: false
     schema:
@@ -797,7 +797,7 @@ metadata:
 spec:
   template:
     spec:
-      type: cx33
+      type: cpx32
       imageName: ubuntu-24.04
 ---
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
@@ -949,5 +949,5 @@ metadata:
 spec:
   template:
     spec:
-      type: c33
+      type: cpx32
       imageName: ubuntu-24.04

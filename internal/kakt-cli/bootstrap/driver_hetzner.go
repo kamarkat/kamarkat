@@ -357,8 +357,15 @@ func (d *HetznerDriver) PopulateClusterConfig(cfg *cluster.Config) {
 	cfg.KubernetesVersion = versions.KubernetesVersion
 	cfg.NetworkCIDR = d.NetworkCIDR
 	cfg.SubnetCIDR = subnetCIDR
-	cfg.ControlPlaneMachineType = "cx33"
-	cfg.WorkerMachineType = "cx33"
+	// cpx32: 4 shared AMD vCPU, 8 GB, 160 GB NVMe, per node.
+	//
+	// It replaces cx33, which had the same CPU and memory on an 80 GB root disk.
+	// The hub's root disk is not spare capacity -- it carries the container
+	// images, etcd's data directory and the kubelet's ephemeral storage, and
+	// persistent volumes go to hcloud-volumes rather than here -- so the second
+	// 80 GB is the whole reason for the change.
+	cfg.ControlPlaneMachineType = "cpx32"
+	cfg.WorkerMachineType = "cpx32"
 	cfg.ControlPlaneReplicas = 1
 	cfg.WorkerReplicas = d.PlannedWorkerReplicas()
 	cfg.HCloudToken = d.Token

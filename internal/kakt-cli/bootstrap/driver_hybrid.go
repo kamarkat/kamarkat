@@ -191,7 +191,7 @@ func (d *HybridDriver) PopulateClusterConfig(cfg *cluster.Config) {
 
 	// ADR-046: the hybrid cell exists so that worker capacity comes from home-lab
 	// hardware — "Costs nothing to keep running (no idle Hetzner worker nodes)".
-	// The Hetzner driver provisions 2 cx33 workers for the hub, which is right for
+	// The Hetzner driver provisions 2 cpx32 workers for the hub, which is right for
 	// a pure-Hetzner hub but is exactly the idle capacity this provider avoids.
 	//
 	// The hub's workers are the Flatcar home-lab nodes: provision-flatcar-worker.sh
