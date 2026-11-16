@@ -138,7 +138,7 @@ var CLISecretMappings = []SecretMapping{
 	},
 
 	// ========================================================================
-	// 5b. EXTERNALLY-ISSUED CREDENTIALS (seeded from k8-secrets/)
+	// 5b. EXTERNALLY-ISSUED CREDENTIALS (seeded at Day-0 from the operator's store)
 	// ========================================================================
 	// Purpose: credentials issued by systems OUTSIDE the cluster, which nothing
 	// here can generate. They previously had no producer at all: a rebuilt
@@ -146,7 +146,7 @@ var CLISecretMappings = []SecretMapping{
 	// "could not get secret data from provider", and the consuming pods sat in
 	// CreateContainerConfigError. Seeding was folklore — an operator had to know
 	// which keys to paste into the console.
-	// Source: created by scripts/hub-bootstrap.sh (step 6b) from k8-secrets/,
+	// Source: created by scripts/hub-bootstrap.sh (step 6b) from the operator's store,
 	// which is gitignored. A key whose file is absent or empty is never turned
 	// into a Secret, so it is skipped here rather than uploaded blank.
 	{
@@ -296,7 +296,7 @@ var CLISecretMappings = []SecretMapping{
 	// ========================================================================
 	// Purpose: Tailscale auth key for hybrid spoke control-plane nodes (ADR-046)
 	// Source: tailscale-hybrid-psk (created by `hub configure-tailscale` from
-	//        k8-secrets/tailscale/authkey)
+	//        ${KAMARKAT_HOME:-~/.kamarkat}/tailscale/authkey)
 	// Consumers: shared ClusterClass Tailscale pre-kubeadm hook (contentFrom.secret)
 	// ExternalSecret: manifests/providers/hybrid/k8s/tailscale-psk-es.yaml
 	{
@@ -352,7 +352,7 @@ var CLISecretMappings = []SecretMapping{
 	// The issuer sends verification and password-reset mail through the box
 	// owner's own sending service (Resend). Only the password is secret; host,
 	// user and sender are in the Zitadel values. The owner keeps the whole SMTP
-	// URL in k8-secrets/smtp/resend (or IDENTITY_PROVIDER_SMTP_URL), hub-bootstrap step 6b
+	// URL in ${KAMARKAT_HOME:-~/.kamarkat}/smtp/resend (or IDENTITY_PROVIDER_SMTP_URL), hub-bootstrap step 6b
 	// turns it into this Secret, and the password component is uploaded to the
 	// owner's /<tenant>-mgmt folder, where zitadel-smtp-config reads it through
 	// the infisical-tenant-mgmt store.

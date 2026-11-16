@@ -17,8 +17,8 @@ import (
 // (contentFrom.secret → /etc/tailscale-authkey + /etc/tailscale-hostname).
 //
 // This mirrors the GHCR/hetzner Secret Zero pattern: the CLI reads the values
-// from k8-secrets (gitignored) and injects them via client-go. Infisical is the
-// long-term authority — hub-operator uploads this Secret to Infisical via
+// from the environment or the operator's own store and injects them via
+// client-go. Infisical is the long-term authority — hub-operator uploads this Secret to Infisical via
 // CLISecretMappings, and ESO syncs it back (see secret_mappings.go).
 func (i *Installer) InstallTailscalePSK(ctx context.Context, authkey, hostname string) error {
 	fmt.Println("[bootstrap] Creating tailscale-hybrid-psk secret...")

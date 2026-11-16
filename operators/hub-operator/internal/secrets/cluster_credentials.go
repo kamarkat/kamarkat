@@ -78,8 +78,8 @@ var ExternalPerCellCredentialKeys = []string{
 type MaterialiseFleetCredentialsResult struct {
 	Created  []string
 	Existing []string
-	// MissingAtRoot are keys absent from the Infisical root, i.e. never seeded
-	// from k8-secrets/. They are reported, not fabricated: inventing a value for
+	// MissingAtRoot are keys absent from the Infisical root, i.e. never seeded at
+	// Day-0. They are reported, not fabricated: inventing a value for
 	// an externally-issued credential yields a secret that authenticates to
 	// nothing and fails later, further from the cause.
 	MissingAtRoot []string

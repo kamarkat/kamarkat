@@ -216,8 +216,8 @@ if [[ -n "$_caller_spoke_name" ]]; then
 fi
 unset _caller_hub_kubeconfig _caller_spoke_name
 
-# Auto-fetch Tailscale authkey from k8-secrets if not passed via CLI
-# The operator's own store, not a checkout (internal/kakt-cli/opstore).
+# Auto-fetch the Tailscale authkey from the operator's own store when it is not
+# passed via CLI -- ${KAMARKAT_HOME:-~/.kamarkat}, not a checkout (internal/kakt-cli/opstore).
 DEFAULT_TS_AUTHKEY_FILE="${KAMARKAT_HOME:-$HOME/.kamarkat}/tailscale/authkey"
 if [[ -z "$TS_AUTHKEY" && -f "$DEFAULT_TS_AUTHKEY_FILE" ]]; then
   TS_AUTHKEY="$(tr -d '\r\n' < "$DEFAULT_TS_AUTHKEY_FILE")"

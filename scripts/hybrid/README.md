@@ -22,7 +22,7 @@ verification are handled by **one script**:
 ./scripts/hybrid/provision-flatcar-worker.sh --verify
 
 # Autonomous Tailscale re-auth. Omit --ts-authkey and the key is read from
-# k8-secrets/tailscale/authkey; pass it only to use a different one.
+# ${KAMARKAT_HOME:-$HOME/.kamarkat}/tailscale/authkey; pass it only to use a different one.
 ./scripts/hybrid/provision-flatcar-worker.sh --node 1 --ts-authkey tskey-...
 
 # Re-running is RECOVERY-FIRST, not rebuild-first: an existing VM is started and

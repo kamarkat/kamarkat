@@ -65,8 +65,8 @@ build-hub:
 	@echo "✓ Build complete: $(BUILD_DIR)/$(KAKT_BINARY)"
 
 # The whole released-path loop in one command: publish, build the CLI, scaffold a
-# tenant repository and bootstrap from it. Credentials come from k8-secrets/, so
-# nothing is prompted. Phases and settings:
+# tenant repository and bootstrap from it. Credentials come from the operator's
+# own store, ${KAMARKAT_HOME:-~/.kamarkat}, so nothing is prompted. Phases and settings:
 # scripts/dev/local-e2e.sh --help
 e2e:
 	@test -n "$(VERSION)" || { echo "usage: make e2e VERSION=0.1.16-rc.1 [DRY=1]"; exit 1; }

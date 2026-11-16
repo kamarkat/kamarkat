@@ -71,4 +71,4 @@ kubectl patch application platform-infisical-prerequisites -n argocd --type merg
 
 kubectl patch application platform-database -n argocd --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
 
-export KUBECONFIG=k8-secrets/kubeconfig/hub.kubeconfig && kubectl get pods
+export KUBECONFIG=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig && kubectl get pods

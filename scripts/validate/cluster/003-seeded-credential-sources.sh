@@ -2,11 +2,12 @@
 # ADR-003: a seeded credential's SOURCE Secret carries every key the uploader reads.
 #
 # Bootstrap Secrets are seeded once, at Day-0: hub-bootstrap step 6b writes
-# k8-secrets/<subdir>/<file> into a cluster Secret, hub-operator's CLISecretMappings
-# publishes that Secret to Infisical, and ESO delivers it back out. Only the last two
-# hops reconcile. Nothing watches k8-secrets/ -- it is a directory on the operator's
-# machine, reachable from no cluster -- so a credential added there AFTER the box was
-# built never arrives, and the box keeps running on whatever it was seeded with.
+# ${KAMARKAT_HOME:-~/.kamarkat}/<subdir>/<file> into a cluster Secret, hub-operator's
+# CLISecretMappings publishes that Secret to Infisical, and ESO delivers it back out.
+# Only the last two hops reconcile. Nothing watches the operator's store -- it is a
+# directory on the machine that ran the bootstrap, reachable from no cluster -- so a
+# credential added there AFTER the box was built never arrives, and the box keeps
+# running on whatever it was seeded with.
 #
 # That drift is quiet. The uploader skips a source Secret that does not exist, so a
 # credential absent from this box is not a failure; but a Secret that EXISTS and is

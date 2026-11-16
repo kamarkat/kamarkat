@@ -15,4 +15,4 @@ inclusion: manual
 - you must never create a summary or temoprary document unless staed in the tasks.
 - Always make sure a README is included or updated per folder.
 
-Note: Cluster is already live and you have access to cluster - export KUBECONFIG=k8-secrets/kubeconfig/hub-cp.kubeconfig && kubectl patch .. you can verify your vhnages
+Note: Cluster is already live and you have access to cluster - export KUBECONFIG=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-cp.kubeconfig && kubectl patch .. you can verify your vhnages

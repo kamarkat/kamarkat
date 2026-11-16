@@ -11,7 +11,7 @@ Context:
 
 Access
 
-KUBECONFIG=…/zero-ops/.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-01.kubeconfig. Use the hub kubeconfig only if the evidence points to the hub. Never print, copy or log anything from these files, or any Secret.
+KUBECONFIG=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/nutgraf-01.kubeconfig. Use the hub kubeconfig only if the evidence points to the hub. Never print, copy or log anything from these files, or any Secret.
 
 Which session
 

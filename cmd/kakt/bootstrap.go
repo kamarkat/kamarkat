@@ -431,16 +431,19 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		Provider:         bp,
 		ClusterName:      clusterName,
 		BootstrapContext: bootstrapContext,
-		KeepBootstrap:    keepBootstrap,
-		MergeKubeconfig:  mergeKubeconfig,
-		Debug:            debug,
-		ManagementScope:  box.ManagementScope(),
-		Topology:         topology,
-		Gating:           gatingMode,
-		GitopsDir:        gitopsDir,
-		OIDCIssuerURL:    oidcIssuerURL,
-		OIDCClientID:     oidcClientID,
-		Encryption:       encryptionMode,
+		// What admission counted, not counted again. See
+		// Orchestrator.ProviderResourcesOwned.
+		ProviderResourcesOwned: admission.Resuming,
+		KeepBootstrap:          keepBootstrap,
+		MergeKubeconfig:        mergeKubeconfig,
+		Debug:                  debug,
+		ManagementScope:        box.ManagementScope(),
+		Topology:               topology,
+		Gating:                 gatingMode,
+		GitopsDir:              gitopsDir,
+		OIDCIssuerURL:          oidcIssuerURL,
+		OIDCClientID:           oidcClientID,
+		Encryption:             encryptionMode,
 	}
 
 	if err := orchestrator.Run(ctx); err != nil {

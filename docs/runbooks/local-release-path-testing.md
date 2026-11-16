@@ -22,7 +22,7 @@ make e2e VERSION=0.1.16-rc.1           # the whole loop
 ```
 
 `scripts/dev/local-e2e.sh` runs all four phases below and reads every credential
-from `k8-secrets/`, so nothing is prompted. Re-run one phase by naming it:
+from `${KAMARKAT_HOME:-$HOME/.kamarkat}/`, so nothing is prompted. Re-run one phase by naming it:
 
 ```bash
 ./scripts/dev/local-e2e.sh 0.1.16-rc.1 cli bootstrap
@@ -34,16 +34,16 @@ reads, one file per value:
 
 | file | used as |
 |---|---|
-| `k8-secrets/hetzner/token` | `--provider-token`, `HCLOUD_TOKEN` |
-| `k8-secrets/github/github-pat-token` | `--gitops-token` |
-| `k8-secrets/infisical/ESCROW_PROVIDER_PROJECT_ID` | `--escrow-project-id` |
-| `k8-secrets/infisical/ESCROW_PROVIDER_CLIENT_ID` | `--escrow-client-id` |
-| `k8-secrets/infisical/ESCROW_PROVIDER_CLIENT_SECRET` | `--escrow-client-secret` |
-| `k8-secrets/infisical/ESCROW_PROVIDER_URL` | `--escrow-url` (defaults to `https://app.infisical.com`) |
-| `k8-secrets/s3/*` | `S3_*`, CNPG Barman backups of the platform database. A **destination**: absent, the box bootstraps and runs with no backups, and the run says so. |
-| `k8-secrets/grafana-cloud/irm-*` | `GRAFANA_IRM_*`, where this box's alerts page (ADR-078 add.5 §5). A destination, same rule. |
-| `k8-secrets/ghcr/username`, `k8-secrets/ghcr/token` | `GHCR_USERNAME`/`GHCR_TOKEN`, for pulling the tenant's private images (ADR-066). Optional here: falls back to the GitHub PAT above, which carries `write:packages`, with the login from `gh`. A real tenant supplies a token scoped to their own images. |
-| `k8-secrets/tailscale/authkey` | `--tailscale-authkey`, hybrid only |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token` | `--provider-token`, `HCLOUD_TOKEN` |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/github/github-pat-token` | `--gitops-token` |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/infisical/ESCROW_PROVIDER_PROJECT_ID` | `--escrow-project-id` |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/infisical/ESCROW_PROVIDER_CLIENT_ID` | `--escrow-client-id` |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/infisical/ESCROW_PROVIDER_CLIENT_SECRET` | `--escrow-client-secret` |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/infisical/ESCROW_PROVIDER_URL` | `--escrow-url` (defaults to `https://app.infisical.com`) |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/s3/*` | `S3_*`, CNPG Barman backups of the platform database. A **destination**: absent, the box bootstraps and runs with no backups, and the run says so. |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/grafana-cloud/irm-*` | `GRAFANA_IRM_*`, where this box's alerts page (ADR-078 add.5 §5). A destination, same rule. |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/ghcr/username`, `${KAMARKAT_HOME:-$HOME/.kamarkat}/ghcr/token` | `GHCR_USERNAME`/`GHCR_TOKEN`, for pulling the tenant's private images (ADR-066). Optional here: falls back to the GitHub PAT above, which carries `write:packages`, with the login from `gh`. A real tenant supplies a token scoped to their own images. |
+| `${KAMARKAT_HOME:-$HOME/.kamarkat}/tailscale/authkey` | `--tailscale-authkey`, hybrid only |
 
 They are loaded before anything is published, so a missing one stops the run
 rather than spending a version on a run that cannot finish.
@@ -141,7 +141,7 @@ bin/kakt bundle-version   # must print 0.1.16-rc.1
 
 ```bash
 export PATH="$PWD/bin:$PATH"
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
+export HCLOUD_TOKEN=$(cat "${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token")
 
 kakt box init --local \
   --tenant acme --git-org <your-gh-org> --domain acme.example \
@@ -187,7 +187,7 @@ platform content comes from the embedded tree, so the working directory is irrel
 A development build resolves `manifests/…` against the cwd and fails here with a
 `no such file or directory` naming a file this repository plainly has.
 
-`HCLOUD_TOKEN` is exported in step 3 because the `k8-secrets/hetzner/token` fallback
+`HCLOUD_TOKEN` is exported in step 3 because the `${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token` fallback
 is resolved against the platform checkout, and you are no longer in it.
 
 ## 5. Tear down

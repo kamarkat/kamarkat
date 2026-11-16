@@ -14,7 +14,7 @@ import (
 )
 
 // objectStorageSecret is the box's object-storage credential, written at
-// bootstrap from k8-secrets/s3 (the account the database backups use).
+// bootstrap from the operator's store, s3/ (the account the database backups use).
 const (
 	objectStorageSecretNamespace = "platform-ops"
 	objectStorageSecretName      = "s3-object-storage"

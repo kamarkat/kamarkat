@@ -56,7 +56,7 @@ You are not supposed to use local docker for build. Only use CI for builds.
 
 are you redy yo take instrcutrions from team lead?
 
-Local cluster access: zero-ops/.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig...
+Local cluster access: ${KAMARKAT_HOME:-$HOME/.kamarkat}/kubeconfig...
 
 make sure all comamnds are linked to cli comamnds page to avoid duplicate esplanations.
 
@@ -76,7 +76,7 @@ Better approach is to make changes to manifest files and apply the files to clus
 it is important that any adhoc changes you make to cluster must be updated in codebase so that it is not lost and we end up again same issues in future. 
 
 cluster access:
-Hub - zero-ops/k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig
+Hub - ${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig
 Spoke -  KUBECONFIG=/tmp/spoke-fresh.kubeconfig
 
 ------
@@ -98,7 +98,7 @@ do not assume and craete a plan. only proceed when i ask u to.
 -------------------------
 
 your task is not to implement. you have to report back with a implementation plan that can be used by another agent for implmentation. cluster access:
-Hub - zero-ops/k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig
+Hub - ${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig
 Spoke -  KUBECONFIG=/tmp/spoke-fresh.kubeconfig ......... find why http://waypoint.nutgrafin is not accessble from browser. read zero-ops/docs/adr/046-hybrid-provider-home-worker.mdfirst. waypoint workloads run on flatcar node 1 worker node which is created by script -zero-ops/scripts/hybrid/provision-flatcar-worker.sh 
 -----------------------------------------
 

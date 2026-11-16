@@ -72,6 +72,18 @@ type Orchestrator struct {
 	// record. See requireDurableState.
 	checkpointErr error
 
+	// ProviderResourcesOwned is how many provider resources this cluster already
+	// holds, counted by ManagementAdmission from the provider's own inventory
+	// before this run began.
+	//
+	// Passed in rather than re-asked: admission establishes it with the same
+	// credential and the same ownership label the teardown deletes by, and a
+	// second probe here could answer differently about the same cluster. What
+	// reads it is reconcileBootstrapCluster, where "was anything built from the
+	// bootstrap cluster that is now missing" cannot be answered from the phase
+	// record alone -- a phase that failed part way records nothing.
+	ProviderResourcesOwned int
+
 	// OIDCIssuerURL and OIDCClientID name the identity provider this box's API
 	// server accepts tokens from (ADR-076). Empty on a first build; supplied on a
 	// rebuild of an environment whose issuer already runs, to avoid provisioning
@@ -1027,8 +1039,9 @@ func (o *Orchestrator) persistTenantState(ctx context.Context, label string) err
 // normally writes this file. The control plane is up by this point, so the Secret
 // already exists.
 //
-// It writes to k8-secrets/kubeconfig/<cluster>.kubeconfig, not a temp file, and
-// the path is also passed to the script through HUB_KUBECONFIG.
+// It writes to the operator's own store -- ${KAMARKAT_HOME:-~/.kamarkat}, via
+// opstore.KubeconfigPath -- rather than a temp file, and the path is also passed
+// to the script through HUB_KUBECONFIG.
 //
 // Both, because neither alone was enough. home-lab.env assigns HUB_KUBECONFIG
 // unconditionally, so the environment variable was discarded; and the value it
@@ -1489,8 +1502,9 @@ func (o *Orchestrator) createKindCluster(ctx context.Context, bs *state.Bootstra
 	// The PINNED copy is recorded, never the file it was read from.
 	//
 	// Recording the source looked equivalent and was not. hub-bootstrap.sh exports
-	// KUBECONFIG to k8-secrets/kubeconfig/<cluster>.kubeconfig whenever that file
-	// already exists -- so on a resumed run kind merged kind-<cluster> INTO the
+	// KUBECONFIG to the hub's own kubeconfig in the operator's store
+	// (${KAMARKAT_HOME:-~/.kamarkat}/run/kubeconfig/<cluster>.kubeconfig) whenever
+	// that file already exists -- so on a resumed run kind merged kind-<cluster> INTO the
 	// hub's kubeconfig, the check above passed against it, and that path was
 	// recorded. pivot-move then calls SaveKubeconfig, which os.WriteFile()s the
 	// same path with the hub's kubeconfig: a whole-file overwrite, not a merge.
@@ -2210,6 +2224,20 @@ func (o *Orchestrator) handleExistingState(ctx context.Context, stateMgr *state.
 		if err := stateMgr.Save(bs); err != nil {
 			return err
 		}
+	}
+
+	// WHAT IS STILL THERE OF THE BOOTSTRAP CLUSTER, settled before a single
+	// phase is skipped on the strength of a record that names a machine this run
+	// is not on.
+	if err := o.reconcileBootstrapCluster(stateMgr, bs); err != nil {
+		return err
+	}
+
+	// AND THE HUB'S, for the same reason one layer later: the recorded path is
+	// the previous machine's, and the escrow is where a hub kubeconfig is
+	// recovered from.
+	if err := o.reconcileHubKubeconfig(ctx, stateMgr, bs); err != nil {
+		return err
 	}
 
 	// Resume from where we left off — the runFresh pipeline will skip

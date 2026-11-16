@@ -140,7 +140,7 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if fleet, err := spokeInfisical.EnsureFleetCredentialsMaterialised(ctx, spokeName); err != nil {
 		logger.Error(err, "Failed to materialise fleet credentials into the cluster path", "spoke", spokeName)
 	} else if len(fleet.MissingAtRoot) > 0 {
-		logger.Error(nil, "Fleet credentials absent at the Infisical root; seed them from k8-secrets/ or the consuming feature stays down",
+		logger.Error(nil, "Fleet credentials absent at the Infisical root; seed them there or the consuming feature stays down",
 			"spoke", spokeName, "missing", fleet.MissingAtRoot)
 	}
 

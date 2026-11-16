@@ -2239,7 +2239,7 @@ Impersonation is an escalation path, so it is opt-in, never part of a default ru
 `kakt kms verify` prints who holds it — making its revocation a visible decision rather
 than a forgotten one.
 
-The resource names land in `k8-secrets/gcp/<cluster>/` (gitignored), and
+The resource names land in `${KAMARKAT_HOME:-$HOME/.kamarkat}/gcp/<cluster>/` (gitignored), and
 `KMS_CRYPTO_KEY` from there is what the control-plane template carries. Writing the
 Crossplane manifests for the reconciler to adopt is the remaining step and is not done.
 

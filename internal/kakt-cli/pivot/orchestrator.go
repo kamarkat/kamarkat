@@ -249,7 +249,7 @@ func (o *Orchestrator) getKubeconfig(ctx context.Context) (string, error) {
 		return "", decodeErr
 	}
 
-	// Save to k8-secrets/kubeconfig directory
+	// Save into the operator's own store (internal/kakt-cli/opstore)
 	// The operator's private runtime path, not a checkout: a working kubeconfig
 	// is cluster-admin and must not sit where it can be committed
 	// (internal/kakt-cli/opstore).

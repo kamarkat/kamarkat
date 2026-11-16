@@ -34,7 +34,7 @@ After running this command:
 - ESO syncs it back, so ArgoCD cannot reset it to empty
 - Hybrid workload cluster CP nodes join the tailnet before kubeadm init`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve defaults from k8-secrets (gitignored) before validation.
+			// Resolve defaults from the operator's own store before validation.
 			if authkey == "" {
 				authkey = opstore.ValueOrEnv("TS_AUTHKEY", "tailscale/authkey")
 			}

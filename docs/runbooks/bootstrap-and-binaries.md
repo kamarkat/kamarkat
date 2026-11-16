@@ -21,7 +21,7 @@ go build -o bin/kakt ./cmd/kakt
 # Step 1: Bootstrap Hub Cluster with Ubuntu (default, production-ready)
 
 # Legacy way
-# export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token)
+# export HCLOUD_TOKEN=$(cat "${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token")
 # ./bin/kakt bootstrap \
 #   --name=hub \
 #   --region=hel1 \
@@ -45,30 +45,30 @@ go build -o bin/kakt ./cmd/kakt
 export GHCR_TOKEN=$(cat ~/.kamarkat/github/github-pat-token)
 ./bin/kakt configure-github-access \
   --ghcr-pat=$GHCR_TOKEN \
-  --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+  --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig
 
 # Step 4: Wait for ArgoCD to sync and create namespaces
 # ArgoCD will create platform-data, platform-security, and other namespaces
 # Note: We must poll until the namespace exists, as kubectl wait fails if it is missing.
-until kubectl get namespace platform-data --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig >/dev/null 2>&1; do
+until kubectl get namespace platform-data --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig >/dev/null 2>&1; do
   echo "Waiting for ArgoCD to create platform-data namespace..."
   sleep 5
 done
 
 kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/platform-data \
-  --timeout=60s --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+  --timeout=60s --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig
 
 # Step 5: Initialize bootstrap secrets (Secret Zero)
 # This generates CA certificate, Infisical master keys, and backs them up to AWS
 # TLS is enabled from Day 0 - no upgrade step needed
 # Step 3.5 automatically bootstraps Infisical (Org, Project, Machine Identity)
 # No port-forward needed - the CLI uses pod exec + REST API internally
-SECRET_STORE_API_URL=http://localhost:8080 ./bin/kakt init-secrets --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+SECRET_STORE_API_URL=http://localhost:8080 ./bin/kakt init-secrets --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig
 
 # Step 6: Wait for ArgoCD to sync and deploy database
 kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
   -n platform-data --timeout=600s \
-  --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig
+  --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig
 
 # Steps 7-8 (former manual UI steps) are now automated in init-secrets Step 3.5
 # The deprecated `hub configure-eso` has been replaced by automatic bootstrapping.
@@ -77,10 +77,10 @@ kubectl wait --for=condition=ready pod -l cnpg.io/cluster=platform-db \
 ./bin/kakt teardown --name=hub
 
 # Only use if local kind cluster does not exist and already pivoted
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt teardown --name=hub --force --confirm 2>&1 | tee .zero-ops/teardown-hub.log
+export HCLOUD_TOKEN=$(cat "${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token") && ./bin/kakt teardown --name=hub --force --confirm 2>&1 | tee .zero-ops/teardown-hub.log
 
 # Teardown the whole box: the workload clusters first, the management cluster last
-export HCLOUD_TOKEN=$(cat k8-secrets/hetzner/token) && ./bin/kakt teardown --name=hub --force --confirm --gitops-dir . --destroy-managed=<workload cluster> 2>&1 | tee .zero-ops/teardown.log
+export HCLOUD_TOKEN=$(cat "${KAMARKAT_HOME:-$HOME/.kamarkat}/hetzner/token") && ./bin/kakt teardown --name=hub --force --confirm --gitops-dir . --destroy-managed=<workload cluster> 2>&1 | tee .zero-ops/teardown.log
 
 ```
 

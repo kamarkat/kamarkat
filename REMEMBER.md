@@ -69,10 +69,11 @@ happened and reported success while broken.
 - cilium-operator declares hostPorts: 2 replicas need 2 nodes. Single-node
   clusters must scale it to 1 (`CiliumOperatorReplicas`), not edit the shared addon.
 
-## Secret seeding (k8-secrets/)
+## Secret seeding (the operator's store)
 
-- `k8-secrets/` is **gitignored**. Its layout is one file per value,
-  `k8-secrets/<system>/<name>`, and the file's contents are the raw value.
+- The operator's store lives outside every checkout, at `${KAMARKAT_HOME:-~/.kamarkat}`.
+  Its layout is one file per value, `${KAMARKAT_HOME:-~/.kamarkat}/<system>/<name>`,
+  and the file's contents are the raw value.
 - Credentials issued OUTSIDE the platform are seeded by **hub-bootstrap step 6b**
   from that tree; `SEED_SPECS` in `scripts/hub-bootstrap.sh` is the table. Adding a
   new one is one line there plus a `CLISecretMappings` entry in the hub-operator.
@@ -84,7 +85,7 @@ happened and reported success while broken.
   idempotent.
 - Anything the platform can generate itself belongs in the operator's
   `ApplicationSecretMappings` instead (random value, uploaded to Infisical, ESO
-  creates the Secret with `creationPolicy: Owner`) — not in `k8-secrets/`.
+  creates the Secret with `creationPolicy: Owner`) — not in the operator's store.
 - `validate/run.sh preflight --only=infisical-key-producers` cross-checks every
   Infisical-backed ExternalSecret key against what the operator produces. A key
   with no producer fails preflight; that is how four separate seeding gaps went

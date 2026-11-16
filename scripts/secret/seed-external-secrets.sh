@@ -24,7 +24,7 @@
 #     scripts/secret/seed-external-secrets.sh <cell-id> [--dry-run]
 #
 #   e.g. SECRET_STORE_BASE_URL=https://infisical.dev.nutgraf.in \
-#        KUBECONFIG=.local-e2e/nutgraf-gitops/k8-secrets/kubeconfig/nutgraf-hub.kubeconfig \
+#        KUBECONFIG="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/nutgraf-hub.kubeconfig" \
 #          scripts/secret/seed-external-secrets.sh nutgraf-01 --dry-run
 #
 #   Run from the repository root. Dry-run first: it lists every key, its source

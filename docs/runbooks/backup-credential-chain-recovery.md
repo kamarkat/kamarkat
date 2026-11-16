@@ -18,7 +18,7 @@ broken ESO store, failing barman archiver
 ## Symbols
 
 - `SPOKE` — spoke name, e.g. `spoke-pool-hybrid-dev-01`
-- `HUB_KC` / `SPOKE_KC` — kubeconfigs at `k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig`, `k8-secrets/kubeconfig/<spoke>.kubeconfig`
+- `HUB_KC` / `SPOKE_KC` — kubeconfigs at `${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig`, `${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/<spoke>.kubeconfig`
 
 ## Recovery procedure (order matters)
 

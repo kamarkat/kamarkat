@@ -42,7 +42,7 @@
 # Examples:
 #   ./rejoin-tailnet.sh --node hub-hybrid-dev-h2vst-pll5z
 #   ./rejoin-tailnet.sh --node flatcar-spoke-node-1 --cluster spoke
-#   ./rejoin-tailnet.sh --node <n> --authkey-file ../../k8-secrets/tailscale/authkey
+#   ./rejoin-tailnet.sh --node <n> --authkey-file "${KAMARKAT_HOME:-$HOME/.kamarkat}/tailscale/authkey"
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 

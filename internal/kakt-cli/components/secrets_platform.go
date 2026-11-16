@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 	corev1 "k8s.io/api/core/v1"
@@ -27,8 +27,9 @@ import (
 // grafana-alloy never started.
 //
 // The key names are the Secret's, and they are deliberately the same as the file
-// names under k8-secrets/ -- that layout was already written to match, which is
-// how it was clear these were meant to be read from there.
+// names in the operator's store, ${KAMARKAT_HOME:-~/.kamarkat}/<system>/<name> --
+// that layout was already written to match, which is how it was clear these were
+// meant to be read from there.
 type optionalSecret struct {
 	name      string
 	namespace string
@@ -126,10 +127,11 @@ func optionalSecrets() []optionalSecret {
 // InstallPlatformCredentials creates the credentials a hub needs to be healthy.
 //
 // Two sources, in order: the environment, which is how a workflow supplies a
-// value it holds as a repository secret; then k8-secrets/, which is how an
-// operator working in a checkout supplies one. Resolved against the checkout
-// rather than the working directory, because Day-0 runs from the tenant's
-// repository and k8-secrets/ is not there.
+// value it holds as a repository secret; then the operator's own store
+// (internal/kakt-cli/opstore), which is how a person at a workstation supplies
+// one. The store is outside every checkout deliberately -- Day-0 runs from the
+// tenant's repository, so a credential kept beside the platform's source was
+// reachable from the one machine that had cloned it and nowhere else.
 //
 // All-or-nothing per secret, for the reason the escrow gives: a partial set is a
 // configuration that cannot work, and a Secret built from one produces a
@@ -212,32 +214,6 @@ func resolveOptional(s optionalSecret) (data map[string]string, found, missing [
 		return nil, nil, nil
 	}
 	return data, found, missing
-}
-
-// readCheckoutFile reads a path relative to the platform checkout.
-//
-// Not the working directory: Day-0 runs from the tenant's repository (ADR-072),
-// and k8-secrets/ belongs to the operator's own checkout. The same reasoning and
-// the same order as the Hetzner token fallback in cmd/kakt/bootstrap.go.
-func readCheckoutFile(rel string) string {
-	candidates := []string{rel}
-	if root := strings.TrimSpace(os.Getenv("ZERO_OPS_DIR")); root != "" {
-		candidates = append(candidates, filepath.Join(root, rel))
-	}
-	if exe, err := os.Executable(); err == nil {
-		if exe, err = filepath.EvalSymlinks(exe); err == nil {
-			dir := filepath.Dir(exe)
-			candidates = append(candidates, filepath.Join(dir, rel), filepath.Join(filepath.Dir(dir), rel))
-		}
-	}
-	for _, p := range candidates {
-		if b, err := os.ReadFile(p); err == nil {
-			if v := strings.TrimSpace(string(b)); v != "" {
-				return v
-			}
-		}
-	}
-	return ""
 }
 
 func applySecret(ctx context.Context, cs kubernetes.Interface, s optionalSecret, data map[string]string) error {

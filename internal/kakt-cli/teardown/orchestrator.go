@@ -1016,9 +1016,9 @@ func (o *Orchestrator) localCleanup(ctx context.Context) error {
 
 	// Remove kubeconfigs, AT BOTH ROOTS.
 	//
-	// Day-0 writes k8-secrets/kubeconfig/<cluster>.kubeconfig relative to the
-	// working directory it runs in, and resolveKubectlBaseArgs above is willing to
-	// read it under --gitops-dir as well. Teardown removed only the working
+	// Day-0 writes <cluster>.kubeconfig into the operator's own runtime path, and
+	// resolveKubectlBaseArgs above is willing to read one under --gitops-dir as
+	// well. Teardown removed only the working
 	// directory's, so a teardown run from anywhere but the repository left the
 	// admin kubeconfig of a destroyed cluster on disk -- still named for a cluster
 	// whose API server is gone, and still the first thing a later command picks up.

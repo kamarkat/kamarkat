@@ -21,20 +21,20 @@ grep "ArgoCD Password" .zero-ops/bootstrap-hub.log
 # e.g. mu-Ezo3o2g-UbOYQ (hub-hybrid-dev 2026-08-27)
 
 # Live (authoritative, via hub kubeconfig)
-kubectl --kubeconfig=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig \
+kubectl --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig \
   get secret argocd-initial-admin-secret -n platform-ops \
   -o jsonpath='{.data.password}' | base64 -d
 # Source: internal/hub-cli/components/installer.go:96
 ```
 
-Hub kubeconfig is `k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig` (`.zero-ops/state/hub-hybrid-dev.json:35`). `k8-secrets/kubeconfig/hub.kubeconfig` does not exist.
+Hub kubeconfig is `${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig` (`.zero-ops/state/hub-hybrid-dev.json:35`). `${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig` does not exist.
 
 ## Access — Port-Forward (verified, recommended)
 
 Public `argocd.dev.nutgraf.in` currently 307-loops for the CLI (`curl -k https://argocd.dev.nutgraf.in/api/version` → `307` to same URL; `argocd login ... --grpc-web` → `stopped after 10 redirects`). Use port-forward; it bypasses the Gateway and is the only verified CLI path.
 
 ```bash
-HUB_KC=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig
+HUB_KC=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig
 
 # 1. Forward (svc exposes 80/443 → pod 8080; either mapping works, 18444:443 matches runbook)
 kubectl --kubeconfig=$HUB_KC port-forward -n platform-ops svc/argocd-server 18444:443 &
@@ -86,7 +86,7 @@ argocd cluster list --grpc-web
 kubectl fallback (when CLI unavailable):
 
 ```bash
-HUB_KC=k8-secrets/kubeconfig/hub-hybrid-dev.kubeconfig
+HUB_KC=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub-hybrid-dev.kubeconfig
 kubectl --kubeconfig=$HUB_KC get applications -n platform-ops
 kubectl --kubeconfig=$HUB_KC get application <app> -n platform-ops -o yaml | yq '.status | {health,sync}'
 kubectl --kubeconfig=$HUB_KC get events -n platform-ops --field-selector involvedObject.name=<app>
@@ -110,7 +110,7 @@ kubectl --kubeconfig=$HUB_KC patch application <app> -n platform-ops --type merg
 
 - `argocd app get --server argocd.dev.nutgraf.in --grpc-web` without prior `login`
 - `argocd --core` / relying on `current-context` (ambient state trap, `internal/hub-cli/pivot/orchestrator.go:31`)
-- `kubectl --kubeconfig=k8-secrets/kubeconfig/hub.kubeconfig` (phantom file)
+- `kubectl --kubeconfig=${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/hub.kubeconfig` (phantom file)
 - Omitting `--grpc-web` through port-forward
 
 ## Sync Waves

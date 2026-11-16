@@ -150,8 +150,8 @@ func (d *HybridDriver) OnCAPIInit(ctx context.Context, kubeconfig, kubeContext, 
 // readTailscaleAuthkey loads the tailnet auth key.
 //
 // The environment comes first, the on-disk path second. That order is the whole
-// point: the file is `k8-secrets/`, which is the platform operator's own
-// gitignored directory on their own laptop. Day-0 now runs in the tenant's CI
+// point: the file is in the operator's own store, ${KAMARKAT_HOME:-~/.kamarkat},
+// which exists on the machine of whoever ran `kakt`. Day-0 now runs in the tenant's CI
 // under the tenant's secrets (ADR-072), where that directory does not exist and
 // never will -- so a tenant bootstrapping a hybrid box got the warning below,
 // built a control plane that never joined the tailnet, and discovered it when
