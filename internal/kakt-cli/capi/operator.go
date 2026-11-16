@@ -516,6 +516,92 @@ func (i *OperatorInstaller) waitForCRDs(ctx context.Context, timeout time.Durati
 	return nil
 }
 
+// explainStuckProvider collects the evidence for a provider that never reported
+// Ready, and asserts nothing about the cause.
+//
+// It returned "timeout waiting for CoreProvider/cluster-api" and nothing else --
+// after six minutes, in a tenant's CI, on a Kind cluster that is destroyed when
+// the job ends. A failed component fetch, a crash-looping operator, an
+// unreachable registry and a webhook that never came up are indistinguishable
+// from that line, so every diagnosis after it was inference. The evidence was
+// there the whole time, in the resource's own conditions and in the operator's
+// log, and was thrown away.
+//
+// WHAT IS COLLECTED, in the order a reader needs it:
+//
+//   - the resource's conditions with reason and message: where the operator
+//     writes what it was doing, including a fetch that failed and why;
+//   - generation against observedGeneration: whether the controller has looked
+//     at this spec at all. Equal with no Ready condition is a controller that
+//     saw it and is working; unequal is one that has not reached it, which is a
+//     different problem with a different fix;
+//   - pod readiness, restart counts and waiting reasons: ImagePullBackOff and
+//     CrashLoopBackOff are named by Kubernetes, so they are reported as facts
+//     rather than deduced from silence;
+//   - namespace events and the operator's recent log.
+//
+// Best effort by design: this runs when the bootstrap has already failed, so a
+// command that cannot answer contributes nothing rather than replacing the
+// failure with its own. The caller keeps the original error and its exit status.
+func (i *OperatorInstaller) explainStuckProvider(ctx context.Context, kind, name string) string {
+	var b strings.Builder
+	run := func(heading string, args ...string) {
+		cmd := exec.CommandContext(ctx, "kubectl", i.kubectlArgs(args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil && len(bytes.TrimSpace(out)) == 0 {
+			return
+		}
+		b.WriteString("\n--- " + heading + " ---\n")
+		b.Write(bytes.TrimSpace(out))
+		b.WriteString("\n")
+	}
+
+	run(kind+"/"+name+" conditions",
+		"get", kind, name, "-n", constants.NamespaceCAPI,
+		"-o", "jsonpath={range .status.conditions[*]}{.type}={.status} ({.reason}) {.message}{\"\\n\"}{end}")
+	// Spec seen or not seen, which the conditions alone do not say.
+	run(kind+"/"+name+" generation",
+		"get", kind, name, "-n", constants.NamespaceCAPI,
+		"-o", "jsonpath=generation={.metadata.generation} observedGeneration={.status.observedGeneration} installedVersion={.status.installedVersion}{\"\\n\"}")
+	run("pods in "+constants.NamespaceCAPI,
+		"get", "pods", "-n", constants.NamespaceCAPI,
+		"-o", "custom-columns=NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount,WAITING:.status.containerStatuses[*].state.waiting.reason,MESSAGE:.status.containerStatuses[*].state.waiting.message")
+	run("recent events",
+		"get", "events", "-n", constants.NamespaceCAPI, "--sort-by=.lastTimestamp")
+	run("operator log (last 50 lines)",
+		"logs", "deployment/capi-operator-controller-manager",
+		"-n", constants.NamespaceCAPI, "--tail=50")
+
+	// THE CONTROLLER THE OPERATOR DEPLOYED, which is a different pod from the
+	// operator and is where this actually failed:
+	//
+	//   ProviderInstalled=True  installedVersion=v1.13.7
+	//   Ready=False (MinimumReplicasUnavailable)
+	//   capi-controller-manager-...  0/1  CrashLoopBackOff  6 restarts
+	//
+	// The operator's own log says only that it applied the objects, because from
+	// its side nothing went wrong. Without the crashing container's log the
+	// crashloop had to be inferred from events, and its CAUSE could not be read
+	// at all. Both containers are asked: --previous holds the run that died,
+	// while a pod in its backoff window has no current log to give.
+	out, err := exec.CommandContext(ctx, "kubectl", i.kubectlArgs("get", "pods",
+		"-n", constants.NamespaceCAPI,
+		"-o", "jsonpath={range .items[?(@.status.containerStatuses[0].ready==false)]}{.metadata.name}{\" \"}{end}")...).Output()
+	if err == nil {
+		for _, pod := range strings.Fields(string(out)) {
+			run("log of "+pod+" (previous run)",
+				"logs", pod, "-n", constants.NamespaceCAPI, "--previous", "--tail=50")
+			run("log of "+pod+" (current)",
+				"logs", pod, "-n", constants.NamespaceCAPI, "--tail=50")
+		}
+	}
+
+	if b.Len() == 0 {
+		return "\n\n(no diagnostics could be collected: the cluster did not answer)"
+	}
+	return "\n" + b.String()
+}
+
 func (i *OperatorInstaller) waitForProviders(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(10 * time.Second)
@@ -528,7 +614,13 @@ func (i *OperatorInstaller) waitForProviders(ctx context.Context, timeout time.D
 				return ctx.Err()
 			case <-ticker.C:
 				if time.Now().After(deadline) {
-					return fmt.Errorf("timeout waiting for %s/%s", provider.Kind, provider.Name)
+					// The original condition, then the evidence. No cause is
+					// asserted here: the operator reports what it was doing in
+					// the resource's own conditions, and a verdict written into
+					// this message would be a guess competing with a fact.
+					return fmt.Errorf("timeout waiting for %s/%s (%s)%s",
+						provider.Kind, provider.Name, timeout,
+						i.explainStuckProvider(ctx, provider.Kind, provider.Name))
 				}
 
 				cmd := exec.CommandContext(ctx, "kubectl", i.kubectlArgs("get", provider.Kind, provider.Name,

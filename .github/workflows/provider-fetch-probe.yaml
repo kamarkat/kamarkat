@@ -13,6 +13,17 @@
 # That is a hypothesis, and this measures it rather than assuming it. It runs
 # where the failure happens, needs no cluster, creates nothing and costs nothing.
 #
+# MEASURED 2026-11-16 (run 43871644095) -- the failure, reproduced:
+#
+#   PreflightCheckPassed=True   ProviderInstalled=True   installedVersion=v1.13.7
+#   Ready=False (MinimumReplicasUnavailable)
+#   capi-controller-manager-...  0/1  CrashLoopBackOff  6 restarts
+#
+# So the fetch is not the problem and never was: the operator downloaded the
+# components and applied them. The controller those components deploy crashes on
+# startup, and its readiness probe on :9440 is refused because nothing is
+# listening. Its own log is what says why, and this probe now collects it.
+#
 # MEASURED 2026-11-16 (runs 43870533985, 43871005479):
 #
 #   pod -> api.github.com: HTTP 200   a pod inside Kind on this runner class
@@ -115,12 +126,17 @@ jobs:
           # cannot test a version the product does not ship.
           capi=$(grep -oE 'CAPIVersion = "[^"]+"' internal/kakt-cli/versions/versions.go | cut -d'"' -f2)
           cm=$(grep -oE 'CertManagerVersion = "[^"]+"' internal/kakt-cli/versions/versions.go | cut -d'"' -f2)
+          # The node image the product pins. The first run of this probe used
+          # kind's default instead, so it was exercising a different Kubernetes
+          # version than any tenant ever gets.
+          node=$(grep -oE 'kindNodeImage = "[^"]+"' internal/kakt-cli/bootstrap/kind.go | cut -d'"' -f2)
           echo "capi=$capi" >> "$GITHUB_OUTPUT"
           echo "certmanager=$cm" >> "$GITHUB_OUTPUT"
-          echo "cluster-api $capi, cert-manager $cm"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "cluster-api $capi, cert-manager $cm, node $node"
 
       - name: Disposable cluster
-        run: kind create cluster --name capi-probe --wait 120s
+        run: kind create cluster --name capi-probe --image "${{ steps.v.outputs.node }}" --wait 120s
 
       - name: cert-manager
         run: |
@@ -192,6 +208,17 @@ jobs:
           echo "::endgroup::"
           echo "::group::operator log"
           kubectl -n platform-capi logs deployment/capi-operator-controller-manager --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::why the provider's controller is not running"
+          for pod in $(kubectl -n platform-capi get pods \
+              -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==false)]}{.metadata.name}{" "}{end}'); do
+            echo "--- describe $pod"
+            kubectl -n platform-capi describe pod "$pod" | tail -40 || true
+            echo "--- $pod previous run"
+            kubectl -n platform-capi logs "$pod" --previous --tail=80 || true
+            echo "--- $pod current"
+            kubectl -n platform-capi logs "$pod" --tail=80 || true
+          done
           echo "::endgroup::"
           echo "::group::egress from inside the cluster"
           kubectl run egress-probe --image=curlimages/curl:8.11.1 --restart=Never --rm -i --quiet --timeout=120s -- \
