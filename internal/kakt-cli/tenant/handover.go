@@ -288,14 +288,16 @@ func readSecret(prompt string) (string, error) {
 // never appears in this process's command line -- where anything on the machine
 // can read it out of the process table for as long as the call runs.
 func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
-	credName, err := ProviderCredential(spec.Provider)
-	if err != nil {
-		return err
-	}
 	repo := fmt.Sprintf("%s/%s", spec.GitOrg, spec.RepoName())
 
+	// NOT THE PROVIDER TOKEN. It was set here, and every lifecycle command reads
+	// that credential from the box's escrow instead -- deliberately, so a token
+	// that happens to be in an environment cannot answer about a different
+	// provider project. The repository copy was therefore read by nothing: the
+	// bootstrap workflow forwarded it into a process that overwrote it in its
+	// first seconds. It is escrowed by `kakt box init` now, which is where the
+	// operator hands it over.
 	values := map[string]string{
-		credName:                  s.ProviderToken,
 		"GITOPS_REPO_WRITE_TOKEN": s.GitopsToken,
 	}
 	if v := strings.TrimSpace(s.TailscaleAuthkey); v != "" {
@@ -608,10 +610,16 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 	fmt.Fprintf(w, "  https://github.com/%s\n\n", repo)
 
 	if !s.CompleteFor(spec.Provider) {
-		fmt.Fprintf(w, "It cannot bootstrap yet: the workflow it carries runs under the\n")
-		fmt.Fprintf(w, "tenant's own secrets, and %s.\n\n", missingWord(s, credName, spec.Provider))
+		// Two destinations, named as such. The repository's secrets are what the
+		// workflow runs under; the provider credential is escrowed instead, and
+		// telling a tenant to "set" it alongside the others sent them to
+		// Settings -> Secrets for a value nothing reads there.
+		fmt.Fprintf(w, "It cannot bootstrap yet: %s.\n\n", missingWord(s, credName, spec.Provider))
 		if strings.TrimSpace(s.ProviderToken) == "" {
-			fmt.Fprintf(w, "  gh secret set %s --repo %s\n", credName, repo)
+			// Escrowed, not set as a repository secret: the bootstrap reads this
+			// credential from the box's escrow and from nowhere else.
+			fmt.Fprintf(w, "  kakt escrow enroll-provider-credential --gitops-dir . "+
+				"--cluster <cluster> --provider %s < token\n", spec.Provider)
 		}
 		if strings.TrimSpace(s.GitopsToken) == "" {
 			fmt.Fprintf(w, "  gh secret set GITOPS_REPO_WRITE_TOKEN --repo %s\n", repo)
@@ -655,7 +663,10 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 func missingWord(s Secrets, credName, provider string) string {
 	var missing []string
 	if strings.TrimSpace(s.ProviderToken) == "" {
-		missing = append(missing, credName)
+		// Where it has to go, not just its name: this one is escrowed and the
+		// rest are repository secrets, and the difference decides where the
+		// tenant goes next.
+		missing = append(missing, credName+" is not escrowed")
 	}
 	if strings.TrimSpace(s.GitopsToken) == "" {
 		missing = append(missing, "GITOPS_REPO_WRITE_TOKEN")
@@ -665,16 +676,23 @@ func missingWord(s Secrets, credName, provider string) string {
 	if needsTailscale(provider) && strings.TrimSpace(s.TailscaleAuthkey) == "" {
 		missing = append(missing, "TS_AUTHKEY")
 	}
+	// Each entry carries its own verb now, because they no longer share one
+	// destination: one is escrowed and the others are set on the repository.
+	for i, m := range missing {
+		if !strings.Contains(m, " is not ") {
+			missing[i] = m + " is not set"
+		}
+	}
 	switch len(missing) {
 	case 0:
 		return "everything it needs is set"
 	case 1:
-		return missing[0] + " is not set"
+		return missing[0]
 	case 2:
-		return missing[0] + " and " + missing[1] + " are not set"
+		return missing[0] + ", and " + missing[1]
 	default:
-		return strings.Join(missing[:len(missing)-1], ", ") + " and " +
-			missing[len(missing)-1] + " are not set"
+		return strings.Join(missing[:len(missing)-1], ", ") + ", and " +
+			missing[len(missing)-1]
 	}
 }
 

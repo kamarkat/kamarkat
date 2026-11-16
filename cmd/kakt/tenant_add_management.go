@@ -150,12 +150,27 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		return nil
 	}
 
-	fmt.Println("\nCommit and push to build it:")
+	// THE BINDING, NAMED HERE because this is the first moment it can be done and
+	// the last moment before it is needed. It reads the declaration this command
+	// just wrote, so it cannot run before now; the push below starts Day-0, whose
+	// first privileged read refuses an escrow that was never bound. A box that
+	// went from here straight to `git push` met that refusal having never been
+	// told the step existed.
+	fmt.Println("\nTwo steps, and the second is the one that builds:")
+	fmt.Println()
+	fmt.Printf("  kakt escrow bind-destination --gitops-dir . --cluster %s\n", name)
+	fmt.Println("      establishes this escrow as your box's, inside the escrow itself.")
+	fmt.Println("      Once per box, as the platform administrator. Day-0 refuses an")
+	fmt.Println("      escrow nobody established, so this precedes the push.")
+	fmt.Println()
 	fmt.Println("  git add registry/clusters && git commit -m \"Declare " + name + "\" && git push")
-	fmt.Println("\nThe push starts Day-0 in your repository, which reads this cluster's shape")
-	fmt.Println("from the declaration you just committed. It costs money and takes hours, so")
-	fmt.Println("review the declaration before you push -- and only a cluster this push ADDS is")
-	fmt.Println("built, so editing one that exists changes nothing here.")
+	fmt.Println("      starts Day-0 in your repository, which reads this cluster's shape")
+	fmt.Println("      from the declaration you just committed. It costs money and takes")
+	fmt.Println("      hours, so review the declaration before you push -- and only a")
+	fmt.Println("      cluster this push ADDS is built, so editing one that exists changes")
+	fmt.Println("      nothing here.")
+	fmt.Println()
+	fmt.Println("`kakt escrow verify` reports the binding, so you can confirm it before pushing.")
 
 	return nil
 }

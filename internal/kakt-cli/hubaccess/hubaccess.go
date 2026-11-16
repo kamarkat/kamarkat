@@ -458,10 +458,19 @@ func (a *escrowAccess) Provider(ctx context.Context, id Identity, provider strin
 		return "", err
 	}
 	if payload == "" {
-		return "", fmt.Errorf("the escrow holds no %s credential for box %s.\n\n"+
-			"hub-operator escrows the box's provider credential on reconcile; a box that has "+
-			"not reconciled since this was introduced has none yet. Set the provider's token "+
-			"in the environment for this run", provider, id.BoxID)
+		// NOT "set it in the environment", which this said and which cannot work:
+		// the one reader overwrites the environment with what it finds here, so an
+		// operator following that advice saw no change and no explanation. A box
+		// is enrolled when it is created; this is the command that fixes one that
+		// was not, or rotates one that was.
+		return "", fmt.Errorf("the escrow holds no %s credential for box %s, so this box "+
+			"cannot create or destroy infrastructure.\n\n"+
+			"It is escrowed when the box is initialized. A box created before that, or one "+
+			"whose credential has to change, is enrolled explicitly:\n\n"+
+			"  kakt escrow enroll-provider-credential --gitops-dir . --cluster <cluster> "+
+			"--provider %s < token\n\n"+
+			"The credential is read from the escrow and from nowhere else, so setting it in "+
+			"the environment has no effect.", provider, id.BoxID, provider)
 	}
 	return strings.TrimSpace(payload), nil
 }

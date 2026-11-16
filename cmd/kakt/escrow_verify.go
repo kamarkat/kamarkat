@@ -37,15 +37,24 @@ var (
 func newEscrowVerifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Report which escrow artefacts actually exist for a cluster",
+		Short: "Report what the escrow actually holds for a cluster, and whether this box is bound to it",
 		Long: `Check what the escrow holds, rather than what it should hold.
 
 ADR-076 lists what a box cannot be rebuilt without. This reports which of those
 are actually present, by fingerprint, so a missing one is visible before a
 recovery rather than during one.
 
+It also reports the box's BINDING -- the record, inside the escrow, that this
+escrow is the one that box belongs to. Nothing can be escrowed or recovered
+without it: the first privileged read of a bootstrap refuses an escrow that was
+never bound. It is reported here because this is the command that answers what an
+escrow holds, and because an unbound box has no other way to find out before
+Day-0 tells it.
+
 Values are never printed. A fingerprint is enough to compare one store against
-another and useless to anyone who obtains it.`,
+another and useless to anyone who obtains it. The binding is the exception, and
+is printed in full: it is a URL and a project id, which are names rather than
+secrets, and seeing WHERE a box is bound is the point of reporting it.`,
 		RunE: runEscrowVerify,
 	}
 	f := cmd.Flags()
@@ -125,6 +134,45 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 
 	missing := 0
 	checked := 0
+
+	// THE BOX'S BINDING, FIRST AND BOX-SCOPED.
+	//
+	// Not one of ADR-076's artefacts -- it is not recovery material -- but the
+	// escrow cannot be used without it, so a report that omitted it said "all
+	// artefacts present" about a box whose Day-0 would refuse on its first
+	// privileged read:
+	//
+	//   escrow project … holds no binding for box … so it is not established as
+	//   this box's escrow
+	//
+	// A box built from the quickstart reached that refusal having never been told
+	// the step existed. Reported here because this is the command an operator is
+	// pointed at to find out what their escrow holds, and because the answer is a
+	// single read.
+	//
+	// Keyed by the box on both halves of the identity: the binding belongs to the
+	// box, not to any one of its clusters, so the same line is correct whether
+	// --management or --workload was passed.
+	checked++
+	bound, err := store.RestoreArtifact(ctx, escrow.ForCluster(verifyBox, verifyBox),
+		escrow.ArtifactEscrowDestination)
+	switch {
+	case err != nil:
+		fmt.Printf("  ERROR    %-24s %v\n", escrow.ArtifactEscrowDestination, err)
+		missing++
+	case bound == "":
+		fmt.Printf("  MISSING  %-24s this escrow is not established as box %s's — nothing can be escrowed or recovered until it is\n",
+			escrow.ArtifactEscrowDestination, verifyBox)
+		fmt.Printf("           %-24s bind it as the platform administrator: kakt escrow bind-destination --gitops-dir . --cluster %s\n",
+			"", verifyCluster)
+		missing++
+	default:
+		// The recorded destination, printed in full rather than fingerprinted: it
+		// is a URL and a project id, which are names and not secrets, and the
+		// whole point is to see WHERE this box is bound.
+		fmt.Printf("  present  %-24s bound to %s\n", escrow.ArtifactEscrowDestination, bound)
+	}
+
 	for _, r := range required {
 		if r.hubOnly && !isHub {
 			fmt.Printf("  n/a      %-24s %s — held by the management cluster only (ADR-076)\n", r.artifact, r.what)
@@ -154,10 +202,11 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 		// Non-zero, so this is usable as a gate. A box missing a root secret from
 		// the escrow is one incident from unrecoverable, and ADR-076 is explicit
 		// that the gap cannot be closed after the cluster is gone.
-		return fmt.Errorf("%d of %d required escrow artefact(s) absent for %q",
+		return fmt.Errorf("%d of %d required escrow entries absent for %q",
 			missing, checked, verifyCluster)
 	}
-	fmt.Printf("\nAll %d artefacts required for %q are present.\n", checked, verifyCluster)
+	fmt.Printf("\nAll %d required escrow entries for %q are present, this box's binding included.\n",
+		checked, verifyCluster)
 	fmt.Println("Presence is not provenance: compare a fingerprint against the value the box")
 	fmt.Println("is actually using before relying on it (ADR-076).")
 	return nil

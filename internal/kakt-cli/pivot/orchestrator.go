@@ -83,7 +83,9 @@ func (o *Orchestrator) ExecuteMove(ctx context.Context) (string, error) {
 	fmt.Println("[pivot] Creating Hetzner credentials secret...")
 	hcloudToken := os.Getenv("HCLOUD_TOKEN")
 	if hcloudToken == "" {
-		return "", fmt.Errorf("HCLOUD_TOKEN environment variable not set")
+		return "", fmt.Errorf("the box's provider credential was not resolved before the " +
+			"pivot: it is read from the escrow once, at the start of the bootstrap, and set " +
+			"for the steps that follow")
 	}
 
 	// Read template from file
@@ -134,7 +136,9 @@ func (o *Orchestrator) WaitForReady(ctx context.Context, mgmtKubeconfig string) 
 	fmt.Println("[pivot] Recreating Hetzner credentials secret...")
 	hcloudToken := os.Getenv("HCLOUD_TOKEN")
 	if hcloudToken == "" {
-		return fmt.Errorf("HCLOUD_TOKEN environment variable required")
+		return fmt.Errorf("the box's provider credential was not resolved before the pivot: " +
+			"it is read from the escrow once, at the start of the bootstrap, and set for the " +
+			"steps that follow")
 	}
 
 	// Read template from file

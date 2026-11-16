@@ -19,7 +19,6 @@
 #
 # REQUIRED -- Day-0 refuses without them, rather than building a box that looks
 # configured and is not:
-#   HCLOUD_TOKEN    the cloud API token clusters are created with
 #   GITOPS_REPO_WRITE_TOKEN
 #                   write access to this repository, so Day-0 can commit the
 #                   artifacts it generates for the cluster it creates, and so
@@ -42,6 +41,15 @@
 # is missing:
 #   S3_ACCESS_KEY_ID     object storage for database backups. A production box
 #   S3_SECRET_ACCESS_KEY without these has no backups.
+#
+# NOT HERE -- THE CLOUD CREDENTIAL. There is no HCLOUD_TOKEN secret to set. The
+# credential that creates and destroys this box's infrastructure is escrowed when
+# the box is initialized, and every lifecycle command reads it from the escrow and
+# from nowhere else -- so that a token which happens to be in an environment
+# cannot authenticate perfectly and answer about somebody else's provider
+# project. This workflow used to forward a repository copy into a process that
+# overwrote it in its first seconds. `kakt escrow enroll-provider-credential`
+# rotates it.
 #
 # OPTIONAL -- where this box's alerts page you (ADR-078 add.5 §5): the IRM
 # integration URL that critical and warning alerts go to, and the hub's IRM
@@ -320,7 +328,6 @@ jobs:
       # repository, not in the job.
       - name: Build ${{ matrix.box.cluster }}
         env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
           # Read only when the cluster declares on-prem capacity: the control
           # plane and those nodes join your tailnet from this one key.

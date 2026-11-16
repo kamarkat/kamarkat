@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/browser"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/session"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
@@ -543,6 +544,9 @@ func (b *boxInit) create(ctx context.Context) error {
 	}
 	fmt.Printf("[box] pushed to https://github.com/%s/%s\n", b.spec.GitOrg, b.spec.RepoName())
 
+	if err := b.escrowProviderCredential(ctx); err != nil {
+		return err
+	}
 	if err := tenant.SetSecrets(ctx, b.spec, b.secrets); err != nil {
 		return err
 	}
@@ -745,10 +749,62 @@ would read the wrong escrow.
 	// correct" is not a state this can observe -- and setting the value it
 	// already holds changes nothing, where skipping one that failed last time
 	// leaves a box that cannot bootstrap.
+	if err := b.escrowProviderCredential(ctx); err != nil {
+		return err
+	}
 	if err := tenant.SetSecrets(ctx, b.spec, b.secrets); err != nil {
 		return err
 	}
 	return boxCreatedVerdict(b.spec, b.resume)
+}
+
+// escrowProviderCredential puts this box's provider credential in its escrow, as
+// part of creating the box.
+//
+// WHERE THE HAND-OVER BELONGS. box init is already the one place an operator
+// supplies this credential -- it is in the set the run collects and prints -- and
+// every lifecycle command reads it back from the escrow and from nowhere else
+// (resolveHCloudToken, teardown, inventory). Writing it only to the repository's
+// Actions secrets left the escrow without it, so the first bootstrap of every box
+// created after that rule came in refused: "the escrow holds no hetzner
+// credential for box …". The credential was in GitHub the whole time and nothing
+// reads it there.
+//
+// It also BINDS the box, because enrolment is a box's first privileged write and
+// hubaccess establishes the binding in the same act. That is why creating a box
+// no longer needs a separate `kakt escrow bind-destination`.
+//
+// FATAL, like the escrow itself. A box whose provider credential is not escrowed
+// can only ever be destroyed from the machine that made it, which is the state
+// ADR-076 exists to prevent -- and nothing has been created yet, so refusing here
+// costs nothing. The repository already exists at this point, so the operator
+// resumes with `kakt box init --resume` once the cause is fixed.
+func (b *boxInit) escrowProviderCredential(ctx context.Context) error {
+	coords := hubaccess.Coordinates{
+		Identity:        hubaccess.Identity{BoxID: b.spec.BoxID, ClusterName: b.spec.BoxID},
+		EscrowURL:       strings.TrimSpace(b.spec.EscrowURL),
+		EscrowProjectID: strings.TrimSpace(b.spec.EscrowProjectID),
+		EscrowOrgID:     strings.TrimSpace(b.spec.EscrowOrgID),
+		PlatformAdmin:   strings.TrimSpace(b.spec.PlatformAdmin),
+	}
+	// Not rotated from here. A re-run or a --resume enrols the same credential
+	// again, which is a no-op; replacing a DIFFERENT one is a deliberate act with
+	// its own command, so that an operator who re-runs box init with a new token
+	// in their store is told rather than silently repointing the box.
+	outcome, err := hubaccess.EnrollProviderCredential(ctx, coords,
+		b.spec.Provider, b.secrets.ProviderToken, false)
+	if err != nil {
+		return fmt.Errorf("this box's provider credential must be escrowed before it is "+
+			"operable (ADR-076): %w", err)
+	}
+	switch outcome {
+	case hubaccess.EnrolledUnchanged:
+		fmt.Printf("[box] ✓ %s credential already escrowed for %s\n", b.spec.Provider, b.spec.BoxID)
+	default:
+		fmt.Printf("[box] ✓ escrowed this box's %s credential and bound %s to its escrow\n",
+			b.spec.Provider, b.spec.BoxID)
+	}
+	return nil
 }
 
 // boxCreatedVerdict says what exists and what declares its first cluster.

@@ -6,14 +6,15 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrDockerNotRunning     ErrorCode = "DOCKER_NOT_RUNNING"
-	ErrKindNotFound         ErrorCode = "KIND_NOT_FOUND"
-	ErrInvalidHetznerToken  ErrorCode = "INVALID_HETZNER_TOKEN"
-	ErrClusterExists        ErrorCode = "CLUSTER_EXISTS"
-	ErrKindCreateFailed     ErrorCode = "KIND_CREATE_FAILED"
-	ErrOperatorInstallFailed ErrorCode = "OPERATOR_INSTALL_FAILED"
-	ErrProvisioningTimeout  ErrorCode = "PROVISIONING_TIMEOUT"
-	ErrPivotFailed          ErrorCode = "PIVOT_FAILED"
+	ErrDockerNotRunning       ErrorCode = "DOCKER_NOT_RUNNING"
+	ErrKindNotFound           ErrorCode = "KIND_NOT_FOUND"
+	ErrInvalidHetznerToken    ErrorCode = "INVALID_HETZNER_TOKEN"
+	ErrProviderAPIRefused     ErrorCode = "PROVIDER_API_REFUSED"
+	ErrClusterExists          ErrorCode = "CLUSTER_EXISTS"
+	ErrKindCreateFailed       ErrorCode = "KIND_CREATE_FAILED"
+	ErrOperatorInstallFailed  ErrorCode = "OPERATOR_INSTALL_FAILED"
+	ErrProvisioningTimeout    ErrorCode = "PROVISIONING_TIMEOUT"
+	ErrPivotFailed            ErrorCode = "PIVOT_FAILED"
 	ErrComponentInstallFailed ErrorCode = "COMPONENT_INSTALL_FAILED"
 )
 
@@ -73,7 +74,42 @@ func InvalidHetznerToken(cause error) *BootstrapError {
 	return New(
 		ErrInvalidHetznerToken,
 		"Invalid or expired Hetzner API token",
-		"Check your token:\n  1. Verify HCLOUD_TOKEN environment variable is set\n  2. Ensure token has read/write permissions\n  3. Generate new token at https://console.hetzner.cloud/",
+		"Check the credential this box is built with -- the escrowed one, since that is the "+
+			"only one read:\n"+
+			"  1. kakt escrow verify --box <box> --cluster <cluster> --management reports whether it is there\n"+
+			"  2. Ensure the token has read and write permissions\n"+
+			"  3. Generate a new one at https://console.hetzner.cloud/ and enrol it with\n"+
+			"     kakt escrow enroll-provider-credential --gitops-dir . --cluster <cluster> --provider hetzner --rotate < token",
+		cause,
+	)
+}
+
+// ProviderAPIRefused is the provider's API failing for a reason that is NOT the
+// credential.
+//
+// It exists because there was no such reason available. Every failure of the
+// token check returned InvalidHetznerToken, so when Hetzner removed
+// GET /v1/datacenters after 1 October 2026 and began answering 410
+// `deprecated_api_endpoint`, a released platform calling a withdrawn endpoint
+// reported the tenant's credential as invalid or expired. Two runs were spent on
+// the credential. The API had said exactly what was wrong, in a field this
+// buried.
+//
+// So the cause is quoted and the remediation says whose problem it is: an
+// operator cannot fix a withdrawn endpoint, and should not be sent to their
+// provider's console to try.
+func ProviderAPIRefused(provider string, cause error) *BootstrapError {
+	return New(
+		ErrProviderAPIRefused,
+		fmt.Sprintf("The %s API refused a read this box's credential is entitled to make", provider),
+		"The credential was accepted; the call itself was not. The cause below is what the\n"+
+			"provider returned.\n\n"+
+			"  deprecated_api_endpoint  this platform version calls an endpoint the provider has\n"+
+			"                           withdrawn. It is a platform defect, not a credential\n"+
+			"                           problem: take a later version, and report it if none\n"+
+			"                           carries the fix.\n"+
+			"  rate_limit_exceeded      too many calls to this project; retry shortly.\n"+
+			"  anything else            the provider's status page, then this cause verbatim.",
 		cause,
 	)
 }

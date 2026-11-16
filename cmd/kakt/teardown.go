@@ -253,29 +253,28 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubeconfig string, infraOnly bool) (kubeconfig, providerToken string, cleanup func(), err error) {
 	cleanup = func() {}
 
-	// The provider credential is read from the environment first for the same
-	// reason the machine identity is: a pipeline that exports it must behave the
-	// way it always has, and an operator overriding it is being explicit.
-	// NOT from the environment. A token exported in a shell authenticates
-	// perfectly against a DIFFERENT provider project, where this box owns nothing
-	// -- so a teardown would delete nothing and report success. The box's own
-	// credential is the only one that can answer what the box owns.
-	providerToken = ""
-
+	// THE PROVIDER CREDENTIAL IS ALWAYS THE ESCROWED ONE. Never the environment:
+	// a token exported in a shell authenticates perfectly against a DIFFERENT
+	// provider project, where this box owns nothing -- so a teardown would delete
+	// nothing and report success. Only the box's own credential can answer what
+	// the box owns.
+	//
+	// So --kubeconfig supplies KUBERNETES access and nothing else. It used to be
+	// read as supplying both, and refused with "there is no provider credential"
+	// on a condition that was by then unconditional -- the environment having
+	// been dropped as a source -- which made the flag impossible to use at all.
+	// The escrow is still read for the credential, and a box that never finished
+	// bootstrapping has one: it is escrowed when the box is initialized, long
+	// before a cluster exists.
 	if infraOnly && strings.TrimSpace(explicitKubeconfig) != "" {
 		return "", "", cleanup, fmt.Errorf("--kubeconfig and --infrastructure-only ask for " +
 			"opposite things: one supplies Kubernetes access, the other says there is none")
 	}
-	if strings.TrimSpace(explicitKubeconfig) != "" {
+	explicit := strings.TrimSpace(explicitKubeconfig) != ""
+	if explicit {
 		if _, statErr := os.Stat(explicitKubeconfig); statErr != nil {
 			return "", "", cleanup, fmt.Errorf("--kubeconfig %s: %w", explicitKubeconfig, statErr)
 		}
-		if providerToken == "" {
-			return "", "", cleanup, fmt.Errorf("--kubeconfig names a file, but there is no provider " +
-				"credential: drop --kubeconfig so both are read from the box's escrow, which " +
-				"is where this box's own credential lives")
-		}
-		return explicitKubeconfig, providerToken, cleanup, nil
 	}
 
 	coords, err := hubaccess.Declaration(gitopsDir, clusterName)
@@ -288,10 +287,16 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 	}
 	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
 
-	// A recovery run asks for no Kubernetes access and must not acquire any: it
-	// has already been told the API cannot be reached, and the orchestrator
-	// refuses the mode if it turns out it can.
-	if !infraOnly {
+	switch {
+	case explicit:
+		// Named by the operator, so it wins over the escrowed one -- that is what
+		// the flag is for.
+		kubeconfig = explicitKubeconfig
+	case infraOnly:
+		// A recovery run asks for no Kubernetes access and must not acquire any:
+		// it has already been told the API cannot be reached, and the
+		// orchestrator refuses the mode if it turns out it can.
+	default:
 		_, path, removeKubeconfig, kubeErr := access.Kubernetes(ctx, id)
 		if kubeErr != nil {
 			return "", "", cleanup, kubeErr
@@ -300,12 +305,10 @@ func resolveHubAccess(ctx context.Context, gitopsDir, clusterName, explicitKubec
 		kubeconfig = path
 	}
 
-	if providerToken == "" {
-		providerToken, err = access.Provider(ctx, id, "hetzner")
-		if err != nil {
-			cleanup()
-			return "", "", func() {}, err
-		}
+	providerToken, err = access.Provider(ctx, id, "hetzner")
+	if err != nil {
+		cleanup()
+		return "", "", func() {}, err
 	}
 	return kubeconfig, providerToken, cleanup, nil
 }

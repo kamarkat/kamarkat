@@ -575,8 +575,11 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 		// every server kept running and kept billing.
 		return fmt.Errorf("no provider credential, so no server can be deleted: the box's " +
 			"servers are still running.\n\n" +
-			"kakt reads it from the box's escrow with your own identity. If this box has " +
-			"not escrowed one yet, set HCLOUD_TOKEN for this run")
+			"kakt reads it from the box's escrow with your own identity, and from nowhere " +
+			"else -- setting HCLOUD_TOKEN has no effect. A box whose escrow holds none is " +
+			"enrolled explicitly:\n\n" +
+			"  kakt escrow enroll-provider-credential --gitops-dir . --cluster <cluster> " +
+			"--provider hetzner < token")
 	}
 
 	client := hcloud.NewClient(hcloud.WithToken(hcloudToken))

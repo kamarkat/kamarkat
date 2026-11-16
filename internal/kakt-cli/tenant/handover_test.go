@@ -63,11 +63,11 @@ func TestHandoverSaysWhatIsMissingAndHowToFinish(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"acme-inc/acme-gitops-1",            // the repository that now exists
-		"0.1.9",                             // what it is pinned to
-		"HCLOUD_TOKEN",                      // the provider's own secret name
-		"GITOPS_REPO_WRITE_TOKEN",           // and the other one
-		"push is what builds it",            // what completes it
+		"acme-inc/acme-gitops-1",  // the repository that now exists
+		"0.1.9",                   // what it is pinned to
+		"HCLOUD_TOKEN",            // the provider's own credential name
+		"GITOPS_REPO_WRITE_TOKEN", // and the other one
+		"push is what builds it",  // what completes it
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the handover does not mention %q:\n%s", want, out)

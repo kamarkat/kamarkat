@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/kamarkat/kamarkat/internal/platform"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -253,17 +252,14 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 			"to be kept in, and a box is not built without one (ADR-076): %w", err)
 	}
 
-	// The provider credential, escrowed before any infrastructure exists.
-	//
-	// Required, not best-effort: see enrollProviderCredential. A failure here
-	// fails the bootstrap, because a box whose recovery credential is not escrowed
-	// can only ever be destroyed from this machine -- and the servers do not exist
-	// yet, so refusing now costs nothing.
-	if err := enrollProviderCredential(ctx, escrowClient, boxID, p.clusterName,
-		p.driver.Name(), os.Getenv("HCLOUD_TOKEN")); err != nil {
-		return fmt.Errorf("the box's recovery credentials must be escrowed before its "+
-			"infrastructure is created (ADR-076): %w", err)
-	}
+	// NO PROVIDER-CREDENTIAL ENROLMENT HERE. There was one, reading
+	// os.Getenv("HCLOUD_TOKEN") "before any infrastructure exists" -- and it could
+	// not work: resolveHCloudToken runs earlier in this same command and
+	// overwrites that variable with the value it read FROM the escrow, so this
+	// wrote back what it had just read. On a box whose escrow was empty the read
+	// refused first and this was never reached. The hand-over moved to `kakt box
+	// init`, which is where an operator supplies the credential, and
+	// hubaccess.EnrollProviderCredential is the only thing that performs it.
 
 	provisioner := &cluster.Provisioner{
 		Kubeconfig:   cfg.BootstrapKubeconfig,

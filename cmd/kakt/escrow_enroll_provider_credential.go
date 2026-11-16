@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
-	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"github.com/spf13/cobra"
 )
 
@@ -120,46 +119,23 @@ func runEnrollProviderCredential(ctx context.Context, o enrollProviderOpts, in i
 		coords.EscrowProjectID = escrowEnvValue("ESCROW_PROVIDER_PROJECT_ID")
 	}
 
-	// Establishing, not merely opening: a first enrolment is where this box's
-	// escrow is established, so an unbound project is bound in the same authorized
-	// act. A project already bound to different coordinates is still refused --
-	// moving a bound box is a rebind.
-	access, err := hubaccess.OpenEstablishing(ctx, coords)
+	// One implementation, in hubaccess: this command and `kakt box init` enrol the
+	// same way, so a box created by either is in the same state afterwards.
+	outcome, err := hubaccess.EnrollProviderCredential(ctx, coords, provider, cred, o.rotate)
 	if err != nil {
 		return err
 	}
-	// The box on both halves: this credential is the box's, not a cluster's, and
-	// a successor hub must find the same one (ADR-111 §1).
-	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.BoxID}
-	artifact := escrow.ProviderCredentialArtifact(provider)
 	boxID = coords.BoxID
-
-	existing, err := access.Artifact(ctx, id, artifact)
-	if err != nil {
-		// Unreadable is not absent. Enrolling over a credential that may exist is
-		// how the one a teardown needs gets lost.
-		return fmt.Errorf("reading the escrow: %w", err)
-	}
-	switch {
-	case existing == cred:
+	switch outcome {
+	case hubaccess.EnrolledUnchanged:
 		fmt.Printf("[enroll] the escrowed %s credential for %s is already this one; nothing written\n",
 			provider, boxID)
 		return nil
-	case existing != "" && !o.rotate:
-		return fmt.Errorf("box %s already has an escrowed %s, and this is a different one.\n\n"+
-			"Refusing to replace it: pass --rotate if that is what you intend, and revoke the "+
-			"old credential at the provider afterwards", boxID, artifact)
+	case hubaccess.EnrolledRotated:
+		fmt.Printf("[enroll] rotated the %s credential for %s (%d chars)\n", provider, boxID, len(cred))
+	default:
+		fmt.Printf("[enroll] enrolled the %s credential for %s (%d chars)\n", provider, boxID, len(cred))
 	}
-
-	if err := access.PutArtifact(ctx, id, artifact, cred); err != nil {
-		return fmt.Errorf("escrow the credential: %w", err)
-	}
-
-	what := "enrolled"
-	if existing != "" {
-		what = "rotated"
-	}
-	fmt.Printf("[enroll] %s the %s credential for %s (%d chars)\n", what, provider, boxID, len(cred))
 	fmt.Println("  Lifecycle commands read it from the escrow now, so this box can be operated")
 	fmt.Println("  from any authorized workstation.")
 	return nil
