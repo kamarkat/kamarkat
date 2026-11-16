@@ -96,9 +96,19 @@ on:
 #   - It builds only a cluster this push ADDED. A commit that edits a cluster
 #     already declared is reconciled by that cluster's own control plane, which
 #     is where every change after Day-0 belongs.
-#   - It builds only a cluster that has no generated/ directory. Day-0 writes
-#     that directory, so its presence is the repository's own record that this
-#     cluster has been built, and a re-added declaration does not bill twice.
+#   - It builds only a cluster that Day-0 has no record of having started, or
+#     one whose record says it stopped part way. That record is
+#     .state/<cluster>.json, which Day-0 commits after every phase, and it is
+#     the thing a re-run continues from.
+#
+#     NOT the generated/ directory, which is what this read before. Day-0
+#     commits generated/ at adr045-commit -- after phase 11f, with boundary-04,
+#     boundary-05, boundary-06, adr045-verify and finalize still to run -- so a
+#     box that failed in any of those five was refused here as "already built"
+#     with a fifth of the bootstrap never attempted, and the dispatch that
+#     exists to continue it could not. It stays as the answer for a box that has
+#     generated/ and NO state record: nothing can be resumed from, so a run
+#     would start from phase 1 and provision a second set of servers.
 #   - It builds only a MANAGEMENT cluster -- a declaration with no
 #     environmentSlug. A managed cluster declares one, and is provisioned by the
 #     management cluster reconciling it from git, not by a CI run.
@@ -106,8 +116,10 @@ on:
 # Each of those is a reason to do nothing, reported in the run rather than
 # passing silently, so a push that was not meant to build says so.
 #
-# workflow_dispatch remains, for re-running a build that stopped part way and for
-# replacing a management cluster whose declaration is already committed.
+# workflow_dispatch remains, for re-running a build that stopped part way -- which
+# is resolved from .state/<cluster>.json above, so a failure in any phase can be
+# continued -- and for replacing a management cluster whose declaration is already
+# committed.
 #
 # Day-0 commits the artifacts it generates back into this repository, so the run
 # needs write access to it.
@@ -212,10 +224,43 @@ jobs:
               if values.get("environmentSlug"):
                   refused.append(f"{name}: declares environmentSlug, so the management cluster provisions it")
                   continue
-              # Day-0's own record that this cluster exists.
-              if (pathlib.Path("registry/clusters") / name / "generated").is_dir():
-                  refused.append(f"{name}: already built (generated/ is present)")
+              # WHAT DAY-0 RECORDS ABOUT THIS CLUSTER, which is what decides
+              # whether there is anything left to do.
+              #
+              # The state file is committed after every phase, so it exists for
+              # any attempt that got past preflight and it names where that
+              # attempt stopped. A record that reached `complete` is still sent
+              # through: the CLI re-checks that phase's postconditions and
+              # either refuses the run ("Cluster already bootstrapped") or
+              # withdraws the records that do not hold and repairs them, and
+              # refusing here would put that repair out of CI's reach -- the
+              # same gap one phase later.
+              record = pathlib.Path(".state") / f"{name}.json"
+              phases, parsed = [], False
+              if record.is_file():
+                  try:
+                      phases = (json.loads(record.read_text()) or {}).get("completedPhases") or []
+                      parsed = True
+                  except (ValueError, OSError) as exc:
+                      # Unreadable is not absent. Falling through to "build it"
+                      # on a corrupt record would start a box over from phase 1.
+                      print(f"::error::{record} cannot be read ({exc}), so what this "
+                            f"cluster has already done is unknown and it will not be built",
+                            file=sys.stderr)
+                      raise SystemExit(1)
+              if not parsed and (pathlib.Path("registry/clusters") / name / "generated").is_dir():
+                  refused.append(f"{name}: built (generated/ is present) with no "
+                                 f"{record} to continue from, so a run would start from "
+                                 f"phase 1 and provision a second set of servers")
                   continue
+              if parsed and "complete" in phases:
+                  print(f"::notice::{name}: recorded complete. Day-0 re-checks what each "
+                        f"phase claims and either refuses this run or repairs only the "
+                        f"claims that no longer hold", file=sys.stderr)
+              elif parsed:
+                  print(f"::notice::{name}: continuing an attempt that recorded "
+                        f"{len(phases)} completed phase(s); Day-0 skips those and "
+                        f"resumes at the first that is outstanding", file=sys.stderr)
               on_prem = (values.get("onPrem") or {})
               missing = [k for k in ("provider", "region") if not values.get(k)]
               if missing:
