@@ -13,6 +13,7 @@ Emits tab-separated lines the shell wrapper classifies:
 """
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -86,6 +87,17 @@ if not secrets:
     print("NONE")
     sys.exit(0)
 
+# The declaration a box is created with, rendered by the one fixture every gate
+# shares (scripts/validate/management-declaration-fixture.sh).
+_decl = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+_r = subprocess.run(["scripts/validate/management-declaration-fixture.sh"],
+                    capture_output=True, text=True)
+if _r.returncode != 0:
+    raise SystemExit("the management declaration fixture could not be rendered: " + _r.stderr)
+_decl.write(_r.stdout)
+_decl.close()
+DECL_FIXTURE = _decl.name
+
 # ── 2. apply the ApplicationSet patches the way ArgoCD does ──────────────────
 rendered = run(["helm", "template", CHART,
                 "--set", "environmentSlug=dev",
@@ -113,8 +125,15 @@ rendered = run(["helm", "template", CHART,
                 # the platform's hostnames (ADR-051, ADR-065).
                 "--set", "hubDomain=example.test",
                 "--set", "global.hubDomain=example.test",
-                "--set", "previewDomain=example-preview.test", "--set", "alerting.emailTo[0]=alerts@example.test",
-                "--set", "global.previewDomain=example-preview.test"],
+                "--set", "global.previewDomain=example-preview.test",
+                # AND THE DECLARATION A BOX IS CREATED WITH, from the fixture
+                # every render gate shares. The list above used to carry
+                # previewDomain and alerting.emailTo of its own and was still
+                # missing management.infisicalEnvironmentSlug, so this check
+                # reported the chart broken instead of checking the spoke
+                # ExternalSecret prefixes it exists for -- which is the same way
+                # it was already failing for the value above it.
+                "-f", DECL_FIXTURE],
                "environment-manager chart does not render")
 
 appset = next((d for d in yaml.safe_load_all(rendered)

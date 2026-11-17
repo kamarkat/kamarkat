@@ -143,6 +143,24 @@ publicTlsIssuer: <PUBLIC_TLS_ISSUER>
 # see ADR-051's amendment of 2026-09-18. Leave it empty to publish on the apex.
 domain: <DOMAIN>
 subdomain: <SUBDOMAIN>
+# WHERE SESSION PREVIEWS ARE SERVED, and deliberately not under the domain above.
+#
+# A preview runs your own application's code, so it is served from a separate
+# REGISTRABLE domain -- another site as the browser counts sites, which is the
+# whole of ADR-108. `preview.<domain>` would be the same site and would defeat
+# it, so this is a second domain you own rather than anything derived from the
+# first, and `kakt box init --preview-domain` is where it is named.
+#
+# OPTIONAL, and adding it later is the normal way to get previews: leave it
+# empty and this box serves none. The platform then renders no preview DNS
+# filter at all rather than an empty one -- an empty --domain-filter matches
+# every zone the credential can reach, which is what ADR-108 guards against.
+#
+# It was briefly required, which made a second domain a precondition for having
+# a box at all: a declaration without one did not render, and the seed took
+# every ApplicationSet with it -- boundary 01 waiting out its whole budget on
+# "no ApplicationSet targets project boundary-01".
+previewDomain: <PREVIEW_DOMAIN>
 # Cloud worker nodes this cluster runs.
 #
 # Two by default in every environment. A development box briefly defaulted to
@@ -263,6 +281,26 @@ dns:
 #                  (ADR-113). Off unless this box's product sells plans; an
 #                  application declaring capabilities.billing does not render
 #                  while it is off.
+# WHERE THIS BOX'S ALERTS ARE EMAILED.
+#
+# Rendered from the session that created the box -- the platform administrator's
+# own address -- so it is never asked for and never defaulted. Change it to a
+# rota or a shared inbox whenever you like: unlike platformAdminIdentity above,
+# which is Infisical's id because an address must not carry authority, this is
+# only a destination.
+#
+# It is required while capabilities.observability is on, and the chart refuses to
+# render without it rather than shipping a box whose alerts go nowhere (ADR-078
+# add.4, add.5 §5). That refusal was already there and this file did not carry
+# the key: every render in CI supplied `alerting.emailTo[0]=alerts@example.test`
+# of its own, so the chart was only ever validated against a fixture that had it,
+# and the first real declaration to reach ArgoCD failed to render -- taking every
+# ApplicationSet with it, and stalling boundary 01 for its whole budget on "no
+# ApplicationSet targets project boundary-01".
+alerting:
+  emailTo:
+    - <PLATFORM_ADMIN_EMAIL>
+
 capabilities:
   database:
     enabled: true

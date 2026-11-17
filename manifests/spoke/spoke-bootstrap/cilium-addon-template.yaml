@@ -14278,6 +14278,27 @@ stringData:
             - build-config
             - "--k8s-api-server-urls="
             env:
+            # THE API SERVER'S REAL ADDRESS, or this container deadlocks the
+            # cold boot. It reads the ConfigMap through the apiserver, and the
+            # in-cluster ClusterIP is not routable until an agent is running --
+            # which is what this container is a prerequisite for. The v1.17.18
+            # addon wired both of these here; the bump to v1.20.4 kept them on
+            # cilium-agent and cilium-operator and lost them on this init
+            # container, and 046-hybrid-provider.sh has reported it ever since.
+            # Optional, so a cell that does not set k8s-service-host in
+            # cilium-config behaves exactly as it does today.
+            - name: KUBERNETES_SERVICE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cilium-config
+                  key: k8s-service-host
+                  optional: true
+            - name: KUBERNETES_SERVICE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cilium-config
+                  key: k8s-service-port
+                  optional: true
             - name: K8S_NODE_NAME
               valueFrom:
                 fieldRef:

@@ -87,17 +87,28 @@ TMPL
     # Rendered with the values a cluster supplies, because the templated
     # objects need them: rendering without would count zero and delete a
     # chart that is correct.
-    # global.previewDomain is one of them since ADR-108 made it required (an
-    # empty one would widen external-dns to every zone).
+    # BOTH WAYS ROUND for the preview domain, because a box may serve no
+    # previews and that is the path most boxes take.
+    #
+    # It used to render only WITH one, because ADR-108 made the value required.
+    # It is optional now -- declaring the domain is what turns previews on -- and
+    # the two branches are not the same chart: with a domain the preview zone
+    # joins the issuers' dnsZones, external-dns is filtered to it and
+    # preview-access runs; without, the zone is absent, external-dns is confined
+    # to the hub zone and preview-access is scaled to zero. A gate that only ever
+    # rendered one of them is a gate that has not seen what most boxes get.
     #
     # Helm's own error is kept: discarding it reported a missing value as
     # "renders no objects", which names the symptom and hides the cause.
-    if ! rendered=$(helm template "$name" "$chart" \
-        --set spokeName=probe --set global.provider="$prov" \
-        --set global.previewDomain=example-preview.test 2>&1); then
-        echo "$name: does not render: ${rendered}" >&2; rm -rf "$chart"; exit 1
-    fi
-    objects=$(grep -c '^kind:' <<< "$rendered" || true)
-    [[ "${objects:-0}" -gt 0 ]] || { echo "$name: renders no objects; refusing" >&2; rm -rf "$chart"; exit 1; }
+    for preview in example-preview.test ""; do
+        if ! rendered=$(helm template "$name" "$chart" \
+            --set spokeName=probe --set global.provider="$prov" \
+            --set global.previewDomain="$preview" 2>&1); then
+            echo "$name: does not render${preview:+ with a preview domain}${preview:-" without a preview domain"}: ${rendered}" >&2
+            rm -rf "$chart"; exit 1
+        fi
+        objects=$(grep -c '^kind:' <<< "$rendered" || true)
+        [[ "${objects:-0}" -gt 0 ]] || { echo "$name: renders no objects; refusing" >&2; rm -rf "$chart"; exit 1; }
+    done
     echo "packaged $name -> $chart ($objects object(s))"
 done

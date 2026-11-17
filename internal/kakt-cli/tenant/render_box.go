@@ -40,9 +40,38 @@ type Spec struct {
 	GitOrg   string
 	// PlatformAdmin is Infisical's id for the one human this box accepts.
 	PlatformAdmin string
-	Domain        string
-	Provider      string
-	Region        string
+
+	// PreviewDomain is the SEPARATE registrable domain this box serves session
+	// previews from (ADR-108).
+	//
+	// Not derived from Domain, and it cannot be: a preview runs a tenant's own
+	// code, so it is served from a different registrable domain precisely so the
+	// browser treats it as a different site. `preview.<domain>` would be the same
+	// site and would defeat the decision.
+	//
+	// OPTIONAL, and declaring it is what turns previews on. A box that serves
+	// none leaves it empty, and the platform then renders no preview DNS filter
+	// at all rather than an empty one -- an empty --domain-filter matches every
+	// zone the credential can reach, which is what ADR-108 guards against.
+	//
+	// It was briefly required here, which made a preview domain a precondition
+	// for having a box: a declaration without one did not render, and the seed
+	// took every ApplicationSet down with it. Previews are added when wanted.
+	PreviewDomain string
+
+	// PlatformAdminEmail is that human's address, for things that have to REACH
+	// them rather than authorize them -- today, where this box's alerts are
+	// emailed.
+	//
+	// Deliberately not the authority: platformAdminIdentity is Infisical's id
+	// because "an address can be changed and re-assigned, so a box that named its
+	// administrator by email would hand that authority to whoever next holds it".
+	// A destination has the opposite requirement -- it has to be somewhere a
+	// person reads -- so the box records both, and only the id decides anything.
+	PlatformAdminEmail string
+	Domain             string
+	Provider           string
+	Region             string
 	// Subdomain is the DNS label every hostname on this box sits under, or empty
 	// for the apex. Declared, never derived: see hubDomain.
 	Subdomain string
@@ -467,6 +496,8 @@ func (s Spec) boxTokens() map[string]string {
 		"<ESCROW_PROJECT_ID>":       s.EscrowProjectID,
 		"<ESCROW_ORG_ID>":           s.EscrowOrgID,
 		"<PLATFORM_ADMIN_IDENTITY>": strings.TrimSpace(s.PlatformAdmin),
+		"<PLATFORM_ADMIN_EMAIL>":    strings.TrimSpace(s.PlatformAdminEmail),
+		"<PREVIEW_DOMAIN>":          strings.TrimSpace(strings.TrimSuffix(s.PreviewDomain, ".")),
 	}
 }
 
@@ -555,6 +586,8 @@ func (s Spec) clusterTokens() map[string]string {
 		// and Infisical decides what that identity may read.
 		"<ESCROW_ORG_ID>":           s.EscrowOrgID,
 		"<PLATFORM_ADMIN_IDENTITY>": strings.TrimSpace(s.PlatformAdmin),
+		"<PLATFORM_ADMIN_EMAIL>":    strings.TrimSpace(s.PlatformAdminEmail),
+		"<PREVIEW_DOMAIN>":          strings.TrimSpace(strings.TrimSuffix(s.PreviewDomain, ".")),
 	}
 }
 

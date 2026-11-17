@@ -302,7 +302,16 @@ def walk(o, p):
 print(' '.join(walk(yaml.safe_load(open('manifests/argocd/environment-manager/values.yaml')), '')))
 ")"
 rendered_bundle=$(mktemp)
-trap 'rm -f "$rendered_bundle"' EXIT
+# THE DECLARATION A BOX IS CREATED WITH, shared with every other render gate
+# (scripts/validate/management-declaration-fixture.sh). The `--set` list this
+# replaces supplied values the declaration template did not carry, so these
+# checks ran against a shape no box has.
+decl_fixture=$(mktemp)
+if ! scripts/validate/management-declaration-fixture.sh > "$decl_fixture"; then
+    echo "application specs: the management declaration fixture could not be rendered" >&2
+    exit 1
+fi
+trap 'rm -f "$rendered_bundle" "$decl_fixture"' EXIT
 while read -r provider; do
     [ -n "$provider" ] || continue
     for optional in "" "$every_optional"; do
@@ -312,13 +321,9 @@ while read -r provider; do
         # found nothing wrong with nothing.
         # shellcheck disable=SC2086 # $optional is a list of --set flags
         if ! helm template platform-bundle dist/charts/platform-bundle \
-            --set boxId=example-box --set provider="$provider" \
-            --set management.infisicalEnvironmentSlug=management \
-            --set publicTlsIssuer=letsencrypt-prod --set hubIngressAddress=127.0.0.1 \
-            --set instanceRepoURL=https://github.com/example-org/example-gitops \
-            --set hubDomain=dev.example.test \
-            --set previewDomain=example-preview.test \
-            --set 'alerting.emailTo[0]=alerts@example.test' \
+            -f "$decl_fixture" \
+            --set provider="$provider" \
+            --set hubIngressAddress=127.0.0.1 \
             --set bundleVersion="$VERSION" $optional >"$rendered_bundle"; then
             echo "application specs: the bundle did not render on $provider, so nothing was checked" >&2
             exit 1

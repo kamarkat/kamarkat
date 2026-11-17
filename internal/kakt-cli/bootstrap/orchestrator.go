@@ -412,6 +412,7 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	// ── Phase 6: Pivot move ───────────────────────────────────────────
 	pivotCfg := &PivotConfig{
 		ClusterName:         o.ClusterName,
+		GitopsDir:           o.GitopsDir,
 		BootstrapKubeconfig: kubeconfig,
 		BootstrapContext:    bootstrapCtx,
 		Debug:               o.Debug,

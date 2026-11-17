@@ -107,6 +107,17 @@ jobs:
       - name: One pinned Cilium, and configs spelled for it
         run: python3 scripts/validate/cilium-version-parity.py
 
+      # WHAT WE ASK CAPI FOR MUST EXIST IN THE CAPI WE PIN.
+      #
+      # A feature gate deleted upstream makes the provider's manager exit while
+      # the operator still reports ProviderInstalled=True; a condition a kind
+      # does not have reads as the empty string for a whole timeout. Both cost a
+      # tenant's box a full provisioning cycle, and both are a grep of the
+      # pinned source. It reports its own blind spot when the reference checkout
+      # is absent rather than passing quietly.
+      - name: Feature gates and conditions exist in the pinned Cluster API
+        run: python3 scripts/validate/capi-contract-parity.py
+
       - name: Static preflight invariants
         run: ENVIRONMENT=dev bash scripts/validate/run.sh preflight
 

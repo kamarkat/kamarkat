@@ -45,6 +45,17 @@ validate_billing_engine_isolation() {
     out=$(cd "$VALIDATE_ROOT" && python3 - <<'PY'
 import re, subprocess, tempfile, yaml
 
+# The declaration a box is created with, rendered by the one fixture every gate
+# shares (scripts/validate/management-declaration-fixture.sh).
+_decl = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+_r = subprocess.run(["scripts/validate/management-declaration-fixture.sh"],
+                    capture_output=True, text=True)
+if _r.returncode != 0:
+    raise SystemExit("the management declaration fixture could not be rendered: " + _r.stderr)
+_decl.write(_r.stdout)
+_decl.close()
+DECL_FIXTURE = _decl.name
+
 BE = "manifests/hub-core-services/billing-engine"
 GW = "manifests/hub-core-services/gateway"
 EM = "manifests/argocd/environment-manager"
@@ -54,7 +65,11 @@ FIXTURE = {"oidcIssuer": "https://id.example.test", "oidcJwksUrl": "https://id.e
            "global": {"hubDomain": "example.test", "provider": "hybrid"}}
 EM_ARGS = ["--set", "environmentSlug=dev", "--set", "provider=hybrid", "--set", "boxId=example-box",
            "--set", "instanceRepoURL=https://github.com/example-org/example-gitops",
-           "--set", "hubDomain=dev.example.test", "--set", "previewDomain=example-preview.test", "--set", "alerting.emailTo[0]=alerts@example.test",
+           # The declaration a box is created with, from the one fixture every
+           # render gate shares. This carried its own list, which was missing a
+           # value the chart requires (management.infisicalEnvironmentSlug), so
+           # this check reported the chart broken when it was the fixture.
+           "-f", DECL_FIXTURE,
            "--set", "topology=single", "--set", "publicTlsIssuer=letsencrypt-prod",
            "--set", "oidcIssuer=https://auth.example.invalid"]
 

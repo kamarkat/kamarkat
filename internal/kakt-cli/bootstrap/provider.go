@@ -133,6 +133,11 @@ type PivotConfig struct {
 	BootstrapContext    string
 	Debug               bool
 	Encryption          cluster.EncryptionMode
+	// GitopsDir is the box's repository, which is where the box's identity and
+	// its escrow's coordinates are written. The pivot needs them because the
+	// kubeconfig it produces is escrowed as soon as it exists -- see
+	// CloudProvider.PivotMove.
+	GitopsDir string
 }
 
 // FinalizeConfig carries state from the orchestrator into Phase 12.

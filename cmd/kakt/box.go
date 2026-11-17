@@ -126,6 +126,10 @@ func (b *boxInit) bind(cmd *cobra.Command) {
 	// case; several is a refusal that names them (ResolveGitOrg).
 	f.StringVar(&b.spec.GitOrg, "git-org", "", "the tenant's git organisation, where their repository is created. Read from the platform credential when it reaches exactly one")
 	f.StringVar(&b.spec.Domain, "domain", "", "the tenant's base domain (required)")
+	f.StringVar(&b.spec.PreviewDomain, "preview-domain", "",
+		"a SEPARATE registrable domain this box serves session previews from, e.g. "+
+			"acme-preview.dev (required). Not a subdomain of --domain: a preview runs the "+
+			"tenant's own code and is served from another site on purpose (ADR-108)")
 	// The DNS label this box sits under, declared rather than derived from the
 	// environment (ADR-051 amendment 2026-09-18). Empty publishes on the apex.
 	f.StringVar(&b.spec.Subdomain, "subdomain", "",
@@ -278,6 +282,12 @@ authenticates with the secrets on its own repository.`, box, store, box)
 		}
 		if sess, err := session.Current(ctx, domain); err == nil && strings.TrimSpace(sess.UserID) != "" {
 			b.spec.PlatformAdmin = sess.UserID
+			// The address too, for what has to reach this person rather than
+			// authorize them: this box's alerts are emailed to it. Read from the
+			// same session as the id, so nothing is asked for twice and nothing
+			// is invented -- a box whose alerts went nowhere was the alternative,
+			// and ADR-078 add.5 §5 does not allow it.
+			b.spec.PlatformAdminEmail = sess.Email
 			fmt.Printf("[box] platform administrator: %s (%s)\n", sess.Email, sess.UserID)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/kamarkat/kamarkat/internal/platform"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -353,7 +354,66 @@ func (p *CloudProvider) PivotMove(ctx context.Context, cfg *PivotConfig) (string
 		return "", fmt.Errorf("pivot move failed: %w", err)
 	}
 	fmt.Println("[pivot] ✓ Resources moved to Management Cluster")
+
+	// THE ESCROW COPY, FROM THE MOMENT THE HUB EXISTS.
+	//
+	// ExecuteMove writes this cluster's admin kubeconfig into the operator's own
+	// store on THIS machine, and that is the only copy of it until hub-operator
+	// reconciles a HubEnvironment and escrows one -- which happens at boundary 01,
+	// several phases later. A runner is discarded at the end of its job, so a run
+	// that pivoted and then stopped anywhere before that boundary left a cluster
+	// nobody could reach again: the CAPI objects were on the hub, the hub's
+	// credential was on a machine that no longer existed, and the box had to be
+	// torn down and rebuilt. That happened twice.
+	//
+	// hub-operator still writes it on reconcile and that copy stays
+	// authoritative; this one is the same bytes from the same Secret, written
+	// earlier, so a resume between here and there has something to restore from.
+	escrowMgmtKubeconfig(ctx, cfg.GitopsDir, p.clusterName, mgmtKubeconfig)
+
 	return mgmtKubeconfig, nil
+}
+
+// escrowMgmtKubeconfig keeps the recovery copy of a cluster's admin kubeconfig.
+//
+// Reported, never fatal. The move has already happened by the time this runs, so
+// failing the phase would record no progress for work that cannot be repeated --
+// `clusterctl move` does not run twice against a cluster it has already moved.
+// What it must not do is fail quietly: an operator who does not know the copy is
+// missing is the operator who discovers it when the runner is gone.
+func escrowMgmtKubeconfig(ctx context.Context, gitopsDir, clusterName, path string) {
+	if strings.TrimSpace(gitopsDir) == "" {
+		// No box repository: nothing names the escrow, and a development run
+		// from a platform checkout has none. Not a failure, and not silent.
+		fmt.Println("[pivot] no --gitops-dir, so this kubeconfig is not escrowed; " +
+			"it exists only on this machine")
+		return
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil || len(payload) == 0 {
+		fmt.Printf("[pivot] ⚠️  cannot read %s to escrow it: %v\n", path, err)
+		return
+	}
+	boxID, err := hubaccess.DeclaredBoxID(gitopsDir, clusterName)
+	if err != nil {
+		fmt.Printf("[pivot] ⚠️  cannot tell which box this cluster belongs to, so its "+
+			"kubeconfig is not escrowed: %v\n", err)
+		return
+	}
+	store, err := escrow.NewEscrowClient(ctx, "")
+	if err != nil {
+		fmt.Printf("[pivot] ⚠️  no escrow to keep this cluster's kubeconfig in: %v\n", err)
+		return
+	}
+	if err := store.BackupArtifact(ctx, escrow.ForCluster(boxID, clusterName),
+		escrow.ArtifactKubeconfig, string(payload)); err != nil {
+		fmt.Printf("[pivot] ⚠️  could not escrow this cluster's kubeconfig: %v\n", err)
+		fmt.Println("[pivot] ⚠️     until hub-operator escrows one at boundary 01, this run " +
+			"cannot be resumed on another machine.")
+		return
+	}
+	fmt.Printf("[pivot] ✓ kubeconfig escrowed for box %s; a resume on another machine can "+
+		"recover it\n", boxID)
 }
 
 // ── Phase 7: Pivot Ready ────────────────────────────────────────────────────

@@ -444,7 +444,6 @@ spec:
                         hybrid.kamarkat.io/home-worker-config: "true"
                     data:
                       home-workers: "[]"         # Patched from annotation
-                      home-worker-enabled: "false" # Patched from annotation
                       home-worker-ttl: "24h"     # Patched from annotation
                       tailnet-name: ""           # Patched from annotation
                       claim-name: ""             # Patched from metadata.name
@@ -471,9 +470,12 @@ spec:
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.annotations[home-workers]
                 toFieldPath: spec.forProvider.manifest.data.home-workers
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.annotations[home-worker-enabled]
-                toFieldPath: spec.forProvider.manifest.data.home-worker-enabled
+              # NO home-worker-enabled PATCH. The annotation is gone: the machines a
+              # tenant lists are the declaration, and a toggle beside a list was
+              # two declarations of one fact. This patch is removed with it rather
+              # than left reading an absent path -- FromCompositeFieldPath is not
+              # optional by default, so a newly scaffolded pool would have failed
+              # to compose at all, which is a worse way to find out.
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.annotations[home-worker-ttl]
                 toFieldPath: spec.forProvider.manifest.data.home-worker-ttl

@@ -132,6 +132,13 @@ func newBootstrapCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bootstrap-mgmt",
 		Short: "Bootstrap the management cluster (one step of a box)",
+		// A RUNTIME FAILURE IS NOT A USAGE ERROR. Day-0 failures printed this
+		// command's twenty-five flags under the error, and a tenant's CI log
+		// then ended with a flag list -- which read as "unknown flag" and sent
+		// the next reader looking for a typo instead of at the phase that
+		// failed. `kakt bootstrap` already silences it; this is the command that
+		// bootstrap runs.
+		SilenceUsage: true,
 		Long: `Bootstrap a self-hosted Hub (Management) Cluster using Cluster API (CAPI).
 Supports multiple infrastructure providers: hetzner (cloud) and hybrid (home-lab workers).
 

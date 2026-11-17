@@ -78,6 +78,20 @@
       value: '{{ .Values.global.oidcIssuer }}/oauth/v2/keys'
     - path: [spec, template, spec, containers, 0, env, 3, value]
       value: '{{ .Values.global.previewDomain }}'
+    # NOT RUNNING ON A BOX THAT SERVES NO PREVIEWS, rather than running and
+    # refusing.
+    #
+    # preview-access requires PREVIEW_DOMAIN and exits when it is empty -- "a
+    # default here would be right in one environment only" -- which is correct
+    # for the process and wrong as a box's steady state: the Deployment would sit
+    # in CrashLoopBackOff on every box that has no preview domain, and a
+    # permanently unhealthy workload is what the boundary gates are watching for.
+    #
+    # Scaled to zero instead, by the same declaration that would have given it a
+    # domain. Declaring the domain later scales it back up, so previews stay
+    # something a box adds when it wants them.
+    - path: [spec, replicas]
+      value: {{ if .Values.global.previewDomain }}1{{ else }}0{{ end }}
 
 - kind: Deployment
   name: external-dns
@@ -92,11 +106,20 @@
     - path: [spec, template, spec, containers, 0, args, 1]
       value: '--txt-owner-id={{ .Values.spokeName }}'
     # ADR-108: the preview domain is the one other zone this box writes.
-    # REQUIRED: an empty --domain-filter matches EVERY zone in the DNS
-    # account, so an unset preview domain must fail the render, never widen
-    # what external-dns may write.
+    #
+    # ALWAYS SET, and never empty. An empty --domain-filter matches EVERY zone in
+    # the DNS account, and the catalogue ships this slot as
+    # `--domain-filter=PLACEHOLDER`, so leaving the field unset is not an option
+    # either -- the field list is what replaces placeholders, and an entry
+    # omitted here is a placeholder reaching a tenant's cluster.
+    #
+    # A box that serves no previews confines external-dns to the hub zone by
+    # naming it twice: two identical filters are one filter, and it says in the
+    # arg list that previews write nowhere. This used to be `required`, which
+    # made a preview domain a precondition for a workload cluster rendering at
+    # all -- the same break that stopped a hub's seed at boundary 01.
     - path: [spec, template, spec, containers, 0, args, 2]
-      value: '--domain-filter={{ required "global.previewDomain is required: external-dns would otherwise be given an empty filter, which matches every zone (ADR-108)" .Values.global.previewDomain }}'
+      value: '--domain-filter={{ .Values.global.previewDomain | default (.Values.global.hubDomain) }}'
 
 - kind: ClusterSecretStore
   name: infisical-backend
@@ -136,9 +159,13 @@
     - path: [spec, acme, solvers, 0, selector, dnsZones]
       value:
         - '{{ .Values.global.hubDomain }}'
-        # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too.
-        # Required: an empty zone would match every domain.
-        - '{{ required "global.previewDomain is required (ADR-108)" .Values.global.previewDomain }}'
+        # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too, when
+        # this box serves previews. Listed only then: an empty zone would match
+        # every domain, and the list is always SET because the catalogue's own
+        # copy names the zones of whoever wrote it.
+        {{- if .Values.global.previewDomain }}
+        - '{{ .Values.global.previewDomain }}'
+        {{- end }}
 
 - kind: ClusterIssuer
   name: letsencrypt-staging
@@ -152,9 +179,13 @@
     - path: [spec, acme, solvers, 0, selector, dnsZones]
       value:
         - '{{ .Values.global.hubDomain }}'
-        # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too.
-        # Required: an empty zone would match every domain.
-        - '{{ required "global.previewDomain is required (ADR-108)" .Values.global.previewDomain }}'
+        # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too, when
+        # this box serves previews. Listed only then: an empty zone would match
+        # every domain, and the list is always SET because the catalogue's own
+        # copy names the zones of whoever wrote it.
+        {{- if .Values.global.previewDomain }}
+        - '{{ .Values.global.previewDomain }}'
+        {{- end }}
 
 - kind: Gateway
   name: tenant-gateway

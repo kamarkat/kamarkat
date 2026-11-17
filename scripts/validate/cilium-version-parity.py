@@ -62,10 +62,6 @@ EXCEPTIONS = {
     "manifests/providers/hybrid/cilium-values.yaml":
         "the values the hybrid addon above is rendered from; it moves when that "
         "addon is re-rendered, not before.",
-    "internal/assets/manifests/addons/cilium-rendered.yaml":
-        "no code reads this file -- it is embedded in the binary and installed by "
-        "nothing. Delete it and remove this entry; until then it is held at "
-        "v1.17.18 rather than re-rendered.",
 }
 
 # Each cell's config base and the addon whose Cilium it is delivered with. This

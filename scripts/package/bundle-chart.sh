@@ -160,13 +160,22 @@ PY
 # guess which environment someone else's secrets are in, because guessing wrong
 # resolves silently from the wrong scope -- and a gate that renders without it is
 # testing a shape no box ever has.
+# THE DECLARATION A BOX IS CREATED WITH, from the one fixture every render gate
+# shares (scripts/validate/management-declaration-fixture.sh). This render used
+# to carry its own `--set` list, and that list supplied a value the declaration
+# template did not have -- so this gate passed on a shape no box has, and the
+# first tenant declaration ArgoCD rendered took every ApplicationSet down.
+#
+# provider is overridden to hybrid deliberately: the declaration names hetzner,
+# and the packaged bundle has to render for the other cell too.
+DECL_FIXTURE=$(mktemp)
+if ! "$(dirname "${BASH_SOURCE[0]}")/../validate/management-declaration-fixture.sh" > "$DECL_FIXTURE"; then
+    echo "platform-bundle: the management declaration fixture could not be rendered" >&2
+    rm -rf "$CHART"; exit 1
+fi
 if ! helm template platform-bundle "$CHART" \
-        --set environmentSlug=dev --set boxId=example-box --set provider=hybrid --set publicTlsIssuer=letsencrypt-prod \
-        --set management.infisicalEnvironmentSlug=management \
-        --set instanceRepoURL=https://github.com/example-org/example-gitops \
-        --set hubDomain=dev.example.test \
-        --set previewDomain=example-preview.test \
-        --set 'alerting.emailTo[0]=alerts@example.test' \
+        -f "$DECL_FIXTURE" \
+        --set provider=hybrid \
         --set bundleVersion="$VERSION" > /dev/null 2>"$CHART/.err"; then
     echo "platform-bundle: released render failed:" >&2; sed 's/^/  /' "$CHART/.err" >&2
     rm -rf "$CHART"; exit 1

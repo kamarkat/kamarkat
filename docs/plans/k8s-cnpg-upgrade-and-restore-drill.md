@@ -193,7 +193,7 @@ The original reasoning, kept because it records why the platform sat at 1.35:
 | kubeadm bootstrap / control-plane providers | **v1.8.5** (mismatched with core) | — | `versions.go:16-17` |
 | CAPH | v1.0.7 | — | `versions.go:22` |
 | CAPI operator | v0.13.0 | — | `versions.go:5` |
-| Cilium | v1.17.18 | v1.17.18 | `internal/assets/manifests/addons/cilium-rendered.yaml` |
+| Cilium | v1.17.18 | v1.20.4 | `versions.go` (`CiliumVersion`); delivered by `manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml`, with the hybrid cell held at v1.17.18 until its addon is re-rendered |
 | CNPG operator | 1.29.0 | 1.29.0 | `manifests/hub-core-services/cloudnative-pg/application.yaml:13`, `manifests/spoke/spoke-catalog/infra/cloudnative-pg/controller.yaml:523` |
 | Postgres image | `ghcr.io/cloudnative-pg/postgresql:16.2` | same | cluster spec |
 | Barman (in image) | **3.10.0** | 3.10.0 | — |
