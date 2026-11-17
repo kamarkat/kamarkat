@@ -24,7 +24,7 @@ patches:
         value:
           - name: billing-db-archive
             barmanObjectStore:
-              destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+              destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
               # The incarnation being RESTORED FROM: what the lost cluster wrote.
               serverName: billing-db-v1
               endpointURL: https://hel1.your-objectstorage.com

@@ -26,6 +26,7 @@ Three checks, because each fails differently:
 Usage: workflow-secrets.py [repo-root]
 """
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -127,10 +128,49 @@ def main():
                     f"{caller} forwards {', '.join(extra)}, which {target} "
                     f"does not declare: GitHub refuses the run.")
 
+    # ── 4. a credential the ESCROW holds is not also a repository secret ────
+    #
+    # This check was the other way round when it was written: "every credential
+    # Day-0 reads from the environment must be forwarded by the tenant workflow".
+    # That was true of the old design and enforced it -- it would have failed the
+    # migration that replaced it, which is what a gate pointed at an abandoned
+    # contract does.
+    #
+    # The contract now: `kakt box init` escrows the credentials a box is built
+    # with, Day-0 reads them from there, and the repository holds the escrow's
+    # four coordinates plus GITOPS_REPO_WRITE_TOKEN -- the one credential a
+    # GitHub Actions build of the tenant's own needs, which cannot read an
+    # escrow. A second copy of anything else here "only widens where it" leaks
+    # (ADR-076), and an Actions secret cannot be read back, so the copy could
+    # never be compared with the one in use.
+    #
+    # The authority is the CODE: the artefacts escrow.go declares box-scoped, and
+    # the environment names components/secrets_platform.go no longer reads.
+    allowed = {
+        "ESCROW_PROVIDER_URL", "ESCROW_PROVIDER_PROJECT_ID",
+        "ESCROW_PROVIDER_CLIENT_ID", "ESCROW_PROVIDER_CLIENT_SECRET",
+        "GITOPS_REPO_WRITE_TOKEN",
+    }
+    workflow = pathlib.Path(root, "manifests", "tenants", "gitops-template",
+                            ".github", "workflows", "bootstrap-cluster.yml")
+    used = 0
+    if workflow.is_file():
+        referenced = set(re.findall(r"secrets\.([A-Z][A-Z0-9_]{3,})", workflow.read_text()))
+        used = len(referenced)
+        extra = sorted(referenced - allowed)
+        if extra:
+            failures.append(
+                f"{os.path.relpath(workflow, root)} reads {', '.join(extra)} from repository "
+                f"secrets, and a box's credentials are escrowed now (ADR-076's amendment).\n"
+                f"    `kakt box init` enrols them and Day-0 reads the escrow; a copy here "
+                f"cannot be read back, so it can never be compared with the copy in use. "
+                f"Only {', '.join(sorted(allowed))} belong on the repository.")
+
     for f in failures:
         err(f)
     print(f"workflow-secrets: {len(reusable)} reusable workflow(s), "
-          f"{len(failures)} failure(s)")
+          f"{used} repository secret(s) the tenant workflow reads of "
+          f"{len(allowed)} allowed, {len(failures)} failure(s)")
     return 1 if failures else 0
 
 

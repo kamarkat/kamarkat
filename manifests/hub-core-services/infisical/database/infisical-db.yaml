@@ -160,7 +160,7 @@ spec:
   # stops archiving on a database that was working (ADR-092).
   backup:
     barmanObjectStore:
-      destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+      destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
       serverName: infisical-db-v1
       endpointURL: https://hel1.your-objectstorage.com
       s3Credentials:

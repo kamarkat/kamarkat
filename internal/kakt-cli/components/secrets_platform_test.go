@@ -3,76 +3,59 @@ package components
 import (
 	"encoding/base64"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 )
 
-// The k8-secrets layout already matched the Secret keys these map to; nothing
-// read it. This pins that correspondence so a renamed key fails here rather
-// than as an ExternalSecret retrying forever on a live box.
-func TestOptionalSecretsResolveFromCheckout(t *testing.T) {
-	root, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
+// Each secret's keys must map onto fields its escrowed artefact actually carries.
+//
+// This used to resolve from a checkout and then from the environment, which is
+// what the credentials no longer come from: `kakt box init` enrols them and Day-0
+// reads the escrow. What still has to hold is the mapping -- a renamed field here
+// is an ExternalSecret retrying forever on a live box, which is the failure this
+// has always been about.
+func TestOptionalSecretsMapOntoTheirArtefactFields(t *testing.T) {
+	payloads := map[string]string{
+		escrow.ArtifactBackupStoreCredential: escrow.RenderFields(map[string]string{
+			escrow.FieldAccessKeyID:     "AKIAEXAMPLE",
+			escrow.FieldSecretAccessKey: "secret",
+		}),
+		escrow.ArtifactAlertDestination: escrow.RenderFields(map[string]string{
+			escrow.FieldAlertmanagerURL: "https://alerts.example.test",
+			escrow.FieldHeartbeatURL:    "https://heartbeat.example.test",
+		}),
+		escrow.ArtifactRegistryCredential: escrow.RenderFields(map[string]string{
+			escrow.FieldRegistryUser:  "acme-bot",
+			escrow.FieldRegistryToken: "ghp_example",
+		}),
+		// A single-value credential is the whole payload.
+		escrow.ArtifactMailTransportURL: "smtps://user:key@smtp.example.test:465",
 	}
-	t.Setenv("ZERO_OPS_DIR", root)
-
-	for _, s := range optionalSecrets() {
-		t.Run(s.name, func(t *testing.T) {
-			if _, err := os.Stat(filepath.Join(root, "k8-secrets", s.dir)); err != nil {
-				t.Skipf("no k8-secrets/%s in this checkout", s.dir)
+	for _, sec := range optionalSecrets() {
+		t.Run(sec.name, func(t *testing.T) {
+			payload, ok := payloads[sec.artifact]
+			if !ok {
+				t.Fatalf("%s reads artefact %q, and this test has no payload for it: add one, "+
+					"or the mapping is unasserted", sec.name, sec.artifact)
 			}
-			data, _, missing := resolveOptional(s)
+			data, _, missing := resolveOptional(sec, payload)
 			if len(missing) > 0 {
-				t.Errorf("%s: keys present on disk do not cover the mapping; missing %v", s.name, missing)
+				t.Errorf("%s: %v not found in %s", sec.name, missing, sec.artifact)
 			}
-			if len(data) != len(s.keys) {
-				t.Errorf("%s: resolved %d of %d keys", s.name, len(data), len(s.keys))
+			if len(data) != len(sec.keys) {
+				t.Errorf("%s: resolved %d of %d keys", sec.name, len(data), len(sec.keys))
 			}
 		})
 	}
 }
 
-// An environment variable wins, which is how a workflow supplies a value it
-// holds as a repository secret rather than as a file.
-func TestOptionalSecretPrefersEnvironment(t *testing.T) {
-	t.Setenv("ZERO_OPS_DIR", t.TempDir())
-	t.Setenv("S3_ACCESS_KEY_ID", "from-env")
-	t.Setenv("S3_SECRET_ACCESS_KEY", "also-env")
-	for _, s := range optionalSecrets() {
-		if s.name != "s3-object-storage" {
-			continue
-		}
-		data, _, missing := resolveOptional(s)
-		if len(missing) > 0 {
-			t.Fatalf("missing %v", missing)
-		}
-		if data["access-key-id"] != "from-env" {
-			t.Errorf("got %q, want the environment value", data["access-key-id"])
-		}
-	}
-}
-
-// Nothing supplied resolves to nothing, which InstallPlatformCredentials turns
-// into a refusal. These are required: a box without object storage is a box
-// whose database has nowhere to back up to, not a box with a feature off.
 func TestPlatformCredentialAbsentResolvesToNothing(t *testing.T) {
-	t.Setenv("ZERO_OPS_DIR", t.TempDir())
-	// And an empty operator store. These resolve from ~/.kamarkat/ now
-	// (internal/kakt-cli/opstore), so on a machine that has actually staged a
-	// box's credentials this asserted against the operator's real S3 keys and
-	// failed for being configured.
-	t.Setenv("KAMARKAT_HOME", t.TempDir())
-	for _, e := range []string{
-		"S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
-		"GRAFANA_IRM_ALERTMANAGER_URL", "GRAFANA_IRM_HEARTBEAT_URL",
-	} {
-		t.Setenv(e, "")
-	}
+	// An escrow that holds nothing under the artefact. Nothing reads the
+	// environment or the operator's store any more, so there is nothing to clear.
 	for _, s := range optionalSecrets() {
-		data, found, missing := resolveOptional(s)
+		data, found, missing := resolveOptional(s, "")
 		if data != nil || found != nil || missing != nil {
 			t.Errorf("%s: an unconfigured secret should resolve to nothing, got %v/%v/%v", s.name, data, found, missing)
 		}
@@ -85,9 +68,10 @@ func TestPlatformCredentialAbsentResolvesToNothing(t *testing.T) {
 // nobody -- which presents as ImagePullBackOff on the tenant's own workloads,
 // not on anything the platform owns.
 func TestRegistryPullSecretComposesDockerConfig(t *testing.T) {
-	t.Setenv("ZERO_OPS_DIR", t.TempDir())
-	t.Setenv("GHCR_USERNAME", "acme-bot")
-	t.Setenv("GHCR_TOKEN", "ghp_example")
+	registry := escrow.RenderFields(map[string]string{
+		escrow.FieldRegistryUser:  "acme-bot",
+		escrow.FieldRegistryToken: "ghp_example",
+	})
 
 	var ghcr optionalSecret
 	for _, s := range optionalSecrets() {
@@ -99,7 +83,7 @@ func TestRegistryPullSecretComposesDockerConfig(t *testing.T) {
 		t.Fatal("the registry pull secret must compose its docker config")
 	}
 
-	in, _, missing := resolveOptional(ghcr)
+	in, _, missing := resolveOptional(ghcr, registry)
 	if len(missing) > 0 {
 		t.Fatalf("missing %v", missing)
 	}
@@ -134,16 +118,20 @@ func TestRegistryPullSecretComposesDockerConfig(t *testing.T) {
 
 // A tenant whose registry is not ghcr.io must still be able to say so.
 func TestRegistryPullSecretHonoursRegistry(t *testing.T) {
-	t.Setenv("ZERO_OPS_DIR", t.TempDir())
-	t.Setenv("GHCR_USERNAME", "u")
-	t.Setenv("GHCR_TOKEN", "t")
+	registry := escrow.RenderFields(map[string]string{
+		escrow.FieldRegistryUser:  "u",
+		escrow.FieldRegistryToken: "t",
+	})
+	// The registry host stays an environment value: it has a correct default, and
+	// requiring it would make a tenant using ghcr supply it or be told their
+	// credential was half-configured.
 	t.Setenv("GHCR_REGISTRY", "registry.acme.example")
 
 	for _, s := range optionalSecrets() {
 		if s.name != "ghcr-pull-secret" {
 			continue
 		}
-		in, _, _ := resolveOptional(s)
+		in, _, _ := resolveOptional(s, registry)
 		if doc := s.compose(in)[".dockerconfigjson"]; !strings.Contains(doc, "registry.acme.example") {
 			t.Errorf("registry not honoured: %s", doc)
 		}

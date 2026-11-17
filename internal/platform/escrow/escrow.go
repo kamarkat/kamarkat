@@ -226,8 +226,18 @@ const ArtifactSpokePKIPrefix = "spoke-pki-"
 //
 // One artefact per provider, because a box may buy capacity from more than one
 // and a single name would make the second overwrite the first.
+// ArtifactProviderCredentialPrefix is the stem of every provider credential's
+// artefact name.
+//
+// Declared rather than written inline, for the same reason
+// ArtifactSpokePKIPrefix is: the enumeration that keeps ADR-076's list and this
+// package honest reads declarations, and a name built inside a function body is
+// a name that list cannot see. It reported this credential as documented and
+// unimplemented while it had been escrowed for weeks.
+const ArtifactProviderCredentialPrefix = "provider-credential-"
+
 func ProviderCredentialArtifact(provider string) string {
-	return "provider-credential-" + strings.TrimSpace(strings.ToLower(provider))
+	return ArtifactProviderCredentialPrefix + strings.TrimSpace(strings.ToLower(provider))
 }
 
 const ArtifactBackupSSECKey = "backup-ssec-key"
@@ -287,7 +297,14 @@ const ArtifactBackupStoreCredential = "backup-store-credential"
 // default. The default still exists, for the per-application credentials the
 // secret uploader names at runtime; it must never be what places a key.
 var boxScoped = map[string]bool{
-	ArtifactEscrowDestination:     true,
+	ArtifactEscrowDestination: true,
+	// The credentials a box is built with (box_credentials.go). Box-scoped
+	// because they outlive every management cluster: a successor pulls the same
+	// images, archives to the same bucket and pages the same people.
+	ArtifactRegistryCredential:    true,
+	ArtifactAlertDestination:      true,
+	ArtifactMailTransportURL:      true,
+	ArtifactTailnetAuthkey:        true,
 	escrowSecretName:              true, // infisical-master-keys
 	ArtifactZitadelMasterkey:      true,
 	ArtifactBackupSSECKey:         true,
@@ -331,21 +348,24 @@ func DeclaredScope(artifact string) (Scope, bool) {
 // path shapes implement them: a hub incarnation and a spoke are both one cluster inside
 // the box, distinguished by their own name, so neither can collide with the other or
 // with a later incarnation.
+// The root is the BOX's, and is named for it.
+//
+// It was "/hub-operator/", which named one of the readers. hub-operator reads some
+// of these artefacts and is not installed when most of them are written: this
+// package writes the cloud token, the master keys, the store credential and the
+// at-rest encryption key during `box init` and Day-0, with no operator anywhere.
+// A folder named after a controller claims that controller owns its contents, and
+// for this material that is untrue. "hub" is also a word this platform retired
+// (ADR-111 Revision 9 §4), and the escrow root is where a tenant met it first.
+//
+// Plural, because one escrow project serves every box in the organisation.
+const escrowRoot = "/boxes/"
+
 func escrowPath(id Identity, artifact string) string {
 	if scope, _ := DeclaredScope(artifact); scope == ScopeCluster {
-		return "/hub-operator/" + id.BoxID + "/clusters/" + id.ClusterName
+		return escrowRoot + id.BoxID + "/clusters/" + id.ClusterName
 	}
-	return "/hub-operator/" + id.BoxID
-}
-
-// legacyPath is where every artefact lived before scopes existed: one flat folder
-// per cluster name.
-//
-// It exists for MigrateArtifactPath and nothing else. No reader falls back to it:
-// a read that silently tried both paths would make an unmigrated box look
-// migrated, and the gap would surface on the day the escrow is used in earnest.
-func legacyPath(clusterName string) string {
-	return "/hub-operator/" + clusterName
+	return escrowRoot + id.BoxID
 }
 
 // NewEscrowClient builds the escrow from the environment, or reports why it cannot.
@@ -715,114 +735,6 @@ func (e *infisicalEscrow) RestoreMasterKeys(ctx context.Context, id Identity) (i
 			"undecryptable, so this fails instead", id.ClusterName, err)
 	}
 	return out, nil
-}
-
-// PathMigrator copies an artefact from the flat pre-scope path to its scoped one.
-//
-// A capability interface, deliberately separate from EscrowClient: this is a
-// one-time operation on an existing box, not part of how the escrow is used, and
-// nothing that reads or writes artefacts normally should be able to reach the old
-// path at all.
-type PathMigrator interface {
-	MigrateArtifactPath(ctx context.Context, id Identity, name string) (Migration, error)
-}
-
-// Migration is what one artefact's migration found, or did.
-//
-// Digest is a fingerprint, never the value: a migration is reported, and a report
-// that carries key material defeats the point of having escrowed it.
-type Migration struct {
-	Artifact string
-	From     string
-	To       string
-	Action   string
-	Digest   string
-}
-
-// Migration actions.
-const (
-	// MigrationCopied means the source was written to the scoped path and the
-	// destination was then read back and compared equal.
-	MigrationCopied = "copied"
-	// MigrationAlreadyPresent means the scoped path already held the same bytes,
-	// or the two paths are the same path.
-	MigrationAlreadyPresent = "already-present"
-	// MigrationAbsent means the old path holds nothing under this name, so there
-	// is nothing to migrate and nothing is wrong.
-	MigrationAbsent = "absent"
-)
-
-// MigrateArtifactPath copies one artefact to the path its scope now gives it.
-//
-// Three properties, because the material is irreplaceable and the failure modes
-// are silent:
-//
-//   - It COPIES. Nothing here generates, derives or rotates. `kakt encryption`
-//     cannot serve as this migration: finding nothing at the scoped path, it mints
-//     a fresh 32-byte key and applies it, and the first thing that key does is fail
-//     to decrypt every Secret already written.
-//   - It never overwrites. A destination holding DIFFERENT bytes is a conflict and
-//     an error, because the only ways to reach that state are a successor that has
-//     already written its own or a migration run against the wrong box, and both
-//     are worse after a blind overwrite.
-//   - It verifies. The destination is read back and compared with the source, so a
-//     write the escrow accepted but did not store is a failure rather than a
-//     "migrated" line in a report.
-//
-// The legacy copy is left in place. It costs nothing, and removing it is a separate
-// decision taken after the new path has actually been used to recover something.
-func (e *infisicalEscrow) MigrateArtifactPath(ctx context.Context, id Identity, name string) (Migration, error) {
-	if err := id.validate(); err != nil {
-		return Migration{}, err
-	}
-	from := legacyPath(id.ClusterName)
-	to := escrowPath(id, name)
-	m := Migration{Artifact: name, From: from, To: to}
-
-	src, err := e.readAt(ctx, from, name)
-	if err != nil {
-		return m, fmt.Errorf("read %s from %s: %w", name, from, err)
-	}
-	if src == "" {
-		m.Action = MigrationAbsent
-		return m, nil
-	}
-	m.Digest = fingerprint(src)
-
-	if from == to {
-		m.Action = MigrationAlreadyPresent
-		return m, nil
-	}
-
-	dst, err := e.readAt(ctx, to, name)
-	if err != nil {
-		return m, fmt.Errorf("read %s from %s: %w", name, to, err)
-	}
-	switch {
-	case dst == src:
-		m.Action = MigrationAlreadyPresent
-		return m, nil
-	case dst != "":
-		return m, fmt.Errorf("%s already holds a DIFFERENT %s (source %s, destination %s): "+
-			"refusing to overwrite it, because the only ways to reach this are a successor that "+
-			"has written its own or a migration aimed at the wrong box, and overwriting makes "+
-			"either unrecoverable", to, name, m.Digest, fingerprint(dst))
-	}
-
-	if err := e.BackupArtifact(ctx, id, name, src); err != nil {
-		return m, fmt.Errorf("write %s to %s: %w", name, to, err)
-	}
-	back, err := e.readAt(ctx, to, name)
-	if err != nil {
-		return m, fmt.Errorf("read back %s from %s: %w", name, to, err)
-	}
-	if back != src {
-		return m, fmt.Errorf("%s at %s does not match the source after writing it "+
-			"(source %s, stored %s): the migration is NOT complete for this artefact",
-			name, to, m.Digest, fingerprint(back))
-	}
-	m.Action = MigrationCopied
-	return m, nil
 }
 
 // readAt reads one artefact from an explicit path. Empty and error are different

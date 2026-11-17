@@ -16,7 +16,7 @@
   name: infisical-db
   fields:
     - path: [spec, backup, barmanObjectStore, destinationPath]
-      value: 's3://hub-db-backups/{{ .Values.global.clusterName }}/'
+      value: 's3://{{ .Values.global.boxId }}/{{ .Values.global.clusterName }}/'
     - path: [spec, instances]
       type: int
       value: '1'

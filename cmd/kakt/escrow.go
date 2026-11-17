@@ -45,7 +45,6 @@ func newEscrowCmd() *cobra.Command {
 	cmd.AddCommand(newEscrowInitCmd())
 	cmd.AddCommand(newEscrowCleanCmd())
 	cmd.AddCommand(newEscrowVerifyCmd())
-	cmd.AddCommand(newEscrowMigratePathsCmd())
 	cmd.AddCommand(newEscrowDeliverBackupCredentialsCmd())
 	cmd.AddCommand(newEscrowEnrollStoreCredentialCmd())
 	cmd.AddCommand(newEscrowEnrollProviderCredentialCmd())

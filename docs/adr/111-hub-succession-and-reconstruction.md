@@ -1066,7 +1066,7 @@ command that declares it again. A record that cannot be read is refused rather t
 
 The remaining gap is narrow and worth naming: a repository whose history has been rewritten or
 re-created loses that record. The authoritative record for that case is the escrow, where every
-incarnation is a folder under `/hub-operator/<boxId>/clusters/` (§1). Reading it would make
+incarnation is a folder under `/boxes/<boxId>/clusters/` (§1). Reading it would make
 bootstrap require the escrow credential, which today is optional at bootstrap time, so it is
 not done here.
 

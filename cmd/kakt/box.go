@@ -15,6 +15,7 @@ import (
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/session"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	"github.com/kamarkat/kamarkat/internal/platform/objectstore"
 )
 
 // newBoxCmd groups what is done to a box from outside it.
@@ -557,6 +558,12 @@ func (b *boxInit) create(ctx context.Context) error {
 	if err := b.escrowProviderCredential(ctx); err != nil {
 		return err
 	}
+	if err := b.escrowBoxCredentials(ctx); err != nil {
+		return err
+	}
+	if err := b.ensureBackupBucket(ctx); err != nil {
+		return err
+	}
 	if err := tenant.SetSecrets(ctx, b.spec, b.secrets); err != nil {
 		return err
 	}
@@ -762,10 +769,66 @@ would read the wrong escrow.
 	if err := b.escrowProviderCredential(ctx); err != nil {
 		return err
 	}
+	if err := b.escrowBoxCredentials(ctx); err != nil {
+		return err
+	}
+	if err := b.ensureBackupBucket(ctx); err != nil {
+		return err
+	}
 	if err := tenant.SetSecrets(ctx, b.spec, b.secrets); err != nil {
 		return err
 	}
 	return boxCreatedVerdict(b.spec, b.resume)
+}
+
+// ensureBackupBucket creates the box's object-storage bucket.
+//
+// THE PLATFORM CREATES IT, not the operator. Nothing that writes to object storage
+// makes its own bucket, and none of them reports a missing one at start:
+// CloudNativePG fails at the first WAL archive, minutes later and three layers from
+// the cause. The tenant has just handed over the credential that can create it and
+// is standing right here, so this is the moment.
+//
+// ONE BUCKET PER BOX, named for the box, with each cluster's archive under its own
+// prefix inside it (objectstore.BackupBucket, BackupPrefix). The box outlives every
+// management cluster it has, and a successor restores what its predecessor wrote
+// (ADR-111 §1) -- so the bucket belongs to the box and the prefix to the cluster,
+// which is what ADR-082 already keys the archive on. It replaces `hub-db-backups`,
+// one literal bucket shared by every box that ever ran.
+//
+// Fatal, and deliberately so: backups are not optional, the credential that creates
+// buckets is the one being enrolled, and a box that reaches boundary 02 without a
+// bucket archives nothing while reporting itself healthy.
+func (b *boxInit) ensureBackupBucket(ctx context.Context) error {
+	keyID := strings.TrimSpace(b.secrets.S3AccessKeyID)
+	secret := strings.TrimSpace(b.secrets.S3SecretAccessKey)
+	if keyID == "" || secret == "" {
+		return fmt.Errorf("this box has no object-storage credential, so its backup bucket "+
+			"cannot be created.\n\nPut the key under ~/.kamarkat/s3/ "+
+			"(access-key-id, secret-access-key) and re-run: the platform's databases archive "+
+			"to %s, and a box without it archives nothing",
+			objectstore.BackupBucket(b.spec.BoxID))
+	}
+	region := strings.TrimSpace(b.spec.Region)
+	endpoint := objectstore.Endpoint(region)
+	client, err := objectstore.New(endpoint, region, keyID, secret)
+	if err != nil {
+		return fmt.Errorf("object storage at %s: %w", endpoint, err)
+	}
+	bucket := objectstore.BackupBucket(b.spec.BoxID)
+	created, err := client.EnsureBucket(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("could not create this box's backup bucket %s at %s: %w\n\n"+
+			"The credential needs permission to create buckets in that project. Every "+
+			"platform database archives here, so the box is not built without it.",
+			bucket, endpoint, err)
+	}
+	if created {
+		fmt.Printf("[box] ✓ created backup bucket %s at %s\n", bucket, endpoint)
+	} else {
+		fmt.Printf("[box] ✓ backup bucket %s already exists at %s\n", bucket, endpoint)
+	}
+	return nil
 }
 
 // escrowProviderCredential puts this box's provider credential in its escrow, as
@@ -789,14 +852,84 @@ would read the wrong escrow.
 // ADR-076 exists to prevent -- and nothing has been created yet, so refusing here
 // costs nothing. The repository already exists at this point, so the operator
 // resumes with `kakt box init --resume` once the cause is fixed.
-func (b *boxInit) escrowProviderCredential(ctx context.Context) error {
-	coords := hubaccess.Coordinates{
+// escrowCoordinates is this box's escrow, as the declaration states it.
+//
+// The box on both halves of the identity: these artefacts belong to the box and
+// outlive every cluster in it (ADR-111 §1).
+func (b *boxInit) escrowCoordinates() hubaccess.Coordinates {
+	return hubaccess.Coordinates{
 		Identity:        hubaccess.Identity{BoxID: b.spec.BoxID, ClusterName: b.spec.BoxID},
 		EscrowURL:       strings.TrimSpace(b.spec.EscrowURL),
 		EscrowProjectID: strings.TrimSpace(b.spec.EscrowProjectID),
 		EscrowOrgID:     strings.TrimSpace(b.spec.EscrowOrgID),
 		PlatformAdmin:   strings.TrimSpace(b.spec.PlatformAdmin),
 	}
+}
+
+// escrowBoxCredentials puts everything else this box is built with in its escrow.
+//
+// All of it, in one place, because the alternative is what this replaces: nine
+// Actions secrets on the tenant's repository, each forwarded into Day-0 by a
+// workflow that had to name it, and one pair that the workflow asked for in its
+// header and never passed. A credential a box cannot read is indistinguishable
+// from one it was never given.
+//
+// Not rotated from here, for the same reason the provider credential is not: a
+// re-run enrols the same bytes and reports nothing, while a DIFFERENT value is
+// refused and names the command that replaces one deliberately. An operator who
+// re-runs init with a new key in their store is told, not obeyed.
+func (b *boxInit) escrowBoxCredentials(ctx context.Context) error {
+	coords := b.escrowCoordinates()
+
+	// The object-store credential, in the shape its own tooling uses: an AWS
+	// credentials file. `kakt escrow deliver-backup-credentials` already renders
+	// this artefact into CloudNativePG's keys and Velero's INI, so enrolling it
+	// here means one authority for archiving and restore rather than two.
+	store := escrow.RenderFields(map[string]string{
+		escrow.FieldAccessKeyID:     strings.TrimSpace(b.secrets.S3AccessKeyID),
+		escrow.FieldSecretAccessKey: strings.TrimSpace(b.secrets.S3SecretAccessKey),
+	})
+	registry := escrow.RenderFields(map[string]string{
+		escrow.FieldRegistryUser:  strings.TrimSpace(b.secrets.GHCRUsername),
+		escrow.FieldRegistryToken: strings.TrimSpace(b.secrets.GHCRToken),
+	})
+	alerts := escrow.RenderFields(map[string]string{
+		escrow.FieldAlertmanagerURL: strings.TrimSpace(b.secrets.GrafanaIRMAlertmanagerURL),
+		escrow.FieldHeartbeatURL:    strings.TrimSpace(b.secrets.GrafanaIRMHeartbeatURL),
+	})
+
+	for _, c := range []struct {
+		artifact string
+		payload  string
+		what     string
+	}{
+		{escrow.ArtifactBackupStoreCredential, store, "object storage for database backups"},
+		{escrow.ArtifactRegistryCredential, registry, "pulling this tenant's private images"},
+		{escrow.ArtifactAlertDestination, alerts, "where this box's alerts page"},
+		{escrow.ArtifactMailTransportURL, strings.TrimSpace(b.secrets.ZitadelSMTPURL), "outbound mail"},
+		{escrow.ArtifactTailnetAuthkey, strings.TrimSpace(b.secrets.TailscaleAuthkey),
+			"admitting nodes on the tenant's own premises"},
+	} {
+		outcome, err := hubaccess.EnrollBoxCredential(ctx, coords, c.artifact, c.payload, false)
+		if err != nil {
+			return fmt.Errorf("escrowing %s (%s): %w", c.artifact, c.what, err)
+		}
+		switch {
+		case strings.TrimSpace(c.payload) == "":
+			// Said, not skipped silently. A box without one of these runs with a
+			// narrower contract, and the operator should know which.
+			fmt.Printf("[box] – %s not supplied; this box has no %s\n", c.artifact, c.what)
+		case outcome == hubaccess.EnrolledUnchanged:
+			fmt.Printf("[box] ✓ %s already escrowed for %s\n", c.artifact, b.spec.BoxID)
+		default:
+			fmt.Printf("[box] ✓ escrowed %s — %s\n", c.artifact, c.what)
+		}
+	}
+	return nil
+}
+
+func (b *boxInit) escrowProviderCredential(ctx context.Context) error {
+	coords := b.escrowCoordinates()
 	// Not rotated from here. A re-run or a --resume enrols the same credential
 	// again, which is a no-op; replacing a DIFFERENT one is a deliberate act with
 	// its own command, so that an operator who re-runs box init with a new token

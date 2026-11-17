@@ -39,7 +39,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 ZERO_OPS = HERE.parents[3]
 ADR = ZERO_OPS / "docs/adr/076-reaching-a-box-you-own.md"
-ESCROW = ZERO_OPS / "internal/platform/escrow/escrow.go"
+# THE PACKAGE, not one file of it. This read escrow.go alone, and the package has
+# eight files: infisical-admin-credential is declared in admin_credential.go, so
+# the check called it documented-but-unimplemented for as long as it has existed.
+ESCROW_PKG = ZERO_OPS / "internal/platform/escrow"
 
 # Artefacts the ADR lists as NOT YET IMPLEMENTED. Each needs that status written
 # beside it in the ADR, so the exemption cannot be silent -- it is a promise with a
@@ -88,15 +91,19 @@ def code_artefacts() -> set:
     secret name. Deliberately not on every string in the file -- a path fragment or
     a log message is not an artefact.
     """
-    if not ESCROW.exists():
+    if not ESCROW_PKG.is_dir():
         return set()
-    text = ESCROW.read_text()
-    return set(
-        re.findall(
-            r"const\s+(?:[A-Za-z]*[Aa]rtifact[A-Za-z]*|escrowSecretName)\s*=\s*\"([a-z0-9-]+)\"",
-            text,
+    names: set = set()
+    for path in sorted(ESCROW_PKG.glob("*.go")):
+        if path.name.endswith("_test.go"):
+            continue
+        names.update(
+            re.findall(
+                r"const\s+(?:[A-Za-z]*[Aa]rtifact[A-Za-z]*|escrowSecretName)\s*=\s*\"([a-z0-9-]+)\"",
+                path.read_text(),
+            )
         )
-    )
+    return names
 
 
 def main() -> int:

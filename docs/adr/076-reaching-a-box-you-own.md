@@ -187,7 +187,7 @@ the reason the box needs no management credential at runtime.
 The cluster's admin kubeconfig is what remains when OIDC cannot be used -- the
 identity provider is down, the cluster is broken, or nobody is left who can log in.
 It is escrowed beside the Infisical master keys, under the same
-`/hub-operator/<clusterID>` path.
+`/boxes/<boxId>` path.
 
 Escrow rather than distribution: one copy, in one place, reachable by the tenant and
 not held by anyone as a matter of course.
@@ -210,7 +210,8 @@ those terms.
 
 ### The recovery contract
 
-Normative. Each artefact below is held under `/hub-operator/<clusterID>`, and each row
+Normative. Each artefact below is held under `/boxes/<boxId>`, cluster-scoped ones
+under `/boxes/<boxId>/clusters/<clusterName>`, and each row
 states its SCOPE, who holds AUTHORITY over its value, and whether recovery of the box
 requires it.
 
@@ -221,6 +222,16 @@ requires it.
 | `admin-kubeconfig` | per cluster | the platform's cluster lifecycle | **required** | none — break-glass only |
 | `zitadel-masterkey` | hub | Infisical; the escrow holds a recovery copy | **required** | read from Infisical by the workload |
 | `infisical-master-keys` | hub | Infisical's own bootstrap; the escrow holds the only recoverable copy | **required** | read at the secret store's start |
+| `infisical-admin-credential` | hub | generated when the box's first cluster is declared; the escrow holds the only copy | **required** | Day-0 logs in to the box's own store with it |
+| `provider-credential-` | hub, one per provider | the tenant's cloud account, enrolled once | **required** | every command that creates or destroys infrastructure reads it from here |
+| `backup-store-credential` | hub | the tenant's object-store account, enrolled once and rotatable | **required** | delivered into the cluster for archiving, and read directly on a restore |
+| `backup-ssec-key` | hub | the tenant's, and immutable while any backup written under it is retained | **required** | the management-state archive is encrypted with it |
+| `escrow-destination` | hub | written when the escrow is bound to the box | **required** | a declaration and its escrow are checked against each other |
+| `spoke-pki-` | per workload cluster, one per purpose | that cluster's own CAPI PKI | **required** | none — recovery only |
+| `registry-credential` | hub | the tenant's registry, enrolled once | not required to rebuild | a first bootstrap pulls the tenant's private images before any store exists |
+| `alert-destination` | hub | the tenant's paging provider, enrolled once | not required to rebuild | where this box's alerts page, set before the box can hold anything |
+| `mail-transport-url` | hub | the tenant's mail transport, enrolled once | not required to rebuild | the identity provider needs it while it is being created |
+| `tailnet-authkey` | hub | the tenant's tailnet, enrolled once | not required to rebuild | a control plane joins the tailnet from cloud-init, with no cluster yet |
 | ordinary application secrets | as ADR-003 declares | **Infisical** | per that system's own contract | delivered by ESO |
 
 **Authority is declared per artefact, never inferred.** The escrow is the recovery
@@ -608,6 +619,56 @@ the second is stated at scaffold time rather than discovered.
   unchanged: the box's own secret store serves it, and the escrow holds a recovery
   copy, because a key read at startup must not depend on reaching another site.
 
+## Amendment, 2026-11-17: the credentials a box is BUILT with are escrowed too
+
+**The admission test gains a clause. An artefact belongs in the escrow when it must be
+readable while the management cluster is unavailable -- or before it exists.**
+
+The first clause admitted recovery material and the second was already being applied
+without being written down: the provider credential is escrowed because "first bootstrap
+has no cluster yet", and the box's own store administrator because a successor must log in
+as the account its predecessor created. Everything else a box is built with stayed on the
+tenant's repository as Actions secrets -- nine of them -- and that is now closed.
+
+**What moves.** The object-storage credential, the registry credential, the alert
+destinations, the mail transport URL and the tailnet auth key. `kakt box init` enrols each
+into the escrow from the values it collects; Day-0 reads them from there, as it already
+reads the provider credential.
+
+**What stays, and the only thing that does.** The four `ESCROW_PROVIDER_*` values, because
+CI cannot read the escrow without knowing where it is -- and `GITOPS_REPO_WRITE_TOKEN`,
+because `setOrgGitopsToken` publishes it at the git organisation with `--visibility all`
+so the tenant's own application builds can pin chart versions into this repository. Those
+builds are not Day-0 and cannot read an escrow, so the token has a second consumer for
+which GitHub is the authority. One exception, with a reason, rather than a category.
+
+**Why this is strictly better than the repository.** §"the credential is in the escrow, and
+a second copy in repository secrets only widens where it" leaks already said half of it.
+The other half is that an Actions secret cannot be read back: a value set there can never
+be compared with the value in use, so drift between them is undetectable by construction --
+which is exactly the argument that moved the store administrator out of there.
+
+**The root is `/boxes/<boxId>`, not `/hub-operator/<boxId>`.** The old root named one of
+the readers. hub-operator reads some of these and is not installed when most of them are
+written: the CLI writes the cloud token, the master keys, the store credential and the
+at-rest encryption key before any operator exists. A folder named after a controller says
+that controller owns what is in it, and for this material that is simply untrue -- it is
+the box's. The word is also one this platform retired (ADR-111 Revision 9 §4: a management
+cluster and managed clusters, and "hub" is not in the vocabulary), and the escrow root is
+where a tenant met it first. Plural, because one escrow project serves every box in the
+organisation.
+
+**No compatibility path, deliberately.** `legacyPath`, `MigrateArtifactPath` and
+`kakt escrow migrate-paths` are removed with the old root rather than kept to reach it. A
+reader that tried both paths would make an unmigrated box look migrated -- the hazard that
+function's own comment named -- and the boxes holding artefacts at the old root are torn
+down. Nothing is read from `/hub-operator/` again.
+
+**What does not move.** Ordinary application secrets, their database credentials, and
+everything the platform's controllers read once the box is running. Those live in the box's
+own Infisical. Mirroring them here would copy the tenant's whole secret estate to a second
+place for no recovery benefit, which is the line this ADR has always drawn.
+
 ## References
 
 - ADR-003: Secret Lifecycle
@@ -852,7 +913,7 @@ refused by Infisical rather than a missing input named at the boundary.
 
 It does not create a per-box authentication boundary. The same machine identity
 may hold membership in several escrow projects, and separation by secret path
-within one project (`/hub-operator/<boxID>`) is a convention, not an access
+within one project (`/boxes/<boxId>`) is a convention, not an access
 control. GitHub still holds the credentials that reach the escrow. What the
 change removes is a second durable copy and the drift it made possible, not the
 shared identity's privileges.

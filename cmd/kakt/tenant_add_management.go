@@ -150,18 +150,20 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 		return nil
 	}
 
-	// THE BINDING, NAMED HERE because this is the first moment it can be done and
-	// the last moment before it is needed. It reads the declaration this command
-	// just wrote, so it cannot run before now; the push below starts Day-0, whose
-	// first privileged read refuses an escrow that was never bound. A box that
-	// went from here straight to `git push` met that refusal having never been
-	// told the step existed.
-	fmt.Println("\nTwo steps, and the second is the one that builds:")
-	fmt.Println()
-	fmt.Printf("  kakt escrow bind-destination --gitops-dir . --cluster %s\n", name)
-	fmt.Println("      establishes this escrow as your box's, inside the escrow itself.")
-	fmt.Println("      Once per box, as the platform administrator. Day-0 refuses an")
-	fmt.Println("      escrow nobody established, so this precedes the push.")
+	// NO BINDING STEP HERE. It is established, not instructed.
+	//
+	// This printed `kakt escrow bind-destination` as step one of two, and that
+	// was already untrue when it was written: `box init` escrows this box's
+	// provider credential, enrolment opens the escrow with OpenEstablishing, and
+	// OpenEstablishing records escrow-destination as a side effect of the first
+	// authorized write. So by the time a box has a cluster to declare, the
+	// binding exists -- and the instruction asked an operator to perform, as a
+	// named prerequisite, something the platform had already done.
+	//
+	// The command stays for the one case it is for: a box whose binding is
+	// missing or wrong, which `kakt escrow verify` reports and whose error paths
+	// name it. Nothing in an ordinary flow should.
+	fmt.Println("\nOne step, and it is the one that builds:")
 	fmt.Println()
 	fmt.Println("  git add registry/clusters && git commit -m \"Declare " + name + "\" && git push")
 	fmt.Println("      starts Day-0 in your repository, which reads this cluster's shape")
@@ -170,7 +172,8 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	fmt.Println("      cluster this push ADDS is built, so editing one that exists changes")
 	fmt.Println("      nothing here.")
 	fmt.Println()
-	fmt.Println("`kakt escrow verify` reports the binding, so you can confirm it before pushing.")
+	fmt.Println("`kakt escrow verify` reports this box's escrow, including the binding, if")
+	fmt.Println("you want to see it before you push.")
 
 	return nil
 }

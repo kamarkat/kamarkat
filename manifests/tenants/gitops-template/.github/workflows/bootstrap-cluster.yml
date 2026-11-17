@@ -14,53 +14,55 @@
 # It runs under this repository's own secrets, in this organisation's own
 # runners. The platform holds neither (ADR-065).
 #
-# Secrets this repository must hold. Set them under Settings -> Secrets and
-# variables -> Actions.
+# FIVE SECRETS, and the rest of this box's credentials are not here.
 #
-# REQUIRED -- Day-0 refuses without them, rather than building a box that looks
-# configured and is not:
+# Set these under Settings -> Secrets and variables -> Actions:
+#
+#   ESCROW_PROVIDER_URL, ESCROW_PROVIDER_PROJECT_ID,
+#   ESCROW_PROVIDER_CLIENT_ID, ESCROW_PROVIDER_CLIENT_SECRET
+#                   your escrow, on an Infisical you control. CI cannot read an
+#                   escrow it cannot find, so these four say where it is -- and
+#                   everything else this box is built with is read FROM there.
+#
 #   GITOPS_REPO_WRITE_TOKEN
 #                   write access to this repository, so Day-0 can commit the
-#                   artifacts it generates for the cluster it creates, and so
-#                   ArgoCD can read it. Your applications' builds inherit it
-#                   from your organisation to pin a chart version here
-#   GHCR_USERNAME   your container registry, for pulling YOUR private images.
-#   GHCR_TOKEN      The platform's own images are public; your workloads are
-#                   yours (ADR-066) and this is what runs them.
-#   ESCROW_PROVIDER_*   (4) the escrow, on an Infisical you control. It holds
-#                        this box's master keys -- without them, losing this
-#                        cluster loses every secret it manages -- AND the
-#                        administrator of the box's own Infisical, which Day-0
-#                        reads from there. There is no SECRET_STORE_ADMIN_EMAIL or
-#                        SECRET_STORE_ADMIN_PASSWORD secret to set: that credential
-#                        is generated when the box is initialized and kept in the
-#                        escrow, because a GitHub secret cannot be read back and
-#                        a copy nothing can compare is a copy that can drift.
+#                   artifacts it generates and ArgoCD can read them. It stays a
+#                   GitHub secret because your own application builds read it
+#                   from your organisation to pin a chart version here, and a
+#                   build cannot reach an escrow.
 #
-# STRONGLY RECOMMENDED -- absent, the box bootstraps and runs, and says what it
-# is missing:
-#   S3_ACCESS_KEY_ID     object storage for database backups. A production box
-#   S3_SECRET_ACCESS_KEY without these has no backups.
+# NOT HERE, AND DELIBERATELY. Each of these was once a secret on this repository.
+# `kakt box init` escrows them under the box, and Day-0 reads them from the
+# escrow:
 #
-# NOT HERE -- THE CLOUD CREDENTIAL. There is no HCLOUD_TOKEN secret to set. The
-# credential that creates and destroys this box's infrastructure is escrowed when
-# the box is initialized, and every lifecycle command reads it from the escrow and
-# from nowhere else -- so that a token which happens to be in an environment
-# cannot authenticate perfectly and answer about somebody else's provider
-# project. This workflow used to forward a repository copy into a process that
-# overwrote it in its first seconds. `kakt escrow enroll-provider-credential`
-# rotates it.
+#   the cloud credential         there is no HCLOUD_TOKEN to set. The credential
+#                                that creates and destroys this box's
+#                                infrastructure is escrowed, so a token that
+#                                happens to be in an environment cannot
+#                                authenticate perfectly and answer about someone
+#                                else's provider project.
+#   object storage for backups   there is no S3_ACCESS_KEY_ID or
+#                                S3_SECRET_ACCESS_KEY. This file asked for both
+#                                for months and forwarded neither, so a tenant
+#                                who set them correctly got a Day-0 that refused
+#                                for want of them.
+#   your registry credential     there is no GHCR_USERNAME or GHCR_TOKEN.
+#   where alerts page you        there is no GRAFANA_IRM_ALERTMANAGER_URL or
+#                                GRAFANA_IRM_HEARTBEAT_URL (ADR-078 add.5 §5).
+#   outbound mail                there is no IDENTITY_PROVIDER_SMTP_URL.
+#   your tailnet key             there is no TS_AUTHKEY. On-premises nodes are a
+#                                dev managed cluster's capacity (ADR-075), and
+#                                that cluster's own declaration lists them.
+#   the store administrator      there is no SECRET_STORE_ADMIN_EMAIL or
+#                                SECRET_STORE_ADMIN_PASSWORD. It is generated at
+#                                initialization and escrowed.
 #
-# OPTIONAL -- where this box's alerts page you (ADR-078 add.5 §5): the IRM
-# integration URL that critical and warning alerts go to, and the hub's IRM
-# heartbeat, which pages when the hub stops reporting. Metrics, logs and
-# dashboards run in the box and need no account.
-#   GRAFANA_IRM_ALERTMANAGER_URL, GRAFANA_IRM_HEARTBEAT_URL
+# The reason is the same for all of them: a GitHub secret cannot be read back, so
+# a copy here can never be compared with the copy in use -- and a credential this
+# file does not forward arrives as an empty string with nothing anywhere saying
+# so. `kakt escrow enroll-*` rotates any of them; `kakt escrow verify` reports
+# what the escrow holds.
 #
-# OPTIONAL -- IDENTITY_PROVIDER_SMTP_URL, this box's outbound mail: identity mail and
-# alert email both send through it.
-#
-# TS_AUTHKEY is read only when this cluster accepts on-prem nodes (ADR-075).
 name: Bootstrap cluster
 
 on:
@@ -373,25 +375,26 @@ jobs:
       # repository, not in the job.
       - name: Build ${{ matrix.box.cluster }}
         env:
+          # FIVE, and the escrow carries the rest.
+          #
+          # Day-0 reads this box's credentials from its escrow -- the cloud
+          # token, the object-storage key, the registry credential, where alerts
+          # page, outbound mail, the tailnet key. `kakt box init` enrolled them,
+          # and nothing here has to name them one by one.
+          #
+          # That naming was the defect this replaces. Every credential had to be
+          # listed in this block, and one the list omitted arrived as an empty
+          # string with no warning anywhere: the object-storage pair was asked
+          # for in this file's own header for months and forwarded by nothing,
+          # so a tenant who set both secrets correctly got a Day-0 that refused
+          # for want of them.
           GITOPS_REPO_WRITE_TOKEN: ${{ secrets.GITOPS_REPO_WRITE_TOKEN }}
-          # Read only when the cluster declares on-prem capacity: the control
-          # plane and those nodes join your tailnet from this one key.
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
-          # The escrow, on a secret store you control. It holds this box's master
-          # keys -- which cannot live inside the box they decrypt -- and the
-          # administrator of the box's own secret store.
+          # Where this box's escrow is. Four values, and the only thing CI must
+          # know before it can read everything else.
           ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
           ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
           ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
           ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
-          # Your container registry, for pulling your OWN private images.
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          # Where this box's alerts page you. Optional.
-          GRAFANA_IRM_ALERTMANAGER_URL: ${{ secrets.GRAFANA_IRM_ALERTMANAGER_URL }}
-          GRAFANA_IRM_HEARTBEAT_URL: ${{ secrets.GRAFANA_IRM_HEARTBEAT_URL }}
-          # This box's outbound mail. Optional.
-          IDENTITY_PROVIDER_SMTP_URL: ${{ secrets.IDENTITY_PROVIDER_SMTP_URL }}
         run: |
           set -euo pipefail
           ./kakt bootstrap --cluster "${{ matrix.box.cluster }}" --gitops-dir .

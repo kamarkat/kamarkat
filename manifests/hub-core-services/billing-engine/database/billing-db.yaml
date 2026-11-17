@@ -77,7 +77,7 @@ spec:
   # for why serverName is not templated.
   backup:
     barmanObjectStore:
-      destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+      destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
       serverName: billing-db-v1
       endpointURL: https://hel1.your-objectstorage.com
       s3Credentials:

@@ -8,7 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 	corev1 "k8s.io/api/core/v1"
@@ -26,15 +27,25 @@ import (
 // paper and none in fact: five ExternalSecrets on every box retried forever, and
 // grafana-alloy never started.
 //
-// The key names are the Secret's, and they are deliberately the same as the file
-// names in the operator's store, ${KAMARKAT_HOME:-~/.kamarkat}/<system>/<name> --
-// that layout was already written to match, which is how it was clear these were
-// meant to be read from there.
+// WHERE THESE COME FROM, and it is no longer this process's environment.
+//
+// They are read from the box's escrow, under the box, where `kakt box init`
+// enrolled them (ADR-076's amendment: an artefact belongs there when it must be
+// readable while the management cluster is unavailable OR before it exists).
+// Day-0 in a tenant's CI is precisely the second case -- it is creating the store
+// everything else reads from.
+//
+// It used to read the environment and then the operator's own store, which is why
+// a tenant's run could not work: the values were on the operator's workstation and
+// in nine Actions secrets, the runner had neither, and a credential the bootstrap
+// workflow did not forward arrived as an empty string with nothing anywhere saying
+// so. The object-storage pair was asked for in that workflow's header and never
+// passed.
 type optionalSecret struct {
 	name      string
 	namespace string
-	dir       string            // under the operator's store
-	keys      map[string]string // secret key -> environment variable
+	artifact  string            // the escrow artefact holding it
+	keys      map[string]string // secret key -> field inside that artefact ("" = the whole payload)
 	secType   corev1.SecretType
 	what      string // what it enables
 	// destination marks a credential that says where a capability SENDS, rather
@@ -55,21 +66,23 @@ type optionalSecret struct {
 func optionalSecrets() []optionalSecret {
 	return []optionalSecret{
 		{
-			name: "s3-object-storage", namespace: constants.NamespaceOps, dir: "s3",
+			name: "s3-object-storage", namespace: constants.NamespaceOps,
+			artifact: escrow.ArtifactBackupStoreCredential,
 			keys: map[string]string{
-				"access-key-id":     "S3_ACCESS_KEY_ID",
-				"secret-access-key": "S3_SECRET_ACCESS_KEY",
+				"access-key-id":     escrow.FieldAccessKeyID,
+				"secret-access-key": escrow.FieldSecretAccessKey,
 			},
 			secType: corev1.SecretTypeOpaque,
 			what:    "CNPG Barman backups of the platform database",
 		},
 		{
-			name: "grafana-cloud", namespace: constants.NamespaceOps, dir: "grafana-cloud",
+			name: "grafana-cloud", namespace: constants.NamespaceOps,
+			artifact: escrow.ArtifactAlertDestination,
 			keys: map[string]string{
-				// ADR-078 add.5 §5: where the hub's Alertmanager pages, and its
+				// ADR-078 add.5 §5: where this box's Alertmanager pages, and its
 				// heartbeat. Metrics, logs and dashboards run in the box.
-				"irm-alertmanager-url": "GRAFANA_IRM_ALERTMANAGER_URL",
-				"irm-heartbeat-url":    "GRAFANA_IRM_HEARTBEAT_URL",
+				"irm-alertmanager-url": escrow.FieldAlertmanagerURL,
+				"irm-heartbeat-url":    escrow.FieldHeartbeatURL,
 			},
 			secType:     corev1.SecretTypeOpaque,
 			what:        "where the box's alerts page (ADR-078 add.5 §5)",
@@ -79,9 +92,12 @@ func optionalSecrets() []optionalSecret {
 			// The issuer's outbound mail (ADR-060 amendment): the owner's Resend
 			// SMTP URL, smtps://resend:<api-key>@smtp.resend.com:465. hub-operator
 			// uploads only its password, to /<tenant>-mgmt.
-			name: "zitadel-smtp", namespace: constants.NamespaceOps, dir: "smtp",
+			name: "zitadel-smtp", namespace: constants.NamespaceOps,
+			artifact: escrow.ArtifactMailTransportURL,
 			keys: map[string]string{
-				"resend": "IDENTITY_PROVIDER_SMTP_URL",
+				// One value: the transport URL is the whole artefact, which an
+				// empty field name marks.
+				"resend": "",
 			},
 			secType:     corev1.SecretTypeOpaque,
 			what:        "the identity provider sending verification and password-reset mail",
@@ -97,10 +113,11 @@ func optionalSecrets() []optionalSecret {
 			// pull-secret-es.yaml and the stateless-web rollout base both mount
 			// this. A tenant keeping its packages private has no way to run them
 			// without it.
-			name: "ghcr-pull-secret", namespace: constants.NamespaceOps, dir: "ghcr",
+			name: "ghcr-pull-secret", namespace: constants.NamespaceOps,
+			artifact: escrow.ArtifactRegistryCredential,
 			keys: map[string]string{
-				"username": "GHCR_USERNAME",
-				"token":    "GHCR_TOKEN",
+				"username": escrow.FieldRegistryUser,
+				"token":    escrow.FieldRegistryToken,
 			},
 			secType: corev1.SecretTypeDockerConfigJson,
 			what:    "pulling private images for this tenant's workloads",
@@ -126,12 +143,13 @@ func optionalSecrets() []optionalSecret {
 
 // InstallPlatformCredentials creates the credentials a hub needs to be healthy.
 //
-// Two sources, in order: the environment, which is how a workflow supplies a
-// value it holds as a repository secret; then the operator's own store
-// (internal/kakt-cli/opstore), which is how a person at a workstation supplies
-// one. The store is outside every checkout deliberately -- Day-0 runs from the
-// tenant's repository, so a credential kept beside the platform's source was
-// reachable from the one machine that had cloned it and nowhere else.
+// ONE SOURCE: the box's escrow, under the box.
+//
+// It was the environment and then the operator's own store, and a tenant's CI has
+// neither -- the values sat on the workstation that ran `box init` and in nine
+// Actions secrets the bootstrap workflow had to forward one by one. `box init`
+// enrols them now and this reads them back, which is the same path the provider
+// credential has taken since ADR-076.
 //
 // All-or-nothing per secret, for the reason the escrow gives: a partial set is a
 // configuration that cannot work, and a Secret built from one produces a
@@ -146,8 +164,26 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 		return fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
+	// The box's own escrow, read once for all of them. The declaration names it:
+	// a cluster is always built from the repository that declares it (ADR-072),
+	// so nothing here needs a flag or an environment variable.
+	coords, err := hubaccess.Declaration(i.GitopsDir, i.ClusterName)
+	if err != nil {
+		return fmt.Errorf("the credentials this box was built with are in its escrow, and "+
+			"this cluster's declaration is what names it: %w", err)
+	}
+	access, err := hubaccess.Open(ctx, coords)
+	if err != nil {
+		return fmt.Errorf("opening this box's escrow to read the credentials it was built "+
+			"with: %w", err)
+	}
+
 	for _, s := range optionalSecrets() {
-		data, found, missing := resolveOptional(s)
+		payload, err := hubaccess.BoxCredential(ctx, access, coords.BoxID, s.artifact)
+		if err != nil {
+			return err
+		}
+		data, found, missing := resolveOptional(s, payload)
 		switch {
 		case len(found) == 0 && s.destination:
 			// Not an error. The capability ships and runs; it simply has nowhere
@@ -160,10 +196,13 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 			// Rendering refuses to dispatch without these, so reaching here
 			// means Day-0 was run by hand and should say so rather than build a
 			// box that looks finished.
-			return fmt.Errorf("%s was not supplied, and %s needs it.\n\n"+
-				"Set %s in the environment, or put the values under ~/.kamarkat/%s/.\n"+
-				"Rendering collects these; a hand-run Day-0 has to pass them.",
-				s.name, s.what, strings.Join(envNames(s), ", "), s.dir)
+			return fmt.Errorf("this box's escrow holds no %s, and %s needs it.\n\n"+
+				"`kakt box init` enrols it from the value you supply; a box created before "+
+				"it did, or one that declined this capability, has none. Enrol it and "+
+				"re-run:\n\n  kakt escrow enroll-%s --box %s\n\n"+
+				"It is read from the escrow and from nowhere else: a copy in this process's "+
+				"environment is a copy nothing can compare (ADR-076).",
+				s.artifact, s.what, s.artifact, coords.BoxID)
 		case len(missing) > 0:
 			return fmt.Errorf("%s is partially supplied: missing %s.\n"+
 				"All of its keys or none: a credential built from some of them "+
@@ -184,25 +223,35 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 
 // resolveOptional reads every key of one secret, reporting which were found and
 // which were not, so a partial set can be refused by name.
-func envNames(s optionalSecret) []string {
+func fieldNames(s optionalSecret) []string {
 	var out []string
-	for _, env := range s.keys {
-		out = append(out, env)
+	for _, field := range s.keys {
+		if field == "" {
+			continue
+		}
+		out = append(out, field)
 	}
 	sort.Strings(out)
 	return out
 }
 
-func resolveOptional(s optionalSecret) (data map[string]string, found, missing []string) {
+// resolveOptional maps one escrowed artefact onto the Secret's keys.
+//
+// payload is what the escrow holds under that artefact, or "" when it holds
+// nothing. A single-value credential -- a URL, an auth key -- is the whole
+// payload, which its key marks with an empty field name; everything else is
+// `key=value` lines, the shape an AWS credentials file already uses.
+func resolveOptional(s optionalSecret, payload string) (data map[string]string, found, missing []string) {
 	data = map[string]string{}
-	for key, env := range s.keys {
-		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
-			data[key] = v
-			found = append(found, key)
-			continue
+	fields := escrow.ParseFields(payload)
+	for key, field := range s.keys {
+		var v string
+		if field == "" {
+			v = strings.TrimSpace(payload)
+		} else {
+			v = strings.TrimSpace(fields[field])
 		}
-		// The operator's store, not a checkout (internal/kakt-cli/opstore).
-		if v := opstore.Value(s.dir + "/" + key); v != "" {
+		if v != "" {
 			data[key] = v
 			found = append(found, key)
 			continue

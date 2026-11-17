@@ -297,28 +297,31 @@ func SetSecrets(ctx context.Context, spec Spec, s Secrets) error {
 	// bootstrap workflow forwarded it into a process that overwrote it in its
 	// first seconds. It is escrowed by `kakt box init` now, which is where the
 	// operator hands it over.
+	// FIVE, AND ONLY FIVE. Everything else a box is built with is escrowed by
+	// `kakt box init` and read from there by Day-0 (ADR-076's amendment).
+	//
+	// This set nine. Each one had to be forwarded into the Day-0 step by the
+	// bootstrap workflow, and a credential the workflow did not name arrived as
+	// an empty string with no warning anywhere -- which is what happened to the
+	// object-storage pair: asked for in that workflow's own header, never passed,
+	// and a tenant who set both secrets correctly got a Day-0 that refused for
+	// want of them. An Actions secret also cannot be read back, so a value here
+	// can never be compared with the value in use.
+	//
+	// The escrow's own coordinates stay, because CI cannot read an escrow it
+	// cannot find. The git token stays because setOrgGitopsToken publishes it at
+	// the organisation for the tenant's application builds, and a build cannot
+	// reach an escrow.
 	values := map[string]string{
 		"GITOPS_REPO_WRITE_TOKEN": s.GitopsToken,
 	}
-	if v := strings.TrimSpace(s.TailscaleAuthkey); v != "" {
-		values["TS_AUTHKEY"] = v
-	}
-	// All three or none: a partial set produces a box that believes it has an
+	// All four or none: a partial set produces a box that believes it has an
 	// escrow and cannot reach it, which is worse than having none.
 	if s.hasEscrow() {
 		values["ESCROW_PROVIDER_URL"] = strings.TrimSpace(s.EscrowURL)
 		values["ESCROW_PROVIDER_CLIENT_ID"] = strings.TrimSpace(s.EscrowClientID)
 		values["ESCROW_PROVIDER_CLIENT_SECRET"] = strings.TrimSpace(s.EscrowClientSecret)
 		values["ESCROW_PROVIDER_PROJECT_ID"] = strings.TrimSpace(s.EscrowProjectID)
-	}
-
-	// Whatever this box has. Capability credentials are refused earlier when
-	// absent, so anything empty here is a telemetry key the tenant declined --
-	// which is a narrower support contract, not a misconfiguration.
-	for _, c := range platformCredentials() {
-		if v := strings.TrimSpace(*c.Field(&s)); v != "" {
-			values[c.Secret] = v
-		}
 	}
 
 	// Sorted, not map order. Go randomises map iteration, so a failure part-way

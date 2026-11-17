@@ -23,10 +23,15 @@
 #
 # TWO VALUES YOU MUST SET, and the overlay is deliberately not renderable without them:
 #
-#   PLACEHOLDER_BOX   the archive prefix, which is this box's `clusterName`. The steady
-#                     state derives it from global.clusterName, but a recovery names the
-#                     prefix of the box whose archive is being READ -- after a hub
-#                     succession those differ, and only the operator knows which.
+#   PLACEHOLDER_BOX       the BUCKET, which is the boxId. One bucket per box, because a
+#                         box outlives its clusters and a successor restores what its
+#                         predecessor wrote (ADR-111 §1).
+#
+#   PLACEHOLDER_CLUSTER   the archive PREFIX inside that bucket, which is the name of the
+#                         cluster whose archive is being READ. The steady state derives it
+#                         from global.clusterName; a recovery names the predecessor's --
+#                         after a succession those differ, and only the operator knows
+#                         which.
 #
 #   serverName        the two below MUST differ. `externalClusters` names the incarnation
 #                     being read; `backup` names the one the replacement writes. One name
@@ -59,7 +64,7 @@ patches:
         value:
           - name: infisical-db-archive
             barmanObjectStore:
-              destinationPath: s3://hub-db-backups/PLACEHOLDER_BOX/
+              destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
               # The incarnation being RESTORED FROM: what the lost cluster wrote.
               serverName: infisical-db-v1
               endpointURL: https://hel1.your-objectstorage.com
