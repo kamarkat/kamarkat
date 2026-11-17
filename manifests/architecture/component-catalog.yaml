@@ -288,13 +288,18 @@ components:
     repos:
       quay.io/cilium/certgen: cilium/certgen
     behind:
+      - versions: ["v1.20.4"]
+        status: held
+        reason: >-
+          Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline;
+          patch release 1.20.5 evaluation is scheduled for 0.3.12.
+        target: 0.3.12
       - versions: ["v0.4.13"]
         status: held
         reason: >-
           certgen is its own project, shipped by the Cilium chart and vendored with it.
-          Cilium itself is current at v1.20.4; certgen moves when the chart does, and
-          editing it inside the vendored render would break that render's provenance
-          digest.
+          certgen moves when the chart does, and editing it inside the vendored render
+          would break that render's provenance digest.
         blocked_by: Cilium
   - name: agentgateway
     description: The gateway that serves application and platform routes.
@@ -427,6 +432,14 @@ components:
     repo: cloudnative-pg/cloudnative-pg
     layer: capability
     match: ["ghcr.io/cloudnative-pg/cloudnative-pg"]
+    behind:
+      - versions: ["1.30.1"]
+        status: held
+        reason: >-
+          CloudNativePG 1.30 is qualified against the platform's Kubernetes 1.36 baseline;
+          patch release 1.30.2 evaluation is scheduled for 0.3.12.
+        target: 0.3.12
+        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: PostgreSQL
     description: The platform database and each application's database.
     license: PostgreSQL
