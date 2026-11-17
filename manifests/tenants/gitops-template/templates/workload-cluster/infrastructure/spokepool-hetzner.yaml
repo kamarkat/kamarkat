@@ -40,6 +40,29 @@ metadata:
   annotations:
     # Control-plane topology (patched into CAPI Cluster topology.controlPlane.replicas)
     control-plane-replicas: "1"
+    # NODES ON YOUR OWN PREMISES, which this pool may admit when it serves dev.
+    #
+    # Your machines, joining this cluster over your tailnet, running the
+    # workloads this cluster is for. They are worker capacity: they never carry
+    # cluster-machinery state, so replacing one is a capacity operation
+    # (ADR-014, ADR-075).
+    #
+    # DEV ONLY, and enforced rather than advised: hub-operator mints a join
+    # token only for a pool whose environment label is dev, and says so in its
+    # log when a pool asks for one and is not. A management cluster admits none
+    # at all -- it runs on its cloud workers.
+    #
+    # LISTING A MACHINE IS THE DECISION. There is no enable flag: a cluster with
+    # machines here admits them, one with an empty list runs on its cloud workers
+    # (spec.nodePool.count below), and nothing is defaulted either way.
+    #
+    # Each entry is {"hostname":"...","tailnetHost":"...."}, and the tailnet is
+    # read from those names rather than declared twice. Provision each machine
+    # with scripts/hybrid/provision-flatcar-worker.sh --cluster spoke <this
+    # cluster>; that script's home-lab.env is a second declaration of the same
+    # hardware and nothing reconciles the two, so edit them together.
+    home-workers: '[]'
+    home-worker-ttl: "24h"
 spec:
   provider: <CLOUD_PROVIDER>
   compositionSelector:

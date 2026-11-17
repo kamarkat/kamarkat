@@ -89,12 +89,20 @@ func (d *HetznerDriver) Name() string { return "hetzner" }
 // while the flag that would have given it some was set.
 func (d *HetznerDriver) OnPremRequested() bool { return d.OnPremEnabled }
 
-// hubTailnetHostname is the name the control plane registers on the tailnet.
-func (d *HetznerDriver) hubTailnetHostname() string {
-	if d.ClusterName != "" {
-		return d.ClusterName + "-cp"
+// tailnetHostname is the name this cluster's control plane registers on the
+// tailnet.
+//
+// The cluster's own name, and nothing else. It used to fall back to "hub-cp"
+// when the name was empty, which put a word the platform's vocabulary does not
+// use -- a management cluster and managed clusters, never a hub (ADR-111
+// Revision 9 §4) -- onto a tenant's tailnet, under a name no cluster answers to.
+// A nameless cluster has no tailnet identity to register, so this says so by
+// returning nothing rather than by inventing one.
+func (d *HetznerDriver) tailnetHostname() string {
+	if d.ClusterName == "" {
+		return ""
 	}
-	return "hub-cp"
+	return d.ClusterName + "-cp"
 }
 
 // CiliumAddonPath is the shared spoke-bootstrap template: hetzner's hub installs
@@ -333,7 +341,11 @@ func (d *HetznerDriver) StageTailscaleCredentials(ctx context.Context, kubeconfi
 		return nil
 	}
 
-	hostname := d.hubTailnetHostname()
+	hostname := d.tailnetHostname()
+	if hostname == "" {
+		return fmt.Errorf("this cluster has no name, so its control plane has no tailnet " +
+			"identity to register; on-prem nodes could not route to it")
+	}
 	if err := writeTailscaleSecret(ctx, kubeconfig, namespace, authkey, hostname); err != nil {
 		return fmt.Errorf("failed to write tailscale credentials: %w", err)
 	}

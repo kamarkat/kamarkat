@@ -96,6 +96,17 @@ jobs:
       - name: No Day-0 script reads an unassigned variable
         run: ./scripts/validate/shell-unassigned-variables.sh
 
+      # ONE CILIUM VERSION, and a config spelled for it.
+      #
+      # The version used to live only in image strings in three manifests, so an
+      # omnibus bump moved the hub's CNI two minor versions without saying so,
+      # and the config delivered beside it kept the previous version's spelling
+      # of a field that had become a duration. cilium-operator exited on boot,
+      # there was no IPAM, and the box died 25 minutes later in an unrelated
+      # phase. Both halves are mechanical, so neither should reach a tenant.
+      - name: One pinned Cilium, and configs spelled for it
+        run: python3 scripts/validate/cilium-version-parity.py
+
       - name: Static preflight invariants
         run: ENVIRONMENT=dev bash scripts/validate/run.sh preflight
 

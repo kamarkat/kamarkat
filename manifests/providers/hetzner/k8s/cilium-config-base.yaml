@@ -179,7 +179,21 @@ data:
   remove-cilium-node-taints: 'true'
   set-cilium-node-taints: 'true'
   set-cilium-is-up-condition: 'true'
-  unmanaged-pod-watcher-interval: '15'
+  # SECONDS WITH A UNIT, because the workloads delivered beside this config are
+  # Cilium v1.20.4 (manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml,
+  # which is what HetznerDriver.CiliumAddonPath returns) and v1.20 parses this
+  # field as a duration. Its chart renders `printf "%ds"` for exactly that
+  # reason; v1.17's rendered a bare `"15"`, which is where this value came from.
+  #
+  # A bare 15 is fatal, not ignored: cilium-operator exits on boot with
+  # `failed to unmarshal config struct unmanagedpods.Config: error decoding
+  # 'UnmanagedPodWatcherInterval': time: missing unit in duration "15"`. The
+  # agent still starts and the nodes still report Ready, so the cluster looks
+  # built -- but with no operator there is no IPAM, every pod that is not
+  # hostNetwork sits in ContainerCreating, and the first thing to need one was
+  # ArgoCD's pre-install hook: 25 minutes of `Job in progress`, then a helm
+  # timeout that named neither Cilium nor this line.
+  unmanaged-pod-watcher-interval: '15s'
   dnsproxy-enable-transparent-mode: 'true'
   dnsproxy-socket-linger-timeout: '10'
   tofqdns-dns-reject-response-code: refused

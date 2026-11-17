@@ -352,15 +352,30 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		}
 		return bs.MgmtKubeconfig
 	}
-	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseOnPremJoin, "on-prem-join",
-		"Joining home-lab worker(s) to the hub...",
-		func() error { return o.joinHomeWorkers(ctx, resolveHubKubeconfig()) },
-		nil,
-		withPostcondition(func() error {
-			return o.phasePostconditions(resolveHubKubeconfig())[state.PhaseOnPremJoin](ctx)
-		}),
-	); err != nil {
-		return err
+	// NOT A PHASE OF A PIPELINE THAT CANNOT HAVE ONE.
+	//
+	// On-premises nodes are a managed cluster's capacity, in dev, and a hub takes
+	// none (see cmd/kakt/bootstrap.go, which refuses --on-prem outside the hybrid
+	// cell). The hybrid cell keeps its join until it is retired, because ADR-046
+	// made home-lab nodes its hub's only worker capacity.
+	//
+	// Asked before runPhase rather than inside the phase, which is what fixes the
+	// record. The phase used to run under every provider, return in 46ms having
+	// done nothing, and mark ITSELF COMPLETE -- a record of the flags this run was
+	// given rather than of the cluster. A hybrid box resumed once as hetzner was
+	// left with one tainted control plane and no worker at all, because every
+	// later hybrid run skipped a phase that a hetzner run had declared done.
+	if hw, ok := o.Provider.(interface{ OnPremRequested() bool }); ok && hw.OnPremRequested() {
+		if err := o.runPhase(ctx, stateMgr, bs, state.PhaseOnPremJoin, "on-prem-join",
+			"Joining home-lab worker(s) to the hub...",
+			func() error { return o.joinHomeWorkers(ctx, resolveHubKubeconfig()) },
+			nil,
+			withPostcondition(func() error {
+				return o.phasePostconditions(resolveHubKubeconfig())[state.PhaseOnPremJoin](ctx)
+			}),
+		); err != nil {
+			return err
+		}
 	}
 
 	// ── Phase 5c: ArgoCD install + seed ────────────────────────────────

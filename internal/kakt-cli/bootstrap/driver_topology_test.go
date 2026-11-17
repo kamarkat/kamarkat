@@ -273,13 +273,17 @@ func TestOnPremIsAnsweredByBothProviders(t *testing.T) {
 
 // The control plane's tailnet name must carry the cluster's name. Moving the
 // derivation onto the embedded driver would have silently regressed every hybrid
-// box to the "hub-cp" fallback, because only the outer driver was given a name.
+// box to a fallback, because only the outer driver was given a name.
+//
+// There is no fallback now: an unnamed cluster registers nothing, rather than
+// registering as "hub-cp" -- a word this platform's vocabulary does not use and
+// a name no cluster answers to.
 func TestControlPlaneTailnetHostnameCarriesTheClusterName(t *testing.T) {
-	if got := (&HetznerDriver{ClusterName: "devbox"}).hubTailnetHostname(); got != "devbox-cp" {
-		t.Errorf("hubTailnetHostname() = %q, want %q", got, "devbox-cp")
+	if got := (&HetznerDriver{ClusterName: "devbox"}).tailnetHostname(); got != "devbox-cp" {
+		t.Errorf("tailnetHostname() = %q, want %q", got, "devbox-cp")
 	}
-	if got := (&HetznerDriver{}).hubTailnetHostname(); got != "hub-cp" {
-		t.Errorf("unnamed cluster = %q, want the %q fallback", got, "hub-cp")
+	if got := (&HetznerDriver{}).tailnetHostname(); got != "" {
+		t.Errorf("unnamed cluster = %q, want no tailnet identity", got)
 	}
 }
 

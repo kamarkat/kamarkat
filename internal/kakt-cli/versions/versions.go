@@ -48,6 +48,24 @@ const (
 	// lived here and were read by nothing, so editing them looked like a version
 	// bump and changed nothing -- do not re-add them.
 
+	// Cilium, the CNI every cell installs.
+	//
+	// THERE WAS NO PIN HERE, and the version lived in image strings inside three
+	// manifests instead. Commit 4a086204 -- one omnibus version bump, the same one
+	// that took CAPI from 1.10.0 to 1.13.7 -- raised the shared spoke-bootstrap
+	// addon from 1.17.18 to 1.20.4. The hetzner HUB installs that same artifact
+	// (HetznerDriver.CiliumAddonPath), so the hub's CNI moved two minor versions
+	// with it, while the config base delivered beside it kept the spelling v1.17's
+	// chart renders. v1.20 parses unmanaged-pod-watcher-interval as a duration, so
+	// cilium-operator exited on boot, there was no IPAM, every pod that was not
+	// hostNetwork sat in ContainerCreating, and a box died 25 minutes later in
+	// ArgoCD's pre-install hook naming neither Cilium nor the field.
+	//
+	// scripts/validate/cilium-version-parity.py asserts every Cilium image in every
+	// shipped manifest equals this, and that each cell's config base is spelled for
+	// the version of the addon it is paired with.
+	CiliumVersion = "v1.20.4"
+
 	// Prerequisites
 	CertManagerVersion = "v1.21.3"
 

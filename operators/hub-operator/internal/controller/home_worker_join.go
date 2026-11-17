@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +25,7 @@ import (
 
 // Home worker join flow for the hybrid provider cell (ADR-046 §WS4).
 //
-// For each hybrid SpokePool with home-worker-enabled=true, the hub-operator:
+// For each dev SpokePool that lists machines in home-workers, the hub-operator:
 //  1. Reads the spoke kubeconfig Secret (<spoke>-kubeconfig, platform-capi) that
 //     CAPI generates for the spoke cluster.
 //  2. Computes the spoke's CA certificate sha256 (discovery-token-ca-cert-hash).
@@ -45,8 +46,16 @@ const bootstrapTokenSecretType = "bootstrap.kubernetes.io/token"
 // bootstrapTokenTTLAnnotation is the claim annotation carrying the TTL (e.g. "24h").
 const bootstrapTokenTTLAnnotation = "home-worker-ttl"
 
-// homeWorkerEnabledAnnotation is the claim annotation gating the join flow.
-const homeWorkerEnabledAnnotation = "home-worker-enabled"
+// NO ENABLE ANNOTATION. There was a home-worker-enabled toggle, and it asked a
+// question the declaration already answers: the machines a tenant lists in
+// home-workers ARE the statement that this pool admits nodes on their premises.
+// A toggle beside a list is two declarations of one fact, and they drift -- a
+// pool with enabled=true and an empty list used to have ONE slot invented for
+// it, named <spoke>-home-worker, which is how nutgraf-01 came to hold a token
+// for a machine that does not exist while the second real machine had none.
+//
+// Nothing is asked and nothing is defaulted: machines listed means on-prem
+// capacity, none listed means the pool runs on its cloud workers.
 
 // homeWorkersAnnotation is the claim annotation carrying the home worker list.
 // Format: JSON array of objects with at least a "hostname" field.
@@ -72,29 +81,56 @@ const kubeadmBootstrapTokenCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
 // homeWorkerTokenPrefix is the Secret name prefix for spoke bootstrap tokens.
 const homeWorkerTokenPrefix = "bootstrap-token-"
 
-// isHomeWorkerProvider returns true for provider types that support home workers (hybrid / Flatcar).
-func isHomeWorkerProvider(provider string) bool {
-	return provider == "hybrid"
-}
+// homeWorkerEnvironment is the only environment a managed cluster may admit
+// nodes on the tenant's own premises in.
+//
+// "On-premises worker nodes - dev only", as the published architecture draws
+// them, inside the managed-clusters block. It was drawn that way and enforced
+// nowhere: the join flow asked the provider and the annotation and never the
+// environment, so a stg or prod pool that carried home-worker-enabled would have
+// had tokens minted for it.
+const homeWorkerEnvironment = "dev"
+
+// homeWorkerEnvironmentLabel is where a SpokePool records the environment it
+// serves. The composition derives the cluster's own labels from it.
+const homeWorkerEnvironmentLabel = "environment"
+
+// NO PROVIDER GATE HERE ANY MORE.
+//
+// This used to be `provider == "hybrid"`, which made on-prem capacity a property
+// of the infrastructure provider -- the thing ADR-075 set out to stop. The
+// datapath that an on-prem node needs is platform-wide by that decision: every
+// cell runs mtu 1200 and devices `eth+ enp+ tailscale0`, and every spoke's
+// ClusterClass already carries the Tailscale pre-kubeadm hook, inert until
+// tailscale-hybrid-psk holds something. A dev pool on hetzner is therefore as
+// able to admit a node as a hybrid one, and the tenant's declaration is what
+// decides -- not which cloud the pool's cloud workers come from.
 
 // reconcileHomeWorkerJoin ensures the home-worker join payload Secret and spoke
-// bootstrap token for a hybrid SpokePool. Gated on isHomeWorkerProvider
-// and the home-worker-enabled annotation. Idempotent and rotation-aware.
+// bootstrap token for a SpokePool that admits nodes on the tenant's own
+// premises. Gated on the pool serving dev and on it listing machines -- not on a
+// toggle, and not on its provider. Idempotent and rotation-aware.
 func (r *SpokePoolReconciler) reconcileHomeWorkerJoin(ctx context.Context, spokePool *unstructured.Unstructured) error {
 	logger := log.FromContext(ctx)
 	spokeName := spokePool.GetName()
 
-	// Gate: hybrid providers only.
-	provider, found, err := unstructured.NestedString(spokePool.Object, "spec", "provider")
-	if err != nil || !found {
+	// Gate: this pool serves dev.
+	//
+	// Reported rather than ignored. A pool that asked for home workers and does
+	// not get them would otherwise sit with its hardware unjoined and nothing
+	// anywhere saying why; and reported rather than fatal, because the reconcile
+	// carries the rest of the pool's state and a tenant's declaration is not a
+	// reason to stop reconciling the cluster they already have.
+	env := spokePool.GetLabels()[homeWorkerEnvironmentLabel]
+	if env != homeWorkerEnvironment && spokePool.GetAnnotations()[homeWorkersAnnotation] != "" &&
+		spokePool.GetAnnotations()[homeWorkersAnnotation] != "[]" {
+		logger.Error(nil, "this pool lists machines on the tenant's own premises and does not serve "+
+			homeWorkerEnvironment+"; they are a "+homeWorkerEnvironment+
+			"-only capability, so no join token is minted and this pool runs on its cloud workers",
+			"spoke", spokeName, "environment", env)
 		return nil
 	}
-	if !isHomeWorkerProvider(provider) {
-		return nil
-	}
-
-	// Gate: home-worker-enabled annotation must be "true".
-	if spokePool.GetAnnotations()[homeWorkerEnabledAnnotation] != "true" {
+	if env != homeWorkerEnvironment {
 		return nil
 	}
 
@@ -110,19 +146,28 @@ func (r *SpokePoolReconciler) reconcileHomeWorkerJoin(ctx context.Context, spoke
 
 	endpointHost := spokePool.GetAnnotations()[homeWorkerJoinEndpointAnnotation]
 
-	homeWorkers := spokePool.GetAnnotations()[homeWorkersAnnotation]
+	// THE LIST IS THE DECLARATION, so an unreadable or empty one is not a reason
+	// to invent anything.
+	//
+	// It used to invent: a malformed list logged a line and fell through to one
+	// slot named <spoke>-home-worker, and so did an empty one. nutgraf-01 held
+	// exactly that token while the hardware it actually owns -- two machines --
+	// went unprovisioned, and the Secret looked correctly minted the whole time.
+	homeWorkers := strings.TrimSpace(spokePool.GetAnnotations()[homeWorkersAnnotation])
+	if homeWorkers == "" || homeWorkers == "[]" {
+		// No machines declared: this pool's capacity is its cloud workers, which
+		// is the ordinary case and not a failure.
+		return nil
+	}
 	var workerList []struct {
 		Hostname string `json:"hostname"`
 	}
-	if homeWorkers != "" {
-		if err := json.Unmarshal([]byte(homeWorkers), &workerList); err != nil {
-			logger.Info("home-workers annotation is not a valid JSON array — using 1 worker slot", "spoke", spokeName, "error", err)
-		}
+	if err := json.Unmarshal([]byte(homeWorkers), &workerList); err != nil {
+		return fmt.Errorf("the %s annotation on %s is not a JSON array of machines, so what "+
+			"this pool admits cannot be read: %w", homeWorkersAnnotation, spokeName, err)
 	}
 	if len(workerList) == 0 {
-		workerList = []struct {
-			Hostname string `json:"hostname"`
-		}{{Hostname: spokeName + "-home-worker"}}
+		return nil
 	}
 
 	// Read the spoke kubeconfig Secret (<spoke>-kubeconfig, platform-capi).

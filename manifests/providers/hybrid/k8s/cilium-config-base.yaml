@@ -164,6 +164,12 @@ data:
   remove-cilium-node-taints: 'true'
   set-cilium-node-taints: 'true'
   set-cilium-is-up-condition: 'true'
+  # NO UNIT HERE, and that is not an oversight. This cell's workloads are Cilium
+  # v1.17.18 (manifests/providers/hybrid/k8s/cilium-addon-hybrid.yaml), whose
+  # operator reads this field as an integer number of seconds -- `15s` would be
+  # rejected by it exactly as `15` is rejected by v1.20. The hetzner base says
+  # 15s because its addon is v1.20.4. The two are only safe to spell the same
+  # once both cells deliver the same Cilium.
   unmanaged-pod-watcher-interval: '15'
   dnsproxy-enable-transparent-mode: 'true'
   dnsproxy-socket-linger-timeout: '10'

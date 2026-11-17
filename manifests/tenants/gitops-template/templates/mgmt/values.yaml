@@ -275,19 +275,12 @@ capabilities:
   billing:
     enabled: false
 
-# On-prem nodes (ADR-075). Machines on your own premises, joining this cluster
-# over your Tailscale tailnet.
+# NODES ON YOUR OWN PREMISES ARE NOT DECLARED HERE, and there is nothing to
+# switch on or off.
 #
-# A capability, not a property of the provider: enable it whenever you want the
-# capacity, disable it when you do not. The datapath every box runs is already
-# sized for it, so turning it on costs no cluster-wide change.
-#
-# Two things to know before enabling on a cluster that already exists. Nodes join
-# the tailnet when they join the cluster, so existing nodes keep the addresses
-# they registered with -- completing the arrangement means replacing the control
-# plane. And the platform cannot see the other half: a machine on your premises,
-# running the join. This value says the cluster will accept them.
-onPrem:
-  enabled: false
-  # Your tailnet, e.g. acme.ts.net. Required when enabled.
-  tailnet: ""
+# They are capacity for a managed cluster serving dev -- your machines, joining
+# that cluster over your tailnet, running the workloads it is for. You declare
+# them by LISTING them on that cluster's SpokePool, and listing them is the whole
+# of the decision: a cluster with machines listed admits them, one with none runs
+# on its cloud workers. This cluster is the box's management cluster and admits
+# none at all.

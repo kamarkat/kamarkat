@@ -164,6 +164,26 @@ of them: what runs is what the release contains.`,
 				fmt.Println("[day0] more than one, so the hub's single-pool gates are skipped;")
 				fmt.Println("[day0] each is brought up and checked after the hub converges")
 			}
+			// ON-PREM BELONGS TO A MANAGED CLUSTER SERVING DEV, not to this one.
+			//
+			// The published architecture puts on-premises workers inside the
+			// managed-clusters block, dev only. A hub runs on its cloud workers.
+			// Refused here, where the declaration that asked for it is open, so
+			// the message names the file to edit rather than a flag nobody typed:
+			// this wrapper is what turns onPrem.enabled into --on-prem.
+			//
+			// The hybrid cell still joins home-lab nodes to its own hub, because
+			// ADR-046 left it no other worker capacity; it is retired by ADR-075's
+			// exit condition and this exception goes with it.
+			if decl.OnPrem && decl.Provider != "hybrid" {
+				return fmt.Errorf("registry/clusters/%s/values.yaml declares onPrem.enabled on a "+
+					"management cluster.\n\n"+
+					"On-premises nodes are capacity for a MANAGED cluster serving dev -- your own\n"+
+					"machines, joining that cluster over your tailnet. This cluster is the box's\n"+
+					"management cluster and runs on its cloud workers.\n\n"+
+					"Set onPrem.enabled to false here and declare the on-prem pool on the managed\n"+
+					"cluster that serves dev.", cluster)
+			}
 			if decl.OnPrem {
 				args = append(args, "--on-prem")
 				if decl.Tailnet != "" {

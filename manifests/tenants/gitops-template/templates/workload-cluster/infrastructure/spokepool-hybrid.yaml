@@ -29,7 +29,9 @@ metadata:
     # capacity and every tenant workload pends.
     home-workers: '[]'
     # Home worker join flow settings (read by hub-operator reconcileHomeWorkerJoin)
-    home-worker-enabled: "true"
+    # No enable flag: the list above is the decision. It was a toggle beside a
+    # list -- two declarations of one fact -- and an empty list with the toggle on
+    # had a single machine invented for it.
     home-worker-ttl: "24h"
     tailnet-name: ""
 spec:

@@ -299,6 +299,99 @@ Nodes the platform cannot roll are nodes the platform cannot patch. An unmanaged
 - **Confirms ADR-070.** Running a box on the tenant's own hardware is a cost decision available where the topology allows it, asked for rather than defaulted. No supported topology is weakened to reach a number.
 - No change to ADR-072: the capability is declared in the tenant's repository and reconciled by the tenant's control plane, like everything else there.
 
+## Amendment, 2026-11-17: the capability belongs to a managed cluster, in dev
+
+**This ADR made on-prem a property of a BOX, and that is withdrawn. On-premises
+nodes are capacity a MANAGED cluster may declare, in the dev environment only.
+A management cluster takes none.**
+
+The architecture this platform publishes has said so throughout: "On-premises
+worker nodes · dev only -- your own machines, joining over your tailnet", drawn
+inside the managed-clusters block. The decision above put the capability on the
+hub instead, and nothing reconciled the two. The published shape wins, because it
+is the one a tenant reads before they decide.
+
+What the decision above got right stands: on-prem is a setting rather than an
+identity, `mtu: 1200` and `devices: eth+ enp+ tailscale0` stay platform-wide so
+the capability remains available without restarting agents, and `provider` is not
+the switch for it. What changes is WHICH cluster may use it.
+
+What this withdraws:
+
+- `--on-prem` on a management cluster is refused (`cmd/kakt/bootstrap.go`), and a
+  box whose declaration carries `onPrem.enabled` is refused where that
+  declaration is read (`cmd/kakt/bootstrap_day0.go`), naming the file to edit.
+- `on-prem-join` is no longer a phase of a hub pipeline that cannot have one. It
+  used to run under every provider, return in 46 milliseconds having done
+  nothing, and record ITSELF COMPLETE -- a record of this run's flags rather than
+  of the cluster, which is what left a hybrid box resumed once as hetzner with a
+  tainted control plane and no worker at all.
+- The exit condition above -- "a hetzner box ... admitted a node on the tenant's
+  own premises" -- is withdrawn with it. It was never met. The replacement
+  condition is a dev managed cluster that has admitted one.
+
+The hybrid cell is the one exception and keeps its hub-side join, because ADR-046
+made home-lab nodes its hub's only worker capacity (`WorkerReplicas = 0`) and
+refusing it would leave those boxes with nowhere to schedule. The cell is still
+retired by this ADR's exit condition, now restated against managed clusters, and
+the exception is withdrawn with the cell.
+
+### Nothing is asked, and nothing is defaulted
+
+**The machines a tenant lists are the declaration. There is no enable flag, on
+either kind of cluster.**
+
+A toggle beside a list is two declarations of one fact, and they drift: a pool
+carrying `home-worker-enabled: true` and an empty list had ONE machine invented
+for it, named `<spoke>-home-worker`, and `nutgraf-01` held a join token for that
+imaginary machine while the second of the two it actually owns had none -- with
+the Secret looking correctly minted throughout. A malformed list did the same
+thing. Both are gone: an empty or unreadable list is no capacity, and an
+unreadable one is an error rather than a default.
+
+So the question is never put to anyone:
+
+- A management cluster's declaration no longer carries an `onPrem` block. It
+  admits no nodes on the tenant's own premises, so there was nothing to set.
+- `--on-prem`, `--tailnet-name` and `--on-prem-join-ttl` are no longer offered by
+  `bootstrap-mgmt`; they remain, hidden, for the hybrid cell that still joins
+  home-lab nodes to its own hub.
+- A managed cluster's SpokePool carries `home-workers` and `home-worker-ttl`, and
+  no `home-worker-enabled`. The tailnet is read from the machines' own
+  `tailnetHost` names rather than declared a second time.
+- With no machines listed, a pool runs on `spec.nodePool.count` cloud workers --
+  which is the ordinary case and reported as nothing at all, not as a failure.
+
+### Where the capability lives now
+
+A managed cluster declares it on its own SpokePool, in the tenant's repository:
+`home-worker-enabled`, `home-workers` (the machines, by hostname and tailnet
+host), `home-worker-ttl` and `tailnet-name`. hub-operator's
+`reconcileHomeWorkerJoin` mints one kubeadm bootstrap token per declared machine,
+and `scripts/hybrid/provision-flatcar-worker.sh --cluster spoke <cluster>` joins
+them. That machinery was already there for the hybrid cell; what this amendment
+changes is who may use it and where it is checked.
+
+**It is gated on the environment, and no longer on the provider.** The join flow
+asked `provider == "hybrid"` and the annotation, and never the environment -- so
+"dev only" was drawn in the architecture and enforced nowhere, while a dev pool
+on hetzner could not have a node at all. Both are now the other way round:
+hub-operator mints tokens only for a pool whose `environment` label is `dev`, and
+reports a pool that asks and is not, and the provider is not consulted.
+
+Dropping the provider gate costs nothing this decision had not already paid for.
+`mtu: 1200` and `devices: eth+ enp+ tailscale0` are platform-wide by the decision
+above, every spoke's ClusterClass already carries the Tailscale pre-kubeadm hook
+inert, and `manifests/providers/hetzner/k8s/tailscale-psk-es.yaml` now syncs the
+tailnet credential into a hetzner cell as the hybrid cell's copy always did for
+that one. The hetzner spoke template ships the four annotations, disabled.
+
+Still outstanding, and an operation rather than a change: `nutgraf-hub` is
+declared `provider: hybrid`, so its hub's only worker capacity is a home-lab
+node. Moving that box to cloud workers -- and its hardware to `nutgraf-01`, which
+already declares two home workers of its own -- is what retires the cell, the
+hub-side join, `OnPremEnabled`, and the second Cilium version with it.
+
 ## References
 
 - ADR-014: Platform-Owned Stateful Infrastructure

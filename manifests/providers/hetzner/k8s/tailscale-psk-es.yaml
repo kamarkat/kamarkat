@@ -1,0 +1,53 @@
+---
+# The tailnet credential this cell's nodes join with (ADR-046 invariant 6,
+# ADR-075).
+#
+# Here as well as in the hybrid cell because on-premises nodes are a MANAGED
+# CLUSTER's capability in dev, not a provider's: a dev pool on hetzner may admit
+# a node on the tenant's own premises, and that node's only InternalIP is its
+# tailnet address -- so the control plane has to be on the tailnet too or
+# cross-node pod traffic dies in one direction while both nodes report Ready.
+#
+# The Secret's name is the one the shared spoke ClusterClass already references
+# in its Tailscale pre-kubeadm hook (spokepool-clusterclass-v1.yaml, four
+# places), which is why it keeps the name it was given in the hybrid cell rather
+# than gaining a provider-neutral one: renaming it would mean editing an
+# immutable template on every live spoke.
+#
+# Infisical is the source of truth (ADR-043): hub-operator uploads the
+# tailscale-hybrid-psk source Secret from platform-capi via CLISecretMappings
+# (tailscale-authkey / tailscale-hostname) -- a mapping that is not
+# provider-gated -- and ESO syncs it back here. ESO owning the Secret is what
+# stops ArgoCD resetting it to an empty value.
+#
+# Inert until those keys exist. Every Tailscale step in the ClusterClass is
+# guarded on `[ -s /etc/tailscale-hostname ]`, so a cell with no on-prem node
+# carries this and does nothing with it.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: tailscale-hybrid-psk
+  namespace: platform-capi
+spec:
+  refreshInterval: 1h
+
+  secretStoreRef:
+    name: infisical-backend
+    kind: ClusterSecretStore
+
+  target:
+    name: tailscale-hybrid-psk
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        authkey: "{{ .authkey }}"
+        hostname: "{{ .hostname }}"
+
+  data:
+    - secretKey: authkey
+      remoteRef:
+        key: tailscale-authkey
+    - secretKey: hostname
+      remoteRef:
+        key: tailscale-hostname

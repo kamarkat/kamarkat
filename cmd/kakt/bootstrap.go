@@ -181,8 +181,9 @@ sixteen hours behind a run that reported success.`,
 	cmd.Flags().BoolVar(&buildFlatcarImage, "build-flatcar-image", false, "Trigger Packer build for Flatcar image")
 	cmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging")
 	cmd.Flags().IntVar(&workerReplicas, "workers", -1,
-		"cloud worker nodes to provision (default: 2). Pass 0 to run on on-prem "+
-			"capacity alone, which then has to be there (ADR-075)")
+		"cloud worker nodes this management cluster runs on (default: 2). It needs at "+
+			"least one: a cluster with none is refused before anything is provisioned, "+
+			"because the control plane keeps its taint and no platform workload can schedule")
 	cmd.Flags().StringVar(&topology, "topology", "single", "Topology mode: single (default) or multi (bridged)")
 	cmd.Flags().StringVar(&bootstrapEncryption, "encryption-mode", string(cluster.EncryptionSecretbox),
 		"how this box encrypts Secrets at rest: secretbox (ADR-003 §6, default)")
@@ -192,6 +193,21 @@ sixteen hours behind a run that reported success.`,
 	cmd.Flags().BoolVar(&onPremEnabled, "on-prem", false, "accept nodes on the tenant's own premises, joining this cluster over their tailnet (ADR-075)")
 	cmd.Flags().StringVar(&onPremJoinTTL, "on-prem-join-ttl", "24h", "kubeadm bootstrap-token TTL for on-prem nodes")
 	cmd.Flags().StringVar(&tailnetName, "tailnet-name", "", "the tenant's Tailscale tailnet, e.g. acme.ts.net. Required with --on-prem")
+
+	// NOT OFFERED. A management cluster admits no nodes on the tenant's own
+	// premises, so there is nothing for an operator to turn on here: the
+	// capability belongs to a managed cluster serving dev, where listing the
+	// machines is the whole of the decision.
+	//
+	// Hidden rather than deleted because the hybrid cell still joins home-lab
+	// nodes to its own hub -- ADR-046 left it no other worker capacity -- and
+	// `kakt bootstrap` passes these for a hybrid box's declaration. They go when
+	// the cell goes.
+	for _, f := range []string{"on-prem", "tailnet-name", "on-prem-join-ttl"} {
+		if err := cmd.Flags().MarkHidden(f); err != nil {
+			panic(fmt.Sprintf("flag %s is declared above and must be hideable: %v", f, err))
+		}
+	}
 
 	// Mark required flags
 	cmd.MarkFlagRequired("name")
@@ -285,6 +301,32 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	// printed, the control plane had no tailnet address, and the failure surfaced
 	// much later as cert-manager's webhook timing out from the API server --
 	// three layers from its cause.
+	// ON-PREM IS A MANAGED CLUSTER'S CAPABILITY, IN DEV, AND NOT THE HUB'S.
+	//
+	// That is what the architecture this platform publishes says -- "On-premises
+	// worker nodes · dev only", inside the managed-clusters block, "your own
+	// machines, joining over your tailnet" -- and the documented shape is the one
+	// that holds. ADR-075 had made on-prem a property of a BOX instead, so
+	// `--on-prem` was accepted here and the hub pipeline carried an on-prem-join
+	// phase for every build; on a hetzner box that phase has never admitted a
+	// node, which is ADR-075's own unmet exit condition.
+	//
+	// A hub's capacity is its cloud workers. A tenant who wants their own machines
+	// declares them on a managed cluster that serves dev, where the thing those
+	// machines run is the thing they are for.
+	//
+	// The hybrid cell is the exception and is on its way out: ADR-046 made its
+	// hub's ONLY worker capacity home-lab nodes, so refusing it here would leave
+	// those boxes with one tainted control plane and nowhere to schedule. It keeps
+	// the hub-side join until the cell is retired.
+	if onPremEnabled && provider != "hybrid" {
+		return fmt.Errorf("--on-prem is not a management cluster's setting.\n\n"+
+			"On-premises nodes are capacity for a MANAGED cluster serving dev -- your own\n"+
+			"machines, joining that cluster over your tailnet. A management cluster runs on\n"+
+			"its cloud workers; --workers sets how many (0 is not supported on %s).\n\n"+
+			"Declare the on-prem pool on the managed cluster instead, and drop onPrem from\n"+
+			"this box's declaration.", provider)
+	}
 	if onPremEnabled {
 		if err := requireTailnetCredentials(tailnetName); err != nil {
 			return err

@@ -634,6 +634,80 @@ func (p *Provisioner) dumpDiagnosticsOnFailure(ctx context.Context) {
 	if descOutput, _ := describeCmd.CombinedOutput(); len(descOutput) > 0 {
 		fmt.Printf("%s\n", descOutput)
 	}
+
+	// WHY THE WORKERS ARE NOT AVAILABLE, which is a question about the cluster
+	// being built and not about the one building it.
+	//
+	// Everything above reads CAPI objects in the bootstrap cluster. When the
+	// machines are Running and registered as nodes and the wait still fails,
+	// what is wrong is inside the new cluster -- the CNI and the CCM that the
+	// ClusterResourceSet delivers, without which every node stays NotReady and
+	// the MachineDeployment reports "0 available replicas" forever. None of that
+	// was collected, so the run ended with the symptom and the next one had to
+	// be spent reproducing it.
+	bootstrap := func(label string, args ...string) {
+		out, _ := exec.CommandContext(ctx, "kubectl", p.kubectlArgs(args...)...).CombinedOutput()
+		if len(out) > 0 {
+			fmt.Printf("\n[cluster-provision] %s:\n%s\n", label, out)
+		}
+	}
+	bootstrap("the addon sets and what they have applied",
+		"get", "clusterresourceset,clusterresourcesetbinding", "-n", p.Config.Namespace, "-o", "wide")
+
+	kubeconfig, cleanup, err := p.workloadKubeconfig(ctx)
+	if err != nil {
+		fmt.Printf("\n[cluster-provision] cannot reach the new cluster to say why its nodes are not ready: %v\n", err)
+		return
+	}
+	defer cleanup()
+	inside := func(label string, args ...string) {
+		out, _ := exec.CommandContext(ctx, "kubectl",
+			append([]string{"--kubeconfig", kubeconfig}, args...)...).CombinedOutput()
+		if len(out) > 0 {
+			fmt.Printf("\n[cluster-provision] %s:\n%s\n", label, out)
+		}
+	}
+	inside("nodes in the new cluster", "get", "nodes", "-o", "wide")
+	inside("why each node is not ready",
+		"get", "nodes", "-o",
+		"jsonpath={range .items[*]}{.metadata.name}{\": \"}"+
+			"{range .status.conditions[?(@.type=='Ready')]}{.status}{\" \"}{.reason}{\": \"}{.message}{end}"+
+			"{\"\\n\"}{end}")
+	inside("kube-system in the new cluster", "get", "pods", "-n", "kube-system", "-o", "wide")
+	inside("recent events in kube-system", "get", "events", "-n", "kube-system",
+		"--sort-by=.lastTimestamp")
+}
+
+// workloadKubeconfig writes the new cluster's admin kubeconfig to a temporary
+// file and returns its path.
+//
+// CAPI keeps it in <cluster>-kubeconfig in the bootstrap cluster from the moment
+// the control plane is up, so it is available exactly when the questions this
+// answers start being asked -- before the pivot, and before anything has
+// escrowed a copy.
+func (p *Provisioner) workloadKubeconfig(ctx context.Context) (string, func(), error) {
+	noop := func() {}
+	out, err := exec.CommandContext(ctx, "kubectl", p.kubectlArgs("get", "secret",
+		p.Config.ClusterName+"-kubeconfig", "-n", p.Config.Namespace,
+		"-o", "jsonpath={.data.value}")...).Output()
+	if err != nil {
+		return "", noop, fmt.Errorf("read %s-kubeconfig: %w", p.Config.ClusterName, err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", noop, fmt.Errorf("decode %s-kubeconfig: %w", p.Config.ClusterName, err)
+	}
+	f, err := os.CreateTemp("", "workload-*.kubeconfig")
+	if err != nil {
+		return "", noop, err
+	}
+	if _, err := f.Write(decoded); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", noop, err
+	}
+	f.Close()
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
 // kubeconfigPath returns the kubeconfig path used by this provisioner.
