@@ -91,7 +91,8 @@
     # domain. Declaring the domain later scales it back up, so previews stay
     # something a box adds when it wants them.
     - path: [spec, replicas]
-      value: {{ if .Values.global.previewDomain }}1{{ else }}0{{ end }}
+      type: int
+      value: '{{ if .Values.global.previewDomain }}1{{ else }}0{{ end }}'
 
 - kind: Deployment
   name: external-dns
@@ -160,12 +161,10 @@
       value:
         - '{{ .Values.global.hubDomain }}'
         # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too, when
-        # this box serves previews. Listed only then: an empty zone would match
-        # every domain, and the list is always SET because the catalogue's own
-        # copy names the zones of whoever wrote it.
-        {{- if .Values.global.previewDomain }}
-        - '{{ .Values.global.previewDomain }}'
-        {{- end }}
+        # this box serves previews. A box that serves no previews names the hub
+        # zone twice (identical to external-dns above), ensuring the list is
+        # always set and non-empty.
+        - '{{ .Values.global.previewDomain | default (.Values.global.hubDomain) }}'
 
 - kind: ClusterIssuer
   name: letsencrypt-staging
@@ -180,12 +179,10 @@
       value:
         - '{{ .Values.global.hubDomain }}'
         # ADR-108: the *.<previewDomain> wildcard is issued by DNS-01 too, when
-        # this box serves previews. Listed only then: an empty zone would match
-        # every domain, and the list is always SET because the catalogue's own
-        # copy names the zones of whoever wrote it.
-        {{- if .Values.global.previewDomain }}
-        - '{{ .Values.global.previewDomain }}'
-        {{- end }}
+        # this box serves previews. A box that serves no previews names the hub
+        # zone twice (identical to external-dns above), ensuring the list is
+        # always set and non-empty.
+        - '{{ .Values.global.previewDomain | default (.Values.global.hubDomain) }}'
 
 - kind: Gateway
   name: tenant-gateway
