@@ -901,14 +901,23 @@ func (b *boxInit) escrowBoxCredentials(ctx context.Context) error {
 	for _, c := range []struct {
 		artifact string
 		payload  string
-		what     string
+		// what it enables, read as "escrowed <artifact> -- <what>"
+		what string
+		// the same thing as a noun, read as "this box has no <absent>". One
+		// phrasing could not serve both: "this box has no pulling this tenant's
+		// private images" is what one tried.
+		absent string
 	}{
-		{escrow.ArtifactBackupStoreCredential, store, "object storage for database backups"},
-		{escrow.ArtifactRegistryCredential, registry, "pulling this tenant's private images"},
-		{escrow.ArtifactAlertDestination, alerts, "where this box's alerts page"},
-		{escrow.ArtifactMailTransportURL, strings.TrimSpace(b.secrets.ZitadelSMTPURL), "outbound mail"},
+		{escrow.ArtifactBackupStoreCredential, store,
+			"object storage for database backups", "backups of its databases"},
+		{escrow.ArtifactRegistryCredential, registry,
+			"pulling this tenant's private images", "credential for private images"},
+		{escrow.ArtifactAlertDestination, alerts,
+			"where this box's alerts page", "paging destination for its alerts"},
+		{escrow.ArtifactMailTransportURL, strings.TrimSpace(b.secrets.ZitadelSMTPURL),
+			"outbound mail", "outbound mail"},
 		{escrow.ArtifactTailnetAuthkey, strings.TrimSpace(b.secrets.TailscaleAuthkey),
-			"admitting nodes on the tenant's own premises"},
+			"admitting nodes on the tenant's own premises", "tailnet key for on-premises nodes"},
 	} {
 		outcome, err := hubaccess.EnrollBoxCredential(ctx, coords, c.artifact, c.payload, false)
 		if err != nil {
@@ -918,7 +927,7 @@ func (b *boxInit) escrowBoxCredentials(ctx context.Context) error {
 		case strings.TrimSpace(c.payload) == "":
 			// Said, not skipped silently. A box without one of these runs with a
 			// narrower contract, and the operator should know which.
-			fmt.Printf("[box] – %s not supplied; this box has no %s\n", c.artifact, c.what)
+			fmt.Printf("[box] – %s not supplied; this box has no %s\n", c.artifact, c.absent)
 		case outcome == hubaccess.EnrolledUnchanged:
 			fmt.Printf("[box] ✓ %s already escrowed for %s\n", c.artifact, b.spec.BoxID)
 		default:

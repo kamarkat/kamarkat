@@ -62,6 +62,13 @@ type BoxDecl struct {
 	} `yaml:"escrow"`
 
 	PlatformAdminIdentity string `yaml:"platformAdminIdentity"`
+	// AlertEmail is where this box's alerts are emailed -- a destination, not an
+	// authority, which is why it is an address where the identity above is an id.
+	//
+	// Read from here by every cluster this box declares, so the address outlives
+	// the session that supplied it: resolving it from whoever runs
+	// `add-management` would repoint a box's alerts by accident.
+	AlertEmail string `yaml:"alertEmail"`
 }
 
 // ReadBoxDecl reads the box a gitops repository declares.
@@ -100,23 +107,24 @@ func ReadBoxDecl(gitopsDir string) (BoxDecl, error) {
 // caller supplies the cluster's own name and whatever it overrides.
 func (b BoxDecl) specFor(cluster string, ov ClusterOverrides) Spec {
 	s := Spec{
-		TenantID:         b.TenantID,
-		GitOrg:           b.GitOrg,
-		PlatformAdmin:    b.PlatformAdminIdentity,
-		Domain:           b.Domain,
-		Subdomain:        b.Subdomain,
-		Provider:         b.Provider,
-		Region:           b.Region,
-		Workers:          b.Workers,
-		BoxID:            b.BoxID,
-		ClusterName:      cluster,
-		BundleVersion:    b.BundleVersion,
-		PlatformRevision: b.PlatformRevision,
-		PlatformRepoURL:  b.PlatformRepoURL,
-		BundleRegistry:   b.BundleRegistry,
-		EscrowURL:        b.Escrow.URL,
-		EscrowProjectID:  b.Escrow.ProjectID,
-		EscrowOrgID:      b.Escrow.OrganizationID,
+		TenantID:           b.TenantID,
+		GitOrg:             b.GitOrg,
+		PlatformAdmin:      b.PlatformAdminIdentity,
+		PlatformAdminEmail: b.AlertEmail,
+		Domain:             b.Domain,
+		Subdomain:          b.Subdomain,
+		Provider:           b.Provider,
+		Region:             b.Region,
+		Workers:            b.Workers,
+		BoxID:              b.BoxID,
+		ClusterName:        cluster,
+		BundleVersion:      b.BundleVersion,
+		PlatformRevision:   b.PlatformRevision,
+		PlatformRepoURL:    b.PlatformRepoURL,
+		BundleRegistry:     b.BundleRegistry,
+		EscrowURL:          b.Escrow.URL,
+		EscrowProjectID:    b.Escrow.ProjectID,
+		EscrowOrgID:        b.Escrow.OrganizationID,
 	}
 	if v := strings.TrimSpace(ov.Provider); v != "" {
 		s.Provider = v
@@ -214,24 +222,25 @@ func (id BoxIdentity) Apply(s Spec) Spec {
 // rename anything: there is no derivation on this path.
 func SpecFromDecl(b BoxDecl) Spec {
 	return Spec{
-		TenantID:          b.TenantID,
-		GitOrg:            b.GitOrg,
-		PlatformAdmin:     b.PlatformAdminIdentity,
-		Domain:            b.Domain,
-		Subdomain:         b.Subdomain,
-		Provider:          b.Provider,
-		Region:            b.Region,
-		Workers:           b.Workers,
-		BoxID:             b.BoxID,
-		GitopsRepo:        b.GitopsRepo,
-		ManagementCluster: b.ManagementCluster,
-		BundleVersion:     b.BundleVersion,
-		PlatformRevision:  b.PlatformRevision,
-		PlatformRepoURL:   b.PlatformRepoURL,
-		BundleRegistry:    b.BundleRegistry,
-		EscrowURL:         b.Escrow.URL,
-		EscrowProjectID:   b.Escrow.ProjectID,
-		EscrowOrgID:       b.Escrow.OrganizationID,
+		TenantID:           b.TenantID,
+		GitOrg:             b.GitOrg,
+		PlatformAdmin:      b.PlatformAdminIdentity,
+		PlatformAdminEmail: b.AlertEmail,
+		Domain:             b.Domain,
+		Subdomain:          b.Subdomain,
+		Provider:           b.Provider,
+		Region:             b.Region,
+		Workers:            b.Workers,
+		BoxID:              b.BoxID,
+		GitopsRepo:         b.GitopsRepo,
+		ManagementCluster:  b.ManagementCluster,
+		BundleVersion:      b.BundleVersion,
+		PlatformRevision:   b.PlatformRevision,
+		PlatformRepoURL:    b.PlatformRepoURL,
+		BundleRegistry:     b.BundleRegistry,
+		EscrowURL:          b.Escrow.URL,
+		EscrowProjectID:    b.Escrow.ProjectID,
+		EscrowOrgID:        b.Escrow.OrganizationID,
 	}
 }
 

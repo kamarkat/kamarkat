@@ -79,3 +79,17 @@ escrow:
 # The one human this box accepts for escrow-backed operations: Infisical's own id
 # for the account, never an address. `kakt whoami` prints it.
 platformAdminIdentity: <PLATFORM_ADMIN_IDENTITY>
+
+# Where this box's alerts are emailed.
+#
+# A DESTINATION, which is why it is an address where platformAdminIdentity above
+# is an id: that one carries authority and must not follow a mailbox that can be
+# re-assigned, while this one has to reach a person who reads it.
+#
+# Recorded on the BOX, not on each cluster, and that is the whole reason this
+# field exists: every cluster this box ever declares renders its own
+# alerting.emailTo from here. Taken from the session that created the box the
+# first time, so nothing is asked -- and taken from here afterwards, so a second
+# cluster declared next year by a different operator pages the same place rather
+# than whoever happened to run the command.
+alertEmail: <PLATFORM_ADMIN_EMAIL>

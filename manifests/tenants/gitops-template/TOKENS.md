@@ -24,6 +24,7 @@ in this template's history. A renderer that is handed one should refuse it.
 | `<HUB_DOMAIN>` | the two joined: `<subdomain>.<domain>`, or `<domain>` when no subdomain is declared |
 | `<ESCROW_URL>` | the Infisical this box escrows to. A name, not a credential: it is what lets any authorized workstation find the box's artefacts |
 | `<ESCROW_PROJECT_ID>` | the escrow project this box was enrolled in. Also a name; the identity that reads it is the operator's own `kakt login`, or a machine identity in CI |
+| `<PLATFORM_ADMIN_EMAIL>` | where this box's alerts are emailed, taken from the session that created it. A destination, so it is an address -- unlike `<PLATFORM_ADMIN_IDENTITY>`, which carries authority and is an id. Recorded on the box (`alertEmail`), and every cluster the box declares renders its own `alerting.emailTo` from there |
 
 ## Tokens you fill in yourself
 
