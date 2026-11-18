@@ -52,6 +52,30 @@ spec:
       memory: 256Mi
     limits:
       memory: 256Mi
+  # THE POOLER'S NAME, IN THE SERVER CERTIFICATE.
+  #
+  # A PgBouncer pooler "reuses the same certificates as the PostgreSQL cluster"
+  # (CNPG connection-pooling docs), and CNPG generates those with the cluster's
+  # own service names only -- grafana-db-rw, -r and -ro. A client that
+  # connects through the pooler and verifies the hostname therefore meets a
+  # certificate that does not name what it dialled, and the failure is at the
+  # TLS layer rather than anywhere near this file:
+  #
+  #   ERR_TLS_CERT_ALTNAME_INVALID: Host: grafana-db-pooler.platform-data.svc.
+  #   is not in the cert's altnames: DNS:grafana-db-rw, ...
+  #
+  # DB_HOST is exactly that name (components/secrets_database_impl.go), so the
+  # names below are the four forms a client in this cluster can dial it by.
+  #
+  # The old single platform-db carried this block; the ADR-112 split into five
+  # per-application clusters dropped it, and nothing noticed until a pooler was
+  # first reached -- which took until the Pooler objects themselves became valid.
+  certificates:
+    serverAltDNSNames:
+      - grafana-db-pooler
+      - grafana-db-pooler.platform-data
+      - grafana-db-pooler.platform-data.svc
+      - grafana-db-pooler.platform-data.svc.cluster.local
   postgresql:
     parameters:
       shared_buffers: "64MB"
