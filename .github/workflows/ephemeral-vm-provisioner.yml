@@ -62,8 +62,26 @@ jobs:
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: arun-soloz
-          password: ${{ secrets.GHCR_TOKEN }}
+          # THE JOB'S OWN IDENTITY, not a person's.
+          #
+          # GITHUB_TOKEN is issued for this job and expires when it ends, and the
+          # images live under this repository's own owner, which is the case it
+          # covers. It replaced a shared PAT (GHCR_TOKEN, hardcoded to one
+          # maintainer's username) that every image workflow depended on: when it
+          # stopped being accepted, all ten failed at this step with
+          #
+          #   docker/login-action: GET https://ghcr.io/v2/: denied: denied
+          #
+          # and no image was rebuilt until someone noticed. There is nothing to
+          # rotate here and no account to lose access.
+          #
+          # `packages: write` at the top of this file is what authorizes the push.
+          # A package that predates this still carries its own Actions-access list,
+          # and refuses an unlisted repository with a 403 on blob upload -- a
+          # different boundary from this login, fixed in the package's settings
+          # rather than here.
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v7
         id: build
