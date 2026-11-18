@@ -167,7 +167,8 @@ spec:
   cluster:
     name: zitadel-db
 ---
-# This cluster's application, the operator, and this cluster's own peers. Nothing else.
+# This cluster's application, the operators that manage it, and this cluster's own
+# peers. Nothing else.
 #
 # The shared cluster's policy admits SEVEN namespaces because one cluster serves them
 # all; here the identity provider reaches only its own database. The peer selector is a bare
@@ -197,6 +198,25 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform-data
+        # The hub-operator, which creates this cluster's roles and grants their
+        # permissions over zitadel-db-rw -- the primary, so the peer is these instance
+        # pods rather than the pooler. The pre-split platform-db-access rule
+        # admitted the whole of platform-ops for it ("hub-operator, infisical setup
+        # jobs", 4a086204^ database/network-policy.yaml) and the per-application
+        # policies that replaced it dropped the peer. A dropped SYN is not a
+        # refusal: every role-provisioning pass hung for ~135s and timed out with
+        # no role created, on a cluster reporting Healthy.
+        #
+        # The namespace AND the operator's own label in ONE `from` element, as the
+        # Support Agent rule below is -- two elements would readmit every pod in
+        # platform-ops. Narrower than the rule it restores, which named the
+        # namespace alone.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-ops
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hub-operator
       ports:
         - protocol: TCP
           port: 5432
