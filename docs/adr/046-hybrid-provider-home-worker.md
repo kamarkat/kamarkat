@@ -283,7 +283,18 @@ and codified so re-provisioned spokes work out of the box:
    outer packet and the encapsulated frame is routed to loopback. Node addresses,
    ipcache entries and tunnel maps were each verified correct while that failure was
    active.
-7. **Standalone `cilium-envoy` DaemonSet removed (embedded Envoy only).** The
+7. **Standalone `cilium-envoy` DaemonSet removed (embedded Envoy only).**
+   *Superseded by addendum 10 and §15 (2026-08-20): Envoy runs STANDALONE again and
+   the four cilium-envoy objects are back in the rendered Secret deliberately. What
+   this item diagnosed -- two Envoys competing for the same abstract sockets -- is
+   prevented the other way round now: `envoy.enabled: true` in
+   `providers/hybrid/cilium-values.yaml`, `external-envoy-proxy: 'true'` in
+   `providers/hybrid/k8s/cilium-config-base.yaml` so the agent runs no embedded
+   proxy, and the `wait-for-envoy-release` init container ordering the DS after the
+   agent has released the sockets. Hetzner is the mirror and equally consistent:
+   `external-envoy-proxy: 'false'` and no cilium-envoy objects in its template, which
+   also settles the last sentence below. Read the paragraph as the incident record it
+   is; the codification it names is no longer what the manifests do.* The
    rendered addon had BOTH `external-envoy-proxy: "false"` (agent runs Envoy
    embedded, serving Gateway-API L7 on 127.0.0.1:10515) AND the standalone
    `cilium-envoy` DaemonSet (`--base-id 0`). Both bind the same
