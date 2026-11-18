@@ -66,22 +66,36 @@ const (
 	// identity provider's database, and a Zitadel restarting briefly satisfies it.
 	//
 	// The drop is gone rather than re-specified. It never fixed anything on this
-	// platform: every recovery came from the hook mechanics -- `ensure-schema`,
-	// and a failed hook Job deleting itself. A destructive operation that has
-	// earned nothing does not get a second signature.
+	// platform: every recovery came from the Jobs being run again -- `ensure-schema`
+	// in setup's initContainers, and a fresh attempt replacing the previous one.
+	// A destructive operation that has earned nothing does not get a second
+	// signature. (That re-run was hook mechanics when this was written; it is now
+	// a Sync-phase replacement, ADR-079's 2026-11-18 amendment. The conclusion is
+	// the mechanism's, not the phase's.)
 )
 
-// resetZitadelIfInitIncomplete drops and recreates the Zitadel database when a
-// previous bootstrap left it half-initialised.
+// prepareZitadelForRetry clears what is in the way of the identity provider
+// starting, and nothing else.
 //
-// Gated on the database's own signature and nothing else. An earlier version
-// also required boundary 04 to be unfinished, which sounded like a safety
-// property and was in fact the bug: the phase was recorded complete by a binary
-// that never checked Zitadel served, so the guard suppressed the repair on every
-// run that could have performed it. The signature is the real guard -- a Zitadel
-// that initialised properly HAS projections.migrations and therefore cannot
-// match it -- and being the only guard, it is one that cannot be bypassed by a
-// stale completion record.
+// NON-DESTRUCTIVE, and that is the decision rather than the current state of the
+// code: it drops no database, deletes no Job, and truncates nothing (ADR-079,
+// and a test in this package's suite forbids those statements in this file). All
+// it does is settle an operation that can no longer finish and ask ArgoCD for a
+// sync -- the Jobs carry Force=true,Replace=true, so a sync is what runs init
+// and setup again.
+//
+// A sync it REQUESTS is not a sync it can promise. ArgoCD decides whether to run
+// one, and a request made while a stale non-terminal operation is recorded is
+// spent settling that operation instead (see requestZitadelSync, which confirms a
+// new one actually began). What follows this function is awaitZitadelReady, whose
+// live probe is the authority on whether the identity provider serves -- not this
+// function's return, and not any Job's completion record.
+//
+// Gated on the live state and nothing else. An earlier version also required
+// boundary 04 to be unfinished, which sounded like a safety property and was in
+// fact the bug: the phase was recorded complete by a binary that never checked
+// Zitadel served, so the guard suppressed the repair on every run that could have
+// performed it.
 func (o *Orchestrator) prepareZitadelForRetry(ctx context.Context, kubeconfig string) error {
 	// Nothing to repair on a box where the identity provider already works. This
 	// is also what keeps the repair off the happy path entirely: a first
@@ -115,8 +129,8 @@ func (o *Orchestrator) prepareZitadelForRetry(ctx context.Context, kubeconfig st
 	//
 	// OutOfSync is the normal state of an Application mid-sync, so it cannot on
 	// its own mean "nothing is happening". This repair fired against a sync that
-	// had started 20 seconds earlier and was correctly running Zitadel's PreSync
-	// hooks; each of its three sync requests found startedAt unchanged -- because
+	// had started 20 seconds earlier and was correctly running Zitadel's init and
+	// setup Jobs; each of its three sync requests found startedAt unchanged -- because
 	// the same operation was still going -- and reported "settled the previous
 	// operation rather than starting a sync". It then failed the phase over a
 	// sync that was working.
@@ -162,11 +176,10 @@ func (o *Orchestrator) prepareZitadelForRetry(ctx context.Context, kubeconfig st
 	//
 	// The in-flight sync goes FIRST, and the sync request at the end is not
 	// optional -- the two are one operation split around the database work.
-	// Zitadel's init and setup Jobs are Helm pre-install hooks, which ArgoCD runs
-	// as PreSync, and an operation sits waiting on them. Dropping the database
-	// underneath a running setup is a race, and an operation left in flight
-	// blocks every later sync, so the re-run this function exists to cause could
-	// never start.
+	// Zitadel's init and setup Jobs are sync waves 1 and 2, and an operation sits
+	// waiting on them for as long as they run. Dropping the database underneath a
+	// running setup is a race, and an operation left in flight blocks every later
+	// sync, so the re-run this function exists to cause could never start.
 	if err := o.clearZitadelSync(ctx, kubeconfig); err != nil {
 		return err
 	}
@@ -364,9 +377,12 @@ func (o *Orchestrator) clearZitadelSync(ctx context.Context, kubeconfig string) 
 // a NEW sync actually began.
 //
 // Writing `.operation` is what `argocd app sync` does, and it is the only thing
-// that re-runs a PreSync hook. A refresh annotation does not: refresh
-// re-compares desired against live, and hooks are not part of that comparison --
-// which is why an earlier version that annotated `refresh=hard` achieved nothing.
+// that re-runs the init and setup Jobs. A refresh annotation does not: refresh
+// re-compares desired against live and syncs nothing, which is why an earlier
+// version that annotated `refresh=hard` achieved nothing. A sync is also what
+// RE-CREATES those Jobs, because they carry Force=true,Replace=true -- so a
+// database this function has just dropped is initialised again rather than met
+// with a Job that already reports Succeeded.
 //
 // The confirmation is the part that is not obvious, and skipping it left a box
 // unrepaired for three hours. A request made while a STALE non-terminal

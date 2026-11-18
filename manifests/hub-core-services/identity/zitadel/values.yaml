@@ -226,8 +226,50 @@ readinessProbe:
 # (creates the schema) -- ArgoCD would then never create them at all, turning a
 # transient failure into a permanent one.
 #
-# The three Jobs deliberately KEEP their hooks: they are genuine one-shot
-# initialisation and must run before the Deployment (weights 1 then 2).
+# NOTHING IN THE SYNC PATH IS A HELM HOOK ANY MORE, and the Jobs are why. (The
+# chart keeps one: `zitadel-cleanup` is a post-delete hook, which runs when the
+# Application is deleted and never during a sync. It is left alone.)
+#
+# They kept theirs, as genuine one-shot initialisation that must precede the
+# Deployment. That is the mirror image of this defect and it deadlocks a clean
+# box: ArgoCD runs every PreSync hook to completion BEFORE entering Sync, so
+# zitadel-init waited for a ServiceAccount and a ConfigMap that only Sync would
+# create, and Sync was waiting for zitadel-init.
+#
+#   Error creating: pods "zitadel-init-" is forbidden: error looking up service
+#   account platform-identity/zitadel: serviceaccount "zitadel" not found
+#
+# Neither phase works for both resources, because hook-ness is what deletes
+# them: ArgoCD's default hook-delete-policy is BeforeHookCreation, so a hook
+# ServiceAccount is deleted at the start of every sync whether or not anything
+# is using it. The prerequisites therefore cannot be hooks, and the ordering the
+# Jobs need has to come from somewhere else.
+#
+# It comes from SYNC WAVES, below: the prerequisites at the default 0, init at
+# 10, setup at 11, both Deployments at 12. ArgoCD waits for each wave to be
+# healthy before the next, and a Job is healthy only once it has completed, so
+# this is the same sequence the hook weights expressed -- inside one phase, with
+# nothing deleted between attempts.
+#
+# THE NUMBERS ARE ADR-029 §4's, not this component's. Its table puts dependent
+# workloads at 10 or above, and these Jobs and Deployments are exactly that --
+# application workloads, not operators (1) or admission policies (5+). Ordering
+# them at 1, 2 and 3 would have borrowed the operators' tier for a workload and
+# invented a platform-wide initialisation tier that nothing else needs; the
+# sequence belongs to this component, so it is expressed inside this component's
+# own range (ADR-029 requires no amendment for it).
+#
+# EVERY WAVE-0 RESOURCE IS HEALTHY ON ITS OWN, which is the property that makes
+# this safe rather than merely ordered. The chart renders no HPA, no PDB, no
+# debug ReplicaSet and no ServiceMonitor here -- all four default to disabled --
+# and both Services are ClusterIP, so nothing at wave 0 waits on a pod. A wave-0
+# resource whose health depended on the workload would reproduce the deadlock
+# this replaces, one wave further on.
+#
+# Two things fall out of it. A failed Job now KEEPS ITS LOGS, because nothing
+# deletes it; and the stale-completion problem ADR-079 recorded as unsolved is
+# gone, because Force=true,Replace=true recreates each Job on the next sync
+# rather than reading a Succeeded record that describes a database since dropped.
 #
 # This used to add "and are restartable by design -- cmd/setup runs cleanup on
 # interruption so a retry can pick up where we left off rather than booting into
@@ -245,16 +287,29 @@ readinessProbe:
 # eventstore.unique_constraints, every retry collided with the row its own
 # predecessor wrote, and nothing cleaned up because nothing was cancelled.
 #
-# That collision is recoverable only by recreating the database, which the CLI
-# now does (ADR-079, resetZitadelIfInitIncomplete). There is no upstream remedy
-# for it: `zitadel setup cleanup` clears a stuck LOCK, and a lock was not the
-# problem -- internal/migration/migration.go pushes a `failed` event on migration
-# error, and shouldExec re-runs a StepFailed step, so it was already retrying.
+# That collision is not repaired from here, and the CLI does not drop the
+# database to clear it (ADR-079: the destructive reset was removed, and a test
+# forbids DROP DATABASE in that file). There is no upstream remedy either:
+# `zitadel setup cleanup` clears a stuck LOCK, and a lock was not the problem --
+# internal/migration/migration.go pushes a `failed` event on migration error and
+# shouldExec re-runs a StepFailed step, so it was already retrying. What the CLI
+# does instead is non-destructive: `prepareZitadelForRetry` probes the live state
+# and asks ArgoCD for a sync, which under Replace=true below recreates both Jobs
+# so a fresh attempt runs -- a database already damaged this way needs a person.
 serviceAccount:
   annotations: null
 
 configMap:
   annotations: null
+
+# The issuer's Deployment, AFTER the two Jobs.
+#
+# Wave 3 rather than the default 0, which is not a preference: at 0 it shares a
+# wave with the prerequisites, so ArgoCD would wait for the Deployment to become
+# healthy before running the Jobs at 1 and 2 -- and it cannot become healthy
+# until setup has created the schema it starts against.
+annotations:
+  argocd.argoproj.io/sync-wave: "12"
 
 # The login UI is its own Deployment and Service in Zitadel v4. It shares the
 # hostname and takes the longer prefix, which Gateway API matches first.
@@ -291,6 +346,11 @@ login:
 
   configMap:
     annotations: null
+
+  # And the same wave as the issuer's Deployment, for the same reason: at the
+  # default 0 it would have to be healthy before the Jobs it depends on run.
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
 
   gateway:
     httpRoute:
@@ -329,34 +389,38 @@ login:
 initJob:
   backoffLimit: 10
   activeDeadlineSeconds: 600
-  # A FAILED hook must delete itself, or it blocks every later sync.
+  # A STALE TERMINAL JOB must not decide the next sync.
   #
-  # The chart's default policy is `before-hook-creation` alone, which deletes the
-  # previous hook when creating the next one. That covers success and does not
-  # cover failure: a Job left in a terminal Failed state is read by ArgoCD as the
-  # hook's result for the NEXT sync too, so the sync fails without running
-  # anything. Measured on this box -- a requested sync completed in 41ms:
+  # As a hook it did. The chart's default `before-hook-creation` deletes the
+  # previous hook when creating the next one, which covers success and not
+  # failure: a Job left Failed was read by ArgoCD as the hook's result for the
+  # NEXT sync, so the sync finished without running anything. Measured on this
+  # box -- a requested sync completed in 41ms:
   #
   #   PreSync/1 hook Job/zitadel-init (,Failed,Job was active longer than deadline)
   #   "sync/terminate complete" duration=41.670788ms
   #   "Skipping auto-sync: application status is Synced"
   #
-  # Nothing recovers from that. Auto-sync declines because the Application reads
-  # Synced, and every explicit sync re-reads the same stale failure. One Job that
-  # failed once made the identity provider permanently unreachable.
+  # One Job that failed once made the identity provider permanently unreachable.
+  # The hook answer was `hook-failed`, which deleted the Job the moment it failed
+  # and took its logs with it.
   #
-  # `hook-failed` deletes the Job as soon as it fails, so the next sync finds
-  # nothing stale and creates it fresh.
+  # Replace=true is the same guarantee without that cost: each sync recreates the
+  # Job from this manifest, so nothing terminal is ever read as the current
+  # result, and a failure keeps its pod and its logs until the next attempt.
+  # Force=true is what makes it possible at all -- a Job's spec.template is
+  # immutable, so replacing one requires deleting it, and without this a changed
+  # image or deadline would fail the sync for ever.
   #
-  # The cost is real: the failed Job's logs go with it. That is why
-  # zitadelSetupFailure falls back to ArgoCD's own recorded hook message, which
-  # survives the Job -- and why the initContainers above matter, since a
-  # credential or schema failure now surfaces in the pod that failed rather than
-  # three namespaces away.
+  # The three helm.sh keys are set to null rather than omitted: Helm deep-merges
+  # maps, so only null removes the chart's default (see the block above
+  # serviceAccount). What remains is an ordinary Sync-phase resource at wave 1.
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation,hook-failed
-    helm.sh/hook-weight: "1"
+    helm.sh/hook: null
+    helm.sh/hook-delete-policy: null
+    helm.sh/hook-weight: null
+    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 
 # Clear a migration left half-started before attempting setup again.
 #
@@ -394,11 +458,14 @@ setupJob:
   # Same reasoning as initJob above.
   backoffLimit: 10
   activeDeadlineSeconds: 600
-  # Same delete policy, and the same reason. Weight 2 keeps it after init.
+  # Same treatment, same reasons. Wave 2 keeps it after init, which is the
+  # ordering hook weight 2 used to express.
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation,hook-failed
-    helm.sh/hook-weight: "2"
+    helm.sh/hook: null
+    helm.sh/hook-delete-policy: null
+    helm.sh/hook-weight: null
+    argocd.argoproj.io/sync-wave: "11"
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
   initContainers:
     # Guarantee the schema exists before setup looks for it.
     #

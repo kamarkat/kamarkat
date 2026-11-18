@@ -2197,34 +2197,46 @@ func (o *Orchestrator) zitadelSetupFailure(ctx context.Context, kubeconfig strin
 		return "zitadel-setup last said: " + lines[len(lines)-1]
 	}
 
-	// The Job may be gone. Its delete policy carries `hook-failed`, because a
-	// failed hook Job left in place is read as the hook's result by every later
-	// sync and wedges the Application permanently -- so a failure deletes itself,
-	// and takes its logs with it.
+	// The Job's logs are usually there now: it is a Sync-phase resource replaced
+	// by the next sync rather than a hook deleted the moment it failed, so a
+	// failure keeps its pod until something tries again.
 	//
-	// ArgoCD's own record of why the hook failed outlives the Job, so ask it
-	// rather than reporting "no readable logs", which says nothing and was what
-	// this returned for a box whose hooks had been cleaned up exactly as designed.
-	if msg := o.zitadelHookFailure(ctx, kubeconfig); msg != "" {
+	// It can still be absent -- the Job may not have been created at all, which is
+	// what happens when an earlier wave failed -- and ArgoCD's own record outlives
+	// any of it. Asked rather than reporting "no readable logs", which says
+	// nothing and is what this returned for a box whose hooks had been cleaned up
+	// exactly as designed.
+	if msg := o.zitadelSyncFailure(ctx, kubeconfig); msg != "" {
 		return msg
 	}
-	return "zitadel-setup produced no readable logs and ArgoCD recorded no hook failure; " +
+	return "zitadel-setup produced no readable logs and ArgoCD recorded no failure; " +
 		"check `kubectl get application zitadel -n platform-ops -o jsonpath='{.status.operationState}'`"
 }
 
-// zitadelHookFailure returns ArgoCD's own record of a failed PreSync hook.
+// zitadelSyncFailure returns ArgoCD's own record of why the last sync failed.
 //
-// Survives the Job, which `hook-failed` deletes as soon as it fails.
-func (o *Orchestrator) zitadelHookFailure(ctx context.Context, kubeconfig string) string {
-	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-		"get", "application", "zitadel", "-n", "platform-ops", "-o",
-		`jsonpath={range .status.operationState.syncResult.resources[?(@.hookPhase=="Failed")]}{.name}: {.message}{"\n"}{end}`).Output()
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return "ArgoCD recorded the hook failure: " + line
+// Two shapes, because init and setup are no longer PreSync hooks (see the
+// Jobs' sync waves in the chart's values). A hook recorded hookPhase=Failed; a
+// Sync-phase resource records status=SyncFailed, and a Job that applied cleanly
+// and then failed is reported by the OPERATION, which stops at the wave the Job
+// is in. All three are asked for, in that order, because this is the fallback
+// for a Job whose logs could not be read and returning "" says nothing.
+func (o *Orchestrator) zitadelSyncFailure(ctx context.Context, kubeconfig string) string {
+	for _, q := range []struct{ what, jsonpath string }{
+		{"the hook failure", `{range .status.operationState.syncResult.resources[?(@.hookPhase=="Failed")]}{.name}: {.message}{"\n"}{end}`},
+		{"the sync failure", `{range .status.operationState.syncResult.resources[?(@.status=="SyncFailed")]}{.name}: {.message}{"\n"}{end}`},
+		{"the operation's outcome", `{.status.operationState.message}`},
+	} {
+		out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
+			"get", "application", "zitadel", "-n", "platform-ops", "-o",
+			"jsonpath="+q.jsonpath).Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				return "ArgoCD recorded " + q.what + ": " + line
+			}
 		}
 	}
 	return ""

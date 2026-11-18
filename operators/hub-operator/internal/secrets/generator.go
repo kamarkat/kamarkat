@@ -4,13 +4,18 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"github.com/kamarkat/kamarkat/internal/platform/escrow"
+	"math/big"
 	"time"
+
+	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -510,4 +515,131 @@ func GenerateBootstrapSecrets(ctx context.Context, dataNamespace, securityNamesp
 	result.InfisicalPostgresConnection = infisicalPostgresConn
 
 	return result, nil
+}
+
+// ============================================================================
+// THE LOGIN SERVICE'S SIGNING KEYPAIR
+// ============================================================================
+
+// The material the identity provider's login service signs its system-API
+// assertions with, and that the issuer verifies them against.
+//
+// MINTED HERE BECAUSE NOTHING ELSE CAN. `login.loginServiceKeySecretName` names a
+// Secret the platform owns, which is what stops the chart minting a fresh pair on
+// every ArgoCD render -- its reuse branch is guarded by Helm's `lookup`, which is
+// always empty under `helm template` (five hours of AUTH-7fs1e on 2026-10-30,
+// because the issuer reads SystemAPIUsers once at startup and the login service
+// had moved on). Naming the Secret left a clean box with no producer at all: the
+// ExternalSecret reads two Infisical keys, and the only thing that ever wrote them
+// was an upload of the Secret the chart no longer renders.
+//
+// The SHAPE is the chart's, deliberately: RSA 2048, a self-signed certificate
+// whose subject and only DNS name are "login-service", valid for ten years, and a
+// PKCS#1 private key. Zitadel takes the public key from the certificate and the
+// login service signs RS256 with the key (apps/login/src/lib/server/api.ts hands
+// the PEM to newSystemToken, whose own tests cover `BEGIN RSA PRIVATE KEY`), so
+// the encoding is part of the contract and not a detail.
+//
+// Nothing validates the name: this is an assertion-signing credential, not a TLS
+// server identity. The ten years are what make a FROZEN pair safe to keep -- a
+// renewal the login service adopts before the issuer restarts fails every
+// assertion in between, which is the incident above.
+const (
+	loginServiceCommonName   = "login-service"
+	loginServiceKeyBits      = 2048
+	loginServiceCertValidFor = 3650 * 24 * time.Hour
+)
+
+// GenerateLoginServiceKeyPair mints a new pair.
+func GenerateLoginServiceKeyPair() (certPEM string, keyPEM string, err error) {
+	key, err := rsa.GenerateKey(rand.Reader, loginServiceKeyBits)
+	if err != nil {
+		return "", "", fmt.Errorf("generate the login service's RSA key: %w", err)
+	}
+	certPEM, err = selfSignLoginServiceCertificate(key)
+	if err != nil {
+		return "", "", err
+	}
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}))
+	return certPEM, keyPEM, nil
+}
+
+// ReissueLoginServiceCertificate issues a new certificate over an EXISTING key.
+//
+// The repair for a stored key whose certificate is gone. It is a repair rather
+// than a regeneration because the certificate only carries the key's public half:
+// re-issuing over the same key produces a certificate the running issuer already
+// trusts, while minting a new pair would not.
+func ReissueLoginServiceCertificate(keyPEM string) (string, error) {
+	key, err := parseLoginServiceKey(keyPEM)
+	if err != nil {
+		return "", err
+	}
+	return selfSignLoginServiceCertificate(key)
+}
+
+// ValidateLoginServiceKeyPair reports whether a stored certificate and key are
+// each other's.
+//
+// A pair that does not match cannot be repaired by regenerating either half: the
+// certificate the issuer trusts and the key the login service signs with have
+// already diverged, and only replacing both together is coherent.
+func ValidateLoginServiceKeyPair(certPEM string, keyPEM string) error {
+	if _, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM)); err != nil {
+		return fmt.Errorf("the stored login service certificate and private key are not a pair: %w", err)
+	}
+	return nil
+}
+
+// parseLoginServiceKey accepts either PEM encoding of an RSA key.
+//
+// PKCS#1 is what this mints and what the chart minted before it; PKCS#8 is
+// accepted so a pair stored by anything else is read rather than refused. A key
+// that is not RSA IS refused: the assertions are RS256.
+func parseLoginServiceKey(keyPEM string) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(keyPEM))
+	if block == nil {
+		return nil, fmt.Errorf("the stored login service private key is not PEM")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse the stored login service private key: %w", err)
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("the stored login service private key is %T, and the assertions "+
+			"it signs are RS256", parsed)
+	}
+	return key, nil
+}
+
+func selfSignLoginServiceCertificate(key *rsa.PrivateKey) (string, error) {
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", fmt.Errorf("draw a serial number for the login service certificate: %w", err)
+	}
+	now := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: loginServiceCommonName},
+		DNSNames:     []string{loginServiceCommonName},
+		// An hour of slack, because a certificate that is not yet valid on a node
+		// whose clock runs slightly behind fails exactly like a wrong one.
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(loginServiceCertValidFor),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		return "", fmt.Errorf("self-sign the login service certificate: %w", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), nil
 }

@@ -597,3 +597,66 @@ found in the wrong place, by someone reading the wrong logs.
 - ADR-055: Boundary Activation — amended to require a readiness contract per
   boundary. The same rule one level up: this ADR governs a phase's own
   postcondition, that one governs what the next boundary may assume.
+
+## Amendment (2026-11-18): Zitadel's initialisation is Sync-phase work, ordered by waves — **Accepted** (implemented 2026-11-18)
+
+**This supersedes the hook decisions above**, specifically *"A failed hook blocks every
+later sync unless it deletes itself"* and its remedy `hook-delete-policy:
+before-hook-creation,hook-failed`. The incident evidence those sections carry stands
+unchanged and is why the new arrangement has the shape it does.
+
+### What the hook arrangement could not do
+
+`3fad010a` moved Zitadel's long-lived prerequisites — the ServiceAccounts, Role,
+RoleBinding and config ConfigMaps — out of the hook phase, because a hook resource is
+deleted at the start of every sync (ArgoCD's default delete policy is
+`BeforeHookCreation`), and a sync that deleted the ServiceAccount a pending Job was
+waiting to use made the Job unstartable. That fix was correct and remains in force.
+
+It left an arrangement no clean install can satisfy. ArgoCD runs every PreSync hook to
+completion before entering Sync, so `zitadel-init` waited for a ServiceAccount and a
+ConfigMap that only Sync would create:
+
+```
+Error creating: pods "zitadel-init-" is forbidden: error looking up service account
+platform-identity/zitadel: serviceaccount "zitadel" not found
+```
+
+The message is the same one quoted earlier in this ADR, for the opposite reason — there
+the account had been deleted, here it had never been created. Only a first install of
+this component reaches it, which is why it surfaced on a tenant's Day-0 (2026-11-18) and
+not on a box that already had the namespace populated.
+
+### Decision
+
+1. **Long-lived prerequisites are ordinary GitOps-managed resources.** Unchanged from
+   `3fad010a`; no Helm lifecycle hook may be restored to them.
+2. **`zitadel-init` and `zitadel-setup` are ordinary Sync-phase resources.** Their
+   `helm.sh/hook*` annotations are removed through the chart's own values.
+3. **Resource-level sync waves order initialisation inside the one Zitadel
+   Application**: prerequisites at 0, init at 10, setup at 11, both Deployments at 12.
+   Permitted by ADR-021's 2026-10-29 amendment, and numbered inside ADR-029 §4's
+   existing "dependent workloads at 10+" tier. **ADR-029 is not amended**: no
+   platform-wide initialisation tier is created for one component's sequence.
+4. **`Force=true,Replace=true` on both Jobs.** A Job's `spec.template` is immutable, so
+   a changed image or deadline would otherwise fail the sync permanently; replacement
+   also means no terminal Job is ever read as the current result, which is what
+   `hook-failed` was for.
+5. **A failed Job and its logs remain** until a later sync replaces it. This is the cost
+   `hook-failed` paid and no longer has to be paid.
+6. **The CLI requests a synchronisation and never deletes a Job.** Unchanged, and the
+   prohibition above on deleting hook Jobs applies to these resources too.
+7. **A Job's recorded success is not evidence that the database is still initialised.**
+   Replacement removes the stale completion record *when a synchronisation actually
+   runs*; it does not make every stale database or failed migration self-recovering, and
+   it confers no new destructive power. The prohibition against dropping a Zitadel
+   database on an inferred incomplete-initialisation signature stands in full.
+8. **The CLI's live postconditions remain authoritative.** `awaitZitadelReady`'s probe,
+   not a Job's status and not this phase's own record, decides whether the identity
+   provider serves.
+
+### Scope
+
+This amendment governs the Zitadel component's resource lifecycle. It changes nothing
+about the phase re-entrancy contract this ADR exists for, and nothing about any other
+component's Helm hooks.

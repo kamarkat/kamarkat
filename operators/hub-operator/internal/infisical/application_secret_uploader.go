@@ -12,8 +12,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -216,6 +219,142 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 				}
 				logger.Info("Generated and uploaded Ed25519 DKIM key pair", "selector", secretDef.Selector,
 					"privateKey", secretDef.PrivateKeyKey, "publicKey", secretDef.PublicKeyKey)
+				successCount++
+			}
+			continue
+		}
+
+		// ====================================================================
+		// X.509 KEY PAIR GENERATION (the login service's signing pair)
+		// ====================================================================
+		// The same five-case model as above, with one difference that matters: the
+		// public half is a CERTIFICATE over the private key, so a stored key whose
+		// certificate is missing can be REPAIRED -- re-issuing over that key yields
+		// a certificate carrying the same public key, which a running issuer
+		// already trusts. A certificate without its key cannot be repaired at all.
+		if secretDef.KeyType == "x509" {
+			keyExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+			if err != nil {
+				logger.Error(err, "Failed to check if the private key exists in Infisical", "key", secretDef.PrivateKeyKey)
+				failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+				continue
+			}
+			certExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+			if err != nil {
+				logger.Error(err, "Failed to check if the certificate exists in Infisical", "key", secretDef.PublicKeyKey)
+				failedKeys = append(failedKeys, secretDef.PublicKeyKey)
+				continue
+			}
+
+			switch {
+			case keyExists && certExists:
+				keyVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				if err != nil {
+					logger.Error(err, "Failed to read the stored private key for validation", "key", secretDef.PrivateKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				certVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+				if err != nil {
+					logger.Error(err, "Failed to read the stored certificate for validation", "key", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
+					continue
+				}
+				// Refused rather than replaced. Both halves are already in use --
+				// the issuer trusts the certificate and the login service signs
+				// with the key -- so minting a new pair over a mismatch would
+				// change what BOTH of them hold without either being restarted.
+				if err := secrets.ValidateLoginServiceKeyPair(certVal, keyVal); err != nil {
+					logger.Error(err, "The stored login service pair is inconsistent — refusing to mutate it",
+						"privateKey", secretDef.PrivateKeyKey, "certificate", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey, secretDef.PublicKeyKey)
+					continue
+				}
+				logger.Info("The login service keypair exists and is consistent, skipping",
+					"privateKey", secretDef.PrivateKeyKey)
+				skippedCount++
+				successCount++
+				continue
+
+			case keyExists && !certExists:
+				keyVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				if err != nil {
+					logger.Error(err, "Failed to read the private key to re-issue its certificate", "key", secretDef.PrivateKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				certPEM, err := secrets.ReissueLoginServiceCertificate(keyVal)
+				if err != nil {
+					logger.Error(err, "Failed to re-issue the certificate over the stored private key", "key", secretDef.PrivateKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
+					logger.Error(err, "Failed to upload the re-issued certificate to Infisical", "key", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
+					continue
+				}
+				logger.Info("Re-issued the login service certificate over its existing private key",
+					"certificate", secretDef.PublicKeyKey)
+				successCount++
+
+			case !keyExists && certExists:
+				// Unrecoverable, and not something to paper over: a certificate
+				// with no private key cannot sign, and minting a pair here would
+				// publish a certificate the issuer has not been restarted to trust.
+				logger.Error(fmt.Errorf("the certificate exists but its private key is missing"),
+					"The login service keypair is in an inconsistent state. The private key cannot be "+
+						"derived from the certificate: delete the certificate to have both minted again, "+
+						"which costs a restart of the issuer and of the login service",
+					"privateKey", secretDef.PrivateKeyKey, "certificate", secretDef.PublicKeyKey)
+				failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+				continue
+
+			default:
+				// ADR-003 §1: "it must never silently regenerate a secret that may be
+				// in use". An empty store does not say which of the two this is, so
+				// the delivered Secret is asked -- it is Retained, so it outlives the
+				// Infisical entry and the login service keeps signing with it.
+				//
+				// Refused, not adopted: reading the pair back out and publishing it
+				// would make a Kubernetes Secret the System of Record (ADR-003's
+				// Boundary Rules) and would re-create the second writer this entry
+				// replaced. The remedy is a person's: delete the Secret to have a new
+				// pair minted and accept the restart, or restore the store from the
+				// value that Secret still holds.
+				if inUse, err := u.deliveredSecretExists(ctx, secretDef.DeliveredSecret); err != nil {
+					logger.Error(err, "Could not establish whether the keypair is already in use; refusing to generate",
+						"secret", secretDef.DeliveredSecret)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				} else if inUse {
+					logger.Error(fmt.Errorf("%s exists while Infisical holds neither half of the pair",
+						secretDef.DeliveredSecret),
+						"Refusing to mint a keypair that is already in use: the delivered Secret is Retained, "+
+							"so the login service is still signing with it and a new pair would be rejected by "+
+							"the running issuer until both are restarted (ADR-060, AUTH-7fs1e)",
+						"privateKey", secretDef.PrivateKeyKey, "certificate", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				certPEM, keyPEM, err := secrets.GenerateLoginServiceKeyPair()
+				if err != nil {
+					logger.Error(err, "Failed to generate the login service keypair")
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey, keyPEM); err != nil {
+					logger.Error(err, "Failed to upload the private key to Infisical", "key", secretDef.PrivateKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
+					logger.Error(err, "Failed to upload the certificate to Infisical", "key", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
+					continue
+				}
+				logger.Info("Generated and uploaded the login service keypair",
+					"privateKey", secretDef.PrivateKeyKey, "certificate", secretDef.PublicKeyKey)
 				successCount++
 			}
 			continue
@@ -635,4 +774,35 @@ func hexValueIsWellFormed(value string, hexBytes int) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+// deliveredSecretExists reports whether the Secret an entry names is present.
+//
+// "" is not in use: an entry that names no delivered Secret makes no claim about one,
+// and this must not invent a reason to refuse.
+//
+// Uncached, because cmd/main.go's cache transform strips .data from Secrets that are
+// not labelled managed-by=zero-ops-hub-cli -- and the keys are what tell a delivered
+// pair apart from an empty placeholder. A read that FAILS is returned as an error
+// rather than as "absent": absent authorises generation, and that is not a conclusion
+// to draw from an API call that did not answer.
+func (u *ApplicationSecretUploader) deliveredSecretExists(ctx context.Context, ref string) (bool, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false, nil
+	}
+	namespace, name, found := strings.Cut(ref, "/")
+	if !found || namespace == "" || name == "" {
+		return false, fmt.Errorf("%q is not a <namespace>/<name> reference", ref)
+	}
+	var secret corev1.Secret
+	if err := u.uncachedK8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read %s: %w", ref, err)
+	}
+	// Present but empty is not in use. ESO creates the Secret before it has data on
+	// a first sync, and refusing over that would be refusing over its own placeholder.
+	return len(secret.Data) > 0, nil
 }

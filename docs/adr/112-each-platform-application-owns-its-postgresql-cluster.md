@@ -83,6 +83,7 @@ application's cluster:
 * a `Pooler` only where the application needs one;
 * a NetworkPolicy admitting its application, the operator, and the Support Agent on the
   metrics port only -- and nothing else;
+  <!-- "the operator" is read as two: see the 2026-11-18 amendment. -->
 * its own object store, archive identity, backup schedule and retention (ADR-014 addendum 3);
 * a `<cluster>-metrics` Service over its instance exporter, so the backup evidence ADR-014
   makes the platform accountable for has a source per cluster (ADR-077, collector
@@ -288,7 +289,7 @@ rows were missed on the first pass.
 | `certificates.serverAltDNSNames` | none | it holds only Pooler DNS names, so it goes with the Pooler |
 | `Pooler` | none | §2: an application connects to its own cluster directly |
 | Password-rotation `Job` | none | the Job existed because `app`, the shared cluster's own initdb owner, was in neither the role list nor `managed.roles`. The four's owners are: three in `spec.database.roles` (RoleManager rotates them) and `infisical` under `managed.roles` (CNPG reconciles it from its Secret). Parity by mechanism, not by copying the Job |
-| `bootstrap.initdb.secret` | `infisical-db` only | the bootstrap cluster reads `infisical-db-credentials`, which hub-operator generates during Day-0 before boundary 02 reconciles, so its owner is created with the password Infisical already has. The other three omit it deliberately: their owners' credentials arrive by the ordinary ESO path at boundary 04, and blocking initdb on a Secret boundary 04 delivers would deadlock — the cluster waiting on the Secret, boundary 04 waiting on `DatabaseRolesProvisioned`. Their cost is a window before RoleManager sets the password, and an unused CloudNativePG-generated `<cluster>-app` Secret |
+| `bootstrap.initdb.secret` | `infisical-db` only | the bootstrap cluster reads `infisical-db-credentials`, which hub-operator generates during Day-0 before boundary 02 reconciles, so its owner is created with the password Infisical already has. The other three omit it deliberately: their owners' credentials arrive by the ordinary ESO path at boundary 04, and blocking initdb on a Secret boundary 04 delivers would deadlock — the cluster waiting on the Secret, boundary 04 waiting on `DatabaseRolesProvisioned`. Their cost is a window before RoleManager sets the password, and an unused CloudNativePG-generated `<cluster>-app` Secret. (*"at boundary 04"* is corrected by the 2026-11-18 amendment; the decision to omit the field is not) |
 | `bootstrap.initdb.postInitSQL` | none | it existed to create several databases on one cluster. Each of the four hosts one, declared as a `Database` CR — which, unlike `postInitSQL`, reconciles: `postInitSQL` runs once at initdb and can never repair an existing cluster |
 
 **The readiness gate is derived, not listed.** `control-plane-db-credentials` and
@@ -426,3 +427,66 @@ methods exist rather than one with a flag.
 - ADR-092: Recovery is exceptional
 - ADR-109: The credit authority
 - ADR-111: A hub is replaced, not upgraded
+
+## Amendment (2026-11-18): where a role credential ships, and which operator reaches the database — **Accepted** (implemented 2026-11-18; the NetworkPolicy allowance shipped in 0.3.22 and the credential placement in 0.3.21, both verified on a running box)
+
+Two statements of implementation state above no longer describe the manifests. Both were
+found by a tenant's first bootstrap, each having held a boundary for its full budget.
+
+### A. A role credential ships with its database, in boundary 02
+
+§8's `bootstrap.initdb.secret` row says the three non-bootstrap owners' credentials
+*"arrive by the ordinary ESO path at boundary 04"*. They do not, and for three of the
+four they never did: `hub-billing-db-credentials`, `hub-credits-db-credentials` and
+`hub-grafana-db-credentials` ship inside their application's own `database/`
+kustomization, which is a boundary-02 component. Only `zitadel-db-credentials` matched
+the sentence — `4a086204` moved it from the shared `database/` folder into the service's
+own directory, which is a boundary-04 component — and that is exactly the cycle the file
+it lives in had already documented:
+
+```
+boundary 04  requires  the platform's database roles
+  hub_zitadel role     needs platform-identity/zitadel-db-credentials
+    that Secret        shipped by components/04/zitadel-credentials
+```
+
+Phase 1b waits for ALL the credentials the declared roles imply, so one misplaced Secret
+held every role whose credential was present.
+
+**The contract, stated once:**
+
+* **A database-role credential belongs to the application's database component, in
+  boundary 02** — beside the `Cluster`, `Pooler`, `Database`, `ScheduledBackup` and
+  NetworkPolicy §6 already lists. §6's enumeration is extended to name it.
+* **Its target namespace is wherever the consumer reads it**, which is not necessarily
+  the component's destination namespace: `zitadel-db-credentials` is delivered to
+  `platform-identity` by a `platform-data` Application, as the shared `platform-database`
+  app did before the split. A manifest naming its own namespace is applied there.
+* **Role reconciliation stays with the authority the cluster declares** — RoleManager for
+  the three roles, CloudNativePG's `managed.roles` for `infisical`. Unchanged.
+* **Boundary 04 must not own a credential that the database-role readiness condition
+  needs**, because that condition is what gates boundary 04.
+
+This does not touch §7 or Infisical's bootstrap contract: `infisical-db` keeps its
+`bootstrap.initdb.secret`, and relocating the other three clusters' ExternalSecrets does
+not give them that field.
+
+### B. Two operators reach the database, for different reasons
+
+§2's bullet names "the operator" where the platform has two, and the per-application
+policies admitted only one:
+
+| Peer | Port | Why |
+|---|---|---|
+| CloudNativePG controller (`cnpg-system`) | 5432 and 8000 | instance management and status extraction |
+| hub-operator (`platform-ops`, pod-selected) | 5432 | the role reconciliation §2 requires of every cluster |
+| Support Agent (`platform-ops`, pod-selected) | 9187 only | backup evidence (ADR-014, ADR-077) |
+| the application's namespace, and `platform-data` | 5432 | the consumer, and the pooler beside the cluster (§9) |
+
+The shared policy this replaced admitted the whole of `platform-ops` for hub-operator;
+each per-application policy now admits it **by pod selector inside one `from` element**,
+which is narrower than what it restores. No port is added to either operator for
+symmetry: hub-operator has no use for 8000, and the Support Agent has none for 5432.
+
+Until this landed, a dropped SYN — not a refusal — made every role-provisioning pass hang
+about 135 seconds and time out against clusters reporting Healthy.

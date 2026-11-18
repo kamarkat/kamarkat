@@ -203,29 +203,21 @@ var CLISecretMappings = []SecretMapping{
 	// managed Secret then rotates nothing: no new key, no second rollout, no
 	// session disruption.
 	//
-	// Why it is published at all: ArgoCD renders with `helm template`, where
-	// Helm's `lookup` always returns empty, so the chart's reuse branch could
-	// never fire and every sync minted a new keypair (2026-10-30, AUTH-7fs1e for
-	// five hours). The platform owns this credential now.
+	// THE LOGIN SERVICE'S KEYPAIR IS NOT UPLOADED FROM KUBERNETES, and these two
+	// mappings that did it are gone.
 	//
-	// The source Secret disappears once login.loginServiceKeySecretName points
-	// elsewhere and the chart stops rendering it. That is not a problem: the
-	// uploader skips a source Secret that does not exist, and Infisical keeps
-	// what was published.
-	{
-		SourceNamespace: NamespaceIdentity,
-		SourceName:      "zitadel-login-service-key",
-		SourceKey:       "tls.crt",
-		InfisicalKey:    "hub-zitadel-login-service-cert",
-		Description:     "Zitadel login service certificate (the pair the issuer trusts)",
-	},
-	{
-		SourceNamespace: NamespaceIdentity,
-		SourceName:      "zitadel-login-service-key",
-		SourceKey:       "tls.key",
-		InfisicalKey:    "hub-zitadel-login-service-key",
-		Description:     "Zitadel login service private key (the pair the issuer trusts)",
-	},
+	// They read platform-identity/zitadel-login-service-key, which the chart stops
+	// rendering the moment login.loginServiceKeySecretName names a Secret of ours
+	// -- so on a clean box the source never existed, the uploader skipped it as
+	// absent, and the ExternalSecret that delivers the pair had no producer at all.
+	// The login service could not start on any box built since.
+	//
+	// ApplicationSecretMappings now MINTS the pair (KeyType "x509"). Keeping these
+	// as well would make two writers for one value, which is the defect the
+	// API-server encryption key note below records: on a box that still carried the
+	// chart's old Secret, this upload would overwrite the minted pair on the next
+	// reconcile and the issuer would be back to trusting a certificate the login
+	// service no longer holds.
 
 	{
 		SourceNamespace: NamespaceObservability,
@@ -398,16 +390,19 @@ type ApplicationSecretDefinition struct {
 	HexBytes int
 
 	// KeyType, when non-empty, triggers asymmetric key pair generation instead of
-	// password generation. Supported values: "ed25519". When KeyType is set,
-	// PrivateKeyKey and PublicKeyKey specify the two Infisical keys for the pair.
-	// PasswordKey and UsernameKey are ignored for key-pair entries.
+	// password generation. Supported values: "ed25519" and "x509". When KeyType is
+	// set, PrivateKeyKey and PublicKeyKey specify the two Infisical keys for the
+	// pair. PasswordKey and UsernameKey are ignored for key-pair entries.
 	KeyType string
 
 	// PrivateKeyKey is the Infisical key for the PEM-encoded private key
 	// (only used when KeyType != "")
 	PrivateKeyKey string
 
-	// PublicKeyKey is the Infisical key for the base64-encoded public key
+	// PublicKeyKey is the Infisical key for the public half of the pair: the
+	// base64-encoded public key for "ed25519", and the PEM-encoded CERTIFICATE
+	// carrying it for "x509" -- which is the form its consumers read, and the
+	// reason one field serves both.
 	// (only used when KeyType != "")
 	PublicKeyKey string
 
@@ -415,6 +410,27 @@ type ApplicationSecretDefinition struct {
 	// secret material. Stored in the mapping for downstream components to consume.
 	// Only used when KeyType != ""
 	Selector string
+
+	// DeliveredSecret, when non-empty, names the Kubernetes Secret ESO delivers this
+	// value to, as "<namespace>/<name>".
+	//
+	// Its PRESENCE is evidence that the value is in use, and that is the whole of what
+	// it is read for: ADR-003 §1 requires a Generator to FAIL rather than silently
+	// regenerate a secret that may be in use, and an Infisical key that is absent does
+	// not distinguish "never generated" from "generated, then deleted from the store".
+	// A delivered Secret with `deletionPolicy: Retain` outlives the Infisical entry,
+	// so a workload can still be holding the value while the store reads empty.
+	//
+	// It is NOT read as a source. Nothing is copied out of it and it is never written
+	// back to Infisical -- that would make a Kubernetes Secret the System of Record,
+	// which the same ADR forbids (Boundary Rules). The only outcomes are "generate"
+	// and "refuse".
+	//
+	// Unnecessary for an entry carrying EscrowArtifact: the escrow is consulted first
+	// there, so a rebuilt box adopts rather than mints, and generation is already
+	// refused when no escrow answers. This field is that protection for a value whose
+	// loss costs a restart rather than the data it protected.
+	DeliveredSecret string
 
 	// EscrowArtifact, when non-empty, names the escrow artefact this value is kept
 	// under outside the box (ADR-076).
@@ -593,5 +609,32 @@ var ApplicationSecretMappings = []ApplicationSecretDefinition{
 		// above; each spoke reads its own cell copy under the name below.
 		ClusterScopedKey: "AGENTGATEWAY_OIDC_COOKIE_SECRET",
 		Description:      "AgentGateway OIDC session cookie encryption secret (32-byte AES-256-GCM key, hex)",
+	},
+	{
+		// The login service's signing keypair (ADR-060, addendum 2026-10-31).
+		//
+		// Minted here because nothing else can: naming the Secret in the chart's
+		// values is what stopped a fresh pair being minted on every ArgoCD render,
+		// and it also removed the only producer the pair ever had. See
+		// secrets.GenerateLoginServiceKeyPair for the material and why its shape is
+		// the chart's, and zitadel-login-service-key-es.yaml for the delivery.
+		//
+		// x509 rather than ed25519: the issuer verifies the assertion against the
+		// CERTIFICATE it is given in SystemAPIUsers, and the login service signs
+		// RS256.
+		KeyType:       "x509",
+		PrivateKeyKey: "hub-zitadel-login-service-key",
+		PublicKeyKey:  "hub-zitadel-login-service-cert",
+		Description:   "Zitadel login service signing keypair (the pair the issuer trusts)",
+		// The ExternalSecret's target (zitadel-login-service-key-es.yaml), which is
+		// Retained: it survives both the chart and the Infisical entry, and the login
+		// service goes on signing with it. So an empty store is not proof that nothing
+		// holds this pair, and ADR-003 §1 makes that distinction the Generator's
+		// responsibility rather than the operator's.
+		DeliveredSecret: NamespaceIdentity + "/zitadel-login-service-key-managed",
+		// NOT escrowed, which is EscrowArtifact's membership test applied rather
+		// than skipped: losing this pair costs one restart of the issuer and of the
+		// login service, not the data either holds. Compare hub-zitadel-masterkey,
+		// which cannot be regenerated without orphaning every column it encrypted.
 	},
 }

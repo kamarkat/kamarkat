@@ -197,3 +197,45 @@ rehearsed on an isolated cluster before a live one.
 - `scripts/validate/preflight/021-boundary-composition.sh` — five invariants.
 - `docs/Administer/Runbooks/grafana-application-ownership-transfer.md` — the transfer
   of Decision 6, with its evidence requirements.
+
+## Amendment (2026-11-18): the identity provider's retry is bounded, deliberately — **Accepted** (records behaviour shipped since `12d62a37`, 2026-06-12)
+
+The 2026-10-29 amendment's Decision 3 records the retry every boundary carries:
+
+```yaml
+retry:
+  limit: -1
+  backoff: {duration: 5s, factor: 2, maxDuration: 3m}
+```
+
+Boundary 04's multi-source ApplicationSet, which generates the `zitadel` Application,
+carries a different one:
+
+```yaml
+retry:
+  limit: 15
+  backoff: {duration: 30s, maxDuration: 10m}
+```
+
+These are not the same contract, and the difference is kept rather than reconciled.
+
+**Decision: the bounded policy stands for this boundary, and is recorded here as a
+scoped deviation from Decision 3.** Unlimited attempts are right where a failure is a
+missing CRD that another Application will supply — the case Decision 3 argues from. They
+are not right here: the identity provider's initialisation Jobs write to a database, a
+failed attempt can leave state a later attempt must reason about (ADR-079), and an
+attempt costs minutes rather than seconds.
+
+What the deviation must preserve, and does:
+
+* ArgoCD retries a failed synchronisation automatically, without a person.
+* When the attempts are exhausted the failure stays visible: the Application reads
+  Degraded or SyncFailed, and nothing reports success over it.
+* Day-0 may request a further synchronisation when its own live-state checks justify one
+  (`prepareZitadelForRetry`), which is a decision made from the cluster's state rather
+  than from a retry counter.
+* A required identity workload that never serves fails the bootstrap. Boundary 04's
+  readiness gate is `awaitZitadelReady`; exhausted retries do not become a green run.
+
+No retry count or backoff value is changed by this amendment. The numbers above are the
+contract for boundary 04's multi-source set; Decision 3's remain the contract elsewhere.
