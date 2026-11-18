@@ -27,12 +27,15 @@ func NewBootstrapClient(k8sClient, uncachedK8sClient client.Client) *BootstrapCl
 	}
 }
 
-// Bootstrap checks if Infisical has been bootstrapped by the CLI.
-// Returns (true, nil) if bootstrap was performed (legacy — always false now),
-// (false, nil) if already bootstrapped. Day-0 bootstrap is exclusively the
-// CLI's responsibility (ADR-021). The operator must never attempt to create
-// the Infisical org, projects, or master Machine Identity.
-func (bc *BootstrapClient) Bootstrap(ctx context.Context) (bool, error) {
+// Bootstrap reports whether the CLI has completed Day-0 bootstrap.
+//
+// It only looks. Day-0 is exclusively the CLI's responsibility (ADR-021) and the
+// operator must never create the Infisical organisation, projects or master
+// Machine Identity -- so this returns an error or nothing, where it used to
+// return a bool that said whether IT had bootstrapped. That bool was always
+// false, and the caller still logged "Infisical bootstrapped successfully" on
+// the branch it could never take.
+func (bc *BootstrapClient) Bootstrap(ctx context.Context) error {
 	logger := log.FromContext(ctx)
 
 	infisicalAuth := &corev1.Secret{}
@@ -43,42 +46,16 @@ func (bc *BootstrapClient) Bootstrap(ctx context.Context) (bool, error) {
 
 	if err == nil {
 		logger.Info("infisical-auth secret exists, bootstrap already completed by CLI")
-		return false, nil
+		return nil
 	}
 
 	if !errors.IsNotFound(err) {
-		return false, fmt.Errorf("failed to check infisical-auth secret: %w", err)
+		return fmt.Errorf("failed to check infisical-auth secret: %w", err)
 	}
 
 	// infisical-auth secret not found — the CLI has not run yet.
 	// The operator must wait for the CLI to complete Day-0 bootstrap.
 	logger.Info("infisical-auth secret not found — waiting for CLI Day-0 bootstrap (hub init-secrets)")
-	return false, nil
-}
-
-// createInfisicalAuthSecret creates the infisical-auth secret for ESO
-func (bc *BootstrapClient) createInfisicalAuthSecret(ctx context.Context, clientID, clientSecret string) error {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      SecretInfisicalAuth,
-			Namespace: NamespaceOps,
-			Labels: map[string]string{
-				LabelManagedBy: ValueManagedBy,
-				LabelComponent: ValueBootstrap,
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			KeyClientID:     clientID,
-			KeyClientSecret: clientSecret,
-			"clientSecret":  clientSecret, // pki-issuer v0.2.0 compat
-		},
-	}
-
-	if err := bc.k8sClient.Create(ctx, secret); err != nil {
-		return fmt.Errorf("failed to create secret: %w", err)
-	}
-
 	return nil
 }
 

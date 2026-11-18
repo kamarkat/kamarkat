@@ -861,9 +861,11 @@ func (r *EphemeralJobReconciler) fireLifecycleCallback(
 		// reconcile-driven duplicate but cannot close the crash window between
 		// the receiver committing and this operator persisting that condition.
 		// A receiver that ignores this field is unprotected against redelivery.
-		// The receiver's deduplication key for THIS event (ADR-052 §16.2). Named
-		// terminalEventId for compatibility with receivers that already read it;
-		// it now carries ready events too, which are not terminal.
+		//
+		// The NAME is wrong and deliberately unchanged: it carries ready events too,
+		// which are not terminal. Renaming it is a coordinated change with the
+		// readers in waypoint (waypoint-sdk/src/sandbox-lifecycle.ts,
+		// sandbox-k8s/src/index.ts), not a rename here.
 		"terminalEventId": eventID,
 		"requestId":       ej.Spec.RequestID,
 		// WHICH INCARNATION. A caller may recycle a workload by deleting the

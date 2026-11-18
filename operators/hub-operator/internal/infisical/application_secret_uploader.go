@@ -72,13 +72,12 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 
 	// Get project slug from environment variable (set via configmap hub-bootstrap-config)
 	// Use secrets project for application secrets (hub-secrets is type "secret-manager")
-	// Fall back to SECRET_STORE_PROJECT_SLUG for backward compatibility
+	// No fallback to SECRET_STORE_PROJECT_SLUG: that names the cert-manager
+	// project, which holds no secrets and cannot hold an environment to read them
+	// in. It is set for every box, so its absence is a broken deployment.
 	projectSlug := os.Getenv("SECRET_STORE_SECRETS_PROJECT_SLUG")
 	if projectSlug == "" {
-		projectSlug = os.Getenv("SECRET_STORE_PROJECT_SLUG")
-	}
-	if projectSlug == "" {
-		return fmt.Errorf("neither SECRET_STORE_SECRETS_PROJECT_SLUG nor SECRET_STORE_PROJECT_SLUG environment variable is set")
+		return fmt.Errorf("SECRET_STORE_SECRETS_PROJECT_SLUG is not set")
 	}
 
 	environmentSlug, err := managementEnvironmentSlug()

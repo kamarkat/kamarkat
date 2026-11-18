@@ -172,14 +172,6 @@ func ResolvePlacement(class string) (Placement, bool) {
 
 // Workspace volume constants (ADR-052 §14, §14.2).
 const (
-	// labelWorkspacePVC marks the PVCs the workspace reaper (§14) is allowed to
-	// consider. It exists so that reaper can never select a PVC this operator
-	// did not author.
-	//
-	// §14.2: This label is retained for backward compatibility but PVCs are no
-	// longer created by the operator. Workspaces now use emptyDir volumes.
-	labelWorkspacePVC = "compute.nutgraf.in/workspace"
-
 	// annotationWorkspaceID records the workspace id on resources for
 	// observability.
 	annotationWorkspaceID = "compute.nutgraf.in/workspace-id"

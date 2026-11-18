@@ -767,6 +767,38 @@ func runBootstrap(ctx context.Context, podName string, admin Administrator) (*bo
 	return cachedBootstrap, nil
 }
 
+// findProjectBySlug answers whether this organisation already holds the project.
+//
+// One function for both callers, because what drifts is the listing's shape, and
+// a second copy of it would drift separately. An empty listing is "not found"
+// rather than an error: an administrator's JWT without project membership sees
+// nothing, which is why createProject still consults the ConfigMap after this.
+func findProjectBySlug(ctx context.Context, podName, adminJWT, projectSlug string) (string, bool, error) {
+	listOut, err := kubectlExec(ctx, podName,
+		"curl", "-s",
+		"http://localhost:"+infisicalPort+PathProjects,
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return "", false, fmt.Errorf("list projects: %w", err)
+	}
+	var listResp struct {
+		Projects []struct {
+			ID   string `json:"id"`
+			Slug string `json:"slug"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listResp); err != nil {
+		return "", false, fmt.Errorf("parse project listing: %w\ndata: %s", err, listOut)
+	}
+	for _, p := range listResp.Projects {
+		if p.Slug == projectSlug {
+			return p.ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 func createProject(ctx context.Context, podName, adminJWT, projectSlug, projectType string) (string, string, error) {
 	payload := map[string]any{
 		"projectName": projectSlug,
@@ -789,40 +821,52 @@ func createProject(ctx context.Context, podName, adminJWT, projectSlug, projectT
 		return "", "", fmt.Errorf("create project failed: %w", err)
 	}
 	if status < 200 || status >= 300 {
+		// A SLUG ALREADY TAKEN IS THIS BOX'S OWN PROJECT, on every run after the
+		// first. Upstream answers that with 400 and "already exists" -- not the 409
+		// the reconcile below was written for -- so returning here made that
+		// reconcile unreachable, and a resume spent ten minutes retrying:
+		//
+		//   create project "hub-platform": HTTP 400, {"message":"A project with the
+		//   slug \"hub-platform\" already exists in your organization..."}
+		//
+		// Matched on the message, exactly as ensureEnvironment matches it, because
+		// 400 also carries refusals that are real -- a payload upstream rejects must
+		// not be read as "someone got here first".
+		if strings.Contains(output, "already exists") {
+			id, found, findErr := findProjectBySlug(ctx, podName, adminJWT, projectSlug)
+			if findErr != nil {
+				return "", "", fmt.Errorf("project %q already exists and finding it failed: %w",
+					projectSlug, findErr)
+			}
+			if found {
+				fmt.Printf("[infisical-bootstrap] Project already exists: %s (id=%s)\n", projectSlug, id)
+				return id, projectSlug, nil
+			}
+			// Taken by a project this administrator cannot see. Reported rather than
+			// worked around under another name: two projects would split the box's
+			// secrets across two stores, and the second would look healthy.
+			return "", "", fmt.Errorf("the slug %q is taken in this organisation, but no project "+
+				"with it is visible to this administrator. Resolve it in Infisical: a project "+
+				"under a different name would split this box's secrets in two", projectSlug)
+		}
 		// Report the real failure rather than letting the error body unmarshal into
 		// an empty struct and resurface as "returned empty ID".
 		return "", "", apiError(fmt.Sprintf("create project %q", projectSlug), status, output)
 	}
 
-	// 409 Conflict means project already exists — reconcile by fetching its ID
 	var projectResp createProjectResponse
 	if err := json.Unmarshal([]byte(output), &projectResp); err != nil {
 		return "", "", fmt.Errorf("failed to parse create project response: %w\nresponse: %s", err, output)
 	}
 	if projectResp.Project.ID == "" {
-		// Could be a 409 — try listing projects to find the slug
-		listOut, listErr := kubectlExec(ctx, podName,
-			"curl", "-s",
-			"http://localhost:"+infisicalPort+PathProjects,
-			"-H", "Authorization: Bearer "+adminJWT,
-		)
-		if listErr != nil {
-			return "", "", fmt.Errorf("create project ambiguous (empty ID) and list failed: %w", listErr)
+		// A 2xx that named no project. The same lookup answers it.
+		id, found, findErr := findProjectBySlug(ctx, podName, adminJWT, projectSlug)
+		if findErr != nil {
+			return "", "", fmt.Errorf("create project ambiguous (empty ID) and lookup failed: %w", findErr)
 		}
-		var listResp struct {
-			Projects []struct {
-				ID   string `json:"id"`
-				Slug string `json:"slug"`
-			} `json:"projects"`
-		}
-		if err := json.Unmarshal([]byte(listOut), &listResp); err != nil {
-			return "", "", fmt.Errorf("create project ambiguous (empty ID) and list parse failed: %w\ndata: %s", err, listOut)
-		}
-		for _, p := range listResp.Projects {
-			if p.Slug == projectSlug {
-				fmt.Printf("[infisical-bootstrap] Project already exists: %s (id=%s)\n", p.Slug, p.ID)
-				return p.ID, p.Slug, nil
-			}
+		if found {
+			fmt.Printf("[infisical-bootstrap] Project already exists: %s (id=%s)\n", projectSlug, id)
+			return id, projectSlug, nil
 		}
 
 		// Project listing returned empty (user JWT may not have project
@@ -853,22 +897,50 @@ func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projec
 	if err != nil {
 		return "", "", "", fmt.Errorf("create identity failed: %w", err)
 	}
-	if status < 200 || status >= 300 {
-		return "", "", "", apiError("create machine identity", status, output)
-	}
-
-	var identityResp createIdentityResponse
-	if err := json.Unmarshal([]byte(output), &identityResp); err != nil {
-		return "", "", "", fmt.Errorf("failed to parse create identity response: %w\nresponse: %s", err, output)
-	}
-	identityID := identityResp.Identity.ID
-	if identityID == "" {
-		// Identity may already exist — try finding it by name
+	// The identity's id, from whichever of three answers upstream gave.
+	//
+	// A name already taken is this box's own identity on every run after the first,
+	// and upstream reports that as a non-2xx -- so refusing every non-2xx here
+	// would make the lookup unreachable, which is exactly the defect that cost a
+	// resume ten minutes on "create project". Matched on both wordings this file
+	// already matches (Conflict, already exists), because the status alone does not
+	// distinguish a duplicate from a payload upstream rejects.
+	//
+	// An adopted identity continues through the same universal-auth and
+	// client-secret steps below: it is the credentials this run needs, not the
+	// identity object, and a run that skipped them would hand Day-0 an empty secret.
+	var identityID string
+	switch {
+	case status < 200 || status >= 300:
+		if !strings.Contains(output, "Conflict") && !strings.Contains(output, "already exists") {
+			return "", "", "", apiError("create machine identity", status, output)
+		}
 		found, findErr := findIdentityByName(ctx, podName, adminJWT, identityName, orgID)
 		if findErr != nil {
-			return "", "", "", fmt.Errorf("create identity returned empty ID and lookup failed: %w", findErr)
+			return "", "", "", fmt.Errorf("identity %q already exists and finding it failed: %w",
+				identityName, findErr)
 		}
+		if found == "" {
+			return "", "", "", fmt.Errorf("the identity name %q is taken in this organisation, but "+
+				"no identity with it is visible to this administrator; resolve it in Infisical",
+				identityName)
+		}
+		fmt.Printf("[infisical-bootstrap] Identity already exists: %s\n", identityName)
 		identityID = found
+	default:
+		var identityResp createIdentityResponse
+		if err := json.Unmarshal([]byte(output), &identityResp); err != nil {
+			return "", "", "", fmt.Errorf("failed to parse create identity response: %w\nresponse: %s", err, output)
+		}
+		identityID = identityResp.Identity.ID
+		if identityID == "" {
+			// A 2xx that named no identity. The same lookup answers it.
+			found, findErr := findIdentityByName(ctx, podName, adminJWT, identityName, orgID)
+			if findErr != nil {
+				return "", "", "", fmt.Errorf("create identity returned empty ID and lookup failed: %w", findErr)
+			}
+			identityID = found
+		}
 	}
 	fmt.Printf("[infisical-bootstrap] Machine Identity: id=%s\n", identityID)
 
@@ -1385,23 +1457,29 @@ func ensureEnvironment(ctx context.Context, podName, adminJWT, projectID, slug s
 	return apiError("create "+op, status, output)
 }
 
-// ensureManagementScope creates the box's declared management scope in both
-// projects a hub addresses as a secret scope.
+// ensureManagementScope creates the box's declared management scope in the one
+// project that can hold it.
 //
-// Both, because both are read as one: the hub's secrets live in hub-secrets, and
-// GetInfisicalConfig falls back to SECRET_STORE_PROJECT_SLUG for a box that carries
-// only the cert project's slug. An environment missing from either project is a
-// reader resolving nothing, so neither is left to chance.
-func ensureManagementScope(ctx context.Context, podName, adminJWT, certProjectID, secretsProjectID string) error {
+// The secrets project only. An environment is a secret-manager concept and
+// upstream refuses it outright for a project of any other type:
+//
+//	create environment "management" in project <hub-platform>: HTTP 400,
+//	{"message":"The project is of type cert-manager. Operations of type
+//	secret-manager are not allowed."}
+//
+// This used to call both, to serve a reader that fell back to the cert project's
+// slug when the secrets slug was absent. That fallback could never have worked --
+// a cert-manager project holds no secrets, and now demonstrably no environment to
+// read them in -- so it is gone from the readers as well. The secrets slug is
+// rendered for every box (environments/management/patch-config.yaml), which makes
+// its absence a broken box rather than a shape to accommodate.
+func ensureManagementScope(ctx context.Context, podName, adminJWT, secretsProjectID string) error {
 	scope, err := declaredManagementScope(ctx)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("[infisical-bootstrap] Declared management scope: %s\n", scope)
-	if err := ensureEnvironment(ctx, podName, adminJWT, secretsProjectID, scope); err != nil {
-		return err
-	}
-	return ensureEnvironment(ctx, podName, adminJWT, certProjectID, scope)
+	return ensureEnvironment(ctx, podName, adminJWT, secretsProjectID, scope)
 }
 
 func BootstrapInfisicalDayZero(ctx context.Context, admin Administrator) (*BootstrapResult, error) {
@@ -1446,7 +1524,7 @@ func BootstrapInfisicalDayZero(ctx context.Context, admin Administrator) (*Boots
 			// reaches this return with the environment still absent. Asking is one GET per
 			// project when it is already there.
 			if err := ensureManagementScope(ctx, podName, boot.Identity.Credentials.Token,
-				state.ProjectID, state.SecretsProjectID); err != nil {
+				state.SecretsProjectID); err != nil {
 				return nil, err
 			}
 			return &BootstrapResult{
@@ -1493,7 +1571,7 @@ func BootstrapInfisicalDayZero(ctx context.Context, admin Administrator) (*Boots
 	// environment is a project-scoped permission, and the grants are what the token
 	// used here holds it by.
 	if err := ensureManagementScope(ctx, podName, boot.Identity.Credentials.Token,
-		certProjectID, secretsProjectID); err != nil {
+		secretsProjectID); err != nil {
 		return nil, err
 	}
 

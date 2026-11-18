@@ -47,7 +47,6 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newConfigureGitHubAccessCmd())
 	rootCmd.AddCommand(newConfigureTailscaleCmd())
 	rootCmd.AddCommand(newInitSecretsCmd())
-	rootCmd.AddCommand(newConfigureESOCmd())
 	rootCmd.AddCommand(newReseedCmd())
 	rootCmd.AddCommand(newVerifyCmd())
 	rootCmd.AddCommand(newKubeconfigCmd())

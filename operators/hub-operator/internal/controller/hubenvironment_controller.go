@@ -380,19 +380,11 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// Bootstrap Infisical (creates admin user, project, machine identity)
-	// Returns (true, nil) if bootstrap was performed, (false, nil) if already bootstrapped
+	// Day-0 belongs to the CLI (ADR-021). This only checks that it has run.
 	bootstrapClient := infisical.NewBootstrapClient(r.Client, r.UncachedClient)
-	bootstrapped, err := bootstrapClient.Bootstrap(ctx)
-	if err != nil {
-		logger.Error(err, "Failed to bootstrap Infisical")
+	if err := bootstrapClient.Bootstrap(ctx); err != nil {
+		logger.Error(err, "Failed to check Infisical bootstrap state")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
-	}
-
-	if bootstrapped {
-		logger.Info("Infisical bootstrapped successfully")
-	} else {
-		logger.Info("Infisical already bootstrapped, skipping")
 	}
 
 	// Upload CLI-injected secrets to Infisical (bootstrap secrets from K8s)

@@ -108,12 +108,17 @@ func (p *Provisioner) UpdateTenantResources(ctx context.Context, req models.Upda
 		extra["suspended"] = false
 	}
 
-	tier := req.Tier
-	if tier == "" {
-		tier = "basic" // fallback; real tier should always be set
+	// The tier decides what this tenant is entitled to, so it is required rather
+	// than defaulted. "basic" silently rewrote a paid tenant's own values file on
+	// any path that forgot to carry it -- a downgrade committed to git, by a
+	// comment that said it should always be set.
+	if req.Tier == "" {
+		return nil, fmt.Errorf("tenant %s: no tier on a %s request, and there is no safe "+
+			"default: writing one would commit a tier this tenant may not be on",
+			req.TenantID, req.Action)
 	}
 
-	content := generateHelmValues(req.TenantID, tier, "", extra)
+	content := generateHelmValues(req.TenantID, req.Tier, "", extra)
 	if err := p.git.putFile(ctx, path,
 		fmt.Sprintf("chore: update tenant %s action=%s", req.TenantID, req.Action),
 		content, sha); err != nil {

@@ -396,16 +396,17 @@ func GetInfisicalConfig(ctx context.Context, clientset *kubernetes.Clientset) (*
 		return nil, fmt.Errorf("read hub-bootstrap-config in %s: %w", constants.NamespaceOps, err)
 	}
 
-	// Use the secrets project slug for secret read/write operations
+	// The secrets project, and only it. SECRET_STORE_PROJECT_SLUG names the
+	// cert-manager project, which holds no secrets and cannot hold an environment
+	// to read them in -- upstream refuses one for a project of that type. Falling
+	// back to it resolved a project that could never answer.
 	projectSlug := cm.Data["SECRET_STORE_SECRETS_PROJECT_SLUG"]
-	if projectSlug == "" {
-		projectSlug = cm.Data["SECRET_STORE_PROJECT_SLUG"]
-	}
 	environmentSlug := cm.Data["SECRET_STORE_ENVIRONMENT_SLUG"]
 
 	if projectSlug == "" {
-		return nil, fmt.Errorf("hub-bootstrap-config carries neither " +
-			"SECRET_STORE_SECRETS_PROJECT_SLUG nor SECRET_STORE_PROJECT_SLUG")
+		return nil, fmt.Errorf("hub-bootstrap-config carries no " +
+			"SECRET_STORE_SECRETS_PROJECT_SLUG (rendered for every box by " +
+			"environments/management/patch-config.yaml)")
 	}
 	if environmentSlug == "" {
 		return nil, fmt.Errorf("hub-bootstrap-config carries no SECRET_STORE_ENVIRONMENT_SLUG " +

@@ -1147,10 +1147,6 @@ func (c *InfisicalClient) rotateSharedIdentityCredentials(ctx context.Context, c
 	return nil
 }
 
-// DEPRECATED: Tenant credential generation belongs to Kube-SBT (Tenant Identity Service)
-// per ADR-039 and ADR-043. This function is retained for temporary backward compatibility
-// only and MUST be removed once Kube-SBT is deployed and manages tenant credentials.
-//
 // EnsureTenantFolderAndCredentials creates the tenant folder, syncs shared
 // Machine Identity credentials into the tenant's path (for SDK identity resolution
 // per ADR-019), generates DB credentials for the tenant database, and materialises

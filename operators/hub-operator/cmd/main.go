@@ -297,8 +297,14 @@ func main() {
 		orgID = os.Getenv("SECRET_STORE_ORGANIZATION_ID")
 	}
 	if secretsProjectID == "" {
-		setupLog.Info("SECRET_STORE_SECRETS_PROJECT_ID is missing, falling back to SECRET_STORE_PROJECT_ID for backward compatibility")
-		secretsProjectID = projectID
+		// No fallback to SECRET_STORE_PROJECT_ID. That names the cert-manager
+		// project, which holds no secrets, so the fallback produced an operator that
+		// started healthy and failed at every secret it tried to write. The id is
+		// rendered for every box (environments/management/templated-fields), which
+		// makes its absence a broken deployment, reported here rather than survived.
+		setupLog.Error(fmt.Errorf("missing secrets project id"),
+			"operator misconfigured: SECRET_STORE_SECRETS_PROJECT_ID is missing")
+		os.Exit(1)
 	}
 
 	setupLog.Info("Loaded Infisical configuration", "projectID", projectID)
