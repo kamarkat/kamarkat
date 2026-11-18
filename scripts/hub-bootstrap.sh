@@ -1009,38 +1009,96 @@ box_org_url() {
 
 step3_configure_github() {
     if is_step_completed "configure_github"; then
-        # Verify the artifact actually exists — the cluster may have been
+        # Verify the essential artifact actually exists — the cluster may have been
         # recreated since the state was saved (e.g. teardown + re-bootstrap).
-        if kubectl get secret -n platform-ops ghcr-pull-secret \
+        # platform-git-secret is the Secret Zero that gives ArgoCD access to the
+        # GitOps repository; ghcr-pull-secret is an optional capability.
+        if kubectl get secret -n platform-ops platform-git-secret \
             --kubeconfig="$KUBECONFIG_PATH" >/dev/null 2>&1; then
             log "Step 3: GitHub access already configured, skipping"
             return
         fi
-        log "Step 3: State says completed but ghcr-pull-secret missing — re-running"
+        log "Step 3: State says completed but platform-git-secret missing — re-running"
     fi
 
     log "Step 3: Configuring GitHub Access..."
 
-    # Named for what it is for -- pulling this box's images -- rather than for
-    # how it happens to be issued. Not GITHUB_TOKEN: that name belongs to GitHub
-    # Actions and to tools that demand it, and a credential of ours parked there
-    # is read by whatever else is in the environment.
-    require_credential GHCR_TOKEN "github/github-pat-token" \
-        "a credential that can pull this box's images"
+    # In modern bootstrap (ADR-065/072/076), Step 1 (kakt bootstrap-mgmt) provisions
+    # ArgoCD git repository access (platform-git-secret) using GITOPS_REPO_WRITE_TOKEN.
+    # ghcr-pull-secret is an optional capability (ADR-066): if enrolled in the box's
+    # escrow, it is provisioned during generate-local-secrets; if declined, the box
+    # uses public images and needs no registry pull secret.
+    #
+    # Check if platform-git-secret already exists on the cluster.
+    local has_git_secret=0
+    if kubectl get secret -n platform-ops platform-git-secret \
+        --kubeconfig="$KUBECONFIG_PATH" >/dev/null 2>&1; then
+        has_git_secret=1
+    fi
+
+    local has_ghcr_secret=0
+    if kubectl get secret -n platform-ops ghcr-pull-secret \
+        --kubeconfig="$KUBECONFIG_PATH" >/dev/null 2>&1; then
+        has_ghcr_secret=1
+    fi
+
+    if [[ "$has_git_secret" -eq 1 && "$has_ghcr_secret" -eq 1 ]]; then
+        log "Step 3: GitHub access (platform-git-secret and ghcr-pull-secret) already configured, skipping"
+        mark_step_completed "configure_github"
+        return
+    fi
+
+    # Check for an explicit or stored GHCR token if ghcr-pull-secret is not yet present.
+    local ghcr_token="${GHCR_TOKEN:-}"
+    if [[ -z "$ghcr_token" ]]; then
+        local pat_path; pat_path="$(owned_secret "github/github-pat-token")"
+        [[ -r "$pat_path" ]] && ghcr_token="$(tr -d '\r\n' < "$pat_path")"
+    fi
+
+    if [[ "$has_git_secret" -eq 1 ]]; then
+        if [[ -n "$ghcr_token" ]]; then
+            local org_url; org_url="$(box_org_url)"
+            log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=\$GHCR_TOKEN --org-url=$org_url"
+            "$KAKT_BINARY" configure-github-access \
+                --ghcr-pat="$ghcr_token" \
+                --org-url="$org_url" \
+                --kubeconfig="$KUBECONFIG_PATH" || error_exit "configure-github-access failed"
+
+            mark_step_completed "configure_github"
+            log "GitHub access configuration completed"
+
+            log "Restarting hub-operator to pick up ghcr-pull-secret..."
+            kubectl rollout restart deployment/hub-operator -n platform-ops \
+                --kubeconfig="$KUBECONFIG_PATH" 2>/dev/null || \
+                log "WARNING: Could not restart hub-operator — may need manual restart"
+            return
+        fi
+
+        log "Step 3: GitHub repository access already configured (platform-git-secret present)"
+        log "Step 3: GHCR pull secret not escrowed or supplied — skipping private image registry configuration"
+        mark_step_completed "configure_github"
+        return
+    fi
+
+    # platform-git-secret is missing: configure GitHub access now.
+    local token="${ghcr_token}"
+    if [[ -z "$token" ]]; then
+        token="${GITOPS_REPO_WRITE_TOKEN:-}"
+    fi
+    if [[ -z "$token" ]]; then
+        error_exit "Neither GHCR_TOKEN nor GITOPS_REPO_WRITE_TOKEN is set, and $(owned_secret "github/github-pat-token") does not exist. Export GITOPS_REPO_WRITE_TOKEN or GHCR_TOKEN to configure GitHub access."
+    fi
 
     local org_url; org_url="$(box_org_url)"
-
-    log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=\$GHCR_TOKEN --org-url=$org_url"
+    log "Running: $KAKT_BINARY configure-github-access --ghcr-pat=*** --org-url=$org_url"
     "$KAKT_BINARY" configure-github-access \
-        --ghcr-pat="$GHCR_TOKEN" \
+        --ghcr-pat="$token" \
         --org-url="$org_url" \
         --kubeconfig="$KUBECONFIG_PATH" || error_exit "configure-github-access failed"
 
     mark_step_completed "configure_github"
     log "GitHub access configuration completed"
 
-    # Restart hub-operator so it picks up the new ghcr-pull-secret.
-    # The pod was created before the secret existed and won't retry on its own.
     log "Restarting hub-operator to pick up ghcr-pull-secret..."
     kubectl rollout restart deployment/hub-operator -n platform-ops \
         --kubeconfig="$KUBECONFIG_PATH" 2>/dev/null || \
