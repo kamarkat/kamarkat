@@ -2,6 +2,7 @@ package infisical
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,11 @@ import (
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 )
+
+// secretInfisicalAuth holds the credentials the box authenticates to its own
+// Infisical with. The copy in platform-security exists for the issuer; this one,
+// in platform-ops, is the authoritative pair.
+const secretInfisicalAuth = "infisical-auth"
 
 // The organisation NAME is not a credential and not per-box: it is a label
 // inside the box's own Infisical, the same on every one by design.
@@ -884,8 +890,145 @@ func createProject(ctx context.Context, podName, adminJWT, projectSlug, projectT
 	return projectResp.Project.ID, projectResp.Project.Slug, nil
 }
 
-func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projectID string, admin Administrator) (string, string, string, error) {
-	// 1. Create the Machine Identity
+// adoptOneIdentity reduces several identically-named identities to the one this
+// box uses, and deletes the rest.
+//
+// WHICH ONE IS DECIDABLE, so nothing here is a guess. The box authenticates with
+// the client id in platform-ops/infisical-auth, and each identity's client id can
+// be read back, so the one already in use identifies itself. Keeping it means the
+// box's identity does not change underneath the running operator.
+//
+// When no Secret exists yet, or none of them matches it, NOTHING is
+// authenticating as any of these: a client SECRET cannot be read back from
+// Infisical, and the only copy of one ever written is in that Secret. So the
+// choice among them is free, the first is taken, and the run mints a fresh client
+// secret for it as it does for an identity it just created.
+//
+// The others are then DELETED. They are grant-bearing identities in the tenant's
+// own store that nothing can use and nothing will clean up, and leaving them is
+// what makes the ambiguity come back on the next run. Deleting is reported per
+// id, and a deletion that fails is reported without stopping the bootstrap: the
+// adopted identity is correct either way, and an orphan is a hygiene problem
+// rather than a reason to leave the box unbuilt.
+func adoptOneIdentity(ctx context.Context, podName, adminJWT string, candidates []string) (string, error) {
+	fmt.Printf("[infisical-bootstrap] %d identities are named %q: %s\n",
+		len(candidates), identityName, strings.Join(candidates, ", "))
+
+	inUse := inUseClientID(ctx)
+	adopted := candidates[0]
+	why := "none is in use, so this run mints a new client secret for the first"
+	if inUse != "" {
+		for _, id := range candidates {
+			clientID, err := getUniversalAuth(ctx, podName, adminJWT, id)
+			if err != nil {
+				// Not fatal: an identity without universal auth configured cannot be
+				// the one in use, which is what this loop is asking.
+				continue
+			}
+			if clientID == inUse {
+				adopted, why = id, "it is the one "+constants.NamespaceOps+"/infisical-auth authenticates with"
+				break
+			}
+		}
+	}
+	fmt.Printf("[infisical-bootstrap]   Keeping %s: %s\n", adopted, why)
+
+	for _, id := range candidates {
+		if id == adopted {
+			continue
+		}
+		if err := deleteIdentity(ctx, podName, adminJWT, id); err != nil {
+			fmt.Printf("[infisical-bootstrap]   ⚠ could not delete the duplicate %s: %v\n", id, err)
+			continue
+		}
+		fmt.Printf("[infisical-bootstrap]   ✓ deleted the duplicate %s\n", id)
+	}
+	return adopted, nil
+}
+
+// inUseClientID is the client id the box authenticates with, or "" if it has
+// none yet.
+//
+// Absent is a real answer here -- a first bootstrap has no such Secret -- so a
+// failure to read it is reported as "" rather than as an error, and the caller
+// treats that as "nothing is in use".
+func inUseClientID(ctx context.Context) string {
+	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := hostKubectl(readCtx,
+		"get", "secret", "-n", constants.NamespaceOps, secretInfisicalAuth,
+		"-o", "jsonpath={.data.clientId}",
+	)
+	if err != nil {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(decoded))
+}
+
+// deleteIdentity removes one machine identity from the organisation.
+func deleteIdentity(ctx context.Context, podName, adminJWT, identityID string) error {
+	output, status, err := curlAPI(ctx, podName,
+		"-X", "DELETE",
+		"http://localhost:"+infisicalPort+PathIdentities+"/"+identityID,
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return apiError("delete identity "+identityID, status, output)
+	}
+	return nil
+}
+
+// findIdentitiesByName returns EVERY identity in the org with this name.
+//
+// Plural because upstream does not key identities by name: it accepted the same
+// name as many times as it was asked, so a bootstrap that retried created one
+// identity per attempt. The caller has to see all of them -- each is a separate
+// credentialed identity in the tenant's own store, and reporting one while
+// leaving the rest is how they stay there unnoticed.
+func findIdentitiesByName(ctx context.Context, podName, adminJWT, name, orgID string) ([]string, error) {
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s",
+		fmt.Sprintf("http://localhost:%s%s?limit=100&orgId=%s", infisicalPort, PathIdentities, orgID),
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list identities failed: %w", err)
+	}
+	// Each element nests the real id and name under `identity`. The outer `id` is
+	// the org membership UUID and is not the identity.
+	var listResp struct {
+		Identities []struct {
+			Identity struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"identity"`
+		} `json:"identities"`
+	}
+	if err := json.Unmarshal([]byte(output), &listResp); err != nil {
+		return nil, fmt.Errorf("parse identities list: %w\nresponse: %s", err, output)
+	}
+	var ids []string
+	for _, item := range listResp.Identities {
+		if item.Identity.Name == name {
+			ids = append(ids, item.Identity.ID)
+		}
+	}
+	return ids, nil
+}
+
+// createIdentity creates the box's machine identity and reports its id.
+//
+// Separate from createMachineIdentity because it must run only when the lookup
+// found nothing: it used to be the first thing that function did, which is what
+// made a retry create another identity instead of finding the one it had.
+func createIdentity(ctx context.Context, podName, adminJWT, orgID string, id *string) error {
 	body := fmt.Sprintf(`{"name":"%s","organizationId":"%s"}`, identityName, orgID)
 	output, status, err := curlAPI(ctx, podName,
 		"-X", "POST",
@@ -895,51 +1038,60 @@ func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projec
 		"-d", body,
 	)
 	if err != nil {
-		return "", "", "", fmt.Errorf("create identity failed: %w", err)
+		return fmt.Errorf("create identity failed: %w", err)
 	}
-	// The identity's id, from whichever of three answers upstream gave.
+	if status < 200 || status >= 300 {
+		return apiError("create machine identity", status, output)
+	}
+	var identityResp createIdentityResponse
+	if err := json.Unmarshal([]byte(output), &identityResp); err != nil {
+		return fmt.Errorf("failed to parse create identity response: %w\nresponse: %s", err, output)
+	}
+	if identityResp.Identity.ID == "" {
+		return fmt.Errorf("create identity returned no id, and the lookup before it found "+
+			"nothing to reuse\nresponse: %s", output)
+	}
+	*id = identityResp.Identity.ID
+	fmt.Printf("[infisical-bootstrap] Identity created: %s (id=%s)\n", identityName, *id)
+	return nil
+}
+
+func createMachineIdentity(ctx context.Context, podName, adminJWT, orgID, projectID string, admin Administrator) (string, string, string, error) {
+	// 1. The Machine Identity: look first, create only if absent.
 	//
-	// A name already taken is this box's own identity on every run after the first,
-	// and upstream reports that as a non-2xx -- so refusing every non-2xx here
-	// would make the lookup unreachable, which is exactly the defect that cost a
-	// resume ten minutes on "create project". Matched on both wordings this file
-	// already matches (Conflict, already exists), because the status alone does not
-	// distinguish a duplicate from a payload upstream rejects.
+	// LOOK FIRST, CREATE ONLY IF ABSENT.
 	//
-	// An adopted identity continues through the same universal-auth and
-	// client-secret steps below: it is the credentials this run needs, not the
-	// identity object, and a run that skipped them would hand Day-0 an empty secret.
+	// Upstream does not key identities by name, so creating unconditionally
+	// SUCCEEDS on a re-run and yields another identity with the same name. A
+	// retry loop in this bootstrap made several, each with its own credentials and
+	// its own project grants, and the box used whichever was created last.
+	//
+	// This is why reacting to a conflict is not enough for identities, although it
+	// is the right shape for projects and environments: there is no conflict to
+	// react to. The only idempotent order is to ask, and create when the answer is
+	// nothing.
+	existing, err := findIdentitiesByName(ctx, podName, adminJWT, identityName, orgID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("looking for an existing %q identity: %w", identityName, err)
+	}
 	var identityID string
 	switch {
-	case status < 200 || status >= 300:
-		if !strings.Contains(output, "Conflict") && !strings.Contains(output, "already exists") {
-			return "", "", "", apiError("create machine identity", status, output)
+	case len(existing) == 1:
+		identityID = existing[0]
+		fmt.Printf("[infisical-bootstrap] Reusing identity %q: id=%s\n", identityName, identityID)
+	case len(existing) > 1:
+		// CONVERGED, not refused and not warned over. Duplicates are a state a
+		// defect in this function produced, so resolving them is this function's
+		// job: an operator asked to go and delete identities by hand is a bootstrap
+		// that does not finish on its own.
+		id, err := adoptOneIdentity(ctx, podName, adminJWT, existing)
+		if err != nil {
+			return "", "", "", err
 		}
-		found, findErr := findIdentityByName(ctx, podName, adminJWT, identityName, orgID)
-		if findErr != nil {
-			return "", "", "", fmt.Errorf("identity %q already exists and finding it failed: %w",
-				identityName, findErr)
-		}
-		if found == "" {
-			return "", "", "", fmt.Errorf("the identity name %q is taken in this organisation, but "+
-				"no identity with it is visible to this administrator; resolve it in Infisical",
-				identityName)
-		}
-		fmt.Printf("[infisical-bootstrap] Identity already exists: %s\n", identityName)
-		identityID = found
+		identityID = id
 	default:
-		var identityResp createIdentityResponse
-		if err := json.Unmarshal([]byte(output), &identityResp); err != nil {
-			return "", "", "", fmt.Errorf("failed to parse create identity response: %w\nresponse: %s", err, output)
-		}
-		identityID = identityResp.Identity.ID
-		if identityID == "" {
-			// A 2xx that named no identity. The same lookup answers it.
-			found, findErr := findIdentityByName(ctx, podName, adminJWT, identityName, orgID)
-			if findErr != nil {
-				return "", "", "", fmt.Errorf("create identity returned empty ID and lookup failed: %w", findErr)
-			}
-			identityID = found
+		if err := createIdentity(ctx, podName, adminJWT, orgID, &identityID); err != nil {
+			return "", "", "", err
 		}
 	}
 	fmt.Printf("[infisical-bootstrap] Machine Identity: id=%s\n", identityID)
@@ -1129,60 +1281,6 @@ func grantOrgAdminRole(ctx context.Context, podName, orgID, identityID string, a
 	}
 	fmt.Printf("[infisical-bootstrap] Identity granted org admin role: %s\n", strings.TrimSpace(output))
 	return nil
-}
-
-// findIdentityByName looks up a Machine Identity by name within the organization.
-//
-// API shape verified against live cluster (Infisical v0.160.11):
-//
-//	GET /api/v1/identities?orgId=<orgId>&limit=100
-//	→ {
-//	    "identities": [{
-//	      "id":         "<membership-uuid>",  // org membership ID — NOT the identity ID
-//	      "identityId": "<identity-uuid>",    // the real identity UUID
-//	      "identity": {
-//	        "id":   "<identity-uuid>",
-//	        "name": "hub-platform-eso",
-//	        ...
-//	      }
-//	    }],
-//	    "totalCount": N
-//	  }
-//
-// The outer `id` is the org membership UUID. Use `identity.id` (== `identityId`)
-// as the identity UUID for subsequent API calls (attach-auth, grant-role, etc.).
-func findIdentityByName(ctx context.Context, podName, adminJWT, name, orgID string) (string, error) {
-	output, err := kubectlExec(ctx, podName,
-		"curl", "-s",
-		fmt.Sprintf("http://localhost:%s%s?limit=100&orgId=%s", infisicalPort, PathIdentities, orgID),
-		"-H", "Authorization: Bearer "+adminJWT,
-	)
-	if err != nil {
-		return "", fmt.Errorf("list identities failed: %w", err)
-	}
-
-	// Each element has a nested `identity` object containing the real id/name,
-	// plus a top-level `identityId` which equals identity.id.
-	// The outer `id` is the org membership UUID — do NOT use it.
-	var listResp struct {
-		Identities []struct {
-			IdentityID string `json:"identityId"`
-			Identity   struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"identity"`
-		} `json:"identities"`
-	}
-	if err := json.Unmarshal([]byte(output), &listResp); err != nil {
-		return "", fmt.Errorf("parse identities list: %w\nresponse: %s", err, output)
-	}
-
-	for _, item := range listResp.Identities {
-		if item.Identity.Name == name {
-			return item.Identity.ID, nil
-		}
-	}
-	return "", fmt.Errorf("identity '%s' not found in org %s", name, orgID)
 }
 
 // getUniversalAuth retrieves the clientId from the Universal Auth configuration.

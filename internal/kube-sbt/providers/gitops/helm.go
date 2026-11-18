@@ -43,14 +43,22 @@ var tierDatabaseType = map[string]string{
 
 // generateHelmValues produces the tenant values.yaml content for the
 // Universal Tenant Helm Chart (15.4, 15.5).
-func generateHelmValues(tenantID, tier, email string, extra map[string]interface{}) []byte {
+// AN UNKNOWN TIER IS AN ERROR, not a basic tenant.
+//
+// This defaulted twice over: unknown resources became tierResources["basic"],
+// and an unmapped database type became "shared". Both are written into the
+// tenant's own values.yaml, so a tier this code does not recognise produced a
+// committed downgrade -- basic limits and the shared database for a tenant
+// entitled to dedicated -- with nothing anywhere reporting it. The two tables
+// above are the authority on what a tier means; a tier absent from them is one
+// this build cannot provision.
+func generateHelmValues(tenantID, tier, email string, extra map[string]interface{}) ([]byte, error) {
 	res := tierResources[tier]
-	if res == nil {
-		res = tierResources["basic"]
-	}
 	dbType := tierDatabaseType[tier]
-	if dbType == "" {
-		dbType = "shared"
+	if res == nil || dbType == "" {
+		return nil, fmt.Errorf("tenant %s: tier %q is not one this build knows how to "+
+			"provision, and there is no safe default: writing one would commit resources "+
+			"and a database topology the tenant may not be entitled to", tenantID, tier)
 	}
 
 	// Dedicated DB name for premium/enterprise
@@ -93,7 +101,7 @@ func generateHelmValues(tenantID, tier, email string, extra map[string]interface
 		sb.WriteString(fmt.Sprintf("%s: %v\n", k, v))
 	}
 
-	return []byte(sb.String())
+	return []byte(sb.String()), nil
 }
 
 // generateWarmSlotValues produces values.yaml for an unassigned warm pool slot (15.11).

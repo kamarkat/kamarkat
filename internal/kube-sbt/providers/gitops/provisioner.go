@@ -54,7 +54,10 @@ func (p *Provisioner) ProvisionTenant(ctx context.Context, req models.ProvisionR
 	}
 
 	path := fmt.Sprintf("%s/%s/values.yaml", p.cfg.TenantsDir, req.TenantID)
-	content := generateHelmValues(req.TenantID, req.Tier, req.Email, nil)
+	content, err := generateHelmValues(req.TenantID, req.Tier, req.Email, nil)
+	if err != nil {
+		return nil, err
+	}
 	_, sha, _ := p.git.getFile(ctx, path)
 
 	if err := p.git.putFile(ctx, path,
@@ -118,7 +121,10 @@ func (p *Provisioner) UpdateTenantResources(ctx context.Context, req models.Upda
 			req.TenantID, req.Action)
 	}
 
-	content := generateHelmValues(req.TenantID, req.Tier, "", extra)
+	content, err := generateHelmValues(req.TenantID, req.Tier, "", extra)
+	if err != nil {
+		return nil, err
+	}
 	if err := p.git.putFile(ctx, path,
 		fmt.Sprintf("chore: update tenant %s action=%s", req.TenantID, req.Action),
 		content, sha); err != nil {
@@ -180,7 +186,10 @@ func (p *Provisioner) ClaimWarmSlot(ctx context.Context, tenantID, tier string) 
 		// Check if unassigned
 		if bytes.Contains(content, []byte("assigned: false")) {
 			// Reassign to tenant
-			newContent := generateHelmValues(tenantID, tier, "", nil)
+			newContent, err := generateHelmValues(tenantID, tier, "", nil)
+			if err != nil {
+				return nil, err
+			}
 			if err := p.git.putFile(ctx, path,
 				fmt.Sprintf("chore: claim warm slot %s for tenant %s", slotID, tenantID),
 				newContent, sha); err != nil {
@@ -248,7 +257,10 @@ func (p *Provisioner) GetWarmPoolStatus(ctx context.Context, tier string) (*mode
 func (p *Provisioner) CommitTenantConfig(ctx context.Context, tenantID string, config models.TenantConfig) error {
 	path := fmt.Sprintf("%s/%s/values.yaml", p.cfg.TenantsDir, tenantID)
 	_, sha, _ := p.git.getFile(ctx, path)
-	content := generateHelmValues(tenantID, config.Tier, "", config.HelmValues)
+	content, err := generateHelmValues(tenantID, config.Tier, "", config.HelmValues)
+	if err != nil {
+		return err
+	}
 	return p.git.putFile(ctx, path,
 		fmt.Sprintf("chore: update config for tenant %s", tenantID),
 		content, sha)

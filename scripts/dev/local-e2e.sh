@@ -287,7 +287,9 @@ load_credentials() {
     if [ -z "$GHCR_USERNAME" ]; then
         GHCR_USERNAME="$(env -u GITHUB_ORG_SETUP_TOKEN -u GITHUB_TOKEN -u GH_TOKEN gh api user --jq .login 2>/dev/null || true)"
     fi
-    [ -n "$GHCR_TOKEN" ] || GHCR_TOKEN="$GITOPS_REPO_WRITE_TOKEN"
+    # No substituting the gitops write token for a registry credential: they are
+    # different grants, and a pull that works because a write token happens to
+    # carry read:packages hides that the registry credential was never supplied.
     if [ -z "$GHCR_USERNAME" ] || [ -z "$GHCR_TOKEN" ]; then
         echo "local-e2e: no registry credential for pulling this tenant's private images." >&2
         echo "  put a username and token under ${SECRETS}/ghcr/, or run: gh auth login" >&2

@@ -8,7 +8,23 @@ import (
 	"strings"
 )
 
-const fleetCAName = "Fleet Intermediate CA"
+// fleetCAName is the certificate's SUBJECT, and fleetCASlug is what the API
+// keys the object by.
+//
+// Two different strings for two different fields, and conflating them cost a
+// bootstrap: creation sends {"name": fleetCASlug, "configuration": {"commonName":
+// fleetCAName}}, while the lookup below matched the listing's "name" against
+// fleetCAName -- the subject. So an existing CA was never recognised, every
+// re-run tried to create a second one, and upstream answered the duplicate with
+//
+//	HTTP 500 {"message":"Something went wrong","error":"Create"}
+//
+// which names neither the field nor the conflict. The lookup and the create now
+// read the same constant, so they cannot disagree again.
+const (
+	fleetCAName = "Fleet Intermediate CA"
+	fleetCASlug = "fleet-intermediate-ca"
+)
 
 type caEntry struct {
 	ID     string `json:"id"`
@@ -44,7 +60,7 @@ func ensureCertificateProfiles(ctx context.Context, podName, adminJWT, projectID
 
 	var fleetCAID, fleetCAStatus string
 	for _, ca := range cas {
-		if ca.Name == fleetCAName {
+		if ca.Name == fleetCASlug {
 			fleetCAID, fleetCAStatus = ca.ID, ca.Status
 			break
 		}
@@ -232,7 +248,7 @@ func resolveCertificatePolicy(ctx context.Context, podName, adminJWT, projectID 
 // it the CA stays at "pending-certificate" and cannot issue certificates.
 func createFleetIntermediateCA(ctx context.Context, podName, adminJWT, projectID string) (string, error) {
 	body := fmt.Sprintf(
-		`{"name":"fleet-intermediate-ca","projectId":"%s","status":"active","configuration":{"type":"root","commonName":"%s","organization":"Zero-Ops","ou":"","country":"","province":"","locality":"","maxPathLength":1,"keyAlgorithm":"RSA_2048"},"notAfter":"2036-06-07T00:00:00Z"}`,
+		`{"name":"`+fleetCASlug+`","projectId":"%s","status":"active","configuration":{"type":"root","commonName":"%s","organization":"Zero-Ops","ou":"","country":"","province":"","locality":"","maxPathLength":1,"keyAlgorithm":"RSA_2048"},"notAfter":"2036-06-07T00:00:00Z"}`,
 		projectID, fleetCAName,
 	)
 	output, err := kubectlExec(ctx, podName,
