@@ -10,3 +10,5 @@ kind: Kustomization
 resources:
   - zitadel-db.yaml
   - zitadel-db-pooler.yaml
+  # The role credential RoleManager derives by name, not by reference.
+  - zitadel-db-credentials-es.yaml
