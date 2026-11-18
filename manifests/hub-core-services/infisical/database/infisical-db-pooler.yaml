@@ -42,6 +42,31 @@ spec:
   # a pooler that never schedules rather than one placed wrongly.
   template:
     spec:
+      # CONTAINERS, EMPTY, AND REQUIRED.
+      #
+      # This block exists only to place the pooler's pods, and the moment it
+      # exists the CRD requires `containers` with it: spec.template is a
+      # PodTemplateSpec, so it inherits PodSpec's own required field (poolers CRD
+      # v1: template.spec required = [containers]). Without it the API server
+      # refuses the object -- `spec.template.spec.containers: Required value` --
+      # ArgoCD reports SyncFailed, no Deployment is ever created, and the
+      # bootstrap waits 45 minutes on "no Deployment found with label
+      # cnpg.io/poolerName=..." which names neither this field nor this file.
+      #
+      # EMPTY is correct, not a placeholder, and the operator's own code is why.
+      # pkg/specs/pgbouncer/deployments.go starts from this template --
+      # `podspec.NewFrom(pooler.Spec.Template).WithContainerImage("pgbouncer",
+      # pooler.Status.Image, false)` -- and pkg/podspec's WithContainer APPENDS a
+      # container of that name when the list has none (v1.30.1). So an empty list
+      # gets a complete pgbouncer container; the schema omits minItems precisely
+      # so a template that only places pods can say so.
+      #
+      # Naming `pgbouncer` here is equally valid and is NOT an override: the
+      # builder finds the container by name and layers onto it, setting the image
+      # only when it is empty. That is how the tenant composition
+      # (crossplane/tenant-platform/compositions) sets PGDATABASE on it and still
+      # gets the operator's own settings. This template needs no such change.
+      containers: []
       nodeSelector:
         node-role.kubernetes.io/worker: ""
         workload-location: PLACEHOLDER_PLACEMENT
