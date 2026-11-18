@@ -44,6 +44,21 @@ func (o *Orchestrator) phasePostconditions(kubeconfig string) map[state.Bootstra
 			return o.zitadelServing(ctx, kubeconfig)
 		},
 
+		// The phase generates infisical-identity.yaml, and boundary 04 reads it
+		// FROM GIT. The two are recorded separately: this phase checkpoints as soon
+		// as its action returns, and adr045-commit commits the file afterwards -- so
+		// a run that generated the file and then failed to commit it leaves a
+		// completion record whose artifact exists only in that runner's workspace.
+		// The next run gets a fresh clone, skips the phase, and nothing ever writes
+		// the file again: the only phase that writes it is the one being skipped.
+		//
+		// Checking the file is checking the effect. On a fresh runner a committed
+		// artifact is present after the clone, and an uncommitted one is absent --
+		// which is exactly the distinction the completion record cannot make.
+		state.PhaseBootstrapInfisicalAPI: func(ctx context.Context) error {
+			return o.generatedIdentityValuesPresent()
+		},
+
 		// PivotReady stages the tailnet credential on the hub, because
 		// `clusterctl move` does not carry a plain Secret across the pivot.
 		// Boxes built before it did that recorded this phase complete anyway, and

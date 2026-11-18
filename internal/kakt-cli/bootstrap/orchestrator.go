@@ -614,6 +614,9 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 			return ci.BootstrapInfisicalAPI(ctx)
 		},
 		func() { fmt.Println("[bootstrap-infisical-api] ✓ Infisical API bootstrapped") },
+		withPostcondition(func() error {
+			return o.phasePostconditions(mgmtKubeconfig)[state.PhaseBootstrapInfisicalAPI](ctx)
+		}),
 	); err != nil {
 		return err
 	}
@@ -976,6 +979,39 @@ func (o *Orchestrator) requireDurableState(phase string) error {
 // for the phases that create infrastructure, not bookkeeping around them: a run
 // that cannot record where it got to must not go on to buy servers it will not
 // be able to tell anyone about.
+// commitIdentity is the identity every commit this orchestrator makes authors as.
+//
+// A CI runner has none configured, and `git commit` there fails with "empty
+// ident name" -- which is how adr045-commit failed on a run where every phase
+// before it had succeeded. persistTenantState resolved this inline, so the
+// phases that record state committed fine while the one that commits the
+// GENERATED ARTIFACTS did not: two commit paths in the same file, one of which
+// had the answer. It is a method now so a third cannot be written without it.
+//
+// Passed with -c rather than written to the repository's config: this is
+// bookkeeping by the platform, and a developer running the same bootstrap on
+// their own machine keeps authoring as themselves. An empty slice when they
+// have an identity, so their commits stay theirs.
+func (o *Orchestrator) commitIdentity(ctx context.Context) []string {
+	git := func(args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = o.GitopsDir
+		return cmd.CombinedOutput()
+	}
+	name, nameErr := git("config", "user.name")
+	email, emailErr := git("config", "user.email")
+	if nameErr == nil && emailErr == nil &&
+		len(bytes.TrimSpace(name)) > 0 && len(bytes.TrimSpace(email)) > 0 {
+		return nil
+	}
+	// .invalid is reserved and never routable (RFC 2606), so this names the
+	// automation without claiming an address that could belong to someone.
+	return []string{
+		"-c", "user.name=kakt Day-0",
+		"-c", "user.email=day0@kamarkat.invalid",
+	}
+}
+
 func (o *Orchestrator) persistTenantState(ctx context.Context, label string) error {
 	if o.GitopsDir == "" {
 		return nil
@@ -987,23 +1023,7 @@ func (o *Orchestrator) persistTenantState(ctx context.Context, label string) err
 		return cmd.CombinedOutput()
 	}
 
-	// AN IDENTITY TO COMMIT AS, because a CI runner has none.
-	//
-	// Passed with -c rather than written to the repository's config: this is
-	// bookkeeping by the platform, and a developer running the same bootstrap on
-	// their own machine keeps authoring as themselves.
-	ident := []string{}
-	name, nameErr := git("config", "user.name")
-	email, emailErr := git("config", "user.email")
-	if nameErr != nil || emailErr != nil ||
-		len(bytes.TrimSpace(name)) == 0 || len(bytes.TrimSpace(email)) == 0 {
-		// .invalid is reserved and never routable (RFC 2606), so this names the
-		// automation without claiming an address that could belong to someone.
-		ident = []string{
-			"-c", "user.name=kakt Day-0",
-			"-c", "user.email=day0@kamarkat.invalid",
-		}
-	}
+	ident := o.commitIdentity(ctx)
 
 	// NOTHING YET IS NOT A FAILURE. Before any phase has written state the
 	// directory does not exist, and `git add` on a path that matches nothing
@@ -1033,7 +1053,8 @@ func (o *Orchestrator) persistTenantState(ctx context.Context, label string) err
 	// Rebase before pushing: a promotion pull request may have merged while this
 	// bootstrap was running, and a rejected push would stop the state being
 	// persisted for the rest of the run.
-	if out, err := git("pull", "--rebase", "--autostash"); err != nil {
+	pullArgs := append(append([]string{}, ident...), "pull", "--rebase", "--autostash")
+	if out, err := git(pullArgs...); err != nil {
 		return fmt.Errorf("could not rebase before pushing the bootstrap state: %w\n%s",
 			err, out)
 	}
@@ -2910,8 +2931,8 @@ func (o *Orchestrator) gitCommitArtifacts(ctx context.Context, paths []string) e
 		// resumed run finish the job the last one started.
 		fmt.Println("[adr045-commit]   Nothing new to commit; ensuring the remote has it")
 	} else {
-		cmd := git("commit", "-m",
-			"chore: bootstrap-generated-gitops-artifacts [skip ci]")
+		cmd := git(append(o.commitIdentity(ctx), "commit", "-m",
+			"chore: bootstrap-generated-gitops-artifacts [skip ci]")...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git commit: %w\n%s", err, out)
 		}
@@ -2926,7 +2947,10 @@ func (o *Orchestrator) gitCommitArtifacts(ctx context.Context, paths []string) e
 	// through the helper above -- which is how they were missed when the rest of
 	// this function moved to the tenant's repository, and would have committed a
 	// tenant's artifacts locally and pushed the platform's repository instead.
-	pullCmd := exec.CommandContext(pullCtx, "git", "pull", "--rebase")
+	// The identity matters here as well: a rebase that has to replay a commit
+	// authors it, and on a runner that fails exactly as the commit above did.
+	pullArgs := append(o.commitIdentity(ctx), "pull", "--rebase")
+	pullCmd := exec.CommandContext(pullCtx, "git", pullArgs...)
 	if o.GitopsDir != "" {
 		pullCmd.Dir = o.GitopsDir
 	}
