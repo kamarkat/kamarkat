@@ -24,6 +24,6 @@ resources:
 # CI-MAINTAINED, and written twice already (bef7af02, 4316f4c3). Do not
 # hand-edit; if the digest is wrong, the workflow is wrong.
 images:
-- digest: sha256:0121197e4fb13061fdc8d8858bfcc5a615352f93fd710391ccbafe905442d30b
+- digest: sha256:3e26edd40f641f9af8495a3a099d29a554faf2f909272b519f1b4489b7d49108
   name: ephemeral-vm-provisioner
   newName: ghcr.io/kamarkat/kamarkat/ephemeral-vm-provisioner
