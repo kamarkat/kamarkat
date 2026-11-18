@@ -13,7 +13,7 @@ resources:
 - zitadel-smtp-password-es.yaml
 
 images:
-- digest: sha256:7b603654901157aa77e1bb7ade7d537ba3562e48e4de6229bb7b4cc624887e68
+- digest: sha256:81c9176398d17b8ff1d4472ad18399c55051a25e3c5649ad49076fa29ca20fb0
   name: controller
   newName: ghcr.io/kamarkat/kamarkat/kube-sbt
 
