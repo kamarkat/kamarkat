@@ -189,7 +189,20 @@ var boundaryContracts = []boundaryContract{
 		),
 	},
 	{
-		3, "03-platform-services", true, true, nil,
+		3, "03-platform-services", true, true,
+		// Cilium probes for the Gateway API CRDs ONCE, at operator startup, and runs
+		// without its Gateway API controller for the life of that process if any was
+		// missing -- serving the CNI perfectly while no Gateway, HTTPRoute or
+		// GRPCRoute is ever reconciled. Delivering the CRDs afterwards changes
+		// nothing until the operator restarts, so the repair is a restart.
+		//
+		// HERE because this is the boundary that delivers them on a box whose CNI
+		// addon shipped an incomplete bundle: hub-core-services/gateway is a
+		// boundary-03 component and is the Day-1 reconciler for the same objects.
+		// In boundary 01 the assertion would fail two boundaries before the only
+		// thing able to satisfy it.
+		&namedStep{"", "enable the Gateway API controller if its CRDs arrived late",
+			(*Orchestrator).ensureGatewayController},
 		requiresNothingBecause(
 			"boundary 02 guarantees the database these services connect to. What " +
 				"they then DO with it is gated by phase 11f, not here."),
@@ -201,11 +214,21 @@ var boundaryContracts = []boundaryContract{
 		// observed as a 15-minute timeout with the operator in CrashLoopBackOff
 		// on "SECRET_STORE_CLIENT_SECRET is missing". The requirement is real and is
 		// declared by boundary 04, which is the first boundary able to wait for it.
-		assertsNothingBecause(
-			"the services this boundary deploys cannot complete their own work " +
-				"until phase 11f supplies the Infisical credential they authenticate " +
-				"with. Their deployment is what this boundary guarantees; what they " +
-				"produce is required by boundary 04 and waited for there."),
+		// ONE assertion, and it is deliberately not about the services.
+		//
+		// What this boundary's services DO still cannot be waited for here -- that
+		// reasoning is unchanged and is why the gate that was tried here deadlocked:
+		// they cannot complete their own work until phase 11f supplies the Infisical
+		// credential they authenticate with, and phase 11f runs after this boundary.
+		//
+		// The Gateway API controller depends on none of that. It needs the CNI and
+		// seven CRDs, both of which exist by the time this boundary's inventory does,
+		// and boundary 04's first Application carries HTTPRoutes whose Applications
+		// never finish syncing without it (2026-11-18: twelve hours with no ingress on
+		// the hub, surfacing as "waiting for healthy state of HTTPRoute/zitadel").
+		asserts(
+			checkNamed("Cilium has accepted the GatewayClass", (*Orchestrator).gatewayClassAccepted),
+		),
 	},
 	{
 		4, "04-tenant-services", true, false,

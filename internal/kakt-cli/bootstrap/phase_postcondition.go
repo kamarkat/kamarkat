@@ -59,6 +59,17 @@ func (o *Orchestrator) phasePostconditions(kubeconfig string) map[state.Bootstra
 			return o.generatedIdentityValuesPresent()
 		},
 
+		// Boundary 03 is where the Gateway API controller is asserted, and the
+		// condition it asserts can become false without this phase being touched:
+		// Cilium probes for the CRDs at operator startup only, so a box provisioned
+		// with an incomplete bundle records this phase complete and then never
+		// reconciles a Gateway again. A completion record that outlives the thing it
+		// recorded is exactly what a postcondition is for -- withdrawn here, the
+		// phase re-runs and its prepare step restarts the operator.
+		state.PhaseBoundary03: func(ctx context.Context) error {
+			return o.gatewayClassAccepted(ctx, kubeconfig)
+		},
+
 		// PivotReady stages the tailnet credential on the hub, because
 		// `clusterctl move` does not carry a plain Secret across the pivot.
 		// Boxes built before it did that recorded this phase complete anyway, and

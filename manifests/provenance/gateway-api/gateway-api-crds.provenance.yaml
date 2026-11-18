@@ -1,0 +1,69 @@
+---
+# ADR-029 §1 provenance for the vendored Gateway API CRDs.
+#
+# Two kinds of digest, deliberately distinct: the upstream files as fetched, and
+# each artifact as committed here. They differ because the committed artifacts are
+# GENERATED from the upstream files -- `description` fields removed -- and the
+# transform is recorded below so the result can be reproduced and compared.
+#
+# Stored outside the artifacts because a digest written into the file it covers
+# changes those bytes and can never verify.
+#
+# THREE COPIES, one digest each, and they are not identical files: each carries its
+# own header explaining the delivery path it serves. The CRD documents in them are
+# byte-identical, which is what the transform guarantees and what a re-vendor must
+# preserve. Two further copies are EMBEDDED, in
+# manifests/providers/hybrid/k8s/cilium-addon-hybrid.yaml and
+# manifests/spoke/spoke-bootstrap/cilium-addon-template.yaml, indented into a
+# ClusterResourceSet Secret; they are not digested here because the Secret carries
+# the CNI as well.
+artifacts:
+  - path: internal/assets/manifests/addons/gateway-api-crds.yaml
+    sha256: 65621c2e9741a54be8b3bcc3741d07056237e26d3c34b1bcd16d090e6547a7ce
+  - path: manifests/hub-core-services/gateway/files/crds/gateway-api-crds.yaml
+    sha256: 1adf4edf6c577f8165fc5f3608c1fa1c10e2131482deb97d529cc0bec5213fd4
+  - path: manifests/spoke/spoke-catalog/infra/crds/gateway-api-crds.yaml
+    sha256: 2d5e88033eeec8c1fd969c7cd7093d88b3852c009339e75b1fb23dda9f975c1d
+
+upstream:
+  repository: https://github.com/kubernetes-sigs/gateway-api
+  version: v1.5.1
+  channel: standard
+  path: config/crd/standard
+  # Seven of the nine files in that directory. listenersets is in Cilium's
+  # AllOptionalKinds (operator/pkg/gateway-api/helpers/schemes.go) and the operator
+  # runs without it; vap_safeupgrades.yaml is a ValidatingAdmissionPolicy, not a CRD.
+  files:
+    - name: gateway.networking.k8s.io_backendtlspolicies.yaml
+      sha256: 9b8818172153d72f9c84032db0be0a4a657277d13f5bbc22226ad9481ff57971
+    - name: gateway.networking.k8s.io_gatewayclasses.yaml
+      sha256: 234ad4b2757ee1b3596a4187bb98df071c5bbdd9e1806f692f2dbf8387e6bef4
+    - name: gateway.networking.k8s.io_gateways.yaml
+      sha256: 7416e8300eb4d8c0a71a23445609075bbacbe8bc80104584b019cfe1ebe77c31
+    - name: gateway.networking.k8s.io_grpcroutes.yaml
+      sha256: 979f4125d44d3df24659ba00d1d04ff8e76c45423193e8aae82dd5810d7827df
+    - name: gateway.networking.k8s.io_httproutes.yaml
+      sha256: 682203b109baecb18d38073a578f7bc2c17d22fe9b0c27bf030850abe014c370
+    - name: gateway.networking.k8s.io_referencegrants.yaml
+      sha256: a8902c486eed0b7339f5bb8a476ccaba0918eb038048402bdc01cbb69b0fbb51
+    - name: gateway.networking.k8s.io_tlsroutes.yaml
+      sha256: 818e4827c469a40e2527a2851591e656782c50fea8dd44812c900d219da09345
+
+transform:
+  why: >-
+    The bundle travels inside a ClusterResourceSet Secret together with the CNI and a
+    Secret's data is capped at 1 MiB. The seven files are 977,785 bytes as published;
+    with descriptions removed they are 320,111, which is 461 KiB smaller than the
+    incomplete five-CRD bundle this replaces.
+  what: >-
+    Every `description` key removed, recursively. Schemas, defaults, enums, printer
+    columns and served/storage versions are untouched; `kubectl explain` is the only
+    consumer that loses anything.
+  command: |
+    B=https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.1/config/crd/standard
+    for k in backendtlspolicies gatewayclasses gateways grpcroutes httproutes \
+             referencegrants tlsroutes; do
+      curl -fsSL "$B/gateway.networking.k8s.io_$k.yaml" |
+        yq eval 'del(.. | select(has("description")).description)'
+      echo '---'
+    done
