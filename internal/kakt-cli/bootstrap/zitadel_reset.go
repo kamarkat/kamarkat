@@ -198,8 +198,20 @@ func (o *Orchestrator) prepareZitadelForRetry(ctx context.Context, kubeconfig st
 // died part-way. Here init's work is simply not present -- most often because
 // this CLI recreated the database, which is exactly what the reset above does.
 func (o *Orchestrator) zitadelSchemaMissing(ctx context.Context, kubeconfig string) bool {
-	primary, err := o.cnpgPrimary(ctx, kubeconfig)
-	if err != nil || primary == "" {
+	// The identity provider's own cluster, from the box's declaration rather than
+	// from a constant here (ADR-112 gives it one of its own).
+	cluster, err := o.clusterForDatabase(ctx, kubeconfig, zitadelDatabase)
+	if err != nil {
+		// Said rather than swallowed. This returns "not missing" when it cannot
+		// tell, which is the safe direction -- a repair that guesses is worse than
+		// a wait that names the symptom -- but a silent one is how the caller came
+		// to treat an unanswerable question as an answer.
+		fmt.Printf("[boundary04] cannot tell whether the %s database carries a schema: %v\n",
+			zitadelDatabase, err)
+		return false
+	}
+	primary, err := o.cnpgPrimary(ctx, kubeconfig, cluster)
+	if err != nil {
 		return false
 	}
 	out, err := o.psql(ctx, kubeconfig, primary, zitadelDatabase,
@@ -475,15 +487,36 @@ func (o *Orchestrator) awaitNewZitadelOperation(ctx context.Context, kubeconfig,
 	return false, nil
 }
 
-// cnpgPrimary returns the name of the platform database's primary pod.
-func (o *Orchestrator) cnpgPrimary(ctx context.Context, kubeconfig string) (string, error) {
+// cnpgPrimary returns the name of ONE cluster's primary pod.
+//
+// The cluster is a parameter, as it is for the operator's own Endpoint type. This
+// selected on cnpg.io/instanceRole=primary alone and took .items[0], which with
+// one cluster per platform application (ADR-112) is whichever name sorts first --
+// credits-db-1 on this box -- so every question about every other application's
+// database was answered by the credit authority's. Both callers were wrong in
+// different ways: missingDatabaseRoles reported hub_zitadel and hub_grafana
+// permanently missing, and zitadelSchemaMissing asked for a `zitadel` database
+// that is not on that cluster and read the resulting error as "nothing to repair".
+//
+// No primary is an ERROR rather than an empty name: a caller that could not reach
+// one must not conclude anything about what is inside it.
+func (o *Orchestrator) cnpgPrimary(ctx context.Context, kubeconfig, cluster string) (string, error) {
+	if strings.TrimSpace(cluster) == "" {
+		return "", fmt.Errorf("no cluster named: a box runs one per application (ADR-112), " +
+			"so an assumed one answers about another application's database")
+	}
 	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-		"get", "pods", "-n", "platform-data", "-l", "cnpg.io/instanceRole=primary",
+		"get", "pods", "-n", "platform-data", "-l",
+		"cnpg.io/cluster="+cluster+",cnpg.io/instanceRole=primary",
 		"-o", "jsonpath={.items[0].metadata.name}").Output()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	pod := strings.TrimSpace(string(out))
+	if pod == "" {
+		return "", fmt.Errorf("%s has no primary pod in platform-data yet", cluster)
+	}
+	return pod, nil
 }
 
 // psql runs one statement in the primary and returns its output, unaligned and

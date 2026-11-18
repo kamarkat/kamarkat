@@ -355,9 +355,10 @@ func init() {
 
 // ClusterFor reports which CNPG cluster a role belongs to.
 //
-// A role that names none belongs to the box's shared cluster, which is what every role
-// did before ADR-112. Resolved here rather than at each call site so the two paths that
-// act on roles -- reconciliation and rotation -- cannot disagree about where a role is.
+// Every role names its own, which the API requires (DatabaseRole.ClusterRef). Resolved
+// through this one function rather than at each call site so the paths that act on roles
+// -- reconciliation, rotation, and the CLI's own gate -- cannot disagree about where a
+// role is.
 func (s HubEnvironmentSpec) ClusterFor(role DatabaseRole) string {
 	return role.ClusterRef
 }

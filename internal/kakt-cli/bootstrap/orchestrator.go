@@ -1752,20 +1752,74 @@ func describeMissingRoles(missing []string) string {
 	return fmt.Sprintf("these roles do not exist: %s", strings.Join(missing, ", "))
 }
 
+// declaredRole is one role as this box's HubEnvironment declares it: its name,
+// the logical database it owns or holds grants in, and the CNPG cluster it lives
+// on.
+//
+// The CLUSTER is carried because a box runs one per platform application
+// (ADR-112) and a role exists on exactly one of them. Reading the names alone
+// was enough while there was a single shared cluster; it is not enough now, and
+// the gap did not announce itself -- it answered every question about every
+// application's database from whichever cluster happened to sort first.
+type declaredRole struct {
+	Name     string
+	Database string
+	Cluster  string
+}
+
 // declaredDatabaseRoles is the set of roles this box's HubEnvironment says the
-// platform needs. The names only -- each entry also carries a database and a
-// permission list, which belong to the operator that grants them.
-func (o *Orchestrator) declaredDatabaseRoles(ctx context.Context, kubeconfig string) ([]string, error) {
+// platform needs. Permissions are left out: they belong to the operator that
+// grants them.
+func (o *Orchestrator) declaredDatabaseRoles(ctx context.Context, kubeconfig string) ([]declaredRole, error) {
 	// Cluster-scoped, so no -A and no -n. See the note in the poll loop below:
 	// naming a cluster-scoped resource together with --all-namespaces makes
 	// kubectl exit 0 and print nothing, which reads as "no roles declared".
 	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-		"get", "hubenvironment", "hub-environment",
-		"-o", "jsonpath={.spec.database.roles[*].name}").Output()
+		"get", "hubenvironment", "hub-environment", "-o",
+		`jsonpath={range .spec.database.roles[*]}{.name}{"\t"}{.database}{"\t"}{.clusterRef}{"\n"}{end}`).Output()
 	if err != nil {
 		return nil, fmt.Errorf("could not read the declared database roles: %w", err)
 	}
-	return strings.Fields(strings.TrimSpace(string(out))), nil
+	var roles []declaredRole
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		// clusterRef is REQUIRED by the API for the reason this parser refuses
+		// without it: a role whose cluster is assumed is checked against a
+		// plausible database and silently the wrong one.
+		if len(f) != 3 || strings.TrimSpace(f[0]) == "" || strings.TrimSpace(f[2]) == "" {
+			return nil, fmt.Errorf("the HubEnvironment declares a role this cannot place: %q. "+
+				"Each role names its own clusterRef, because a box runs one database cluster "+
+				"per application (ADR-112)", line)
+		}
+		roles = append(roles, declaredRole{
+			Name: strings.TrimSpace(f[0]), Database: strings.TrimSpace(f[1]),
+			Cluster: strings.TrimSpace(f[2]),
+		})
+	}
+	return roles, nil
+}
+
+// clusterForDatabase names the CNPG cluster one logical database lives on,
+// taken from the roles the HubEnvironment declares.
+//
+// Derived rather than held as a constant here: the manifests are where a box
+// says which cluster an application's database is on, and a second copy of that
+// fact in this binary is a copy that can disagree with them.
+func (o *Orchestrator) clusterForDatabase(ctx context.Context, kubeconfig, database string) (string, error) {
+	declared, err := o.declaredDatabaseRoles(ctx, kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range declared {
+		if r.Database == database {
+			return r.Cluster, nil
+		}
+	}
+	return "", fmt.Errorf("no declared role names the %q database, so which of this box's "+
+		"clusters holds it is not recorded anywhere this can read", database)
 }
 
 // missingDatabaseRoles asks the DATABASE which declared roles are not in it.
@@ -1781,29 +1835,49 @@ func (o *Orchestrator) missingDatabaseRoles(ctx context.Context, kubeconfig stri
 		return nil, nil
 	}
 
-	primary, err := o.cnpgPrimary(ctx, kubeconfig)
-	if err != nil || primary == "" {
-		return nil, fmt.Errorf("the platform database has no primary to ask yet")
-	}
-
-	// Every role name, compared in Go. Nothing from the HubEnvironment is
-	// interpolated into the statement -- the spec is operator-supplied, and a
-	// role name is not a place to start trusting it.
-	out, err := o.psql(ctx, kubeconfig, primary, "postgres", "select rolname from pg_roles")
-	if err != nil {
-		return nil, fmt.Errorf("could not read pg_roles: %w", err)
-	}
-	present := map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			present[name] = true
+	// ONE PRIMARY PER CLUSTER, asked for the roles that live on it.
+	//
+	// Asking a single primary for every declared role is what this did, and with
+	// one cluster per application (ADR-112) it answered for exactly one of them:
+	// hub_zitadel and hub_grafana were reported permanently absent because they
+	// are not on the cluster being asked, and the gate waited out its full budget
+	// over roles that existed. Grouped, each cluster is asked once.
+	byCluster := map[string][]declaredRole{}
+	var clusters []string
+	for _, r := range declared {
+		if _, seen := byCluster[r.Cluster]; !seen {
+			clusters = append(clusters, r.Cluster)
 		}
+		byCluster[r.Cluster] = append(byCluster[r.Cluster], r)
 	}
 
 	var missing []string
-	for _, role := range declared {
-		if !present[role] {
-			missing = append(missing, role)
+	for _, cluster := range clusters {
+		primary, err := o.cnpgPrimary(ctx, kubeconfig, cluster)
+		if err != nil {
+			return nil, fmt.Errorf("the roles declared on %s cannot be checked: %w", cluster, err)
+		}
+
+		// Every role name, compared in Go. Nothing from the HubEnvironment is
+		// interpolated into the statement -- the spec is operator-supplied, and a
+		// role name is not a place to start trusting it.
+		out, err := o.psql(ctx, kubeconfig, primary, "postgres", "select rolname from pg_roles")
+		if err != nil {
+			return nil, fmt.Errorf("could not read pg_roles on %s: %w", cluster, err)
+		}
+		present := map[string]bool{}
+		for _, line := range strings.Split(out, "\n") {
+			if name := strings.TrimSpace(line); name != "" {
+				present[name] = true
+			}
+		}
+
+		// Named WITH its cluster, because "hub_zitadel does not exist" sent an
+		// operator to the wrong database for as long as this bug lasted.
+		for _, r := range byCluster[cluster] {
+			if !present[r.Name] {
+				missing = append(missing, r.Name+" on "+cluster)
+			}
 		}
 	}
 	return missing, nil
