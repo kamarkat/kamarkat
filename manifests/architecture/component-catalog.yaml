@@ -292,8 +292,8 @@ components:
         status: held
         reason: >-
           Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline;
-          patch release 1.20.5 evaluation is scheduled for 0.3.17.
-        target: 0.3.17
+          patch release 1.20.5 evaluation is scheduled for 0.3.18.
+        target: 0.3.18
       - versions: ["v0.4.13"]
         status: held
         reason: >-
@@ -437,8 +437,8 @@ components:
         status: held
         reason: >-
           CloudNativePG 1.30 is qualified against the platform's Kubernetes 1.36 baseline;
-          patch release 1.30.2 evaluation is scheduled for 0.3.17.
-        target: 0.3.17
+          patch release 1.30.2 evaluation is scheduled for 0.3.18.
+        target: 0.3.18
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: PostgreSQL
     description: The platform database and each application's database.
