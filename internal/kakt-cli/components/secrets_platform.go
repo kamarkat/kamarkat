@@ -56,6 +56,22 @@ type optionalSecret struct {
 	// available to every tenant, and a tenant's own monitoring account is not a
 	// licence check.
 	destination bool
+	// capability marks a credential that IS the capability: with it the box does
+	// the thing, without it the box does not do the thing, and neither is a
+	// misconfiguration.
+	//
+	// Distinct from destination, which is a capability that ships either way and
+	// merely has nowhere to send. This one does not ship: a box that pulls only
+	// public images has no use for a pull secret, and `kakt box init` does not ask
+	// for one unless --private-registry says the box needs it.
+	//
+	// It had no category and so was refused when absent, which is how a box that
+	// deliberately declined private images failed Day-0 at generate-local-secrets
+	// -- init skipped the credential by design and the installer demanded it. The
+	// two sides disagreed about the same choice; the ESCROW is the record of it
+	// now, which is the same rule on-prem nodes follow: the declared value is the
+	// switch, and nothing is defaulted either way.
+	capability bool
 	// compose turns the resolved inputs into the Secret's data, for credentials
 	// whose stored form is not what an operator holds. A registry pull secret is
 	// a docker config document; nobody has one of those lying around, they have a
@@ -114,7 +130,8 @@ func optionalSecrets() []optionalSecret {
 			// this. A tenant keeping its packages private has no way to run them
 			// without it.
 			name: "ghcr-pull-secret", namespace: constants.NamespaceOps,
-			artifact: escrow.ArtifactRegistryCredential,
+			artifact:   escrow.ArtifactRegistryCredential,
+			capability: true,
 			keys: map[string]string{
 				"username": escrow.FieldRegistryUser,
 				"token":    escrow.FieldRegistryToken,
@@ -190,6 +207,12 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 			// remote to send what it collects, which a tenant may well intend.
 			fmt.Printf("[secrets] %s not supplied: metrics and logs are collected "+
 				"but not shipped anywhere remote.\n", s.name)
+			continue
+		case len(found) == 0 && s.capability:
+			// Not an error either, and for a different reason: the box declined
+			// this capability, and the escrow holding nothing is how it said so.
+			fmt.Printf("[secrets] %s not escrowed: this box does not use %s.\n",
+				s.name, s.what)
 			continue
 		case len(found) == 0:
 			// A capability this box is configured for cannot work without it.
