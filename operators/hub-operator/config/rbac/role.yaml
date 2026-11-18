@@ -74,9 +74,9 @@ rules:
   - watch
 - apiGroups:
   - cluster.x-k8s.io
-  - postgresql.cnpg.io
   resources:
   - clusters
+  - machines
   verbs:
   - get
   - list
@@ -152,3 +152,11 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+  - watch

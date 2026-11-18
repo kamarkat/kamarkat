@@ -63,7 +63,7 @@ type HubEnvironmentReconciler struct {
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;list;watch
 //+kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
-//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;machines,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop
 // Requirement 9.3: Implement Reconcile() main entry point
@@ -1659,6 +1659,10 @@ const classMBootstrapLabel = "recovery.platform.io/class-m"
 func (r *HubEnvironmentReconciler) labelBootstrapData(ctx context.Context, clusterName string) error {
 	logger := log.FromContext(ctx)
 
+	// This read is why the role carries cluster.x-k8s.io/machines beside clusters.
+	// Nothing local catches a missing grant -- envtest runs the reconciler as an
+	// administrator -- so the first time the rule was absent was on a real box,
+	// where reconcileEscrow failed every pass and no later condition was ever set.
 	machines := &unstructured.UnstructuredList{}
 	machines.SetGroupVersionKind(schema.GroupVersionKind{
 		Group: "cluster.x-k8s.io", Version: "v1beta1", Kind: "MachineList",
