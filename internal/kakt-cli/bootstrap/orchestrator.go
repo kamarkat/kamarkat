@@ -621,33 +621,24 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		return err
 	}
 
-	// The seed carries the Infisical PKI coordinates as chart values, and they
-	// are only knowable once the phase above has created the project and the
-	// machine identity. The seed was applied before boundary 01, five phases
-	// earlier, so at that point they were empty and the security component
-	// rendered without its ClusterIssuers.
+	// The seed is re-applied here, and no longer because of the PKI.
 	//
-	// Re-applying the seed here supplies them. The renderer reads them back from
-	// the infisical-auth Secret, so this needs no new state threaded through the
-	// pipeline, and applying the same manifest twice is what ReapplySeed exists
-	// for.
+	// It used to carry this box's Infisical project and machine-identity client
+	// id as chart values, knowable only after the phase above created them, so
+	// the seed applied before boundary 01 had them empty and the security
+	// component rendered without its ClusterIssuers. pki-issuer v1.x removed both
+	// parameters -- an Issuer names an application and a profile, the project is
+	// the organisation's active Certificate Manager project, and the controller
+	// reads the client id from the infisical-auth Secret itself -- so there is
+	// nothing left here for the issuers to wait for.
 	//
-	// This replaces a Kustomize patch the previous phase wrote into the
-	// repository and committed. That arrangement appeared to work only because
-	// the committed file survived between runs: a fresh cluster reconciled the
-	// PREVIOUS cluster's project id until the phase above overwrote it, so the
-	// issuers existed early and were wrong rather than absent.
-	// The PKI coordinates reach the cluster through the tenant's declared state,
-	// not through the seed. Before the re-apply, so the same run that learns them
-	// records them.
-	if err := o.writeFleetPKIValues(ctx, mgmtKubeconfig); err != nil {
-		return err
-	}
-
+	// The re-apply stays. This phase is also where the generated artifacts the
+	// seed reads are written (ADR-045), and applying the same manifest twice is
+	// what ReapplySeed exists for.
 	if err := o.ReapplySeed(ctx, mgmtKubeconfig); err != nil {
-		return fmt.Errorf("re-apply seed with Infisical coordinates: %w", err)
+		return fmt.Errorf("re-apply seed after the Infisical API bootstrap: %w", err)
 	}
-	fmt.Println("[bootstrap-infisical-api] ✓ seed re-applied with PKI coordinates")
+	fmt.Println("[bootstrap-infisical-api] ✓ seed re-applied")
 
 	// ── Commit the generated artifacts ────────────────────────────────
 	//

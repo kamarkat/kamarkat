@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"os"
@@ -144,38 +143,6 @@ spec:
 // than passed to a one-shot render. They are the cluster's identity, fixed at
 // creation, and being part of a reconciled object they survive rather than
 // having to be re-supplied by whoever last ran a render.
-// infisicalCoordinates returns the PKI project and machine-identity client id
-// that this hub's ClusterIssuers authenticate to Infisical with.
-//
-// They are read back from the infisical-auth Secret the secrets phase writes
-// into platform-security, rather than carried forward in memory, so a resumed
-// bootstrap that skips that phase still renders a complete seed.
-//
-// This replaces a Kustomize patch that the secrets phase wrote into
-// manifests/hub-core-services/security/generated/ and committed. That placed one
-// cluster's PKI project inside the types repository, which ADR-062 forbids and
-// which made the component impossible to publish: every cluster pulling the
-// chart would have received this cluster's project.
-//
-// Empty strings are returned when the Secret cannot be read. The consuming chart
-// requires both through values.schema.json, so the boundary refuses to render
-// rather than installing an issuer pointed at nothing.
-func (o *Orchestrator) infisicalCoordinates(ctx context.Context, kubeconfig string) (projectID, clientID string) {
-	read := func(key string) string {
-		out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
-			"get", "secret", "infisical-auth", "-n", "platform-security",
-			"-o", "jsonpath={.data."+key+"}").Output()
-		if err != nil {
-			return ""
-		}
-		dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(dec))
-	}
-	return read("projectId"), read("client-id")
-}
 
 // readSeedBundleVersion returns the bundle version already recorded on this
 // cluster's seed Application, or "" when there is none to read.
@@ -211,7 +178,17 @@ func readSeedBundleVersion(ctx context.Context, kubeconfig string) string {
 // registry it fetched from; the chart should not have to guess.
 const bundleRegistry = "ghcr.io/kamarkat/charts"
 
-func renderSeedApplication(envRevision, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, infisicalProjectID, infisicalClientID, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
+// The hub's PKI coordinates are NOT parameters here any more.
+//
+// They were: infisical.fleet.projectId and infisical.fleet.clientId, read back
+// from the infisical-auth Secret and passed to the security boundary, which
+// refused to render an issuer without them. pki-issuer v1.x takes neither -- an
+// Issuer names an application and a profile, the server resolves the project
+// from the organisation's active Certificate Manager project, and the client id
+// is read from that same Secret by the controller itself. Nothing per-cluster
+// is left to carry, which is why the values file Day-0 used to generate for
+// them is gone too.
+func renderSeedApplication(envRevision, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
 	scopes := ""
 	for _, sc := range oidcScopes {
 		scopes += fmt.Sprintf("\n        - %q", sc)
@@ -269,10 +246,6 @@ spec:
           value: %q
         - name: oidcJwksUrl
           value: %q
-        - name: infisical.fleet.projectId
-          value: %q
-        - name: infisical.fleet.clientId
-          value: %q
       valuesObject:
         oidcScopes:%s
   destination:
@@ -284,8 +257,7 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
-`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
-		infisicalProjectID, infisicalClientID, scopes)
+`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, scopes)
 }
 
 // applySeed establishes the Day-0 seed: the six boundary AppProjects and the
@@ -427,11 +399,6 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 		bundleVersion = existing
 	}
 
-	infisicalProjectID, infisicalClientID := o.infisicalCoordinates(ctx, kubeconfig)
-	if infisicalProjectID == "" || infisicalClientID == "" {
-		fmt.Println("[seed] warning: infisical-auth unreadable; the security boundary will refuse to render until it is")
-	}
-
 	// A tenant's cluster is seeded with the Application its own repository
 	// declares, not one rendered here (ADR-072). The chart, the version and the
 	// values all come from that repository, which is what makes it authoritative
@@ -464,7 +431,7 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 	// that has to name it.
 	seed := renderSeedApplication(envRevision, o.ManagementScope, o.providerName(),
 		o.Topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
-		infisicalProjectID, infisicalClientID, bundleVersion, instanceRepo, zone, oidcScopes)
+		bundleVersion, instanceRepo, zone, oidcScopes)
 	if err := kubectlApplyStdin(ctx, kubeconfig, seed); err != nil {
 		return fmt.Errorf("failed to apply the seed Application: %w", err)
 	}

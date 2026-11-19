@@ -12,7 +12,29 @@ infisical:
 
   image:
     repository: infisical/infisical
-    tag: "v0.160.11"
+    # v0.167.12, the version chart 1.12.2 is published for. Pinned explicitly
+    # rather than inherited from the chart's appVersion so a chart bump cannot
+    # move the box's secret store without saying so.
+    #
+    # v0.160.11 -> v0.167.12 APPLIES 196 MIGRATIONS AT BOOT and is not
+    # reversible: Infisical runs them itself (auto-start-migrations), and the
+    # older image cannot read the schema afterwards. Recovery from a failed
+    # upgrade is a restore, which is why the escrowed encryption key matters
+    # (ADR-076) -- nothing in the archive is readable without it. The startup
+    # probe's budget in kustomization.yaml was raised for this boot.
+    tag: "v0.167.12"
+
+  # No restart on every render.
+  #
+  # The chart stamps `updatedAt: {{ now }}` into the Deployment and the pod
+  # template unless this is false. In chart 1.10.0 the layout string was
+  # "2006-01-01" -- month twice, no day -- so the value only changed when the
+  # MONTH did, and the churn went unnoticed. 1.12.x fixes the layout, which
+  # turns the same stamp into a daily rollout of the box's secret store and an
+  # Application that is OutOfSync between any two renders a day apart.
+  #
+  # New in chart 1.12.0, and the only values key the bump added.
+  rolloutOnEveryRender: false
 
   # TLS Configuration: End-to-end encryption (production-grade)
   # - Infisical → PgBouncer: TLS enabled (DB_SSL_MODE=require, DB_ROOT_CERT from CNPG CA)

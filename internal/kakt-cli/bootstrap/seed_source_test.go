@@ -15,7 +15,7 @@ import (
 func TestSeedSourceFollowsBuildMode(t *testing.T) {
 	unreleased := renderSeedApplication("main", "dev", "hybrid", "", "1.2.3.4",
 		"letsencrypt-prod", "https://auth.example", "https://auth.example/jwks",
-		"proj", "client", versions.DevelopmentBundle, "https://github.com/example-org/example-gitops", "dev.example.test", nil)
+		versions.DevelopmentBundle, "https://github.com/example-org/example-gitops", "dev.example.test", nil)
 
 	if !strings.Contains(unreleased, "path: manifests/argocd/environment-manager") {
 		t.Error("an unreleased seed must read the chart from the working tree")
@@ -26,7 +26,7 @@ func TestSeedSourceFollowsBuildMode(t *testing.T) {
 
 	released := renderSeedApplication("main", "dev", "hybrid", "", "1.2.3.4",
 		"letsencrypt-prod", "https://auth.example", "https://auth.example/jwks",
-		"proj", "client", "0.1.3", "https://github.com/example-org/example-gitops", "dev.example.test", nil)
+		"0.1.3", "https://github.com/example-org/example-gitops", "dev.example.test", nil)
 
 	if !strings.Contains(released, "chart: environment-manager") {
 		t.Error("a released seed must name the published chart")

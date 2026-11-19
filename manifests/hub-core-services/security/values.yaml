@@ -1,48 +1,58 @@
 # Coordinates of the Infisical instance this cluster's PKI issuers authenticate
-# against. These are per-cluster facts, not platform defaults, and the chart
-# therefore ships no usable value for them: a published chart carrying one
-# cluster's projectId would hand every other cluster the wrong project, and the
-# failure would be a certificate issued from someone else's PKI rather than an
-# error. values.schema.json requires them, so a missing value fails at render.
+# against.
 #
-# They were supplied until now by a Kustomize patch written into the repository
-# by Day-0 (ADR-045). That arrangement kept per-cluster instance data inside the
-# types repository, which ADR-062 forbids and which makes the component
-# impossible to publish.
+# NOTHING HERE IS PER-CLUSTER, which pki-issuer v1.x is what made possible. Until
+# then this file carried `fleet.projectId` and `fleet.clientId` -- that cluster's
+# project and machine identity, written in by Day-0 and required by
+# values.schema.json, so the component could not be published and a cluster
+# rendered before Infisical existed got the previous cluster's project id.
+#
+# v1.x resolves the project server-side, from the organisation's active
+# Certificate Manager project, and reads the identity from the Secret that
+# already holds the client secret. What is left is the platform's own naming,
+# identical on every cluster in the fleet.
 infisical:
   # Reachable URL of the Infisical API from inside this cluster.
   #
   # A default rather than a supplied value: the infisical-issuer controller dials
   # this from inside the cluster, so the Service address is correct on every
-  # provider and does not vary per cluster. It was passed in with the coordinates
-  # below, which broke the completeness check -- a constant is always "supplied",
-  # so an empty project and client id read as a partial set rather than as
-  # nothing yet known, and boundary 01 refused to render before Infisical
-  # existed. Override it here if the issuer must reach a different endpoint.
+  # provider and does not vary per cluster.
   url: "http://infisical-standalone-infisical.platform-security.svc:8080"
 
-  # Identity used for the fleet intermediate CA (ADR-035).
-  fleet:
-    projectId: ""
-    clientId: ""
-
-  # Identity used for long-lived signing keys.
+  # The PKI Application every Issuer issues through (ADR-035).
   #
-  # Left empty, these inherit the fleet values. That inheritance was previously
-  # expressed as Kustomize `replacements` copying three fields between the two
-  # ClusterIssuers, which stated the dependency in a place neither issuer could
-  # be read from. Setting them separately is now possible without editing the
-  # component, which the replacements did not allow.
-  signing:
-    projectId: ""
-    clientId: ""
+  # Created by Day-0 in the cert-manager project, bound to the profiles
+  # internal/pki declares (internal/kakt-cli/infisical/cert_profiles.go). One per
+  # organisation: an application groups profiles, and the profiles are the
+  # platform's, so a per-cluster application would put cluster identity back into
+  # this file.
+  application: "kamarkat"
 
-  # Secret holding the machine identity's client secret. Delivered by ESO or
-  # Day-0 into the issuer namespace; never rendered by this chart.
+  # The signing issuer's application, if it is ever a different one. Empty
+  # inherits the application above, which is what the Kustomize replacements did
+  # for the project. The two issuers are separated by their PROFILE, below.
+  signing:
+    application: ""
+
+  # The Secret holding the machine identity. Both halves: v0.2.0 took the client
+  # id inline in the issuer and the secret only for the client secret, so a
+  # rotation had to be applied in two places that nothing compared.
+  #
+  # Written by Day-0 into platform-security (`kakt hub init-secrets`), never
+  # rendered by this chart. v1.x requires a namespace on every reference.
   auth:
     secretName: infisical-auth
-    secretKey: client-secret
+    secretNamespace: platform-security
+    clientIdKey: client-id
+    clientSecretKey: client-secret
 
-certificateTemplate:
+# The certificate profiles each issuer issues with, by slug (internal/pki).
+#
+# Named `certificateProfile` rather than `certificateTemplate`: templates are the
+# v0.2.0 vocabulary and the server's own routes are
+# /api/v1/cert-manager/certificate-profiles. The TTL ceiling lives on the profile,
+# which is why the two issuers differ only here -- 7 days for infrastructure
+# services, 3650 for signing keys.
+certificateProfile:
   fleet: infrastructure-services
   signing: signing-keys

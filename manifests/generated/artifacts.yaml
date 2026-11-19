@@ -32,27 +32,20 @@ artifacts:
       - global.infisical.organizationId
       - global.infisical.projectId
       - global.infisical.secretsProjectId
-  # This box's Infisical PKI coordinates, as chart values.
+  # NO PKI COORDINATES ARE GENERATED ANY MORE, and their absence is the decision.
   #
-  # The security boundary emits a ClusterIssuer only when fleet.projectId and
-  # fleet.clientId are both supplied, so without this file there is no issuer and
-  # every certificate naming infisical-fleet-issuer stays pending forever. On the
-  # box that found this, eleven were: all three argocd-agent mTLS identities and
-  # the Support Agent's client certificate -- which IS its enrolment (ADR-077).
+  # platform-pki-values.yaml was declared here, carrying this box's Infisical
+  # project and machine-identity client id, because the security boundary emitted
+  # no ClusterIssuer without them -- which once left eleven certificates pending,
+  # the three argocd-agent mTLS identities and the Support Agent's enrolment
+  # (ADR-077).
   #
-  # Written here rather than onto the seed Application because ADR-072 makes the
-  # tenant's repository authoritative: on a tenant's box the seed comes from
-  # bundle.yaml, and the root Application's selfHeal reverts anything set only on
-  # the cluster.
-  #
-  # Declared under manifests/ like every other artifact; the registry reader
-  # relocates it to clusters/<cluster>/generated/ when a tenant repository is
-  # present, which is where bundle.yaml's valueFiles reads it from.
-  - file: manifests/environments/{env}/generated/values/platform-pki-values.yaml
-    consumedBy: hub-environment
-    requiredFields:
-      - infisical.fleet.projectId
-      - infisical.fleet.clientId
+  # pki-issuer v1.x takes neither value: an Issuer names an application and a
+  # profile, the server resolves the project from the organisation's active
+  # Certificate Manager project, and the controller reads the client id from the
+  # infisical-auth Secret itself. So there is nothing per-cluster left to
+  # generate, the file is no longer written, and bundle.yaml no longer reads it --
+  # a $values source that no run creates would fail the render it is part of.
 
   # The hub Gateway's external-dns target was generated here as a Kustomize
   # patch. It is per-cluster instance data, and the gateway component now takes

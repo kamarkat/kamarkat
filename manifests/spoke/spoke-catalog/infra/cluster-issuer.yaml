@@ -12,13 +12,25 @@ apiVersion: infisical-issuer.infisical.com/v1alpha1
 kind: ClusterIssuer
 metadata:
   name: infisical-fleet-issuer
+#
+# pki-issuer v1.x: an APPLICATION and a PROFILE, no project and no inline client
+# id. The project is resolved by the hub's Infisical from the organisation's
+# active Certificate Manager project, and both halves of the identity are read
+# from the Secret the spoke already receives -- so this file no longer carries a
+# project uuid or a client-id uuid, which is also why it no longer goes stale
+# when the hub is rebuilt (ADR-111).
 spec:
   url: "https://infisical.dev.nutgraf.in"
+  application: "kamarkat"
+  profile: "infrastructure-services"
   authentication:
-    universalAuth:
-      clientId: "7fb640ce-b330-4303-847d-39ca520a7090"
-      secretRef:
+    method: universal
+    universal:
+      clientIdRef:
         name: infisical-auth
+        namespace: platform-security
+        key: client-id
+      clientSecretRef:
+        name: infisical-auth
+        namespace: platform-security
         key: client-secret
-  certificateTemplateName: "infrastructure-services"
-  projectId: "911f8749-9f3c-445d-b82a-afdb25290eca"

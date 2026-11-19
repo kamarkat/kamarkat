@@ -668,13 +668,6 @@ func (s Spec) chartSource() string {
           # later file win, so a fact Day-0 recorded never silently beats
           # something the tenant wrote here deliberately.
           #
-          # The generated file carries this box's Infisical PKI coordinates
-          # (ADR-045). Without them the security boundary emits no ClusterIssuer
-          # and every certificate naming infisical-fleet-issuer stays pending --
-          # the argocd-agent mTLS identities never issue, and
-          # the Support Agent can never enrol, because its client certificate IS
-          # its enrolment.
-          - $values/registry/clusters/` + s.ClusterName + `/generated/values/platform-pki-values.yaml
           # The box's own Infisical organisation and projects. hub-environment
           # renders hub-bootstrap-config from these, and is its only writer.
           - $values/registry/clusters/` + s.ClusterName + `/generated/values/infisical-identity.yaml
@@ -722,13 +715,6 @@ func (s Spec) chartSource() string {
           # later file win, so a fact Day-0 recorded never silently beats
           # something the tenant wrote here deliberately.
           #
-          # The generated file carries this box's Infisical PKI coordinates
-          # (ADR-045). Without them the security boundary emits no ClusterIssuer
-          # and every certificate naming infisical-fleet-issuer stays pending --
-          # the argocd-agent mTLS identities never issue, and
-          # the Support Agent can never enrol, because its client certificate IS
-          # its enrolment.
-          - $values/registry/clusters/` + s.ClusterName + `/generated/values/platform-pki-values.yaml
           # The box's own Infisical organisation and projects. hub-environment
           # renders hub-bootstrap-config from these, and is its only writer.
           - $values/registry/clusters/` + s.ClusterName + `/generated/values/infisical-identity.yaml

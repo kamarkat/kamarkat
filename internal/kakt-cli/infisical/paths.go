@@ -35,8 +35,27 @@ const (
 	PathCertificateProfiles          = "/api/v1/cert-manager/certificate-profiles"
 	PathPKITemplates                 = "/api/v2/pki/certificate-templates"
 	PathCertificateAuthoritiesCreate = "/api/v1/cert-manager/ca/internal"
-	PathCACertificate                = "/api/v1/cert-manager/ca/internal/%s/certificate"
-	PathSecretsRaw                   = "/api/v3/secrets/raw/%s"
+
+	// The Applications model pki-issuer v1.x issues through.
+	//
+	// An Issuer names an APPLICATION and a PROFILE and no project (ClusterIssuer
+	// spec, v1.1.0), so the server resolves the project itself -- from the
+	// organisation's ACTIVE Certificate Manager project. With none set, every
+	// request to the applications routes is refused before it reaches a handler:
+	//
+	//   400 Set an organization active Certificate Manager project before using
+	//       Applications.
+	//
+	// which is what an unmigrated box reports, three boundaries from the cause.
+	// Both routes exist in the deployed Infisical v0.160.11 (verified at that tag
+	// in reference-projects: backend/src/server/routes/v1/index.ts registers the
+	// instance and applications routers under the /cert-manager prefix), so this
+	// needs no server upgrade.
+	PathCertManagerInstance      = "/api/v1/cert-manager/instance"
+	PathCertManagerActiveProject = "/api/v1/cert-manager/instance/active-project"
+	PathCertManagerApplications  = "/api/v1/cert-manager/applications"
+	PathCACertificate            = "/api/v1/cert-manager/ca/internal/%s/certificate"
+	PathSecretsRaw               = "/api/v3/secrets/raw/%s"
 	// PathSecretsRawList lists a folder. Unlike PathSecretsRaw it names no key,
 	// so it answers "what is here" rather than "is this here" -- which is the
 	// question `kakt fleet secrets status` asks.

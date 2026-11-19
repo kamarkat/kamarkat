@@ -114,6 +114,189 @@ func ensureCertificateProfiles(ctx context.Context, podName, adminJWT, projectID
 		fmt.Printf("[infisical-bootstrap] ✓ Certificate profile %q created (TTL: %d days)\n", p.Slug, p.TTLDays)
 	}
 
+	// Phase 4: the two things pki-issuer v1.x needs on top of the profiles.
+	//
+	// An Issuer names an application and a profile and no project, so the server
+	// resolves the project from the organisation's ACTIVE Certificate Manager
+	// project, and the applications routes refuse every request until one is set.
+	// Both steps are here rather than in a phase of their own because this
+	// function already holds the only thing they need -- the cert-manager
+	// project's id -- and because a profile without an application to issue
+	// through is not a finished PKI.
+	if err := ensureActiveCertManagerProject(ctx, podName, adminJWT, projectID); err != nil {
+		return err
+	}
+	profileIDs, err := resolveCertificateProfileIDs(ctx, podName, adminJWT, projectID)
+	if err != nil {
+		return err
+	}
+	return ensurePKIApplication(ctx, podName, adminJWT, profileIDs)
+}
+
+// pkiApplicationName is the application pki-issuer v1.x issues through.
+//
+// THE PLATFORM'S NAME, which is kamarkat. Not the `zero-ops` of
+// app.kubernetes.io/part-of and managed-by=zero-ops-hub-cli: those are label
+// values this change does not touch, several of them selectors, and none of them
+// is what the platform is called. The name shows up in the Infisical UI beside
+// the Fleet Intermediate CA and in every Issuer's spec.application, so it should
+// read as the product rather than as a label.
+//
+// One per organisation, not per cluster: an application groups the profiles that
+// may be issued through it, and the profiles are the platform's (internal/pki).
+// A per-cluster name would put a cluster's identity back into the issuer values
+// that this migration took out of them.
+const pkiApplicationName = "kamarkat"
+
+// ensureActiveCertManagerProject points the organisation's Certificate Manager at
+// the project this bootstrap built.
+//
+// Idempotent through the server's own state: it reads the active project first and
+// writes only when it is unset or different. A write on every run would be
+// harmless on a box with one project and wrong on a box being migrated between
+// two, where the last writer would decide which PKI the fleet issues from.
+func ensureActiveCertManagerProject(ctx context.Context, podName, adminJWT, projectID string) error {
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s",
+		"http://localhost:"+infisicalPort+PathCertManagerInstance,
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return fmt.Errorf("read the Certificate Manager instance state: %w", err)
+	}
+	var state struct {
+		ActiveProjectID string `json:"activeProjectId"`
+	}
+	if err := json.Unmarshal([]byte(output), &state); err != nil {
+		return fmt.Errorf("parse the Certificate Manager instance state: %w\nresponse: %s", err, output)
+	}
+	if state.ActiveProjectID == projectID {
+		fmt.Printf("[infisical-bootstrap] ✓ Certificate Manager's active project is already %s\n", projectID)
+		return nil
+	}
+	if state.ActiveProjectID != "" {
+		fmt.Printf("[infisical-bootstrap] Certificate Manager's active project is %s; repointing it at %s\n",
+			state.ActiveProjectID, projectID)
+	}
+	output, err = kubectlExec(ctx, podName,
+		"curl", "-s", "-X", "POST",
+		"http://localhost:"+infisicalPort+PathCertManagerActiveProject,
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", fmt.Sprintf(`{"projectId":"%s"}`, projectID),
+	)
+	if err != nil {
+		return fmt.Errorf("set the active Certificate Manager project: %w", err)
+	}
+	var set struct {
+		ActiveProjectID string `json:"activeProjectId"`
+	}
+	if err := json.Unmarshal([]byte(output), &set); err != nil || set.ActiveProjectID != projectID {
+		return fmt.Errorf("the active Certificate Manager project was not set to %s.\n\nWithout it "+
+			"every pki-issuer request is refused with \"Set an organization active Certificate Manager "+
+			"project before using Applications\", and no certificate on this box issues.\nresponse: %s",
+			projectID, output)
+	}
+	fmt.Printf("[infisical-bootstrap] ✓ Certificate Manager's active project set to %s\n", projectID)
+	return nil
+}
+
+// resolveCertificateProfileIDs returns the id of every profile the platform
+// declares, in internal/pki's order.
+//
+// By slug, through the same route CheckCertificateProfile uses -- which answers
+// with the profile but is read there only for its status code. An id that cannot
+// be resolved is an error rather than an omission: an application built from a
+// partial list issues some certificates and silently refuses the rest.
+func resolveCertificateProfileIDs(ctx context.Context, podName, adminJWT, projectID string) ([]string, error) {
+	ids := make([]string, 0, len(requiredProfiles))
+	for _, p := range requiredProfiles {
+		output, err := kubectlExec(ctx, podName,
+			"curl", "-s",
+			"http://localhost:"+infisicalPort+fmt.Sprintf(PathCertificateProfilesBySlug, p.Slug, projectID),
+			"-H", "Authorization: Bearer "+adminJWT,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("read certificate profile %q: %w", p.Slug, err)
+		}
+		var resp struct {
+			CertificateProfile struct {
+				ID string `json:"id"`
+			} `json:"certificateProfile"`
+		}
+		if err := json.Unmarshal([]byte(output), &resp); err != nil {
+			return nil, fmt.Errorf("parse certificate profile %q: %w\nresponse: %s", p.Slug, err, output)
+		}
+		if resp.CertificateProfile.ID == "" {
+			return nil, fmt.Errorf("certificate profile %q has no id in %s; the application it is "+
+				"issued through cannot be built from a partial profile list\nresponse: %s",
+				p.Slug, projectID, output)
+		}
+		ids = append(ids, resp.CertificateProfile.ID)
+	}
+	return ids, nil
+}
+
+// ensurePKIApplication creates the application every Issuer names, bound to the
+// platform's profiles.
+//
+// Adopted when it already exists, by name, because an application is keyed by
+// name within the project and a second POST answers with a duplicate-name error
+// rather than the existing one. The profile binding is not re-asserted on an
+// adopted application: adding a profile to the platform is a change to
+// internal/pki and belongs in the same release as the application that offers it.
+func ensurePKIApplication(ctx context.Context, podName, adminJWT string, profileIDs []string) error {
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s",
+		"http://localhost:"+infisicalPort+PathCertManagerApplications,
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return fmt.Errorf("list PKI applications: %w", err)
+	}
+	var list struct {
+		Applications []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"applications"`
+	}
+	if err := json.Unmarshal([]byte(output), &list); err != nil {
+		return fmt.Errorf("parse the PKI application list: %w\nresponse: %s", err, output)
+	}
+	for _, a := range list.Applications {
+		if a.Name == pkiApplicationName {
+			fmt.Printf("[infisical-bootstrap] ✓ PKI application %q already exists: id=%s\n",
+				pkiApplicationName, a.ID)
+			return nil
+		}
+	}
+
+	body, err := json.Marshal(map[string]any{"name": pkiApplicationName, "profileIds": profileIDs})
+	if err != nil {
+		return fmt.Errorf("render the PKI application request: %w", err)
+	}
+	output, err = kubectlExec(ctx, podName,
+		"curl", "-s", "-X", "POST",
+		"http://localhost:"+infisicalPort+PathCertManagerApplications,
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", string(body),
+	)
+	if err != nil {
+		return fmt.Errorf("create PKI application %q: %w", pkiApplicationName, err)
+	}
+	var created struct {
+		Application struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"application"`
+	}
+	if err := json.Unmarshal([]byte(output), &created); err != nil || created.Application.ID == "" {
+		return fmt.Errorf("PKI application %q was not created; every ClusterIssuer names it, so no "+
+			"certificate issues without it\nresponse: %s", pkiApplicationName, output)
+	}
+	fmt.Printf("[infisical-bootstrap] ✓ PKI application %q created with %d profiles: id=%s\n",
+		pkiApplicationName, len(profileIDs), created.Application.ID)
 	return nil
 }
 

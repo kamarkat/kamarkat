@@ -2,36 +2,30 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "required": [
-    "infisical"
+    "infisical",
+    "certificateProfile"
   ],
   "properties": {
     "infisical": {
       "type": "object",
       "required": [
+        "url",
+        "application",
         "auth"
       ],
       "properties": {
         "url": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^https?://.+"
         },
-        "fleet": {
-          "type": "object",
-          "properties": {
-            "projectId": {
-              "type": "string"
-            },
-            "clientId": {
-              "type": "string"
-            }
-          }
+        "application": {
+          "type": "string",
+          "minLength": 1
         },
         "signing": {
           "type": "object",
           "properties": {
-            "projectId": {
-              "type": "string"
-            },
-            "clientId": {
+            "application": {
               "type": "string"
             }
           }
@@ -40,14 +34,24 @@
           "type": "object",
           "required": [
             "secretName",
-            "secretKey"
+            "secretNamespace",
+            "clientIdKey",
+            "clientSecretKey"
           ],
           "properties": {
             "secretName": {
               "type": "string",
               "minLength": 1
             },
-            "secretKey": {
+            "secretNamespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "clientIdKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "clientSecretKey": {
               "type": "string",
               "minLength": 1
             }
@@ -55,14 +59,20 @@
         }
       }
     },
-    "certificateTemplate": {
+    "certificateProfile": {
       "type": "object",
+      "required": [
+        "fleet",
+        "signing"
+      ],
       "properties": {
         "fleet": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "signing": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       }
     }

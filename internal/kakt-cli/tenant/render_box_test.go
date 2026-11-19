@@ -410,8 +410,12 @@ func TestBundleToleratesTheGeneratedValuesFileNotExistingYet(t *testing.T) {
 			// out of generated/ because the Application reconciling that
 			// directory applies what it finds there as objects, and a values
 			// file has no kind.
-			if !strings.Contains(src, "generated/values/platform-pki-values.yaml") {
-				t.Fatal("the bundle does not read the generated PKI values at all")
+			// infisical-identity.yaml, which Day-0 writes in the same late phase
+			// platform-pki-values.yaml used to be written in -- that one is gone
+			// with pki-issuer v1.x, which needs no per-cluster PKI values, and the
+			// property this test protects belongs to whichever file arrives late.
+			if !strings.Contains(src, "generated/values/infisical-identity.yaml") {
+				t.Fatal("the bundle does not read the generated values at all")
 			}
 			if !strings.Contains(src, "ignoreMissingValueFiles: true") {
 				t.Error("the bundle reads a file Day-0 has not written yet without " +

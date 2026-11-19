@@ -21,7 +21,7 @@ kind: Kustomization
 helmCharts:
   - name: infisical-standalone
     repo: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
-    version: 1.10.0
+    version: 1.12.2
     releaseName: infisical-standalone
     namespace: platform-security
     valuesFile: values.yaml
@@ -60,8 +60,16 @@ patches:
                 # app runs DB migrations at startup that take longer than the
                 # ~25s readiness window, so the probe kills the pod mid-migration
                 # and orphans the knex lock (infisical_migrations_lock) forever.
-                # Add a startupProbe giving migrations up to 5 minutes; readiness
-                # only runs after startup succeeds.
+                # Add a startupProbe for migrations; readiness only runs after
+                # startup succeeds.
+                #
+                # 15 MINUTES, raised from 5 with the v0.160.11 -> v0.167.12 jump:
+                # that upgrade applies 196 migrations in one boot, where a routine
+                # patch release applies none or one. The budget is a ceiling, not a
+                # delay -- a pod that migrates in twenty seconds is Ready in twenty
+                # seconds -- and the cost of it being too small is the failure this
+                # probe exists to prevent: the pod killed mid-migration, with the
+                # knex lock left behind.
                 startupProbe:
                   httpGet:
                     path: /api/status
@@ -69,4 +77,4 @@ patches:
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 10
-                  failureThreshold: 30
+                  failureThreshold: 90

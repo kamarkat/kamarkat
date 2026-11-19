@@ -103,7 +103,6 @@ func (i *Installer) InstallInfisicalAuthFromInfisical(ctx context.Context) (bool
 		StringData: map[string]string{
 			"client-id":        result.ClientID,
 			"client-secret":    result.ClientSecret,
-			"clientSecret":     result.ClientSecret, // pki-issuer v0.2.0 compat
 			"orgId":            result.OrgID,
 			"projectId":        result.ProjectID,
 			"secretsProjectId": result.SecretsProjectID,
@@ -140,7 +139,6 @@ func (i *Installer) InstallInfisicalAuthFromInfisical(ctx context.Context) (bool
 		StringData: map[string]string{
 			"client-id":        result.ClientID,
 			"client-secret":    result.ClientSecret,
-			"clientSecret":     result.ClientSecret, // pki-issuer v0.2.0 compat
 			"orgId":            result.OrgID,
 			"projectId":        result.ProjectID,
 			"secretsProjectId": result.SecretsProjectID,

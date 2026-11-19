@@ -7,51 +7,50 @@ copying three of the fleet issuer's fields onto the signing issuer. Reading
 either issuer's effective configuration meant reading all three. They are
 templated from values here so that what a cluster runs is stated in that
 cluster's values file and nowhere else.
+
+NOTHING PER-CLUSTER IS LEFT IN THEM, which is what pki-issuer v1.x changed.
+
+v0.2.0 took a `projectId` and a `certificateTemplateName` and an inline
+`clientId`, so each cluster's issuers carried that cluster's project and
+identity -- written in by Day-0 (writeFleetPKIValues) and gated on both being
+present, because rendering them early meant rendering the PREVIOUS cluster's
+project id. v1.x takes an `application` and a `profile`, resolves the project
+from the organisation's active Certificate Manager project, and reads the client
+id from the same Secret that already holds the client secret.
+
+So there is no unknown-yet state to gate on any more and no completeness check
+to make: the application and the profiles are the platform's own names, the
+Secret is created by Day-0 in the namespace below, and this component renders
+identically on every cluster in the fleet. The issuers go Ready when Infisical
+has the application -- cert-manager retries until it does, which is the same
+convergence every other consumer of a not-yet-bootstrapped Infisical relies on.
 */ -}}
 {{- $a := .Values.infisical.auth -}}
 {{- $signing := .Values.infisical.signing | default dict -}}
-{{- $f := .Values.infisical.fleet | default dict -}}
-{{- $have := and $f.projectId $f.clientId -}}
-{{- $any := or $f.projectId $f.clientId -}}
-{{- /*
-The issuers render only once the cluster's Infisical identity is supplied.
-
-The URL is not part of that test. It is the in-cluster Service address, the same
-on every cluster, and it carries a default; including it here made the check
-always see one value present, so an empty project and client id read as a partial
-set rather than as nothing yet known.
-
-This component is reconciled from boundary 01, five phases before the Infisical
-project and machine identity exist, so there is a window in which the values are
-genuinely unknown. Rendering nothing then is honest: the previous arrangement
-kept a committed Kustomize patch in the repository, so a fresh cluster reconciled
-the PREVIOUS cluster's project id and the issuers existed early and wrong rather
-than absent. The seed is re-applied once Infisical is bootstrapped and they
-appear on the next reconcile.
-
-A PARTIAL set is a different thing and is refused. Unknown-yet is three empty
-values; one empty value among three means someone supplied a configuration that
-cannot work, and an issuer built from it would authenticate as nobody against a
-project that does not exist.
-*/ -}}
-{{- if and $any (not $have) }}
-{{- fail "infisical: fleet.projectId and fleet.clientId must be supplied together; got one without the other" }}
-{{- end }}
-{{- if $have }}---
+---
 apiVersion: infisical-issuer.infisical.com/v1alpha1
 kind: ClusterIssuer
 metadata:
   name: infisical-fleet-issuer
 spec:
   url: {{ .Values.infisical.url | quote }}
-  projectId: {{ .Values.infisical.fleet.projectId | quote }}
+  application: {{ .Values.infisical.application | quote }}
+  profile: {{ .Values.certificateProfile.fleet | quote }}
   authentication:
-    universalAuth:
-      clientId: {{ .Values.infisical.fleet.clientId | quote }}
-      secretRef:
+    method: universal
+    {{- /* Both halves of the identity come from the one Secret Day-0 writes.
+           The client id used to be an inline value in this file and in the
+           box's values, which meant a rotation of the machine identity had to
+           be applied in two places that nothing compared. */}}
+    universal:
+      clientIdRef:
         name: {{ $a.secretName | quote }}
-        key: {{ $a.secretKey | quote }}
-  certificateTemplateName: {{ .Values.certificateTemplate.fleet | quote }}
+        namespace: {{ $a.secretNamespace | quote }}
+        key: {{ $a.clientIdKey | quote }}
+      clientSecretRef:
+        name: {{ $a.secretName | quote }}
+        namespace: {{ $a.secretNamespace | quote }}
+        key: {{ $a.clientSecretKey | quote }}
 ---
 apiVersion: infisical-issuer.infisical.com/v1alpha1
 kind: ClusterIssuer
@@ -59,15 +58,23 @@ metadata:
   name: infisical-signing-issuer
 spec:
   url: {{ .Values.infisical.url | quote }}
-  {{- /* Empty signing values inherit the fleet identity, which is what the
-         Kustomize replacements did. Stated here so the default is legible and
-         so overriding it is a value rather than a change to the component. */}}
-  projectId: {{ ($signing.projectId | default .Values.infisical.fleet.projectId) | quote }}
+  {{- /* Empty signing values inherit the fleet application, which is what the
+         Kustomize replacements did for the project. Stated here so the default
+         is legible and so overriding it is a value rather than a change to the
+         component. The PROFILE is what separates the two issuers: signing-keys
+         is capped at 3650 days and infrastructure-services at 7 (internal/pki),
+         and issuing a long-lived signing key through the short-lived profile is
+         the mistake this split exists to prevent. */}}
+  application: {{ ($signing.application | default .Values.infisical.application) | quote }}
+  profile: {{ .Values.certificateProfile.signing | quote }}
   authentication:
-    universalAuth:
-      clientId: {{ ($signing.clientId | default .Values.infisical.fleet.clientId) | quote }}
-      secretRef:
+    method: universal
+    universal:
+      clientIdRef:
         name: {{ $a.secretName | quote }}
-        key: {{ $a.secretKey | quote }}
-  certificateTemplateName: {{ .Values.certificateTemplate.signing | quote }}
-{{- end }}
+        namespace: {{ $a.secretNamespace | quote }}
+        key: {{ $a.clientIdKey | quote }}
+      clientSecretRef:
+        name: {{ $a.secretName | quote }}
+        namespace: {{ $a.secretNamespace | quote }}
+        key: {{ $a.clientSecretKey | quote }}
