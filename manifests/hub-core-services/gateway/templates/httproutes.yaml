@@ -106,7 +106,27 @@ spec:
       filters:
         - type: RequestRedirect
           requestRedirect:
-            scheme: https
+            # NO `scheme: https` HERE, and that is the whole fix.
+            #
+            # Cilium turns a redirect that names a scheme into a route that
+            # matches only when the request is NOT already on it: it appends an
+            # X-Forwarded-Proto matcher with InvertMatch set
+            # (operator/pkg/model/translation/envoy_virtual_host.go,
+            # getRouteRedirectMatch, v1.21). That is right for the http-to-https
+            # route below, whose entire job is "redirect unless already https",
+            # and it silently disables a HOST redirect: a browser arriving on
+            # https matched the inverted condition false, fell through every
+            # rule, and got the gateway's 404.
+            #
+            # Both host redirects carried it and both 404'd on `/` from the day
+            # they were written -- auth and console -- while their sibling rules
+            # with backends served normally, which is why the routes looked
+            # attached and healthy. Found by the first acceptance run that
+            # probed the browser path (2026-11-20).
+            #
+            # Omitting it preserves the request's scheme, which is already https
+            # because the :80 listener redirects there first. Cilium then uses
+            # the listener's port, so the Location names :443 explicitly.
             hostname: id.{{ .Values.global.hubDomain }}
             # ReplaceFullPath, not path preservation. The paths on this host are
             # Hydra's (/oauth2/auth, /login, /consent) and Zitadel serves none of
@@ -121,9 +141,10 @@ spec:
             # bounced to Zitadel with nothing in the cluster still saying so.
             statusCode: 302
 ---
-# console keeps its two-rule split. Gateway API matches the longer prefix first,
-# so /self-service reaches Kratos and everything else reaches the UI, which is the
-# ordering the Ingress relied on.
+# console is one rule: everything goes to the issuer. The /self-service path this
+# comment used to describe reached Kratos, which the platform no longer runs, and
+# the rule went with it -- the comment stayed and described a split that is not
+# here, which is worth more than the two lines it costs to say so.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -156,7 +177,27 @@ spec:
       filters:
         - type: RequestRedirect
           requestRedirect:
-            scheme: https
+            # NO `scheme: https` HERE, and that is the whole fix.
+            #
+            # Cilium turns a redirect that names a scheme into a route that
+            # matches only when the request is NOT already on it: it appends an
+            # X-Forwarded-Proto matcher with InvertMatch set
+            # (operator/pkg/model/translation/envoy_virtual_host.go,
+            # getRouteRedirectMatch, v1.21). That is right for the http-to-https
+            # route below, whose entire job is "redirect unless already https",
+            # and it silently disables a HOST redirect: a browser arriving on
+            # https matched the inverted condition false, fell through every
+            # rule, and got the gateway's 404.
+            #
+            # Both host redirects carried it and both 404'd on `/` from the day
+            # they were written -- auth and console -- while their sibling rules
+            # with backends served normally, which is why the routes looked
+            # attached and healthy. Found by the first acceptance run that
+            # probed the browser path (2026-11-20).
+            #
+            # Omitting it preserves the request's scheme, which is already https
+            # because the :80 listener redirects there first. Cilium then uses
+            # the listener's port, so the Location names :443 explicitly.
             hostname: id.{{ .Values.global.hubDomain }}
             # ReplaceFullPath for the same reason as the auth host above: the
             # paths here were the SPA's own routes and Zitadel serves none of
