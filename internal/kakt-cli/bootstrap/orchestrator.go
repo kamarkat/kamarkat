@@ -3134,3 +3134,44 @@ func (o *Orchestrator) waitForArgoCDAppsHealthy(ctx context.Context, kubeconfig 
 		}
 	}
 }
+
+// platformCredentialsEscrowedAndInstalled reports whether the credentials this
+// box's escrow holds have actually reached the cluster.
+//
+// The phase that installs them generates local secrets too, and it predates the
+// installer by months: a box bootstrapped before `InstallPlatformCredentials`
+// was added to it recorded the phase complete, so the installer is skipped on
+// every run since and nothing ever creates the Secrets. The hub-operator then
+// has nothing to upload to Infisical, every ExternalSecret reading them retries
+// forever, and on box 7 three databases archived no WAL for two days while the
+// bootstrap reported success.
+//
+// A completion record that outlives the thing it recorded is what a
+// postcondition is for (ADR-079). Withdrawn here, the phase re-runs and the
+// installer either creates the Secret or fails naming the enrolment command --
+// which is the honest outcome when the escrow holds nothing.
+//
+// Keyed on the object-store credential alone. It is the one the platform cannot
+// work without -- no database on the box has a durable backup while it is
+// missing -- and checking the capability credentials beside it would withdraw
+// the record for a box that declined a capability, which is a box with nothing
+// wrong.
+func (o *Orchestrator) platformCredentialsEscrowedAndInstalled(ctx context.Context, kubeconfig string) error {
+	// BOTH destinations of the one escrowed credential. The first feeds every
+	// database through Infisical; the second feeds the box's own secret store
+	// directly, and is the one nothing ever created. Checking only the first
+	// would leave infisical-db archiving nothing on a box this postcondition
+	// had just declared satisfied.
+	for _, s := range []struct{ ns, name, consequence string }{
+		{"platform-ops", "s3-object-storage",
+			"the hub-operator has nothing to upload, so no database reading its archive credential from Infisical can archive WAL"},
+		{"platform-data", "s3-credentials-escrowed",
+			"the box's own secret store has no archive credential, and it cannot take one from Infisical without depending on itself"},
+	} {
+		if err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
+			"get", "secret", s.name, "-n", s.ns).Run(); err != nil {
+			return fmt.Errorf("%s/%s is not on the cluster, so %s", s.ns, s.name, s.consequence)
+		}
+	}
+	return nil
+}

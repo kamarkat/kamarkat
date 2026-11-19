@@ -91,6 +91,36 @@ func optionalSecrets() []optionalSecret {
 			secType: corev1.SecretTypeOpaque,
 			what:    "CNPG Barman backups of the platform database",
 		},
+		// THE SAME CREDENTIAL, in the shape infisical-db reads it.
+		//
+		// Every other CNPG cluster takes its archive credential from Infisical,
+		// delivered by ESO from the Secret above. infisical-db cannot: pointing
+		// it at the Infisical-delivered credential would make recovering
+		// Infisical depend on Infisical, the circularity ADR-076 exists to break,
+		// so it reads platform-data/s3-credentials-escrowed directly.
+		//
+		// Nothing created it. The only producer was `kakt escrow
+		// deliver-backup-credentials`, whose only callers were its own help text
+		// telling a human to run it -- a manual hop in an automated path, and the
+		// reason infisical-db had archived no WAL since the box was built. That
+		// command remains what a SUCCESSOR hub runs, where no Day-0 is running
+		// to do it; the normal path is here, from the same escrow artefact.
+		//
+		// Three keys, region included, because CNPG takes it as a discrete key.
+		// An escrowed credential that declares no region is refused by name
+		// rather than delivered incomplete: the archive fails at first use
+		// either way, and refusing says which field is missing.
+		{
+			name: "s3-credentials-escrowed", namespace: constants.NamespaceData,
+			artifact: escrow.ArtifactBackupStoreCredential,
+			keys: map[string]string{
+				"access-key-id":     escrow.FieldAccessKeyID,
+				"secret-access-key": escrow.FieldSecretAccessKey,
+				"region":            "region",
+			},
+			secType: corev1.SecretTypeOpaque,
+			what:    "CNPG Barman backups of the box's own secret store",
+		},
 		{
 			name: "grafana-cloud", namespace: constants.NamespaceOps,
 			artifact: escrow.ArtifactAlertDestination,

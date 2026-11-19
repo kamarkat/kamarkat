@@ -59,6 +59,15 @@ func (o *Orchestrator) phasePostconditions(kubeconfig string) map[state.Bootstra
 			return o.generatedIdentityValuesPresent()
 		},
 
+		// This phase gained the platform-credential installer long after the
+		// first boxes recorded it complete, so on those boxes the installer has
+		// never run and never will: the only phase that creates the Secrets is
+		// the one being skipped. Same shape as the artifact case above, and the
+		// same remedy.
+		state.PhaseGenerateLocalSecrets: func(ctx context.Context) error {
+			return o.platformCredentialsEscrowedAndInstalled(ctx, kubeconfig)
+		},
+
 		// Boundary 03 is where the Gateway API controller is asserted, and the
 		// condition it asserts can become false without this phase being touched:
 		// Cilium probes for the CRDs at operator startup only, so a box provisioned

@@ -103,6 +103,30 @@ _assert_cnpg_backup() {
 validate_root_of_trust_backup() {
     section "Backups for every CNPG cluster (hub + spokes)"
 
+    # THE CAUSE FIRST, once, before the symptoms.
+    #
+    # Every CNPG cluster on a box reads its archive credential from one of two
+    # Secrets, both rendered from the single object-store credential the box
+    # escrowed. When that credential has not reached the cluster, every database
+    # reports the same three symptoms -- archiving failing, backups stuck,
+    # never backed up -- and on a box with three databases that is nine findings
+    # describing one missing Secret, none of them naming it.
+    #
+    # Reported here and the per-cluster assertions still run: the symptoms are
+    # real and a reader fixing this needs to know which clusters are affected.
+    # What changes is that the list now has the reason at the top of it.
+    local missing_creds=()
+    kc get secret s3-object-storage -n platform-ops >/dev/null 2>&1         || missing_creds+=("platform-ops/s3-object-storage")
+    kc get secret s3-credentials -n platform-data >/dev/null 2>&1         || missing_creds+=("platform-data/s3-credentials")
+    kc get secret s3-credentials-escrowed -n platform-data >/dev/null 2>&1         || missing_creds+=("platform-data/s3-credentials-escrowed")
+    if (( ${#missing_creds[@]} > 0 )); then
+        hard_fail "the object-store credential has not reached this cluster (${missing_creds[*]} absent) — EVERY failure below follows from this one, and no database on this box has a durable backup until it is fixed"
+        note "The box escrows it as backup-store-credential; \`kakt escrow verify\` reports whether it is there."
+        note "Day-0 renders it into those Secrets, and CNPG caches archive credentials ONCE at"
+        note "instance reconcile — so after the credential lands, the instances must be restarted"
+        note "and any backup stuck in walArchivingFailing removed before the schedule resumes."
+    fi
+
     # Every cluster the hub runs, enumerated. The bootstrap cluster is the root of
     # trust, and the rest hold an application's data each; none of them may be
     # backing up to nothing.

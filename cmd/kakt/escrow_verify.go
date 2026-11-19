@@ -108,6 +108,19 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 		// ADR-111 §10: the tenant's half of the management-state backups'
 		// encryption. One per box, so the management cluster's row.
 		{escrow.ArtifactBackupSSECKey, "the management-state backups' encryption key", true},
+		// The OTHER half, and it was not listed here at all: this command
+		// reported "all required entries present" for a box whose databases
+		// could not archive a single WAL segment, because the credential that
+		// reaches the bucket was absent and uncounted. Encryption and
+		// authentication are different authorities (ADR-111 §10) and a successor
+		// hub needs both, so a box missing either cannot restore -- which is the
+		// definition this list is supposed to encode.
+		//
+		// Required, not advisory. Every management cluster runs CloudNativePG
+		// clusters that archive, and a box that cannot archive has no recovery
+		// point at all; saying so here is cheaper than finding out from the
+		// acceptance run two days later.
+		{escrow.ArtifactBackupStoreCredential, "the object-store credential the backups are written and read with", true},
 	}
 
 	// ADR-111 §2: the trust roots a replacement hub cannot do without and cannot

@@ -18,9 +18,15 @@ import (
 // has always been about.
 func TestOptionalSecretsMapOntoTheirArtefactFields(t *testing.T) {
 	payloads := map[string]string{
+		// region included, because the box's own secret store takes it as a
+		// discrete key and an archive configured without it fails at first use.
+		// `kakt escrow enroll-store-credential` carries whatever the operator
+		// supplied, so a credential enrolled before this was needed declares
+		// only the two keys and has to be re-enrolled with a region line.
 		escrow.ArtifactBackupStoreCredential: escrow.RenderFields(map[string]string{
 			escrow.FieldAccessKeyID:     "AKIAEXAMPLE",
 			escrow.FieldSecretAccessKey: "secret",
+			"region":                    "hel1",
 		}),
 		escrow.ArtifactAlertDestination: escrow.RenderFields(map[string]string{
 			escrow.FieldAlertmanagerURL: "https://alerts.example.test",

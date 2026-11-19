@@ -27,6 +27,15 @@
 validate_support_agent_targets_resolve() {
     section "Every Support Agent collector names a target that exists (ADR-077)"
 
+    # A RELEASED RUN CARRIES NO support-agent MANIFESTS, by design: the embedded
+    # set is narrow and this file is not in it. Hard-failing on its absence made
+    # this module fail on every released box, always, and said nothing about the
+    # box -- "the file is missing" was a fact about the release's packaging.
+    #
+    # Its sibling, 82-support-agent-independence.sh, guards the same file this
+    # way. This one did not, which is the whole defect.
+    platform_source_available "manifests/hub-core-services/support-agent/allowlist.yaml" || return 0
+
     local hub="$VALIDATE_ROOT/manifests/hub-core-services/support-agent/allowlist.yaml"
     [ -f "$hub" ] || { hard_fail "no hub allowlist at $hub"; return 0; }
 
