@@ -40,9 +40,6 @@ spec:
       enabled: true
     background:
       enabled: true
-  autogen:
-    podControllers:
-      enabled: false
   matchConstraints:
     resourceRules:
       - apiGroups: [""]

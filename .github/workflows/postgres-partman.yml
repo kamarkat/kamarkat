@@ -92,7 +92,9 @@ jobs:
           # what every package re-created by hand at the 2026-11-04 org rename did.
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:18
           cache-from: type=gha
           provenance: false
 
@@ -121,9 +123,9 @@ jobs:
             # The whole reference after the repository: the :unbuilt placeholder
             # the first run replaces, or the digest a previous run pinned.
             sed -i -E \
-              "s|^([[:space:]]*imageName: )${IMAGE//./\\.}[@:].*$|\1${IMAGE}@${DIGEST}|" \
+              "s|^([[:space:]]*imageName: )${IMAGE//./\\.}[@:].*$|\1${IMAGE}:18@${DIGEST}|" \
               "${MANIFEST}"
-            grep -q "imageName: ${IMAGE}@${DIGEST}" "${MANIFEST}" || {
+            grep -q "imageName: ${IMAGE}:18@${DIGEST}" "${MANIFEST}" || {
               echo "::error::the cluster's image reference did not update; the pattern no longer matches"
               exit 1
             }

@@ -18,6 +18,6 @@
     # The index is checked at packaging -- assign() refuses a path that is not
     # there -- so a resource inserted above it fails the release rather than
     # publishing a store that reads an unrelated scope.
-    - path: [spec, resources, 8, base, spec, forProvider, manifest, spec, provider,
+    - path: [spec, pipeline, 0, input, resources, 8, base, spec, forProvider, manifest, spec, provider,
              infisical, secretsScope, environmentSlug]
       value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'

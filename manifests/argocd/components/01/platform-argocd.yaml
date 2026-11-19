@@ -31,6 +31,7 @@ helmValues: |
       # ExternalSecret custom health check
       # Treats SecretSyncedError as Progressing when the underlying ClusterSecretStore is not ready,
       # preventing a cascade of Degraded statuses across all apps that consume secrets.
+      # Treats optional pull secrets (ghcr-pull-secret-credentials) as Healthy when unconfigured.
       resource.customizations.health.external-secrets.io_ExternalSecret: |
         hs = {}
         if obj.status ~= nil then
@@ -42,6 +43,11 @@ helmValues: |
                   hs.message = condition.message or "Secret synced"
                   return hs
                 else
+                  if obj.metadata ~= nil and (obj.metadata.name == "ghcr-pull-secret-credentials" or obj.metadata.name == "ghcr-pull-secret") then
+                    hs.status = "Healthy"
+                    hs.message = "Optional pull secret not configured"
+                    return hs
+                  end
                   if condition.reason == "SecretSyncedError" then
                     hs.status = "Progressing"
                     hs.message = "Waiting for secret store: " .. (condition.message or "")
@@ -55,8 +61,45 @@ helmValues: |
             end
           end
         end
+        if obj.metadata ~= nil and (obj.metadata.name == "ghcr-pull-secret-credentials" or obj.metadata.name == "ghcr-pull-secret") then
+          hs.status = "Healthy"
+          hs.message = "Optional pull secret not configured"
+          return hs
+        end
         hs.status = "Progressing"
         hs.message = "Waiting for external secret to sync"
+        return hs
+
+      # Gateway API Gateway health check
+      # In hostNetwork mode (e.g. Cilium on Hetzner), the gateway uses NodePort without a LoadBalancer IP,
+      # leaving Programmed=False (AddressNotAssigned). Treat Accepted=True as Healthy.
+      resource.customizations.health.gateway.networking.k8s.io_Gateway: |
+        hs = {}
+        if obj.status ~= nil and obj.status.conditions ~= nil then
+          for i, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Programmed" and condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Gateway programmed"
+              return hs
+            end
+          end
+          for i, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Accepted" and condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Gateway accepted"
+              return hs
+            end
+          end
+          for i, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Accepted" and condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Gateway not accepted"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for gateway status"
         return hs
 
       # CNPG Cluster health check

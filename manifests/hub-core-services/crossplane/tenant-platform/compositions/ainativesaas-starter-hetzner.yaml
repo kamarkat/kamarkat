@@ -10,777 +10,785 @@ spec:
     apiVersion: nutgraf.in/v1alpha1
     kind: AINativeSaaS
 
-  resources:
-  # 1. TenantDatabase XR - Remote Provider Pattern
-  #    Hub pushes TenantDatabase CR to Spoke, Spoke Crossplane reconciles it.
-  #    Replaces: database, db-credentials-secret, db-user, grant-connect, grant-tables, grant-sequences
-  - name: tenant-database-remote
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies:
-          - "*"
-        forProvider:
-          manifest:
-            apiVersion: nutgraf.in/v1alpha1
-            kind: TenantDatabase
-            metadata:
-              name: ""  # Patched: tenantId
-            spec:
-              tenantId: ""       # Patched: the CUSTOMER (attribution only)
-              appId: ""          # Patched: the PRODUCT
-              scopeId: ""        # Patched: <tenant>-<app>, what names are built from
-              databaseName: ""   # Patched: database.name
-              cellId: ""         # Patched: cellId
-              dbRoleName: ""     # Patched: the postgres role, composed by the chart
-              dbOwnerRoleName: "" # Patched: the OWNER role (ADR-093)
-        providerConfigRef:
-          name: ""  # Patched: cellId (provider-kubernetes ProviderConfig for Spoke)
-    readinessChecks:
-      - type: MatchCondition
-        matchCondition:
-          type: Ready
-          status: "True"
-    patches:
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.providerConfigRef.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-tenant-database"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.metadata.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.tenantId
-      toFieldPath: spec.forProvider.manifest.spec.tenantId
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.appId
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: spec.forProvider.manifest.spec.scopeId
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.database.name
-      toFieldPath: spec.forProvider.manifest.spec.databaseName
-    # Carried, not rebuilt. A combine here from tenantId and appId would be an
-    # eighth derivation of a name that already has one source, and the spoke XRD's
-    # CEL rule would reject any value that disagreed with its components anyway.
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.dbRoleName
-      toFieldPath: spec.forProvider.manifest.spec.dbRoleName
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.dbOwnerRoleName
-      toFieldPath: spec.forProvider.manifest.spec.dbOwnerRoleName
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.forProvider.manifest.spec.clusterName
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          # 1. TenantDatabase XR - Remote Provider Pattern
+          #    Hub pushes TenantDatabase CR to Spoke, Spoke Crossplane reconciles it.
+          #    Replaces: database, db-credentials-secret, db-user, grant-connect, grant-tables, grant-sequences
+          - name: tenant-database-remote
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies:
+                  - "*"
+                forProvider:
+                  manifest:
+                    apiVersion: nutgraf.in/v1alpha1
+                    kind: TenantDatabase
+                    metadata:
+                      name: ""  # Patched: tenantId
+                    spec:
+                      tenantId: ""       # Patched: the CUSTOMER (attribution only)
+                      appId: ""          # Patched: the PRODUCT
+                      scopeId: ""        # Patched: <tenant>-<app>, what names are built from
+                      databaseName: ""   # Patched: database.name
+                      cellId: ""         # Patched: cellId
+                      dbRoleName: ""     # Patched: the postgres role, composed by the chart
+                      dbOwnerRoleName: "" # Patched: the OWNER role (ADR-093)
+                providerConfigRef:
+                  name: ""  # Patched: cellId (provider-kubernetes ProviderConfig for Spoke)
+            readinessChecks:
+              - type: MatchCondition
+                matchCondition:
+                  type: Ready
+                  status: "True"
+            patches:
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.providerConfigRef.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-tenant-database"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.metadata.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.tenantId
+              toFieldPath: spec.forProvider.manifest.spec.tenantId
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.appId
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: spec.forProvider.manifest.spec.scopeId
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.database.name
+              toFieldPath: spec.forProvider.manifest.spec.databaseName
+            # Carried, not rebuilt. A combine here from tenantId and appId would be an
+            # eighth derivation of a name that already has one source, and the spoke XRD's
+            # CEL rule would reject any value that disagreed with its components anyway.
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.dbRoleName
+              toFieldPath: spec.forProvider.manifest.spec.dbRoleName
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.dbOwnerRoleName
+              toFieldPath: spec.forProvider.manifest.spec.dbOwnerRoleName
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.forProvider.manifest.spec.clusterName
 
-  # 2. CNPG Pooler CR - Wrapped in provider-kubernetes Object
-  #    Uses tenant-specific credentials from tenant-<id>-db-credentials Secret
-  #    (created by TenantDatabase Composition on Spoke).
-  # ---------------------------------------------------------------------------
-  # Tenant cache (ADR-014, ADR-035, ADR-047).
-  #
-  # Platform-rendered, not fleet-authored. A fleet previously hand-wrote the
-  # Deployment, Service, NetworkPolicy and Certificate in its own repository; the
-  # tenant-specific part of that was two resource stanzas, and everything else —
-  # the pinned digest, the TLS flags, the ACL, the security context — was platform
-  # policy replicated per fleet with no validator watching it. One consequence was
-  # already live: the Certificate existed on disk but was never listed in its
-  # kustomization, so the TLS Secret was never created and the workload could not
-  # start. Resources emitted together cannot develop that gap.
-  #
-  # RENDERED FOR EVERY TENANT, whatever spec.cache.enabled says.
-  #
-  # This said "rendered only when the fleet declares spec.cache.enabled" until
-  # 2026-09-30. It never was: this is a classic Composition (mode Resources) with
-  # no pipeline and no conditional function, so there is nothing here that can
-  # skip a resource, and these five have always been emitted unconditionally.
-  #
-  # The false comment had a cost. The hub-operator seeded CACHE_PASSWORD only when
-  # cache.enabled was true, believing this claim -- so a tenant with the cache off
-  # got an ExternalSecret naming a password nothing would write, failed
-  # SecretSyncedError forever, and never started its cache Deployment. oranger sat
-  # in exactly that state. The operator now seeds the credential unconditionally,
-  # which makes the two halves agree.
-  #
-  # Gating these resources properly needs this Composition converted to a pipeline
-  # (function-go-templating or equivalent). Until then a tenant that wants no cache
-  # still gets one, and that is waste rather than breakage -- state it here rather
-  # than describe a gate that does not exist.
-  # ---------------------------------------------------------------------------
-  - name: cache-credential
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies:
-          - "*"
-        forProvider:
-          manifest:
-            apiVersion: external-secrets.io/v1
-            kind: ExternalSecret
-            metadata:
-              name: ""      # Patched: <tenantId>-cache-auth
-              namespace: "" # Patched: tenant-<tenantId>
-            spec:
-              refreshInterval: 1h
-              secretStoreRef:
-                name: tenant-secret-store
-                kind: SecretStore
-              target:
-                name: ""    # Patched: <tenantId>-cache-auth
-                creationPolicy: Owner
-                deletionPolicy: Retain
-                template:
-                  engineVersion: v2
-                  data:
-                    # The ACL file is rendered here rather than stored, so its
-                    # format is owned in one place and a fleet cannot author a
-                    # syntactically valid file that grants the wrong thing. The
-                    # default user is disabled outright: leaving it enabled makes
-                    # the password advisory.
-                    users.acl: |
-                      user default off
-                      user app on >{{ .password }} ~* +@all
-                    REDIS_URL: ""  # Patched: redis://app:<pw>@<tenantId>-cache:6379
-              data:
-                - secretKey: password
-                  remoteRef:
-                    key: CACHE_PASSWORD
-        providerConfigRef:
-          name: ""
-    patches:
-    # The Infisical key, as an ABSOLUTE path.
-    #
-    # The base leaves it as the bare name CACHE_PASSWORD, and the tenant
-    # SecretStore is scoped with secretsPath "/", so a bare key is looked up at
-    # the Infisical ROOT. hub-operator writes this credential to
-    # /spoke-pool/<cell>/tenants/<tenant>/CACHE_PASSWORD, so the ExternalSecret
-    # was asking a place the value has never been.
-    #
-    # It failed as "could not get secret data from provider", which reads like a
-    # store or auth problem — and the store was fine: waypoint-app-secrets and
-    # hub-ory-jwt-secret sync through the same SecretStore. The tell is that
-    # every working ExternalSecret here names an absolute path and this one did
-    # not.
-    #
-    # Cost of the omission on 2026-09-02: waypoint-cache-auth never resolved, so
-    # bff-workload could not start (CreateContainerConfigError), its Service had
-    # no endpoints, and /api/v1/auth/me returned 503 behind an EPERM from Cilium
-    # socket-LB. waypoint-cache sat ContainerCreating for five hours.
-    - type: CombineFromComposite
-      combine:
-        variables:
-          - fromFieldPath: spec.clusterName
-          - fromFieldPath: spec.appId
-        strategy: string
-        string:
-          fmt: "/spoke-pool/%s/tenants/%s/CACHE_PASSWORD"
-      toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.providerConfigRef.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: metadata.name
-      transforms:
-      - type: string
-        string: {fmt: "%s-cache-credential"}
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.metadata.name
-      transforms:
-      - type: string
-        string: {fmt: "%s-cache-auth"}
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.target.name
-      transforms:
-      - type: string
-        string: {fmt: "%s-cache-auth"}
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: spec.forProvider.manifest.metadata.namespace
-      transforms:
-      - type: string
-        string: {fmt: "tenant-%s"}
-    # The ESO template cannot see the tenant, so the host is patched in. The short
-    # Service name resolves because the consumer shares the namespace.
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.target.template.data.REDIS_URL
-      transforms:
-      - type: string
-        string: {fmt: "redis://app:{{ .password }}@%s-cache:6379"}
+          # 2. CNPG Pooler CR - Wrapped in provider-kubernetes Object
+          #    Uses tenant-specific credentials from tenant-<id>-db-credentials Secret
+          #    (created by TenantDatabase Composition on Spoke).
+          # ---------------------------------------------------------------------------
+          # Tenant cache (ADR-014, ADR-035, ADR-047).
+          #
+          # Platform-rendered, not fleet-authored. A fleet previously hand-wrote the
+          # Deployment, Service, NetworkPolicy and Certificate in its own repository; the
+          # tenant-specific part of that was two resource stanzas, and everything else —
+          # the pinned digest, the TLS flags, the ACL, the security context — was platform
+          # policy replicated per fleet with no validator watching it. One consequence was
+          # already live: the Certificate existed on disk but was never listed in its
+          # kustomization, so the TLS Secret was never created and the workload could not
+          # start. Resources emitted together cannot develop that gap.
+          #
+          # RENDERED FOR EVERY TENANT, whatever spec.cache.enabled says.
+          #
+          # This said "rendered only when the fleet declares spec.cache.enabled" until
+          # 2026-09-30. It never was: this is a classic Composition (mode Resources) with
+          # no pipeline and no conditional function, so there is nothing here that can
+          # skip a resource, and these five have always been emitted unconditionally.
+          #
+          # The false comment had a cost. The hub-operator seeded CACHE_PASSWORD only when
+          # cache.enabled was true, believing this claim -- so a tenant with the cache off
+          # got an ExternalSecret naming a password nothing would write, failed
+          # SecretSyncedError forever, and never started its cache Deployment. oranger sat
+          # in exactly that state. The operator now seeds the credential unconditionally,
+          # which makes the two halves agree.
+          #
+          # Gating these resources properly needs this Composition converted to a pipeline
+          # (function-go-templating or equivalent). Until then a tenant that wants no cache
+          # still gets one, and that is waste rather than breakage -- state it here rather
+          # than describe a gate that does not exist.
+          # ---------------------------------------------------------------------------
+          - name: cache-credential
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies:
+                  - "*"
+                forProvider:
+                  manifest:
+                    apiVersion: external-secrets.io/v1
+                    kind: ExternalSecret
+                    metadata:
+                      name: ""      # Patched: <tenantId>-cache-auth
+                      namespace: "" # Patched: tenant-<tenantId>
+                    spec:
+                      refreshInterval: 1h
+                      secretStoreRef:
+                        name: tenant-secret-store
+                        kind: SecretStore
+                      target:
+                        name: ""    # Patched: <tenantId>-cache-auth
+                        creationPolicy: Owner
+                        deletionPolicy: Retain
+                        template:
+                          engineVersion: v2
+                          data:
+                            # The ACL file is rendered here rather than stored, so its
+                            # format is owned in one place and a fleet cannot author a
+                            # syntactically valid file that grants the wrong thing. The
+                            # default user is disabled outright: leaving it enabled makes
+                            # the password advisory.
+                            users.acl: |
+                              user default off
+                              user app on >{{ .password }} ~* +@all
+                            REDIS_URL: ""  # Patched: redis://app:<pw>@<tenantId>-cache:6379
+                      data:
+                        - secretKey: password
+                          remoteRef:
+                            key: CACHE_PASSWORD
+                providerConfigRef:
+                  name: ""
+            patches:
+            # The Infisical key, as an ABSOLUTE path.
+            #
+            # The base leaves it as the bare name CACHE_PASSWORD, and the tenant
+            # SecretStore is scoped with secretsPath "/", so a bare key is looked up at
+            # the Infisical ROOT. hub-operator writes this credential to
+            # /spoke-pool/<cell>/tenants/<tenant>/CACHE_PASSWORD, so the ExternalSecret
+            # was asking a place the value has never been.
+            #
+            # It failed as "could not get secret data from provider", which reads like a
+            # store or auth problem — and the store was fine: waypoint-app-secrets and
+            # hub-ory-jwt-secret sync through the same SecretStore. The tell is that
+            # every working ExternalSecret here names an absolute path and this one did
+            # not.
+            #
+            # Cost of the omission on 2026-09-02: waypoint-cache-auth never resolved, so
+            # bff-workload could not start (CreateContainerConfigError), its Service had
+            # no endpoints, and /api/v1/auth/me returned 503 behind an EPERM from Cilium
+            # socket-LB. waypoint-cache sat ContainerCreating for five hours.
+            - type: CombineFromComposite
+              combine:
+                variables:
+                  - fromFieldPath: spec.clusterName
+                  - fromFieldPath: spec.appId
+                strategy: string
+                string:
+                  fmt: "/spoke-pool/%s/tenants/%s/CACHE_PASSWORD"
+              toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.providerConfigRef.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: metadata.name
+              transforms:
+              - type: string
+                string: {fmt: "%s-cache-credential"}
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.metadata.name
+              transforms:
+              - type: string
+                string: {fmt: "%s-cache-auth"}
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.target.name
+              transforms:
+              - type: string
+                string: {fmt: "%s-cache-auth"}
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: spec.forProvider.manifest.metadata.namespace
+              transforms:
+              - type: string
+                string: {fmt: "tenant-%s"}
+            # The ESO template cannot see the tenant, so the host is patched in. The short
+            # Service name resolves because the consumer shares the namespace.
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.target.template.data.REDIS_URL
+              transforms:
+              - type: string
+                string: {fmt: "redis://app:{{ .password }}@%s-cache:6379"}
 
-  - name: cache-certificate
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: cert-manager.io/v1
-            kind: Certificate
-            metadata:
-              name: ""
-              namespace: ""
-            spec:
-              # ADR-035: cert-manager is the only issuer of X.509 material.
-              secretName: ""
-              issuerRef:
-                name: infisical-fleet-issuer
-                kind: ClusterIssuer
-                group: infisical-issuer.infisical.com
-              commonName: ""
-              duration: 168h
-              renewBefore: 48h
-              dnsNames: []
-        providerConfigRef:
-          name: ""
-    patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-certificate"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.secretName, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.dnsNames[0]", transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.commonName, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-
-  - name: cache-service
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: v1
-            kind: Service
-            metadata:
-              name: ""
-              namespace: ""
-              labels:
-                app.kubernetes.io/component: cache
-                cost-center: platform
-                tenant-id: ""
-            spec:
-              type: ClusterIP
-              # app-id with the component: a cache pod of another name in this
-              # namespace (a leftover of a rename) must never join this Service.
-              # On 2026-10-15 nutgraf-waypoint-cache, orphaned by the ADR-088
-              # rename, sat behind waypoint-cache: two independent Redis servers
-              # behind one address, each connection landing on either. The SDK
-              # published to one and browsers subscribed on the other, so
-              # wake-ups were lost at random.
-              selector:
-                app.kubernetes.io/component: cache
-                app-id: ""
-              ports:
-              - {name: redis, port: 6379, targetPort: 6379, protocol: TCP}
-              - {name: redis-tls, port: 6380, targetPort: 6380, protocol: TCP}
-        providerConfigRef:
-          name: ""
-    patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-service"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.app-id"}
-
-  - name: cache-deployment
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: apps/v1
-            kind: Deployment
-            metadata:
-              name: ""
-              namespace: ""
-              # tenant-id, app-id and cost-center: Kyverno's require-cost-labels
-              # refuses a tenant workload without all three (ADR-088). A cache
-              # Deployment created before that rule kept running without
-              # app-id; recreated, it was refused, and the tenant had no cache.
-              labels:
-                app.kubernetes.io/component: cache
-                app-id: ""
-                cost-center: platform
-                tenant-id: ""
-            spec:
-              replicas: 1
-              # app-id, as the Service's selector (see cache-service).
-              selector:
-                matchLabels:
-                  app.kubernetes.io/component: cache
-                  app-id: ""
-              template:
-                metadata:
-                  labels:
-                    app.kubernetes.io/component: cache
-                    app-id: ""
-                    cost-center: platform
-                    tenant-id: ""
-                spec:
-                  securityContext:
-                    runAsNonRoot: true
-                    runAsUser: 999
-                    fsGroup: 999
-                    seccompProfile: {type: RuntimeDefault}
-                  containers:
-                  - name: cache
-                    # Digest-pinned by the platform, so a fleet cannot float it and
-                    # every tenant patches together.
-                    image: docker.io/library/redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
-                    command: ["redis-server"]
-                    args:
-                    - --port
-                    - "6379"
-                    - --tls-port
-                    - "6380"
-                    - --tls-cert-file
-                    - /tls/tls.crt
-                    - --tls-key-file
-                    - /tls/tls.key
-                    - --tls-ca-cert-file
-                    - /tls/ca.crt
-                    # Authentication is the ACL, not client certificates.
-                    - --tls-auth-clients
-                    - "no"
-                    - --aclfile
-                    - /acl/users.acl
-                    - --dir
-                    - /data
-                    ports:
-                    - {name: redis, containerPort: 6379}
-                    - {name: redis-tls, containerPort: 6380}
-                    securityContext:
-                      allowPrivilegeEscalation: false
-                      readOnlyRootFilesystem: true
-                      capabilities: {drop: ["ALL"]}
-                    resources:
-                      requests: {cpu: 50m, memory: 64Mi}
-                      limits: {cpu: 250m, memory: 256Mi}
-                    volumeMounts:
-                    - {name: tls, mountPath: /tls, readOnly: true}
-                    - {name: acl, mountPath: /acl, readOnly: true}
-                    - {name: data, mountPath: /data}
-                  volumes:
-                  # Transient by design (ADR-014): an emptyDir, never a PVC. The
-                  # cache holds no state the tenant may not lose.
-                  - {name: data, emptyDir: {}}
-                  - name: tls
-                    secret: {secretName: ""}
-                  - name: acl
-                    secret:
+          - name: cache-certificate
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: cert-manager.io/v1
+                    kind: Certificate
+                    metadata:
+                      name: ""
+                      namespace: ""
+                    spec:
+                      # ADR-035: cert-manager is the only issuer of X.509 material.
                       secretName: ""
-                      items: [{key: users.acl, path: users.acl}]
-        providerConfigRef:
-          name: ""
-    patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-deployment"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.tenant-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.metadata.labels.app-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.matchLabels.app-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.app-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[1].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[2].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-auth"}}]}
-    # The fleet's only inputs.
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.cpu, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.cpu", policy: {fromFieldPath: Optional}}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.memory, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.memory", policy: {fromFieldPath: Optional}}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.limits.cpu, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.limits.cpu", policy: {fromFieldPath: Optional}}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.limits.memory, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.limits.memory", policy: {fromFieldPath: Optional}}
+                      issuerRef:
+                        name: infisical-fleet-issuer
+                        kind: ClusterIssuer
+                        group: infisical-issuer.infisical.com
+                      commonName: ""
+                      duration: 168h
+                      renewBefore: 48h
+                      dnsNames: []
+                providerConfigRef:
+                  name: ""
+            patches:
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-certificate"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.secretName, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.dnsNames[0]", transforms: [{type: string, string: {fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.commonName, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
 
-  - name: cache-network-policy
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: cilium.io/v2
-            kind: CiliumNetworkPolicy
-            metadata:
-              name: ""
-              namespace: ""
-              labels:
-                app.kubernetes.io/component: cache
-                cost-center: platform
-                tenant-id: ""
-            spec:
-              endpointSelector:
-                matchLabels:
-                  app.kubernetes.io/component: cache
-                  app-id: ""
-              # DNS out, tenant namespace in. The cache reaches nothing else.
-              #
-              # Both DNS backends: CoreDNS directly, or the node-local cache
-              # when the redirect policy is in force. Under
-              # `kube-proxy-replacement: true` Cilium enforces egress on the
-              # service ENDPOINT, not the ClusterIP, so naming only kube-dns
-              # stops matching the moment that redirect lands -- see
-              # spoke-catalog/infra/tenant-dns-egress.yaml for the incident.
-              egress:
-              - toEndpoints:
-                - matchLabels:
-                    k8s:io.kubernetes.pod.namespace: kube-system
-                    k8s:k8s-app: kube-dns
-                - matchLabels:
-                    k8s:io.kubernetes.pod.namespace: kube-system
-                    k8s:k8s-app: node-local-dns
-                toPorts:
-                - ports:
-                  - {port: "53", protocol: UDP}
-                  - {port: "53", protocol: TCP}
-              ingress:
-              - fromEndpoints:
-                - matchLabels:
-                    k8s:io.kubernetes.pod.namespace: ""
-                toPorts:
-                - ports:
-                  - {port: "6379", protocol: TCP}
-                  - {port: "6380", protocol: TCP}
-        providerConfigRef:
-          name: ""
-    patches:
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-network-policy"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.endpointSelector.matchLabels.app-id"}
-    - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: "spec.forProvider.manifest.spec.ingress[0].fromEndpoints[0].matchLabels['k8s:io.kubernetes.pod.namespace']", transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+          - name: cache-service
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: ""
+                      namespace: ""
+                      labels:
+                        app.kubernetes.io/component: cache
+                        cost-center: platform
+                        tenant-id: ""
+                    spec:
+                      type: ClusterIP
+                      # app-id with the component: a cache pod of another name in this
+                      # namespace (a leftover of a rename) must never join this Service.
+                      # On 2026-10-15 nutgraf-waypoint-cache, orphaned by the ADR-088
+                      # rename, sat behind waypoint-cache: two independent Redis servers
+                      # behind one address, each connection landing on either. The SDK
+                      # published to one and browsers subscribed on the other, so
+                      # wake-ups were lost at random.
+                      selector:
+                        app.kubernetes.io/component: cache
+                        app-id: ""
+                      ports:
+                      - {name: redis, port: 6379, targetPort: 6379, protocol: TCP}
+                      - {name: redis-tls, port: 6380, targetPort: 6380, protocol: TCP}
+                providerConfigRef:
+                  name: ""
+            patches:
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-service"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.app-id"}
 
-  - name: pooler
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies:
-          - "*"
-        forProvider:
-          manifest:
-            apiVersion: postgresql.cnpg.io/v1
-            kind: Pooler
-            metadata:
-              namespace: platform-data
-            spec:
-              cluster:
-                name: shared-cnpg
-              type: rw
-              instances: 1
-              pgbouncer:
-                poolMode: transaction
-                parameters:
-                  max_client_conn: "300"
-                  default_pool_size: "25"
-                  ignore_startup_parameters: "search_path, extra_float_digits"
-                # No authQuery, authQuerySecret or authQueryUser. Unset, CNPG runs its
-                # built-in Pooler integration and owns the auth path; supplying any of
-                # them disables that and makes this composition responsible for it.
-                # ADR-006 addendum (2026-09-23) records why, and what the previous
-                # value cost.
-              template:
-                spec:
-                  containers:
-                  - name: pgbouncer
-                    env:
-                    - name: PGDATABASE
-                      value: ""  # Patched from database.name
-        providerConfigRef:
-          name: ""  # Patched from cellId
-    patches:
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.providerConfigRef.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-pooler"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-pooler"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.database.name
-      toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[0].value
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.pooler.maxConnections
-      toFieldPath: spec.forProvider.manifest.spec.pgbouncer.parameters.default_pool_size
-      transforms:
-      - type: convert
-        convert:
-          toType: string
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.tenantId
-      toFieldPath: spec.forProvider.manifest.metadata.labels['tenant-id']
-    # Extract ACTUAL Pooler status from Spoke back to XR
-    # Pooler CRs don't have status.conditions - they have status.instances
-    - type: ToCompositeFieldPath
-      fromFieldPath: status.atProvider.manifest.status.instances
-      toFieldPath: status.poolerReady
-      transforms:
-        - type: math
-          math:
-            type: ClampMin
-            clampMin: 1
-        - type: convert
-          convert:
-            toType: bool
+          - name: cache-deployment
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: ""
+                      namespace: ""
+                      # tenant-id, app-id and cost-center: Kyverno's require-cost-labels
+                      # refuses a tenant workload without all three (ADR-088). A cache
+                      # Deployment created before that rule kept running without
+                      # app-id; recreated, it was refused, and the tenant had no cache.
+                      labels:
+                        app.kubernetes.io/component: cache
+                        app-id: ""
+                        cost-center: platform
+                        tenant-id: ""
+                    spec:
+                      replicas: 1
+                      # app-id, as the Service's selector (see cache-service).
+                      selector:
+                        matchLabels:
+                          app.kubernetes.io/component: cache
+                          app-id: ""
+                      template:
+                        metadata:
+                          labels:
+                            app.kubernetes.io/component: cache
+                            app-id: ""
+                            cost-center: platform
+                            tenant-id: ""
+                        spec:
+                          securityContext:
+                            runAsNonRoot: true
+                            runAsUser: 999
+                            fsGroup: 999
+                            seccompProfile: {type: RuntimeDefault}
+                          containers:
+                          - name: cache
+                            # Digest-pinned by the platform, so a fleet cannot float it and
+                            # every tenant patches together.
+                            image: docker.io/library/redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
+                            command: ["redis-server"]
+                            args:
+                            - --port
+                            - "6379"
+                            - --tls-port
+                            - "6380"
+                            - --tls-cert-file
+                            - /tls/tls.crt
+                            - --tls-key-file
+                            - /tls/tls.key
+                            - --tls-ca-cert-file
+                            - /tls/ca.crt
+                            # Authentication is the ACL, not client certificates.
+                            - --tls-auth-clients
+                            - "no"
+                            - --aclfile
+                            - /acl/users.acl
+                            - --dir
+                            - /data
+                            ports:
+                            - {name: redis, containerPort: 6379}
+                            - {name: redis-tls, containerPort: 6380}
+                            securityContext:
+                              allowPrivilegeEscalation: false
+                              readOnlyRootFilesystem: true
+                              capabilities: {drop: ["ALL"]}
+                            resources:
+                              requests: {cpu: 50m, memory: 64Mi}
+                              limits: {cpu: 250m, memory: 256Mi}
+                            volumeMounts:
+                            - {name: tls, mountPath: /tls, readOnly: true}
+                            - {name: acl, mountPath: /acl, readOnly: true}
+                            - {name: data, mountPath: /data}
+                          volumes:
+                          # Transient by design (ADR-014): an emptyDir, never a PVC. The
+                          # cache holds no state the tenant may not lose.
+                          - {name: data, emptyDir: {}}
+                          - name: tls
+                            secret: {secretName: ""}
+                          - name: acl
+                            secret:
+                              secretName: ""
+                              items: [{key: users.acl, path: users.acl}]
+                providerConfigRef:
+                  name: ""
+            patches:
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-deployment"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.tenant-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.metadata.labels.app-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.matchLabels.app-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.app-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[1].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[2].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-auth"}}]}
+            # The fleet's only inputs.
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.cpu, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.cpu", policy: {fromFieldPath: Optional}}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.memory, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.memory", policy: {fromFieldPath: Optional}}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.limits.cpu, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.limits.cpu", policy: {fromFieldPath: Optional}}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.limits.memory, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.limits.memory", policy: {fromFieldPath: Optional}}
 
-  # PostgREST is REMOVED, and with it hub-ory-jwt-secret (2026-09-23).
-  #
-  # WHAT WAS HERE
-  #
-  # A PostgREST Deployment and Service exposing the tenant's database as a REST
-  # API (ADR-008), plus an ExternalSecret delivering the token-signing secret it
-  # validated requests with.
-  #
-  # WHY IT COULD NOT WORK
-  #
-  # That ExternalSecret was named hub-ory-jwt-secret and read the remote key
-  # `hub-hydra-system-secret` -- both Ory artefacts. The platform's issuer is
-  # Zitadel (ADR-081), which signs with RS256 and publishes a JWKS; there is no
-  # shared HMAC secret to distribute and nothing has written that remote key
-  # since Ory was removed. The key is also BARE rather than an absolute path,
-  # so it was looked up at the Infisical root -- the same defect the cache
-  # credential carried, and it fails identically as "could not get secret data
-  # from provider".
-  #
-  # WHAT IT COST, AND WHY IT WAS INVISIBLE
-  #
-  # This was the ONLY resource here carrying a readinessCheck. It never became
-  # Ready, so every tenant XR composed by this Composition sat at
-  # `Ready: False, reason: Creating` permanently -- waypoint included, four days
-  # after it was provisioned and while every other part of it worked. The
-  # tenant's own ArgoCD Application reported Synced and Healthy throughout,
-  # because it was: the XR had been applied successfully. Nothing anywhere named
-  # a secret.
-  #
-  # WHY REMOVED RATHER THAN REPOINTED
-  #
-  # Deleting only the ExternalSecret would have been worse than leaving it.
-  # PostgREST does not fail without PGRST_JWT_SECRET -- it starts and serves
-  # every request as PGRST_DB_ANON_ROLE, which here is the tenant's own database
-  # user. The missing secret is the only thing that has been holding that
-  # Deployment in CreateContainerConfigError; removing it would have produced an
-  # unauthenticated REST API over the tenant's database.
-  #
-  # Repointing it needs the issuer's JWKS delivered into the tenant namespace as
-  # content, not as the URL that tenant-public-endpoint already carries: this
-  # PostgREST build does not fetch a JWKS from a URL, and a static copy goes
-  # stale when the issuer rotates. That is a design this platform does not have
-  # yet, and it is worth having -- but it is a capability to reintroduce
-  # deliberately, not a secret to quietly re-point.
-  #
-  # ADR-008 still names PostgREST as part of this composition's shape. When it
-  # returns it needs JWKS delivery first, and the fleet should have to ask for it
-  # rather than receiving an unrouted API it never requested: nothing routed to
-  # this one, and no application in this box's fleets ever called it.
+          - name: cache-network-policy
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: cilium.io/v2
+                    kind: CiliumNetworkPolicy
+                    metadata:
+                      name: ""
+                      namespace: ""
+                      labels:
+                        app.kubernetes.io/component: cache
+                        cost-center: platform
+                        tenant-id: ""
+                    spec:
+                      endpointSelector:
+                        matchLabels:
+                          app.kubernetes.io/component: cache
+                          app-id: ""
+                      # DNS out, tenant namespace in. The cache reaches nothing else.
+                      #
+                      # Both DNS backends: CoreDNS directly, or the node-local cache
+                      # when the redirect policy is in force. Under
+                      # `kube-proxy-replacement: true` Cilium enforces egress on the
+                      # service ENDPOINT, not the ClusterIP, so naming only kube-dns
+                      # stops matching the moment that redirect lands -- see
+                      # spoke-catalog/infra/tenant-dns-egress.yaml for the incident.
+                      egress:
+                      - toEndpoints:
+                        - matchLabels:
+                            k8s:io.kubernetes.pod.namespace: kube-system
+                            k8s:k8s-app: kube-dns
+                        - matchLabels:
+                            k8s:io.kubernetes.pod.namespace: kube-system
+                            k8s:k8s-app: node-local-dns
+                        toPorts:
+                        - ports:
+                          - {port: "53", protocol: UDP}
+                          - {port: "53", protocol: TCP}
+                      ingress:
+                      - fromEndpoints:
+                        - matchLabels:
+                            k8s:io.kubernetes.pod.namespace: ""
+                        toPorts:
+                        - ports:
+                          - {port: "6379", protocol: TCP}
+                          - {port: "6380", protocol: TCP}
+                providerConfigRef:
+                  name: ""
+            patches:
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-network-policy"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.endpointSelector.matchLabels.app-id"}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: "spec.forProvider.manifest.spec.ingress[0].fromEndpoints[0].matchLabels['k8s:io.kubernetes.pod.namespace']", transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
 
-  # 7. Infisical Credentials for SDK (ADR-003, ADR-019)
-  #    Pulls the Machine Identity credentials from the shared Infisical path.
-  #    MUST use ClusterSecretStore since the tenant SecretStore doesn't exist yet!
-  - name: infisical-credentials-secret
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: external-secrets.io/v1
-            kind: ExternalSecret
-            metadata:
-              namespace: ""  # Patched to tenant-<id>
-            spec:
-              refreshInterval: 1h
-              secretStoreRef:
-                name: infisical-backend
-                kind: ClusterSecretStore
-              target:
-                name: ""  # Patched to <tenantId>-infisical-credentials
-                creationPolicy: Owner
-                template:
-                  data:
-                    client-id: '{{ index . "client-id" }}'
-                    client-secret: '{{ index . "client-secret" }}'
-                    project-id: '{{ index . "project-id" }}'
-                  engineVersion: v2
-                  mergePolicy: Replace
-                  type: Opaque
-              data:
-                - secretKey: client-id
-                  remoteRef:
-                    key: ""  # Patched dynamically
-                    property: client-id
-                - secretKey: client-secret
-                  remoteRef:
-                    key: ""  # Patched dynamically
-                    property: client-secret
-                - secretKey: project-id
-                  remoteRef:
-                    key: ""  # Patched dynamically
-                    property: project-id
-        providerConfigRef:
-          name: ""  # Patched to cellId
-    readinessChecks:
-      - type: MatchCondition
-        matchCondition:
-          type: Ready
-          status: "True"
-    patches:
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.providerConfigRef.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-infisical-credentials-es"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-infisical-credentials"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: spec.forProvider.manifest.metadata.namespace
-      transforms:
-      - type: string
-        string:
-          fmt: "tenant-%s"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.target.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-infisical-credentials"
-    # PULL COMPOSITE JSON OBJECT FROM SHARED PATH
-    - type: CombineFromComposite
-      combine:
-        variables:
-          - fromFieldPath: spec.clusterName
-        strategy: string
-        string:
-          fmt: "/spoke-pool/%s/shared/infisical-credentials"
-      toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
-    - type: CombineFromComposite
-      combine:
-        variables:
-          - fromFieldPath: spec.clusterName
-        strategy: string
-        string:
-          fmt: "/spoke-pool/%s/shared/infisical-credentials"
-      toFieldPath: spec.forProvider.manifest.spec.data[1].remoteRef.key
-    - type: CombineFromComposite
-      combine:
-        variables:
-          - fromFieldPath: spec.clusterName
-        strategy: string
-        string:
-          fmt: "/spoke-pool/%s/shared/infisical-credentials"
-      toFieldPath: spec.forProvider.manifest.spec.data[2].remoteRef.key
+          - name: pooler
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies:
+                  - "*"
+                forProvider:
+                  manifest:
+                    apiVersion: postgresql.cnpg.io/v1
+                    kind: Pooler
+                    metadata:
+                      namespace: platform-data
+                    spec:
+                      cluster:
+                        name: shared-cnpg
+                      type: rw
+                      instances: 1
+                      pgbouncer:
+                        poolMode: transaction
+                        parameters:
+                          max_client_conn: "300"
+                          default_pool_size: "25"
+                          ignore_startup_parameters: "search_path, extra_float_digits"
+                        # No authQuery, authQuerySecret or authQueryUser. Unset, CNPG runs its
+                        # built-in Pooler integration and owns the auth path; supplying any of
+                        # them disables that and makes this composition responsible for it.
+                        # ADR-006 addendum (2026-09-23) records why, and what the previous
+                        # value cost.
+                      template:
+                        spec:
+                          containers:
+                          - name: pgbouncer
+                            env:
+                            - name: PGDATABASE
+                              value: ""  # Patched from database.name
+                providerConfigRef:
+                  name: ""  # Patched from cellId
+            patches:
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.providerConfigRef.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-pooler"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-pooler"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.database.name
+              toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[0].value
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.pooler.maxConnections
+              toFieldPath: spec.forProvider.manifest.spec.pgbouncer.parameters.default_pool_size
+              transforms:
+              - type: convert
+                convert:
+                  toType: string
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.tenantId
+              toFieldPath: spec.forProvider.manifest.metadata.labels['tenant-id']
+            # Extract ACTUAL Pooler status from Spoke back to XR
+            # Pooler CRs don't have status.conditions - they have status.instances
+            - type: ToCompositeFieldPath
+              fromFieldPath: status.atProvider.manifest.status.instances
+              toFieldPath: status.poolerReady
+              transforms:
+                - type: math
+                  math:
+                    type: ClampMin
+                    clampMin: 1
+                - type: convert
+                  convert:
+                    toType: bool
 
-  # 8. Tenant-specific SecretStore (ESO)
-  #    Provides ESO scope isolation per tenant. Uses the shared Machine Identity
-  #    projected into the tenant namespace.
-  - name: tenant-secret-store
-    base:
-      apiVersion: kubernetes.crossplane.io/v1alpha2
-      kind: Object
-      spec:
-        managementPolicies: ["*"]
-        forProvider:
-          manifest:
-            apiVersion: external-secrets.io/v1
-            kind: SecretStore
-            metadata:
-              name: tenant-secret-store
-              namespace: ""  # Patched to tenant-<id>
-            spec:
-              provider:
-                infisical:
-                  hostAPI: "https://infisical.dev.nutgraf.in"
-                  secretsScope:
-                    projectSlug: "hub-secrets"
-                    # The MANAGEMENT scope (ADR-111 Revision 7 §2), templated per box.
-                    # This store reads /spoke-pool/<cell>/tenants/<tenant>/... , which
-                    # hub-operator writes through the box's declared management scope,
-                    # so it follows that scope and not the cell's environment.
-                    environmentSlug: "management"
-                  auth:
-                    universalAuthCredentials:
-                      clientId:
+          # PostgREST is REMOVED, and with it hub-ory-jwt-secret (2026-09-23).
+          #
+          # WHAT WAS HERE
+          #
+          # A PostgREST Deployment and Service exposing the tenant's database as a REST
+          # API (ADR-008), plus an ExternalSecret delivering the token-signing secret it
+          # validated requests with.
+          #
+          # WHY IT COULD NOT WORK
+          #
+          # That ExternalSecret was named hub-ory-jwt-secret and read the remote key
+          # `hub-hydra-system-secret` -- both Ory artefacts. The platform's issuer is
+          # Zitadel (ADR-081), which signs with RS256 and publishes a JWKS; there is no
+          # shared HMAC secret to distribute and nothing has written that remote key
+          # since Ory was removed. The key is also BARE rather than an absolute path,
+          # so it was looked up at the Infisical root -- the same defect the cache
+          # credential carried, and it fails identically as "could not get secret data
+          # from provider".
+          #
+          # WHAT IT COST, AND WHY IT WAS INVISIBLE
+          #
+          # This was the ONLY resource here carrying a readinessCheck. It never became
+          # Ready, so every tenant XR composed by this Composition sat at
+          # `Ready: False, reason: Creating` permanently -- waypoint included, four days
+          # after it was provisioned and while every other part of it worked. The
+          # tenant's own ArgoCD Application reported Synced and Healthy throughout,
+          # because it was: the XR had been applied successfully. Nothing anywhere named
+          # a secret.
+          #
+          # WHY REMOVED RATHER THAN REPOINTED
+          #
+          # Deleting only the ExternalSecret would have been worse than leaving it.
+          # PostgREST does not fail without PGRST_JWT_SECRET -- it starts and serves
+          # every request as PGRST_DB_ANON_ROLE, which here is the tenant's own database
+          # user. The missing secret is the only thing that has been holding that
+          # Deployment in CreateContainerConfigError; removing it would have produced an
+          # unauthenticated REST API over the tenant's database.
+          #
+          # Repointing it needs the issuer's JWKS delivered into the tenant namespace as
+          # content, not as the URL that tenant-public-endpoint already carries: this
+          # PostgREST build does not fetch a JWKS from a URL, and a static copy goes
+          # stale when the issuer rotates. That is a design this platform does not have
+          # yet, and it is worth having -- but it is a capability to reintroduce
+          # deliberately, not a secret to quietly re-point.
+          #
+          # ADR-008 still names PostgREST as part of this composition's shape. When it
+          # returns it needs JWKS delivery first, and the fleet should have to ask for it
+          # rather than receiving an unrouted API it never requested: nothing routed to
+          # this one, and no application in this box's fleets ever called it.
+
+          # 7. Infisical Credentials for SDK (ADR-003, ADR-019)
+          #    Pulls the Machine Identity credentials from the shared Infisical path.
+          #    MUST use ClusterSecretStore since the tenant SecretStore doesn't exist yet!
+          - name: infisical-credentials-secret
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: external-secrets.io/v1
+                    kind: ExternalSecret
+                    metadata:
+                      namespace: ""  # Patched to tenant-<id>
+                    spec:
+                      refreshInterval: 1h
+                      secretStoreRef:
+                        name: infisical-backend
+                        kind: ClusterSecretStore
+                      target:
                         name: ""  # Patched to <tenantId>-infisical-credentials
-                        key: client-id
-                      clientSecret:
-                        name: ""  # Patched to <tenantId>-infisical-credentials
-                        key: client-secret
-        providerConfigRef:
-          name: ""  # Patched to cellId
-    readinessChecks:
-      - type: MatchCondition
-        matchCondition:
-          type: Ready
-          status: "True"
-    patches:
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.clusterName
-      toFieldPath: spec.providerConfigRef.name
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: metadata.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-tenant-secret-store"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.scopeId
-      toFieldPath: spec.forProvider.manifest.metadata.namespace
-      transforms:
-      - type: string
-        string:
-          fmt: "tenant-%s"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientId.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-infisical-credentials"
-    - type: FromCompositeFieldPath
-      fromFieldPath: spec.appId
-      toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientSecret.name
-      transforms:
-      - type: string
-        string:
-          fmt: "%s-infisical-credentials"
+                        creationPolicy: Owner
+                        template:
+                          data:
+                            client-id: '{{ index . "client-id" }}'
+                            client-secret: '{{ index . "client-secret" }}'
+                            project-id: '{{ index . "project-id" }}'
+                          engineVersion: v2
+                          mergePolicy: Replace
+                          type: Opaque
+                      data:
+                        - secretKey: client-id
+                          remoteRef:
+                            key: ""  # Patched dynamically
+                            property: client-id
+                        - secretKey: client-secret
+                          remoteRef:
+                            key: ""  # Patched dynamically
+                            property: client-secret
+                        - secretKey: project-id
+                          remoteRef:
+                            key: ""  # Patched dynamically
+                            property: project-id
+                providerConfigRef:
+                  name: ""  # Patched to cellId
+            readinessChecks:
+              - type: MatchCondition
+                matchCondition:
+                  type: Ready
+                  status: "True"
+            patches:
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.providerConfigRef.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-infisical-credentials-es"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-infisical-credentials"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: spec.forProvider.manifest.metadata.namespace
+              transforms:
+              - type: string
+                string:
+                  fmt: "tenant-%s"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.target.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-infisical-credentials"
+            # PULL COMPOSITE JSON OBJECT FROM SHARED PATH
+            - type: CombineFromComposite
+              combine:
+                variables:
+                  - fromFieldPath: spec.clusterName
+                strategy: string
+                string:
+                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
+              toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
+            - type: CombineFromComposite
+              combine:
+                variables:
+                  - fromFieldPath: spec.clusterName
+                strategy: string
+                string:
+                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
+              toFieldPath: spec.forProvider.manifest.spec.data[1].remoteRef.key
+            - type: CombineFromComposite
+              combine:
+                variables:
+                  - fromFieldPath: spec.clusterName
+                strategy: string
+                string:
+                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
+              toFieldPath: spec.forProvider.manifest.spec.data[2].remoteRef.key
+
+          # 8. Tenant-specific SecretStore (ESO)
+          #    Provides ESO scope isolation per tenant. Uses the shared Machine Identity
+          #    projected into the tenant namespace.
+          - name: tenant-secret-store
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies: ["*"]
+                forProvider:
+                  manifest:
+                    apiVersion: external-secrets.io/v1
+                    kind: SecretStore
+                    metadata:
+                      name: tenant-secret-store
+                      namespace: ""  # Patched to tenant-<id>
+                    spec:
+                      provider:
+                        infisical:
+                          hostAPI: "https://infisical.dev.nutgraf.in"
+                          secretsScope:
+                            projectSlug: "hub-secrets"
+                            # The MANAGEMENT scope (ADR-111 Revision 7 §2), templated per box.
+                            # This store reads /spoke-pool/<cell>/tenants/<tenant>/... , which
+                            # hub-operator writes through the box's declared management scope,
+                            # so it follows that scope and not the cell's environment.
+                            environmentSlug: "management"
+                          auth:
+                            universalAuthCredentials:
+                              clientId:
+                                name: ""  # Patched to <tenantId>-infisical-credentials
+                                key: client-id
+                              clientSecret:
+                                name: ""  # Patched to <tenantId>-infisical-credentials
+                                key: client-secret
+                providerConfigRef:
+                  name: ""  # Patched to cellId
+            readinessChecks:
+              - type: MatchCondition
+                matchCondition:
+                  type: Ready
+                  status: "True"
+            patches:
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.clusterName
+              toFieldPath: spec.providerConfigRef.name
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: metadata.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-tenant-secret-store"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.scopeId
+              toFieldPath: spec.forProvider.manifest.metadata.namespace
+              transforms:
+              - type: string
+                string:
+                  fmt: "tenant-%s"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientId.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-infisical-credentials"
+            - type: FromCompositeFieldPath
+              fromFieldPath: spec.appId
+              toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientSecret.name
+              transforms:
+              - type: string
+                string:
+                  fmt: "%s-infisical-credentials"
