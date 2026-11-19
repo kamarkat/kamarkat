@@ -187,6 +187,15 @@ components:
     repo: syself/cluster-api-provider-hetzner
     layer: machinery
     match: ["ghcr.io/syself/caph*"]
+    behind:
+      - versions: ["v1.1.12"]
+        status: held
+        reason: >-
+          The provider version is qualified against the cluster templates this bundle ships, and
+          those templates are immutable: a provider move that changes a template field is a new
+          template under a new name, not an edit, because editing one wedges the reconciliation
+          of every cluster already built from it. So it moves with a template revision and the
+          contract parity check, not on its own.
   - name: cert-manager
     description: Issues and renews the TLS certificates for every gateway and webhook.
     license: Apache-2.0
@@ -291,9 +300,12 @@ components:
       - versions: ["v1.20.4"]
         status: held
         reason: >-
-          Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline;
-          patch release 1.20.5 evaluation is scheduled for 0.3.31.
-        target: 0.3.31
+          Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline. The newest
+          1.20 patch is deliberately not taken in 0.3.31: that release changes gateway routing,
+          and moving the datapath in the same version would make a routing failure impossible
+          to attribute to either change. It moves in 0.3.32, after the routing change has been
+          accepted on a box.
+        target: 0.3.32
       - versions: ["v0.4.13"]
         status: held
         reason: >-
@@ -403,11 +415,14 @@ components:
     layer: machinery
     match: ["docker.io/infisical/infisical"]
     behind:
-      - versions: ["v0.160.11"]
-        status: not assessed
+      - versions: ["v0.167.12"]
+        status: held
         reason: >-
-          Behind by several patch releases, in a vendored chart. Nobody has assessed the move,
-          and it runs database migrations on start, so it needs its own validation.
+          Assessed and moved in 0.3.30, from v0.160.11, for the Applications API the PKI issuer
+          v1.x contract needs; its 196 database migrations ran in under a minute on a live box.
+          Upstream publishes releases continuously, so a bundle pins the version it qualified
+          and re-qualifies when a platform change needs a newer one, rather than following a
+          component that runs migrations on start.
   - name: Infisical PKI issuer
     description: Issues internal certificates from the secret store's certificate authority.
     license: MIT
@@ -436,9 +451,10 @@ components:
       - versions: ["1.30.1"]
         status: held
         reason: >-
-          CloudNativePG 1.30 is qualified against the platform's Kubernetes 1.36 baseline;
-          patch release 1.30.2 evaluation is scheduled for 0.3.31.
-        target: 0.3.31
+          CloudNativePG 1.30 is qualified against the platform's Kubernetes 1.36 baseline. The
+          newest 1.30 patch moves with the restore drill, which is the management-state
+          recreation test and runs on staging; staging does not exist yet, so naming a release
+          for it would be a date rather than a plan. It is retargeted when staging is created.
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
   - name: PostgreSQL
     description: The platform database and each application's database.
