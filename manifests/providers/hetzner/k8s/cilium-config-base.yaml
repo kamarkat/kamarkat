@@ -51,8 +51,8 @@ data:
   gateway-api-xff-num-trusted-hops: '0'
   gateway-api-service-externaltrafficpolicy: Cluster
   gateway-api-secrets-namespace: cilium-secrets
-  gateway-api-hostnetwork-enabled: 'false'
-  gateway-api-hostnetwork-nodelabelselector: ''
+  gateway-api-hostnetwork-enabled: 'true'
+  gateway-api-hostnetwork-nodelabelselector: node-role.kubernetes.io/control-plane=
   enable-policy-secrets-sync: 'true'
   policy-secrets-only-from-secrets-namespace: 'true'
   policy-secrets-namespace: cilium-secrets
@@ -219,7 +219,7 @@ data:
   external-envoy-proxy: 'false'
   envoy-base-id: '0'
   envoy-access-log-buffer-size: '4096'
-  envoy-keep-cap-netbindservice: 'false'
+  envoy-keep-cap-netbindservice: 'true'
   max-connected-clusters: '255'
   clustermesh-enable-endpoint-sync: 'false'
   clustermesh-enable-mcs-api: 'false'

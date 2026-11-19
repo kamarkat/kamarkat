@@ -134,21 +134,16 @@ spec:
   target:
     name: vmauth-vmalert
     creationPolicy: Owner
-  # An indexed `data` entry, not `dataFrom` (ADR-031). A spoke's ExternalSecrets are
-  # patched per cell at `spec.data[N]`, and `dataFrom` offers no index for that patch
-  # to target -- so a generated secret declared that way is the one shape a per-cell
-  # patch cannot reach. The Password generator exposes a single `password` key, and
-  # `data[].sourceRef.generatorRef` is served by the ExternalSecret v1 API this
-  # platform runs (verified against the vendored CRD, eso-crd-03.yaml).
-  data:
-    - secretKey: password
-      sourceRef:
+  # Sourced via `dataFrom` with `generatorRef`. The CRD marks generatorRef in `data[]`
+  # deprecated and unimplemented; ESO looks for a SecretStore when under `data[]` and
+  # fails with empty SecretStore name. Under `dataFrom`, generatorRef is supported and
+  # extracts the generated password directly into the target Secret.
+  dataFrom:
+    - sourceRef:
         generatorRef:
           apiVersion: generators.external-secrets.io/v1alpha1
           kind: Password
           name: vmauth-token
-      remoteRef:
-        key: password
 ---
 # ADR-078 add.5 §7: the VIEWER entry point, a second VMAuth and not a second user
 # on the one above.

@@ -7284,6 +7284,7 @@ stringData:
                   - SETGID
                   - SETUID
                   - SYSLOG
+                  - NET_BIND_SERVICE
                 drop:
                   - ALL
             terminationMessagePolicy: FallbackToLogsOnError

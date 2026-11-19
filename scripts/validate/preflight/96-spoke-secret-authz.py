@@ -68,10 +68,11 @@ for doc in yaml.safe_load_all(run(["kubectl", "kustomize", CATALOG],
     if not doc or doc.get("kind") != "ExternalSecret":
         continue
     name = doc["metadata"]["name"]
-    if doc["spec"].get("dataFrom"):
-        # dataFrom has no /spec/data/N index for a JSON6902 patch to target, so it
-        # cannot be re-scoped per cell at all.
-        print(f"BAD\t{name}\tuses dataFrom — no index for a per-cell patch to target")
+    for df in (doc["spec"].get("dataFrom") or []):
+        if not (df.get("sourceRef") or {}).get("generatorRef"):
+            # dataFrom without a generator has no /spec/data/N index for a JSON6902 patch to target,
+            # so it cannot be re-scoped per cell at all.
+            print(f"BAD\t{name}\tuses dataFrom — no index for a per-cell patch to target")
     # An entry sourced from a GENERATOR reads nothing from the secret store, so the
     # cell prefix does not apply to it: ADR-031 constrains what a spoke's SecretStore
     # is authorised to read, and a generatorRef never consults the store. Its

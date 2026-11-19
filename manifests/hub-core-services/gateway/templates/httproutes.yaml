@@ -23,6 +23,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: api
   namespace: platform-edge
@@ -75,6 +76,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: auth
   namespace: platform-edge
@@ -128,6 +130,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: console
   namespace: platform-identity
@@ -171,6 +174,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: argocd
   namespace: platform-ops
@@ -195,6 +199,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: infisical
   namespace: platform-security
@@ -223,6 +228,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: credit-authority
   namespace: platform-credits
@@ -252,6 +258,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: billing-engine
   namespace: platform-billing
@@ -278,6 +285,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: dashboard
   namespace: platform-ops
@@ -308,6 +316,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: http-to-https
   namespace: platform-ops

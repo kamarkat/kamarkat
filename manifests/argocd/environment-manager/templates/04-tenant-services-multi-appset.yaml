@@ -78,6 +78,16 @@ spec:
               value: 'id.{{ include "environment-manager.hubDomain" $ }}'
             - name: login.gateway.httpRoute.hostnames[0]
               value: 'id.{{ include "environment-manager.hubDomain" $ }}'
+            {{- if $.Values.hubIngressAddress }}
+            - name: gateway.httpRoute.annotations.external-dns\.alpha\.kubernetes\.io/target
+              value: {{ $.Values.hubIngressAddress | quote }}
+            - name: gateway.httpRoute.annotations.external-dns\.kubernetes\.io/target
+              value: {{ $.Values.hubIngressAddress | quote }}
+            - name: login.gateway.httpRoute.annotations.external-dns\.alpha\.kubernetes\.io/target
+              value: {{ $.Values.hubIngressAddress | quote }}
+            - name: login.gateway.httpRoute.annotations.external-dns\.kubernetes\.io/target
+              value: {{ $.Values.hubIngressAddress | quote }}
+            {{- end }}
 {{- else }}
       sources:
         - repoURL: '{{"{{"}} .repoURL {{"}}"}}'
@@ -106,6 +116,16 @@ spec:
                 value: 'id.{{ include "environment-manager.hubDomain" $ }}'
               - name: login.gateway.httpRoute.hostnames[0]
                 value: 'id.{{ include "environment-manager.hubDomain" $ }}'
+              {{- if $.Values.hubIngressAddress }}
+              - name: gateway.httpRoute.annotations.external-dns\.alpha\.kubernetes\.io/target
+                value: {{ $.Values.hubIngressAddress | quote }}
+              - name: gateway.httpRoute.annotations.external-dns\.kubernetes\.io/target
+                value: {{ $.Values.hubIngressAddress | quote }}
+              - name: login.gateway.httpRoute.annotations.external-dns\.alpha\.kubernetes\.io/target
+                value: {{ $.Values.hubIngressAddress | quote }}
+              - name: login.gateway.httpRoute.annotations.external-dns\.kubernetes\.io/target
+                value: {{ $.Values.hubIngressAddress | quote }}
+              {{- end }}
         - repoURL: {{ .Values.platformRepoURL | quote }}
           targetRevision: '{{ .Values.environmentRevision }}'
           ref: values

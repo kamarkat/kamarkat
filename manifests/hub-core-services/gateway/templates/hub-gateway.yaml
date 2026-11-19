@@ -30,6 +30,7 @@ metadata:
   {{- if $target }}
   annotations:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
   name: hub-gateway
   namespace: platform-ops

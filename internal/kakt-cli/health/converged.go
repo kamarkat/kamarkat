@@ -54,12 +54,18 @@ func ConvergedCheckers() []HealthChecker {
 			args: []string{"get", "externalsecrets", "-A", "-o", "json"},
 			count: func(items []map[string]any) (int, int, string) {
 				bad := []string{}
+				total := 0
 				for _, e := range items {
-					if conditionStatus(e) != "True" {
+					synced := hasCondition(e, "Ready", "True") || conditionStatus(e) == "True"
+					if isOptionalExternalSecret(e) && !synced {
+						continue
+					}
+					total++
+					if !synced {
 						bad = append(bad, namespacedName(e))
 					}
 				}
-				return len(bad), len(items), summarise(bad)
+				return len(bad), total, summarise(bad)
 			},
 		},
 		&jsonCountChecker{
@@ -207,4 +213,13 @@ func summarise(bad []string) string {
 		return strings.Join(bad, ", ")
 	}
 	return fmt.Sprintf("%s and %d more", strings.Join(bad[:show], ", "), len(bad)-show)
+}
+
+// isOptionalExternalSecret identifies capabilities that are optional on a cluster
+// (e.g. ghcr-pull-secret, which is only present when GHCR_TOKEN was provided at bootstrap).
+// If not synced, they do not fail convergence.
+func isOptionalExternalSecret(e map[string]any) bool {
+	n := name(e)
+	targetName, _ := nested(e, "spec", "target", "name").(string)
+	return n == "ghcr-pull-secret-credentials" || targetName == "ghcr-pull-secret"
 }

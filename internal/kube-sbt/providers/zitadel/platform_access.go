@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 )
 
 // accessPageLimit is the issuer's per-request maximum for the searches below. Every
@@ -103,12 +104,16 @@ func (a *Auth) EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID
 }
 
 // orgOwners returns the user ids of an organisation's owners, every page of them.
+// ListOrgMembersRequest does not support a roleQuery in queries (it returns 400
+// invalid ListOrgMembersRequest.Queries[0]: embedded message failed validation);
+// we list members with pagination and filter for the ORG_OWNER role client-side.
 func (a *Auth) orgOwners(ctx context.Context, orgID string) ([]string, error) {
 	var ids []string
 	for offset := 0; ; offset += accessPageLimit {
 		var page struct {
 			Result []struct {
-				UserID string `json:"userId"`
+				UserID string   `json:"userId"`
+				Roles  []string `json:"roles"`
 			} `json:"result"`
 			Details struct {
 				TotalResult string `json:"totalResult"`
@@ -116,16 +121,13 @@ func (a *Auth) orgOwners(ctx context.Context, orgID string) ([]string, error) {
 		}
 		body := map[string]any{
 			"query": map[string]any{"offset": fmt.Sprint(offset), "limit": accessPageLimit},
-			// Server-side, so the page boundary cannot hide an owner behind a
-			// hundred service accounts.
-			"queries": []any{map[string]any{"roleQuery": map[string]any{"role": "ORG_OWNER"}}},
 		}
 		if err := a.api.do(ctx, http.MethodPost,
 			"/management/v1/orgs/me/members/_search", orgID, body, &page); err != nil {
 			return nil, fmt.Errorf("list owners of the platform organisation %q: %w", orgID, err)
 		}
 		for _, m := range page.Result {
-			if m.UserID != "" {
+			if m.UserID != "" && slices.Contains(m.Roles, "ORG_OWNER") {
 				ids = append(ids, m.UserID)
 			}
 		}

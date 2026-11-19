@@ -1208,6 +1208,24 @@ func (r *HubEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}),
 			),
 		).
+		// Watch CLI and bootstrap source secrets (e.g. iam-admin-pat, hetzner, platform-admin-credentials)
+		// so when they are created or updated, they are uploaded to Infisical immediately.
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findHubEnvironmentForCLISecret),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				secret, ok := obj.(*corev1.Secret)
+				if !ok {
+					return false
+				}
+				for _, m := range infisical.CLISecretMappings {
+					if secret.Namespace == m.SourceNamespace && secret.Name == m.SourceName {
+						return true
+					}
+				}
+				return false
+			})),
+		).
 		Complete(r)
 }
 
@@ -1301,7 +1319,25 @@ func (r *HubEnvironmentReconciler) findHubEnvironmentForDeployment(ctx context.C
 	return requests
 }
 
-// findHubEnvironmentForStatefulSet maps StatefulSet to HubEnvironment CR
+// findHubEnvironmentForCLISecret maps CLI/bootstrap source secrets to HubEnvironment CRs.
+func (r *HubEnvironmentReconciler) findHubEnvironmentForCLISecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	hubEnvList := &opsv1alpha1.HubEnvironmentList{}
+	if err := r.List(ctx, hubEnvList); err != nil {
+		return []reconcile.Request{}
+	}
+
+	var requests []reconcile.Request
+	for _, hubEnv := range hubEnvList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      hubEnv.Name,
+				Namespace: hubEnv.Namespace,
+			},
+		})
+	}
+
+	return requests
+}
 // Requirement 12.13: Implement mapper function for StatefulSet
 func (r *HubEnvironmentReconciler) findHubEnvironmentForStatefulSet(ctx context.Context, obj client.Object) []reconcile.Request {
 	// List all HubEnvironment CRs
