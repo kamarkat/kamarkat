@@ -245,21 +245,27 @@ if wants platform; then
         # SPOKEPOOL_NAME remains how a run names WHICH workload cluster to assess
         # when a box declares several. Unset, the workload-cluster modules report
         # that; it no longer silences the rest.
-        # The zone this box publishes on, from what it declares (ADR-051). Without
-        # it the checks fall back to the PLATFORM's own zone and judge a tenant's
-        # box by hostnames it does not own -- failing a correct box, or passing a
-        # wrong one.
-        hub_domain="$(kubectl --kubeconfig="$kubeconfig" get hubenvironment hub-environment \
-                        -n platform-ops -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
-        if [[ -z "$hub_domain" ]]; then
-            skip platform "the box declares no domain (HubEnvironment.spec.domain is empty); its hostnames cannot be checked against anything"
-        else
-            run_phase platform "$LOG_DIR/validation-platform.log" \
-                env KUBECONFIG="$kubeconfig" ZERO_OPS_DIR="$ZERO_OPS_DIR" \
-                    SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
-                    HUB_DOMAIN="$hub_domain" \
-                    bash "$PLATFORM_DIR/scripts/post-bootstrap-validate.sh"
-        fi
+        # NO DOMAIN READ HERE, and no skip for the lack of one. The zone comes
+        # from HubEnvironment.spec.domain (ADR-051) and scripts/validate/common.sh
+        # reads it from the cluster when a caller does not pass it -- so every
+        # caller gets the same value, including ones that reach the modules
+        # directly. Reading it here as well made this script the only caller that
+        # worked.
+        #
+        # A box that declares no domain no longer skips this phase either. It has
+        # no zone, which the hostname checks say per check, where it is visible.
+        # Skipping the phase said it about all 36 at once, in a line that read
+        # like a box with nothing to check.
+        #
+        # SPOKEPOOL_NAME is optional and may be unset: with one workload cluster
+        # declared the runner derives it, with none the workload-cluster checks
+        # report that, and with several it is required. Expanded with a default
+        # because this runs under `set -u`, where a bare "$SPOKEPOOL_NAME" aborted
+        # the whole assessment with "unbound variable".
+        run_phase platform "$LOG_DIR/validation-platform.log" \
+            env KUBECONFIG="$kubeconfig" ZERO_OPS_DIR="$ZERO_OPS_DIR" \
+                SPOKEPOOL_NAME="${SPOKEPOOL_NAME:-}" \
+                bash "$PLATFORM_DIR/scripts/post-bootstrap-validate.sh"
     fi
 fi
 

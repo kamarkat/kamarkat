@@ -238,6 +238,36 @@ of them: what runs is what the release contains.`,
 			}
 			fmt.Printf("[day0] ✓ %s converged\n", cluster)
 
+			// THE MANAGEMENT CLUSTER IS ASSESSED FIRST, AND ON ITS OWN.
+			//
+			// It was assessed last, after every declared workload cluster had to
+			// come up -- so a box whose workload cluster was still building
+			// returned before the management cluster had been assessed at all,
+			// and the operator was told the workload cluster did not come up with
+			// no verdict on the thing that was actually finished.
+			//
+			// The management cluster's acceptance does not depend on a workload
+			// cluster existing (ADR-115). Assessing it here means its verdict is
+			// established and recorded whatever happens below.
+			fmt.Printf("\n[day0] ── accepting %s ──\n", cluster)
+			hubAccept := acceptOptions{
+				Cluster:     cluster,
+				Kubeconfig:  kubeconfig,
+				GitopsDir:   ws,
+				PlatformDir: platformDir,
+			}
+			if err := reportAcceptanceVerdict(hubAccept, runAcceptance(c.Context(), hubAccept)); err != nil {
+				return fmt.Errorf("%w\n\n"+
+					"The cluster was built and it does not do its job yet. Everything the "+
+					"run created is kept: fix what the assessment named and re-run this "+
+					"command. Its state is in %s/.state.", err, ws)
+			}
+			// Recorded alongside the phases, so a tenant asking how far its
+			// bootstrap got sees that the cluster was accepted and when. Written
+			// only once a complete assessment has passed; a re-run assesses
+			// again rather than reading this.
+			recordAcceptance(ws, cluster)
+
 			// EVERY DECLARED WORKLOAD CLUSTER, through the hub's own readiness
 			// and home-worker checks rather than a second implementation of them.
 			// Each is reported, and one failing does not hide another.
@@ -254,31 +284,38 @@ of them: what runs is what the release contains.`,
 					strings.Join(unready, " "))
 			}
 
-			// THE BOX AFTER CONVERGENCE AND AFTER EVERY DECLARED POOL.
+			// THE BOX, once its workload clusters exist.
 			//
-			// hub-bootstrap.sh runs this same validation as its own final fatal
-			// step, and that run is NOT before the workload clusters exist: it
-			// comes after step10_wait_spokepool, step10e_spoke_home_worker,
-			// step10f_spoke_database and the tenant-ingress gate, for the pool it
-			// was given.
+			// Only when some are declared. For a management-only box the
+			// assessment above is the whole box, and running it twice would
+			// assert the same things against the same cluster for no added
+			// observation -- which is what the two runs of this validation used
+			// to do on every box, one of them from inside hub-bootstrap.sh.
 			//
-			// What this second run adds is what happened since: the convergence
-			// wait above, and -- where several pools are declared, so the hub
-			// phase asserted about none of them -- the readiness of every one.
-			// That is a state the first run cannot have observed.
+			// What this run adds, where it happens at all, is the workload
+			// clusters: the modules scoped to one, and the ones that span a
+			// management cluster and a workload cluster. Those reported
+			// themselves as not applicable above, correctly, because at that
+			// point no workload cluster existed.
 			//
-			// IT REPLACES THE FIRST REPORT. Both write .state/validation.json, so
-			// the authoritative record is this one, deliberately: it is the later
-			// and wider observation. The first is not preserved alongside it.
-			//
-			// A named phase that cannot run fails rather than skipping, so this
-			// cannot pass without having checked.
-			if err := runDayZero(platformDir, dayZeroValidate, env, "--only=platform"); err != nil {
-				return fmt.Errorf("the clusters were built and the box did not validate: %w\n\n"+
-					"They exist. Fix what the validation named and re-run this command.", err)
+			// It replaces the earlier report. Both write .state/validation.json
+			// and the later, wider observation is the authoritative one.
+			if len(pools) > 0 {
+				fmt.Printf("\n[day0] ── accepting %s with its workload clusters ──\n", cluster)
+				boxAccept := hubAccept
+				if len(pools) == 1 {
+					// Named only when there is one. With several, naming one
+					// would report partial coverage as full.
+					boxAccept.SpokePool = pools[0]
+				}
+				if err := reportAcceptanceVerdict(boxAccept, runAcceptance(c.Context(), boxAccept)); err != nil {
+					return fmt.Errorf("the clusters were built and the box is not accepted: %w\n\n"+
+						"They exist. Fix what the assessment named and re-run this command.", err)
+				}
+				recordAcceptance(ws, cluster)
 			}
 
-			fmt.Printf("\n[day0] %s is built and validated on %s\n", cluster, versions.BundleVersion)
+			fmt.Printf("\n[day0] %s is built and accepted on %s\n", cluster, versions.BundleVersion)
 			return nil
 		},
 	}

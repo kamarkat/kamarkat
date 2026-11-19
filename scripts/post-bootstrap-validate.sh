@@ -28,15 +28,42 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
 fi
 # Provider matrix: cloud providers use hetzner infra and production spoke.
 CAPI_INFRA_PROVIDER="hetzner"
-# No default. It used to fall back to spoke-pool-eu-prod-01, so a run that
-# forgot to pass one validated a dev box against the PRODUCTION pool name, found
-# nothing, and reported the spoke checks as failures of the box rather than of
-# the invocation. Every caller passes it; not knowing is an error, not a guess.
-if [[ -z "${SPOKEPOOL_NAME:-}" ]]; then
-    echo "post-bootstrap-validate: SPOKEPOOL_NAME is not set." >&2
-    echo "  Pass the SpokePool this box declares; there is no safe default." >&2
-    exit 2
+# No default, and no literal guess. It used to fall back to
+# spoke-pool-eu-prod-01, so a run that forgot to pass one validated a dev box
+# against the PRODUCTION pool name, found nothing, and reported the workload
+# cluster checks as failures of the box rather than of the invocation.
+#
+# NOT FATAL ANY MORE. Exiting 2 here aborted the entire assessment -- including
+# every management-cluster check, which has no workload cluster in it -- so a box
+# with no workload cluster could not be assessed at all. That is the same
+# all-or-nothing shape as the whole-phase skip this suite replaced.
+#
+# Derived from what the box DECLARES, which is the authority, not from a literal:
+# one declared cluster has one answer to "which one". With none declared there is
+# nothing to assert and the workload-cluster checks below say so. With several it
+# stays required, because picking one would assess part of a box and report it as
+# the whole.
+SPOKEPOOL_NAME="${SPOKEPOOL_NAME:-}"
+if [[ -z "$SPOKEPOOL_NAME" && -n "${ZERO_OPS_DIR:-}" ]]; then
+    _declared=()
+    for _d in "$ZERO_OPS_DIR"/registry/clusters/*/infrastructure/spokepool.yaml; do
+        [[ -e "$_d" ]] || continue
+        _d="${_d%/infrastructure/spokepool.yaml}"
+        _declared+=("$(basename "$_d")")
+    done
+    if [[ ${#_declared[@]} -eq 1 ]]; then
+        SPOKEPOOL_NAME="${_declared[0]}"
+    elif [[ ${#_declared[@]} -gt 1 ]]; then
+        echo "post-bootstrap-validate: this box declares ${#_declared[@]} workload clusters and none was named." >&2
+        echo "  Name the one to assess; assessing one of several and reporting it as the box is worse than refusing." >&2
+        exit 2
+    fi
 fi
+
+# Whether there is a workload cluster to assert about at all. Read once, so the
+# checks below cannot each reach their own conclusion about it.
+SPOKE_SUBJECT=0
+[[ -n "$SPOKEPOOL_NAME" ]] && SPOKE_SUBJECT=1
 
 # Timeout for individual checks (seconds)
 DEPLOY_READY_TIMEOUT="${DEPLOY_READY_TIMEOUT:-120}"
@@ -62,6 +89,11 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"; }
 log_pass()  { log "  ✅ $1"; ((PASS++)); }
 log_fail()  { log "  ❌ $1"; FAILURES+=("$1"); ((FAIL++)); }
 log_warn()  { log "  ⚠️  $1"; WARNINGS+=("$1"); ((WARN++)); }
+# Neither a pass nor a failure: this box has no such subject. Counted and printed
+# so an omission is never silent -- the alternative is a check that returns early
+# and leaves a clean-looking log with nothing in it.
+NA=0
+log_na()    { log "  ⏭️  not applicable: $1"; ((NA++)); }
 log_section() { log ""; log "══════════════════════════════════════════"; log "  $1"; log "══════════════════════════════════════════"; }
 
 # ─── Waiting for converging state ────────────────────────────────────────────
@@ -117,6 +149,13 @@ kc() { kubectl --kubeconfig="$KUBECONFIG" "$@" 2>/dev/null; }
 SPOKE_KUBECONFIG=""
 SPOKE_KC_TMP=""
 get_spoke_kubeconfig() {
+    # No subject, no kubeconfig to fetch. Without this the secret name was
+    # "-kubeconfig", which is not found, and the miss was reported as a warning
+    # about a cluster this box never declared.
+    if (( ! SPOKE_SUBJECT )); then
+        SPOKE_KUBECONFIG=""
+        return 0
+    fi
     local secret="${SPOKEPOOL_NAME}-kubeconfig"
     SPOKE_KC_TMP="$(mktemp)"
     if ! kc get secret "$secret" -n platform-capi -o jsonpath='{.data.value}' 2>/dev/null \
@@ -557,6 +596,11 @@ check_ingress() {
 check_spoke() {
     log_section "11. SPOKE POOL & CAPI"
 
+    if (( ! SPOKE_SUBJECT )); then
+        log_na "this box declares no workload cluster, so there is no pool, CAPI cluster or agent certificate to assert"
+        return 0
+    fi
+
     # Extract the spoke admin kubeconfig for direct spoke-cluster validation.
     get_spoke_kubeconfig
 
@@ -627,6 +671,9 @@ check_spoke() {
 #   - shared-cnpg not healthy (tenant DB prerequisite)
 
 check_spoke_namespace_pods() {
+    if (( ! SPOKE_SUBJECT )); then
+        return 0
+    fi
     local ns="$1"
     local label_selector="${2:-}"
     local label_arg=""
@@ -933,7 +980,11 @@ check_fleet_argocd_apps() {
 
     # platform-spoke-catalog is WARN — it deploys the spoke platform and converges
     # over time (operator installs + CRD ordering).
-    check_argocd_app "platform-spoke-catalog-${SPOKEPOOL_NAME}" "WARN"
+    if (( SPOKE_SUBJECT )); then
+        check_argocd_app "platform-spoke-catalog-${SPOKEPOOL_NAME}" "WARN"
+    else
+        log_na "no workload cluster is declared, so no spoke catalog Application is expected"
+    fi
 
     # Fleet tenant apps are discovered from the appset (name = <tenant>-<env>-xr);
     # validate the ones that exist rather than failing on envs not yet deployed.
@@ -958,6 +1009,9 @@ print_summary() {
     log "║  ✅ PASSED : $PASS"
     log "║  ❌ FAILED : $FAIL"
     log "║  ⚠️  WARNED : $WARN"
+    # Printed even at zero. An omission count that appears only when it is
+    # non-zero trains a reader to believe its absence means everything ran.
+    log "║  ⏭️  NOT APPLICABLE : $NA"
     log "╠══════════════════════════════════════════╣"
 
     if [[ ${#FAILURES[@]} -gt 0 ]]; then
@@ -991,7 +1045,7 @@ main() {
     log "═══════════════════════════════════════════════════════"
     log " Zero-Ops Post-Bootstrap Core Services Validation"
     log " Kubeconfig: $KUBECONFIG"
-    log " SpokePool:  $SPOKEPOOL_NAME"
+    log " SpokePool:  ${SPOKEPOOL_NAME:-none declared}"
     log "═══════════════════════════════════════════════════════"
 
     preflight_check

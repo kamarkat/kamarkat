@@ -31,17 +31,34 @@ func newVerifyCmd() *cobra.Command {
 		clusterName string
 		kubeconfig  string
 		timeout     time.Duration
+		accept      bool
+		only        []string
+		explain     bool
+		spokePool   string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Wait for a bootstrapped hub to converge, within a fixed budget",
-		Long: "Polls the invariants a hub must satisfy before it is serving -- nodes\n" +
+		Short: "Wait for a cluster to converge, and with --accept assess whether it does its job",
+		Long: "Polls the invariants a cluster must satisfy before it is serving -- nodes\n" +
 			"Ready, secret stores valid, ExternalSecrets synced, Applications Synced\n" +
 			"and Healthy, pods Running -- until they all hold or the budget elapses.\n\n" +
 			"Reports which invariant is outstanding and what it is waiting on, so a\n" +
-			"cluster that is still settling reads differently from one that is stuck.",
+			"cluster that is still settling reads differently from one that is stuck.\n\n" +
+			"With --accept it then runs every check that applies to the cluster and\n" +
+			"reports one verdict. Convergence says the cluster stopped moving;\n" +
+			"acceptance says it does its job, and only the second is a claim worth\n" +
+			"acting on (ADR-115).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A diagnostic subset cannot certify what it did not run, so the
+			// flags that narrow an assessment are refused without the one that
+			// starts an assessment at all. Silently ignoring them would leave a
+			// reader believing a named check had been assessed.
+			if !accept && (len(only) > 0 || explain) {
+				return fmt.Errorf("--only and --explain narrow an acceptance assessment, so " +
+					"they need --accept.\n\nWithout --accept this command waits for " +
+					"convergence, which runs no checks to narrow")
+			}
 			if kubeconfig == "" {
 				if clusterName == "" {
 					return fmt.Errorf("--cluster or --kubeconfig is required: there is " +
@@ -59,6 +76,16 @@ func newVerifyCmd() *cobra.Command {
 				return fmt.Errorf("no kubeconfig at %s: %w", kubeconfig, err)
 			}
 
+			// Explaining asserts nothing, so it does not wait for anything either.
+			// A reader asking what WOULD be assessed is usually asking because
+			// something is wrong, and making them wait out a convergence budget
+			// first would answer a question they did not ask.
+			if accept && explain {
+				o := acceptOptions{Cluster: clusterName, Kubeconfig: kubeconfig,
+					GitopsDir: verifyGitops, SpokePool: spokePool, Explain: true}
+				return reportAcceptanceVerdict(o, runAcceptance(cmd.Context(), o))
+			}
+
 			fmt.Printf("[verify] watching %s for up to %v\n", kubeconfig, timeout)
 			w := &health.HealthWaiter{
 				Checkers: health.ConvergedCheckers(),
@@ -69,10 +96,21 @@ func newVerifyCmd() *cobra.Command {
 				},
 			}
 			if err := w.Wait(cmd.Context(), kubeconfig); err != nil {
-				return fmt.Errorf("the hub did not converge within %v: %w", timeout, err)
+				return fmt.Errorf("%s did not converge within %v: %w", clusterLabel(clusterName, "the cluster"), timeout, err)
 			}
-			fmt.Println("[verify] ✓ hub converged")
-			return nil
+			fmt.Printf("[verify] ✓ %s converged\n", clusterLabel(clusterName, "the cluster"))
+
+			if !accept {
+				return nil
+			}
+
+			// Convergence first, acceptance second, in one command and one order.
+			// A check that probes a public surface before the workloads behind it
+			// are Ready reports a fault that is only earliness.
+			fmt.Println("[verify] assessing acceptance")
+			o := acceptOptions{Cluster: clusterName, Kubeconfig: kubeconfig,
+				GitopsDir: verifyGitops, SpokePool: spokePool, Only: only}
+			return reportAcceptanceVerdict(o, runAcceptance(cmd.Context(), o))
 		},
 	}
 
@@ -83,6 +121,10 @@ func newVerifyCmd() *cobra.Command {
 	// pull, ESO retries on its own interval, and ArgoCD's reconciliation is not
 	// instant. Shorter budgets reported failure on clusters that were fine.
 	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "how long to wait before reporting what is still outstanding")
+	cmd.Flags().BoolVar(&accept, "accept", false, "after convergence, run every check that applies to this cluster and report one verdict")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "assess only these checks; establishes what it runs and accepts nothing")
+	cmd.Flags().BoolVar(&explain, "explain", false, "report what a full assessment would run, and run none of it")
+	cmd.Flags().StringVar(&spokePool, "managed-cluster", "", "which managed cluster to assess, for a box that declares several")
 	return cmd
 }
 

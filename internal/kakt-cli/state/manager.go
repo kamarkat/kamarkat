@@ -36,7 +36,22 @@ const (
 	PhaseInitSecrets           BootstrapPhase = "init-secrets"    // DEPRECATED: replaced by GenerateLocalSecrets + InjectCACert + BootstrapInfisicalAPI
 	PhasePlatformDeploy        BootstrapPhase = "platform-deploy" // DEPRECATED: replaced by B01/B02/B03
 	PhaseFinalize              BootstrapPhase = "finalize"
-	PhaseComplete              BootstrapPhase = "complete"
+
+	// PhaseClusterAccepted records that the cluster was assessed and does its
+	// job (ADR-115), which is not what any other phase records. The others build
+	// something, so a completion record means the thing exists.
+	//
+	// NEVER SKIPPED ON A RE-RUN, and so deliberately not given a postcondition:
+	// acceptance asserts BEHAVIOUR, and behaviour stops holding without anything
+	// in the box changing -- a DNS record edited by hand, a credential expiring
+	// at a provider, a certificate not renewed. "Accepted on the 19th" is
+	// therefore evidence about the 19th and cannot be inherited by a run today,
+	// which is the same reason the customer documentation calls a report
+	// evidence rather than a watch. The record exists for the audit trail: it
+	// says the cluster reached acceptance, and when.
+	PhaseClusterAccepted BootstrapPhase = "cluster-accepted"
+
+	PhaseComplete BootstrapPhase = "complete"
 
 	// ADR-042 Platform Bootstrap States
 	// These are the platform-level state machine states that parallel

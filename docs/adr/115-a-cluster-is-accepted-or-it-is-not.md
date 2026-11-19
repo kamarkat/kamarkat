@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-19
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Relates to:** ADR-039 (ownership model), ADR-040 (Day-0 vs Day-1), ADR-021 (boundary-driven
 GitOps), ADR-047 (the tenant deployment contract, which makes spoke provisioning
@@ -108,9 +108,21 @@ A missing runtime resource never makes a module inapplicable. A missing resource
 the defect the module exists to detect, and inapplicability derived from absence is how a
 broken box reports success.
 
-**5. A module reports exactly one of four results, and two of them are not passes.**
+**5. A module reports exactly one of five results, and three of them are not passes.**
 
-`passed`, `failed`, `inapplicable`, `unverified`.
+`passed`, `failed`, `inapplicable`, `pending`, `unverified`.
+
+`pending` is a module whose subject is declared and does not exist **yet**. It was added during
+implementation, because four results could not express the ordinary case: the bootstrap assesses
+the management cluster before it builds the workload clusters that same run declares, so every
+workload-cluster module is neither inapplicable (the box asked for that cluster) nor unverified
+(nothing is wrong). Without it, no box that declared a workload cluster could pass its own
+bootstrap. A pending module makes the verdict `incomplete`, which exits zero.
+
+`pending` is only ever about something not yet built. A subject that should exist by now and
+does not is a failure, and a subject that cannot be assessed for any other reason is
+unverified. Stretching pending to cover those would restore the behaviour this record
+replaces: a box reporting success over checks that never ran.
 
 `unverified` is a module that applies and could not run: missing credentials, an unreachable
 subject, an absent prerequisite. A cluster with an unverified mandatory module is not accepted,
@@ -171,6 +183,9 @@ The box's aggregate verdict is reported as follows:
 | accepted | every declared cluster is accepted | zero |
 | incomplete | the management cluster is accepted and a declared spoke is pending | zero |
 | failed | an applicable mandatory module failed or was unverified, on any cluster | non-zero |
+
+A run in which every applicable module is pending is `incomplete`, not an invalid assessment:
+it named a subject the box declared, so the selection was not empty.
 
 A spoke that reaches **registered** and then fails, or cannot be assessed, fails the verdict.
 A spoke that never reached registration is pending, with its reason, and does not. A spoke
@@ -264,3 +279,29 @@ source of truth for it.
 - ADR-055: Boundary activation
 - ADR-072: Tenant-controlled Day-0 and declarative cluster lifecycle
 - ADR-079: Day-0 phases declare their re-entrancy
+
+---
+
+## Implementation notes (2026-11-20)
+
+Implemented in one change. Three things the decisions above did not anticipate, each recorded
+here rather than left in the code:
+
+**A fifth result, `pending`.** Decision 5 as written could not express the bootstrap's own
+first assessment. See that decision for the reasoning.
+
+**Registration is asserted, by a new check.** Decision 3 names `registered` as a state, and no
+module asserted it. A cluster can be `Ready` while no ArgoCD cluster Secret exists for it, so
+the platform's generator selects it for nothing and not one Application is created -- and an
+ApplicationSet generating zero Applications is Healthy. `managed-cluster-registered` asserts
+the Secret and its selector label on the management cluster, reporting pending while the
+cluster is not yet provisioned, since registration is a consequence of provisioning.
+
+**The zone is read, not passed.** `HubEnvironment.spec.domain` (ADR-051) was forwarded by one
+caller and not another, so the same checks failed for the absence of a value the cluster in
+front of them was holding. It is now read from that one authority when a caller does not supply
+it. This is not a default: a box that declares no domain still has no zone, per check.
+
+The three check renames in decision 6 are **not** implemented. They are cosmetic, they are what
+the customer documentation already uses, and they ship with that documentation rather than with
+this behaviour.

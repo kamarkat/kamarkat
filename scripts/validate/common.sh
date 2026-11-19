@@ -73,6 +73,7 @@ MODULE_PASSED=0
 MODULE_FAILED=0
 MODULE_INAPPLICABLE=0
 MODULE_UNVERIFIED=0
+MODULE_PENDING=0
 declare -a MODULE_RESULTS=()
 
 # inapplicable <reason> -- this module's subject is not declared on this box.
@@ -88,6 +89,26 @@ inapplicable() {
     echo "  ⏭️  not applicable: $1"
     MODULE_RESULTS+=("inapplicable|${MODULE_NAME:-unknown}|$1")
     ((MODULE_INAPPLICABLE++))
+    return 1
+}
+
+# pending <reason> -- the subject is declared and does not exist YET.
+#
+# The third thing a module can say, and the reason the other two were not enough:
+# a box that declares a workload cluster still being built is not a box with a
+# defect, and it is not a box where that cluster is out of scope either. Reported
+# as pending, which makes the box's verdict INCOMPLETE rather than failed, and
+# incomplete does not fail a run.
+#
+# Pending is only ever about something not yet built. A subject that should exist
+# by now and does not is a failure, and a subject that cannot be assessed for any
+# other reason is unverified. Stretching pending to cover those would restore the
+# exact behaviour this file replaced: a box reporting success over checks that
+# never ran.
+pending() {
+    echo "  ⏳ pending: $1"
+    MODULE_RESULTS+=("pending|${MODULE_NAME:-unknown}|$1")
+    ((MODULE_PENDING++))
     return 1
 }
 
@@ -176,12 +197,27 @@ VALIDATE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # HubEnvironment.spec.domain, which ADR-051 makes the sole authority. A caller that
 # cannot is a caller with nothing to check hostnames against, and it is told so
 # rather than handed the platform's.
+# READ HERE when the caller did not pass it, from the one authority ADR-051
+# names. Requiring every caller to forward it meant each caller was a chance to
+# forget: validate-all.sh read it and passed it, and `kakt verify --accept
+# --only=...` reached these modules without it, so a public-surface check failed
+# for the absence of a value the cluster in front of it was holding.
+#
+# This is not a default. There is still exactly one source, and a box that
+# declares no domain still has no zone -- require_zone below says so. What
+# changed is that obtaining it no longer depends on which caller asked.
+if [[ -z "${HUB_DOMAIN:-}" && -n "${HUB_KUBECONFIG:-}" ]]; then
+    HUB_DOMAIN="$(kubectl --kubeconfig="$HUB_KUBECONFIG" get hubenvironment hub-environment \
+        -n platform-ops -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
+    [[ -n "$HUB_DOMAIN" ]] && ENV_ZONE_SOURCE_DETAIL="read from the box's HubEnvironment"
+fi
+
 if [[ -z "${HUB_DOMAIN:-}" ]]; then
     ENV_ZONE=""
     ENV_ZONE_SOURCE="UNSET"
 else
     ENV_ZONE="$HUB_DOMAIN"
-    ENV_ZONE_SOURCE="the box's HubEnvironment"
+    ENV_ZONE_SOURCE="${ENV_ZONE_SOURCE_DETAIL:-passed by the caller, from the HubEnvironment}"
 fi
 
 # require_zone is called by any check that derives a hostname. Declared here so a

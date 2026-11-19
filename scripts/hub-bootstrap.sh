@@ -2339,34 +2339,20 @@ main() {
     log "  proven until it passes."
     log "You can now access your hub cluster using: kubectl --kubeconfig=$KUBECONFIG_PATH"
 
-    # Run post-bootstrap core services validation
-    log ""
-    log "Running post-bootstrap core services validation..."
-    # validate-all.sh, which runs post-bootstrap-validate and records the phase
-    # in .state/validation.json. One entry point: bootstrap, the verify phase and
-    # CI all reach the validators the same way, so "was this box validated" has
-    # one answer wherever it was asked.
-    local validate_script="$SCRIPT_DIR/validate-all.sh"
-    if [[ ! -f "$validate_script" ]]; then
-        # Not a warning. This is the step that decides whether the platform
-        # works, and a bootstrap that cannot run it has not proven anything --
-        # which is exactly what the log line here used to say while continuing.
-        error_exit "validate-all.sh not found at $validate_script — the platform cannot be proven."
-    fi
-    # Fatal: swallowing this into a warning is how a bootstrap "succeeds"
-    # while leaving a platform that does not work.
+    # NO ASSESSMENT HERE. This step ran validate-all.sh, and so does the command
+    # that invokes this script -- twice over the same cluster, both writing
+    # .state/validation.json, so the box's recorded verdict was whichever ran
+    # last and the earlier one was silently replaced.
     #
-    # KUBECONFIG is passed explicitly. The script used to default it to
-    # a kubeconfig named for a cluster called "hub" -- so a box
-    # named anything else was validated against another cluster's kubeconfig, or
-    # a deleted one.
-    if ! KUBECONFIG="$KUBECONFIG_PATH" \
-         ZERO_OPS_DIR="$ZERO_OPS_DIR" \
-         SPOKEPOOL_NAME="$SPOKEPOOL_NAME" \
-         CLUSTER_NAME="$CLUSTER_NAME" \
-         bash "$validate_script" --only=platform; then
-        error_exit "Post-bootstrap validation FAILED — see the summary above."
-    fi
+    # The assessment belongs to the caller, after the convergence wait: this
+    # script finishes when its phases finish, and phases completing is not the
+    # same claim as the cluster doing its job (ADR-115). Running it from here
+    # also assessed the box BEFORE convergence, which is how checks that probe a
+    # public surface reported faults that were only earliness.
+    #
+    # `kakt bootstrap` assesses the management cluster as soon as it converges,
+    # and the box again once its workload clusters exist. Neither is optional and
+    # neither can be skipped, so nothing is lost by not repeating it here.
 
     report_elapsed "success"
 }
