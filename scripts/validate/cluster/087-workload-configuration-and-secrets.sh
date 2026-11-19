@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: spoke
 # ADR-087 — Workload Configuration and Secrets: every LIVE-CLUSTER check.
 #
 # One file per ADR; the number is the ADR's. Static counterparts are in

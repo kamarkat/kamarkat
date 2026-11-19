@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: every-cluster
 # A network policy that selects no endpoints is reported Healthy. It is simply
 # inert — enforcing nothing, denying nothing, and looking exactly like a policy
 # that works.
@@ -18,10 +19,28 @@
 # Scoped to policies the PLATFORM owns. A tenant policy may legitimately select
 # nothing while its workload is scaled to zero, and failing on that would train
 # people to ignore this check.
+# EVERY CLUSTER, NAMED. This read `${SPOKE_KUBECONFIG:-$HUB_KUBECONFIG}`, so the
+# same assertions judged a workload cluster or the management cluster depending
+# on an environment variable, and the result never said which. A policy inert on
+# the management cluster passed while a workload cluster was being reported on,
+# and the other way round.
+#
+# One assertion, repeated per cluster, with the cluster in every message. The
+# management cluster is always a subject; a workload cluster is one when it is
+# reachable, which the runner has already established before this module runs.
 validate_policy_selects_nothing() {
-    section "Network policies select at least one endpoint"
+    local kc name
+    for kc in "$HUB_KUBECONFIG" "${SPOKE_KUBECONFIG:-}"; do
+        [[ -z "$kc" || ! -r "$kc" ]] && continue
+        if [[ "$kc" == "$HUB_KUBECONFIG" ]]; then name="the management cluster"; else name="${SPOKEPOOL_NAME:-the workload cluster}"; fi
+        _policy_selects_nothing_on "$kc" "$name"
+    done
+}
 
-    local kubeconfig="${SPOKE_KUBECONFIG:-$HUB_KUBECONFIG}"
+_policy_selects_nothing_on() {
+    local kubeconfig="$1" cluster="$2"
+    section "Network policies select at least one endpoint on $cluster"
+
     local out
     out=$(kubectl --kubeconfig="$kubeconfig" get ciliumclusterwidenetworkpolicies -o json 2>/dev/null | python3 -c '
 import json, sys
@@ -47,7 +66,7 @@ for p in items:
 ')
 
     if [[ -z "$out" ]]; then
-        pass "no clusterwide policy is checkable for endpoint selection yet"
+        pass "$cluster: no clusterwide policy is checkable for endpoint selection yet"
         return 0
     fi
 
@@ -105,13 +124,13 @@ print('%d %d' % (n, present))
         # reported "benign" while its python was broken by a quoting error
         # (2026-09-02) — the check has to fail loudly when it cannot answer.
         if [[ -z "${matched// /}" ]]; then
-            hard_fail "could not evaluate CiliumClusterwideNetworkPolicy $name — the endpoint matcher produced no result, so this policy was NOT verified"
+            hard_fail "$cluster: could not evaluate CiliumClusterwideNetworkPolicy $name — the endpoint matcher produced no result, so this policy was NOT verified"
             continue
         fi
         present=$(printf '%s' "$matched" | awk '{print $2}')
         matched=$(printf '%s' "$matched" | awk '{print $1}')
         if [[ "${matched:-0}" == "0" && "${present:-0}" != "0" ]]; then
-            hard_fail "CiliumClusterwideNetworkPolicy $name selects no pods, but $present pod(s) carry its label keys — the SELECTOR IS WRONG and the policy is enforcing nothing: $sel"
+            hard_fail "$cluster: CiliumClusterwideNetworkPolicy $name selects no pods, but $present pod(s) carry its label keys — the SELECTOR IS WRONG and the policy is enforcing nothing: $sel"
         elif [[ "${matched:-0}" == "0" ]]; then
             # Reported, not failed. Zero matches is ambiguous by construction: it
             # is the signature of a wrong label, and equally the correct answer
@@ -131,7 +150,7 @@ print('%d %d' % (n, present))
             # that matters. The wrong-selector half is a hard failure above.
             note "CiliumClusterwideNetworkPolicy $name selects no pods, and nothing carries its label keys — its workload is not running: $sel"
         else
-            pass "$name selects $matched pod(s)"
+            pass "$cluster: $name selects $matched pod(s)"
         fi
     done <<< "$out"
 }

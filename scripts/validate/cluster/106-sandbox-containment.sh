@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: spoke
 # ADR-106: every sandbox is contained by default. These are the LIVE checks.
 #
 # Each one targets a way containment has failed silently on this platform

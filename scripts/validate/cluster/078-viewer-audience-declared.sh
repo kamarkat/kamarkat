@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: path
 # ADR-078 add.5 §7: a box that provisions a viewer identity declares its audience.
 #
 # The spoke's viewer query endpoint is GATED on global.observability.viewer.audience

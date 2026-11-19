@@ -230,24 +230,21 @@ if wants platform; then
     fi
     if [[ -z "$kubeconfig" || ! -r "$kubeconfig" ]]; then
         skip platform "no readable kubeconfig (set KUBECONFIG, or CLUSTER_NAME for the conventional path)"
-    elif [[ -z "${SPOKEPOOL_NAME:-}" ]] \
-         && ! compgen -G "$ZERO_OPS_DIR/registry/clusters/*/infrastructure/spokepool.yaml" >/dev/null; then
-        # INAPPLICABLE, read from the declarations rather than from the unset
-        # variable. A management cluster is built on its own, so a box's first
-        # bootstrap has no workload cluster -- and the spoke checks then have
-        # nothing to assert, which is not the same as being unable to run.
-        #
-        # This is the one skip a NAMED phase is allowed, because the question was
-        # answered: there is no spoke. The branch below still fails when a pool
-        # IS declared and the name was not passed, which is the case that would
-        # otherwise validate a box against checks nobody ran.
-        inapplicable platform "this box declares no workload cluster; the spoke checks have nothing to assert against"
-    elif [[ -z "${SPOKEPOOL_NAME:-}" ]]; then
-        # Declared but not named: required rather than guessed, because
-        # post-bootstrap-validate once validated a dev box against the
-        # production pool name and blamed the box.
-        skip platform "this box declares a workload cluster and SPOKEPOOL_NAME is not set, so the spoke checks cannot run"
     else
+        # NO WHOLE-PHASE SKIP. This phase used to be marked inapplicable when the
+        # box declared no workload cluster, which skipped all 35 modules because
+        # ONE of their subjects was absent -- and then exited 0. A box with two
+        # broken public surfaces passed its bootstrap that way (2026-11-19).
+        #
+        # Applicability is the MODULE's now (ADR-115): each declares what it is
+        # about, the runner resolves whether this box gives it a subject, and a
+        # workload cluster that is declared and unreachable is reported pending
+        # rather than quietly dropped. A phase is only skipped when it cannot be
+        # reached at all, which is the kubeconfig case above.
+        #
+        # SPOKEPOOL_NAME remains how a run names WHICH workload cluster to assess
+        # when a box declares several. Unset, the workload-cluster modules report
+        # that; it no longer silences the rest.
         # The zone this box publishes on, from what it declares (ADR-051). Without
         # it the checks fall back to the PLATFORM's own zone and judge a tenant's
         # box by hostnames it does not own -- failing a correct box, or passing a
@@ -309,8 +306,10 @@ doc = {
                    .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     "cluster": cluster or None,
     # "passed" only when something actually ran and nothing failed. A run whose
-    # every phase was skipped is "incomplete", not "passed" -- that distinction
-    # is the whole reason this file exists.
+    # every phase was skipped is "incomplete", and incomplete DOES NOT EXIT 0 --
+    # see below. This file computed the distinction correctly and then threw it
+    # away one line later, which is how `result: incomplete` printed inside a
+    # green job (2026-11-19).
     "result": ("failed" if any_failed == "1"
                else "passed" if any(p["status"] == "passed" for p in phases)
                else "incomplete"),
@@ -327,4 +326,22 @@ print(f"  result: {doc['result']}  "
       + "  ".join(f"{p['name']}={p['status']}" for p in phases))
 PY
 
-exit "$ANY_FAILED"
+# INCOMPLETE IS NOT SUCCESS. `exit "$ANY_FAILED"` alone reported zero for a run
+# that asserted nothing, so the Day-0 command read it as success and printed
+# "built and validated" over a box whose checks had all been skipped.
+#
+# A phase that could not run is now a non-zero exit, with the report naming which
+# and why. A phase that is genuinely inapplicable to this box -- there is nothing
+# of its subject here -- is recorded as such by the phase itself and does not
+# reach this.
+if [[ "$ANY_FAILED" != "0" ]]; then
+    exit "$ANY_FAILED"
+fi
+RESULT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"])' "$REPORT" 2>/dev/null || echo unknown)"
+if [[ "$RESULT" != "passed" ]]; then
+    echo ""
+    echo "  result: $RESULT — nothing was established. A run that asserted nothing is"
+    echo "  not a run that passed; the report above names every phase and why."
+    exit 1
+fi
+exit 0

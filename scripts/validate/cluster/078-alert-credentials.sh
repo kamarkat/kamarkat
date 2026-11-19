@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: every-cluster
 # ADR-078 addendum 5 §5: every cluster's Alertmanager has the credentials it needs,
 # and the per-cell one is really there.
 #

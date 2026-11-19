@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: every-cluster
 # Backups for every CNPG cluster in the fleet — every cluster on the hub AND the
 # spokes'.
 #

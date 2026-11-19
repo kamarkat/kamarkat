@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: path
 # ADR-046 — Hybrid Provider / Home Worker: every LIVE-CLUSTER check, in one file.
 #
 # One file per ADR; the number is the ADR's. These were cluster modules 60, 61

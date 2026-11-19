@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: path
 # ADR-109: the Credit Authority's isolation and guarantees, LIVE. The rendered
 # half is preflight/109-credit-authority-isolation.sh; both gate the capability.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: spoke
 # ADR-107: the sandboxed runtime is in force where it is offered. LIVE checks.
 #
 #   R1  RuntimeClass `sandboxed` exists, with handler runsc and a node selector

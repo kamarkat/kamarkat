@@ -52,6 +52,57 @@ soft_fail() {
 
 note() { echo "     $1"; }
 
+# ─── Module outcomes (ADR-115) ───────────────────────────────────────────────
+#
+# The counters above count ASSERTIONS. A verdict needs module outcomes as well,
+# because the two answer different questions: "did anything fail" is not "was
+# anything established". A run whose every module was skipped reported zero
+# failures and exited 0, which is how a box with two broken public surfaces
+# passed its bootstrap (2026-11-19).
+#
+# Four outcomes, and two of them are not passes:
+#
+#   passed        it ran, and every assertion held
+#   failed        it ran, and an assertion did not
+#   inapplicable  the box's declarations give it no subject
+#   unverified    it applies and could not run, or ran nothing
+#
+# `unverified` exists so that "could not check" stops being spelled the same way
+# as "checked and fine". It blocks acceptance exactly as a failure does.
+MODULE_PASSED=0
+MODULE_FAILED=0
+MODULE_INAPPLICABLE=0
+MODULE_UNVERIFIED=0
+declare -a MODULE_RESULTS=()
+
+# inapplicable <reason> -- this module's subject is not declared on this box.
+#
+# The reason is mandatory and is recorded, because an omission without one reads
+# exactly like a pass. Returns non-zero so a module can `inapplicable "..." &&
+# return` in one line.
+#
+# NEVER for a missing runtime resource. A resource that should exist and does not
+# is the defect the module is there to find, so that is a failure. Only the box's
+# DECLARATIONS establish inapplicability.
+inapplicable() {
+    echo "  ⏭️  not applicable: $1"
+    MODULE_RESULTS+=("inapplicable|${MODULE_NAME:-unknown}|$1")
+    ((MODULE_INAPPLICABLE++))
+    return 1
+}
+
+# unverified <reason> -- this module applies and could not establish anything.
+#
+# Missing credentials, an unreachable subject, a prerequisite that never arrived.
+# Counted apart from a failure so a report can say which it was, and treated the
+# same way by the exit status, because neither establishes the behaviour.
+unverified() {
+    echo "  ⛔ unverified: $1"
+    MODULE_RESULTS+=("unverified|${MODULE_NAME:-unknown}|$1")
+    ((MODULE_UNVERIFIED++))
+    return 1
+}
+
 # platform_source_available <rel>... -- may this module judge its subject?
 #
 # A RELEASED run reads the platform's content out of the binary, and the embedded

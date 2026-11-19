@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: every-cluster
 # ADR-078 addendum 2 §15, addendum 5: the collection floor is accepted on
 # end-to-end evidence, never on a green sync. LIVE checks, read-only, against each
 # cluster's OWN stores -- where its dashboards and rules read.

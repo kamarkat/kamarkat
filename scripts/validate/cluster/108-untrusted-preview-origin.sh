@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: spoke
 # ADR-108: session previews are served from a separate registrable domain,
 # admitted by a platform handoff. LIVE checks, read-only.
 #

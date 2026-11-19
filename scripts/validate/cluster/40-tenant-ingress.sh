@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: path
 # The public tenant path under ADR-051 is:
 #   browser -> Hetzner LB -> spoke Gateway -> AgentGateway (OIDC) -> workload
 #

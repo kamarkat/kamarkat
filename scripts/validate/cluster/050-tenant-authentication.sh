@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# scope: spoke
 # ADR-050 (Amendment 2026-10-21): an unauthenticated API call gets 401, never a
 # login redirect. LIVE checks, read-only, against every public application host.
 #
