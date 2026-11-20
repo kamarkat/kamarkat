@@ -30,7 +30,7 @@ spec:
   instances: 1
 
   # :unbuilt until the postgres-partman workflow pins its digest.
-  imageName: ghcr.io/kamarkat/kamarkat/postgres-partman:18@sha256:18b154fb96428e366288c104fbd6381ca498bef957a76f663cf61c64f02488de
+  imageName: ghcr.io/kamarkat/kamarkat/postgres-partman:18@sha256:4475d906627183ab11cc8ef70fe3f7b29d10c466bc876110e1225640634d66b2
 
   # The floor credits-db documents, raised once this cluster's metrics say so.
   resources:
