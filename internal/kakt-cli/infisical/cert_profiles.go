@@ -51,7 +51,11 @@ var requiredProfiles = pki.RequiredProfiles
 // It looks up the Fleet Intermediate CA, finds or creates a certificate policy, then creates
 // each profile. This replaces the manual Step 3.6 UI action from the old workflow and
 // satisfies ADR-042 PKI_READY exit criteria.
-func ensureCertificateProfiles(ctx context.Context, podName, adminJWT, projectID string) error {
+// identityID is the box's machine identity -- the one whose Universal Auth
+// credentials the ClusterIssuers carry. It is threaded in rather than looked up
+// because the caller has just created or reused it, and a second lookup by name
+// could pick a different identity with the same name.
+func ensureCertificateProfiles(ctx context.Context, podName, adminJWT, projectID, identityID string) error {
 	// Phase 1: Ensure Fleet Intermediate CA exists and is active (once for all profiles)
 	cas, err := listCertificateAuthorities(ctx, podName, adminJWT, projectID)
 	if err != nil {
@@ -130,7 +134,7 @@ func ensureCertificateProfiles(ctx context.Context, podName, adminJWT, projectID
 	if err != nil {
 		return err
 	}
-	return ensurePKIApplication(ctx, podName, adminJWT, profileIDs)
+	return ensurePKIApplication(ctx, podName, adminJWT, profileIDs, identityID)
 }
 
 // pkiApplicationName is the application pki-issuer v1.x issues through.
@@ -245,7 +249,7 @@ func resolveCertificateProfileIDs(ctx context.Context, podName, adminJWT, projec
 // rather than the existing one. The profile binding is not re-asserted on an
 // adopted application: adding a profile to the platform is a change to
 // internal/pki and belongs in the same release as the application that offers it.
-func ensurePKIApplication(ctx context.Context, podName, adminJWT string, profileIDs []string) error {
+func ensurePKIApplication(ctx context.Context, podName, adminJWT string, profileIDs []string, identityID string) error {
 	output, err := kubectlExec(ctx, podName,
 		"curl", "-s",
 		"http://localhost:"+infisicalPort+PathCertManagerApplications,
@@ -267,7 +271,12 @@ func ensurePKIApplication(ctx context.Context, podName, adminJWT string, profile
 		if a.Name == pkiApplicationName {
 			fmt.Printf("[infisical-bootstrap] ✓ PKI application %q already exists: id=%s\n",
 				pkiApplicationName, a.ID)
-			return nil
+			// NOT A RETURN. Existing meant done here, so a box whose application
+			// was created before membership and enrollment were understood kept
+			// reporting the application as satisfied while no certificate could
+			// issue through it. The two steps below are what issuance actually
+			// needs, and both are idempotent.
+			return ensureApplicationIssuanceAllowed(ctx, podName, adminJWT, a.ID, profileIDs, identityID)
 		}
 	}
 
@@ -297,6 +306,130 @@ func ensurePKIApplication(ctx context.Context, podName, adminJWT string, profile
 	}
 	fmt.Printf("[infisical-bootstrap] ✓ PKI application %q created with %d profiles: id=%s\n",
 		pkiApplicationName, len(profileIDs), created.Application.ID)
+	return ensureApplicationIssuanceAllowed(ctx, podName, adminJWT, created.Application.ID, profileIDs, identityID)
+}
+
+// ensureApplicationIssuanceAllowed makes the application usable by the identity
+// the box's issuers authenticate as.
+//
+// Creating the application and attaching profiles to it does NOT let anything
+// issue. Two more things are required, and neither was done:
+//
+//   - the asking identity must be a MEMBER of the application
+//   - each profile must have the API enrollment method enabled
+//
+// Without the first, Infisical answers a certificate request with a lookup
+// failure on the application; without the second it refuses the enrollment. Both
+// present as the issuer reporting itself not ready, which reads like a
+// configuration error in the ClusterIssuer and is not one.
+//
+// Verified against the vendored Infisical server rather than inferred from the
+// error: pki-application-membership-routers/identities-router.ts for the
+// membership route and body, pki-application-enrollment-routers/api-enrollment-router.ts
+// for the enrollment route and body.
+func ensureApplicationIssuanceAllowed(ctx context.Context, podName, adminJWT, appID string, profileIDs []string, identityID string) error {
+	if identityID == "" {
+		return fmt.Errorf("the box's machine identity is not known, so it cannot be made a member "+
+			"of PKI application %q -- and a non-member cannot issue a single certificate through it",
+			pkiApplicationName)
+	}
+	if err := ensureApplicationMember(ctx, podName, adminJWT, appID, identityID); err != nil {
+		return err
+	}
+	for _, profileID := range profileIDs {
+		if err := ensureProfileAPIEnrollment(ctx, podName, adminJWT, appID, profileID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureApplicationMember adds the box's machine identity to the application.
+//
+// Asked before written, so a re-run neither fails on an existing membership nor
+// rewrites one an operator may have given a different role.
+//
+// `operator` and not `admin`. The role is verified against the server's own
+// default-roles.ts: applicationOperatorPermissions grants Certificate Create,
+// which is the whole of what an issuing identity does, and nothing over the
+// application itself. An issuing credential that can administer the application
+// it issues from is more authority than the job needs.
+func ensureApplicationMember(ctx context.Context, podName, adminJWT, appID, identityID string) error {
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s",
+		"http://localhost:"+infisicalPort+fmt.Sprintf(PathCertManagerAppIdentitiesFmt, appID),
+		"-H", "Authorization: Bearer "+adminJWT,
+	)
+	if err != nil {
+		return fmt.Errorf("list the members of PKI application %q: %w", pkiApplicationName, err)
+	}
+	var members struct {
+		Memberships []struct {
+			ActorIdentityID string `json:"actorIdentityId"`
+			Role            string `json:"role"`
+		} `json:"memberships"`
+	}
+	if err := json.Unmarshal([]byte(output), &members); err != nil {
+		return fmt.Errorf("parse the member list of PKI application %q: %w\nresponse: %s",
+			pkiApplicationName, err, output)
+	}
+	for _, m := range members.Memberships {
+		if m.ActorIdentityID == identityID {
+			fmt.Printf("[infisical-bootstrap] ✓ machine identity is already a member of %q (role=%s)\n",
+				pkiApplicationName, m.Role)
+			return nil
+		}
+	}
+
+	output, err = kubectlExec(ctx, podName,
+		"curl", "-s", "-X", "POST",
+		"http://localhost:"+infisicalPort+fmt.Sprintf(PathCertManagerAppIdentityFmt, appID, identityID),
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", `{"role":"operator"}`,
+	)
+	if err != nil {
+		return fmt.Errorf("add the machine identity to PKI application %q: %w", pkiApplicationName, err)
+	}
+	var added struct {
+		Membership struct {
+			MembershipID string `json:"membershipId"`
+		} `json:"membership"`
+	}
+	if err := json.Unmarshal([]byte(output), &added); err != nil || added.Membership.MembershipID == "" {
+		return fmt.Errorf("the machine identity was not added to PKI application %q, so no "+
+			"certificate can issue through it\nresponse: %s", pkiApplicationName, output)
+	}
+	fmt.Printf("[infisical-bootstrap] ✓ machine identity added to %q as operator\n", pkiApplicationName)
+	return nil
+}
+
+// ensureProfileAPIEnrollment enables issuance over the API for one profile.
+//
+// Idempotent by the server's own contract: the route is a PUT that enables or
+// updates the method, so re-running it sets the same state rather than failing
+// on one already set.
+//
+// autoRenew stays off. cert-manager owns renewal for every certificate on the
+// box -- it is what creates the CertificateRequest this enrollment answers -- and
+// a second renewer would reissue behind it, producing certificates nothing
+// deployed is waiting for.
+func ensureProfileAPIEnrollment(ctx context.Context, podName, adminJWT, appID, profileID string) error {
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s", "-X", "PUT",
+		"http://localhost:"+infisicalPort+fmt.Sprintf(PathCertManagerAppAPIEnrollFmt, appID, profileID),
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", `{"autoRenew":false}`,
+	)
+	if err != nil {
+		return fmt.Errorf("enable API enrollment for profile %s: %w", profileID, err)
+	}
+	if strings.Contains(output, `"message"`) && !strings.Contains(output, `"enrollment"`) {
+		return fmt.Errorf("API enrollment was not enabled for profile %s, so Infisical refuses "+
+			"every certificate request against it\nresponse: %s", profileID, output)
+	}
+	fmt.Printf("[infisical-bootstrap] ✓ API enrollment enabled for profile %s\n", profileID)
 	return nil
 }
 
@@ -342,11 +475,35 @@ func listCertificatePolicies(ctx context.Context, podName, adminJWT, projectID s
 	return resp.CertificatePolicies, nil
 }
 
+// allowedCommonNames is every subject the platform's own certificates request
+// through this policy, as the manifests that request them spell it.
+//
+// It allowed "argocd-agent.*" alone, which was wrong twice over: the separator
+// is a COLON, not a dot, and two other components issue through the same policy.
+// `support-agent-client` asks for `support-agent:<domain>` and Infisical refused
+// it as non-compliant -- so the Support Agent's certificate never issued, its
+// Application sat Progressing, and the bootstrap timed out waiting for it
+// (2026-11-19). The pattern happened to match the argocd-agent certificates
+// because `.` matches any character, which hid the separator error.
+//
+// Enumerated, not widened to "*". This is the control that decides what the
+// box's own CA will sign, so a new consumer is a deliberate line here.
+//
+//	argocd-agent:<cluster>   spoke/infra/certificates.yaml, hub-core-services agent certs
+//	alloy:<cluster>          spoke/infra/certificates.yaml
+//	support-agent:<cluster>  spoke/infra/certificates.yaml
+//	support-agent:<domain>   hub-core-services/support-agent/certificate.yaml
+var allowedCommonNames = []string{"argocd-agent:*", "alloy:*", "support-agent:*"}
+
 // createCertificatePolicy creates a new certificate policy with the given name and returns its ID.
-// The subject policy allows argocd-agent.* common names — the cert-operator prefixes
-// spoke names with "argocd-agent." when issuing bootstrap certificates.
 func createCertificatePolicy(ctx context.Context, podName, adminJWT, projectID, name string) (string, error) {
-	body := fmt.Sprintf(`{"projectId":"%s","name":"%s","subject":[{"type":"common_name","allowed":["argocd-agent.*"]}]}`, projectID, name)
+	subject, err := json.Marshal([]map[string]any{
+		{"type": "common_name", "allowed": allowedCommonNames},
+	})
+	if err != nil {
+		return "", fmt.Errorf("render the certificate policy subject: %w", err)
+	}
+	body := fmt.Sprintf(`{"projectId":"%s","name":"%s","subject":%s}`, projectID, name, subject)
 	output, err := kubectlExec(ctx, podName,
 		"curl", "-s", "-X", "POST",
 		"http://localhost:"+infisicalPort+PathCertificatePolicies,
@@ -413,6 +570,17 @@ func resolveCertificatePolicy(ctx context.Context, podName, adminJWT, projectID 
 	}
 	if len(policies) > 0 {
 		fmt.Printf("[infisical-bootstrap] Using existing policy: id=%s name=%s\n", policies[0].ID, policies[0].Name)
+		// THE SUBJECT IS RECONCILED, not inherited. A policy created by an
+		// earlier release carries that release's allow-list, and the one before
+		// this permitted a single pattern with the wrong separator -- so reusing
+		// it by id kept refusing the Support Agent's certificate on every box
+		// that already had a policy, which is every box.
+		//
+		// The policy is the control that decides what the box's own CA signs, so
+		// what it allows has to be what this release's certificates ask for.
+		if err := updateCertificatePolicySubject(ctx, podName, adminJWT, policies[0].ID); err != nil {
+			return "", err
+		}
 		return policies[0].ID, nil
 	}
 
@@ -473,5 +641,43 @@ func activateRootCA(ctx context.Context, podName, adminJWT, caID string) error {
 	if err != nil {
 		return fmt.Errorf("generate CA certificate failed: %w\noutput: %s", err, output)
 	}
+	return nil
+}
+
+// updateCertificatePolicySubject brings an existing policy's allowed common
+// names up to what this release's certificates request.
+//
+// PATCH with the subject alone. Every other field of the policy is nullish in
+// the server's update schema, so naming only this one leaves validity, key
+// usages and algorithms as the operator or an earlier release set them --
+// sending a whole policy would silently reset fields this code has no opinion
+// about.
+//
+// Verified against the vendored server's certificate-policy-router.ts:
+// PATCH /:id, body updateCertificatePolicySchema.
+func updateCertificatePolicySubject(ctx context.Context, podName, adminJWT, policyID string) error {
+	subject, err := json.Marshal(map[string]any{
+		"subject": []map[string]any{
+			{"type": "common_name", "allowed": allowedCommonNames},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("render the certificate policy update: %w", err)
+	}
+	output, err := kubectlExec(ctx, podName,
+		"curl", "-s", "-X", "PATCH",
+		"http://localhost:"+infisicalPort+PathCertificatePolicies+"/"+policyID,
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+adminJWT,
+		"-d", string(subject),
+	)
+	if err != nil {
+		return fmt.Errorf("update the allowed common names on policy %s: %w", policyID, err)
+	}
+	if !strings.Contains(output, policyID) {
+		return fmt.Errorf("policy %s still allows what it allowed before, so certificates whose "+
+			"common name this release introduced are still refused\nresponse: %s", policyID, output)
+	}
+	fmt.Printf("[infisical-bootstrap] ✓ policy %s allows %v\n", policyID, allowedCommonNames)
 	return nil
 }

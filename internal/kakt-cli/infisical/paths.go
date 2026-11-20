@@ -54,8 +54,20 @@ const (
 	PathCertManagerInstance      = "/api/v1/cert-manager/instance"
 	PathCertManagerActiveProject = "/api/v1/cert-manager/instance/active-project"
 	PathCertManagerApplications  = "/api/v1/cert-manager/applications"
-	PathCACertificate            = "/api/v1/cert-manager/ca/internal/%s/certificate"
-	PathSecretsRaw               = "/api/v3/secrets/raw/%s"
+
+	// Membership and enrollment, under one application. Creating the application
+	// and attaching profiles is not enough for a single certificate to issue:
+	// the identity that asks must be a MEMBER of the application, and each
+	// profile must have the API enrollment method enabled. Verified against the
+	// vendored Infisical server (pki-application-membership-routers and
+	// pki-application-enrollment-routers, v0.165.6+).
+	//
+	// Formats rather than constants, because both name an object in the path.
+	PathCertManagerAppIdentityFmt   = "/api/v1/cert-manager/applications/%s/identities/%s"
+	PathCertManagerAppIdentitiesFmt = "/api/v1/cert-manager/applications/%s/identities"
+	PathCertManagerAppAPIEnrollFmt  = "/api/v1/cert-manager/applications/%s/profiles/%s/enrollment/api"
+	PathCACertificate               = "/api/v1/cert-manager/ca/internal/%s/certificate"
+	PathSecretsRaw                  = "/api/v3/secrets/raw/%s"
 	// PathSecretsRawList lists a folder. Unlike PathSecretsRaw it names no key,
 	// so it answers "what is here" rather than "is this here" -- which is the
 	// question `kakt fleet secrets status` asks.

@@ -1693,7 +1693,7 @@ func BootstrapInfisicalDayZero(ctx context.Context, admin Administrator) (*Boots
 	}
 
 	// Automate ADR-042 PKI_READY: create all required certificate profiles
-	if err := ensureCertificateProfiles(ctx, podName, boot.Identity.Credentials.Token, certProjectID); err != nil {
+	if err := ensureCertificateProfiles(ctx, podName, boot.Identity.Credentials.Token, certProjectID, identityID); err != nil {
 		return nil, fmt.Errorf("ensure certificate profiles: %w", err)
 	}
 
