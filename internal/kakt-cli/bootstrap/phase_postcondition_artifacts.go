@@ -94,5 +94,115 @@ func (o *Orchestrator) certificateIssuersReady(ctx context.Context, kubeconfig s
 			"registration of the platform's PKI application and profiles did not take effect "+
 			"against the Infisical now running", strings.Join(notReady, ", "))
 	}
+
+	// ISSUER READY IS NOT ISSUANCE. A ClusterIssuer reports Ready as soon as its
+	// Universal Auth credentials authenticate; it knows nothing about whether the
+	// application permits the asking identity, whether a profile has API
+	// enrollment enabled, or whether the policy allows the common name being
+	// requested. All three were wrong on a built box while both issuers reported
+	// Ready=True -- so this postcondition held, the phase was skipped, and the
+	// release carrying the repair never ran it (2026-11-20).
+	//
+	// What the phase exists to make possible is a signed certificate, so that is
+	// what is checked.
+	return o.infisicalCertificatesIssued(ctx, kubeconfig)
+}
+
+// infisicalCertificatesIssued reports whether every certificate that issues
+// through this box's own CA has one.
+//
+// Scoped to the Infisical issuers. A public ACME certificate failing is a DNS or
+// rate-limit problem and re-running the Infisical registration would do nothing
+// about it, so widening this would withdraw a record for work that is fine.
+//
+// A certificate stuck in cert-manager's backoff counts as not issued, which is
+// the intended reading: the box does not work, and the phase that can repair the
+// cause is this one.
+func (o *Orchestrator) infisicalCertificatesIssued(ctx context.Context, kubeconfig string) error {
+	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
+		"get", "certificates.cert-manager.io", "-A",
+		"-o", "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}|{.spec.issuerRef.name}|{range .status.conditions[?(@.type=='Ready')]}{.status}{end};{end}").Output()
+	if err != nil {
+		// No cert-manager, or no cluster to ask. Not evidence the phase did not
+		// happen.
+		return nil
+	}
+
+	var unsigned []string
+	for _, entry := range strings.Split(strings.TrimSpace(string(out)), ";") {
+		parts := strings.Split(strings.TrimSpace(entry), "|")
+		if len(parts) != 3 || parts[0] == "" {
+			continue
+		}
+		name, issuer, ready := parts[0], parts[1], parts[2]
+		if !strings.HasPrefix(issuer, "infisical-") {
+			continue
+		}
+		if ready != "True" {
+			unsigned = append(unsigned, name)
+		}
+	}
+	if len(unsigned) > 0 {
+		return fmt.Errorf("certificate(s) %s are not signed, so the box's own CA is not issuing: "+
+			"the asking identity's membership of the PKI application, a profile's API enrollment, "+
+			"or the policy's allowed common names did not take effect",
+			strings.Join(unsigned, ", "))
+	}
+	return nil
+}
+
+// clearFailedInfisicalCertificateRequests removes the requests that failed while
+// the box's CA was refusing them.
+//
+// cert-manager counts failures per Certificate and backs off exponentially: two
+// rejections put the next attempt more than an hour out, and it keeps the failed
+// CertificateRequest as the record of why. So repairing the issuance path
+// changes nothing for that hour -- the box stays broken, the Application stays
+// Degraded, and the bootstrap that just fixed the cause times out waiting for
+// the effect (2026-11-20, support-agent at failedIssuanceAttempts=2).
+//
+// Deleting the failed request is what clears it: cert-manager creates a new one
+// immediately, against the configuration that now permits it. Nothing is lost --
+// a failed request holds no certificate, and its reason has already been
+// reported by the Certificate it belongs to.
+//
+// Only requests against the Infisical issuers, and only failed ones. A pending
+// request is in flight and deleting it would restart work that is progressing;
+// an ACME failure is a different cause this phase cannot repair.
+func (o *Orchestrator) clearFailedInfisicalCertificateRequests(ctx context.Context, kubeconfig string) error {
+	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
+		"get", "certificaterequests.cert-manager.io", "-A",
+		"-o", "jsonpath={range .items[*]}{.metadata.namespace}|{.metadata.name}|{.spec.issuerRef.name}|{range .status.conditions[?(@.type=='Ready')]}{.reason}{end};{end}").Output()
+	if err != nil {
+		return nil
+	}
+
+	cleared := 0
+	for _, entry := range strings.Split(strings.TrimSpace(string(out)), ";") {
+		parts := strings.Split(strings.TrimSpace(entry), "|")
+		if len(parts) != 4 || parts[1] == "" {
+			continue
+		}
+		ns, name, issuer, reason := parts[0], parts[1], parts[2], parts[3]
+		if !strings.HasPrefix(issuer, "infisical-") {
+			continue
+		}
+		// Failed and Denied are the two terminal reasons. Anything else is in
+		// flight or already issued.
+		if reason != "Failed" && reason != "Denied" {
+			continue
+		}
+		if err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
+			"delete", "certificaterequest", name, "-n", ns).Run(); err != nil {
+			// Reported, not fatal. The registration above is the repair; a
+			// request that outlives it costs a retry interval, not the box.
+			fmt.Printf("[bootstrap-infisical-api] could not clear failed request %s/%s: %v\n", ns, name, err)
+			continue
+		}
+		cleared++
+	}
+	if cleared > 0 {
+		fmt.Printf("[bootstrap-infisical-api] ✓ cleared %d failed certificate request(s), so cert-manager retries now rather than after its backoff\n", cleared)
+	}
 	return nil
 }

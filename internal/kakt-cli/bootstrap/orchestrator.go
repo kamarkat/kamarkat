@@ -611,7 +611,16 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		"Bootstrapping Infisical API...",
 		func() error {
 			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
-			return ci.BootstrapInfisicalAPI(ctx)
+			if err := ci.BootstrapInfisicalAPI(ctx); err != nil {
+				return err
+			}
+			// The repair is only half of it. Certificates that were refused
+			// while the application, enrollment or policy were wrong are in
+			// cert-manager's backoff, and it does not retry for an hour after
+			// the second failure -- long enough for this bootstrap to time out
+			// waiting for a certificate its own previous step has just made
+			// issuable.
+			return o.clearFailedInfisicalCertificateRequests(ctx, mgmtKubeconfig)
 		},
 		func() { fmt.Println("[bootstrap-infisical-api] ✓ Infisical API bootstrapped") },
 		withPostcondition(func() error {
