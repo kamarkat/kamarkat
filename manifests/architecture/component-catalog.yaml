@@ -303,9 +303,9 @@ components:
           Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline. The newest
           1.20 patch is deliberately not taken in 0.3.31: that release changes gateway routing,
           and moving the datapath in the same version would make a routing failure impossible
-          to attribute to either change. It moves in 0.3.33, after the routing change has been
+          to attribute to either change. It moves in 0.3.34, after the routing change has been
           accepted on a box.
-        target: 0.3.33
+        target: 0.3.34
       - versions: ["v0.4.13"]
         status: held
         reason: >-
