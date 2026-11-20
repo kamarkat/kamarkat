@@ -35,7 +35,7 @@ spec:
   # 17, not 18. The ledger documents "14 or higher" with no tested ceiling. For a
   # financial ledger the newest untested major is the wrong side to err on, so this
   # takes the newest major with broad soak instead.
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-bookworm
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-system-bookworm@sha256:1d4180c155a2a7b4c59f4f13b7cdc5a1795bb8d85f3c92fd7647dae9e929f72e
 
   # THE FLOOR, not a measurement. Four clusters replace one, so the shared cluster's
   # 2 GiB cannot simply be repeated four times. These are the smallest settings a CNPG
@@ -123,13 +123,13 @@ spec:
       endpointURL: https://hel1.your-objectstorage.com
       s3Credentials:
         accessKeyId:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: access-key-id
         secretAccessKey:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: secret-access-key
         region:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: region
       wal:
         compression: gzip

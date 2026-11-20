@@ -93,18 +93,12 @@ func optionalSecrets() []optionalSecret {
 		},
 		// THE SAME CREDENTIAL, in the shape infisical-db reads it.
 		//
-		// Every other CNPG cluster takes its archive credential from Infisical,
-		// delivered by ESO from the Secret above. infisical-db cannot: pointing
-		// it at the Infisical-delivered credential would make recovering
-		// Infisical depend on Infisical, the circularity ADR-076 exists to break,
-		// so it reads platform-data/s3-credentials-escrowed directly.
-		//
-		// Nothing created it. The only producer was `kakt escrow
-		// deliver-backup-credentials`, whose only callers were its own help text
-		// telling a human to run it -- a manual hop in an automated path, and the
-		// reason infisical-db had archived no WAL since the box was built. That
-		// command remains what a SUCCESSOR hub runs, where no Day-0 is running
-		// to do it; the normal path is here, from the same escrow artefact.
+		// All hub CNPG clusters read platform-data/s3-credentials-escrowed directly
+		// (ADR-112 amendment). CNPG instances start at boundary 02 before Infisical
+		// (boundary 03), so retrieving archive credentials via Infisical/ESO created
+		// an unsolvable dependency race at instance startup where CNPG cached credential
+		// misses and disabled WAL archiving indefinitely. Sourcing from escrowed backup
+		// credentials at Day-0 guarantees credentials exist before boundary 02 starts.
 		//
 		// Three keys, region included, because CNPG takes it as a discrete key.
 		// An escrowed credential that declares no region is refused by name
@@ -119,7 +113,7 @@ func optionalSecrets() []optionalSecret {
 				"region":            "region",
 			},
 			secType: corev1.SecretTypeOpaque,
-			what:    "CNPG Barman backups of the box's own secret store",
+			what:    "CNPG Barman backups of all hub PostgreSQL clusters",
 		},
 		{
 			name: "grafana-cloud", namespace: constants.NamespaceOps,

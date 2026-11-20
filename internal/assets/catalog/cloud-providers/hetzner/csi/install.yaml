@@ -282,8 +282,6 @@ spec:
         - name: csi-resizer
           image: registry.k8s.io/sig-storage/csi-resizer:v2.3.0
           imagePullPolicy: IfNotPresent
-          args:
-            - --feature-gates=RecoverVolumeExpansionFailure=false
           volumeMounts:
           - name: socket-dir
             mountPath: /run/csi

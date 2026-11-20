@@ -21,13 +21,11 @@
 #
 # THIS ONE CANNOT DEPEND ON INFISICAL TO BE RECOVERED. Everything needed to restore it is
 # available before Infisical runs: the archive read credential from the escrow rather than
-# from Infisical, and the master keys as ADR-111 §1 scopes them. The other clusters may
-# keep taking their archive credentials from Infisical, because Infisical is restored
-# before them (ADR-111 Rev5 §3). Hence `s3-credentials-escrowed` below rather than the
-# shared `s3-credentials` -- pointing this cluster at the Infisical-delivered credential
-# would make its recovery depend on the service being recovered, which is the circularity
-# ADR-076 exists to break, at the one cluster where it is fatal. That Secret is delivered
-# from escrow by `kakt escrow deliver-backup-credentials`.
+# from Infisical, and the master keys as ADR-111 §1 scopes them. Under ADR-112 amendment,
+# all hub CNPG clusters take their archive credentials from `s3-credentials-escrowed`
+# (created Day-0 before boundary 02) so that neither fresh installs nor recoveries encounter
+# a credential circularity or startup race. That Secret is delivered
+# from escrow by Day-0 `InstallPlatformCredentials` or `kakt escrow deliver-backup-credentials`.
 #
 # THE BOOTSTRAP METHOD DEPENDS ON THE OPERATION, and only one may be declared for a
 # cluster's creation:
@@ -61,7 +59,7 @@ spec:
   # production compose still ships postgres:14. 17 is the newest major with real
   # ecosystem soak behind it; 18 would be the first consumer to try it here, and
   # this cluster holds the secret store the rest of the box bootstraps from.
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-bookworm
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-system-bookworm@sha256:1d4180c155a2a7b4c59f4f13b7cdc5a1795bb8d85f3c92fd7647dae9e929f72e
 
   # THE FLOOR, not a measurement. Four clusters replace one, so the shared cluster's
   # 2 GiB cannot simply be repeated four times. These are the smallest settings a CNPG

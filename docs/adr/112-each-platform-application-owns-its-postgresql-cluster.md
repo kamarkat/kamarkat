@@ -490,3 +490,20 @@ symmetry: hub-operator has no use for 8000, and the Support Agent has none for 5
 
 Until this landed, a dropped SYN — not a refusal — made every role-provisioning pass hang
 about 135 seconds and time out against clusters reporting Healthy.
+
+### C. Consolidation of WAL Archiving Credentials on Escrow and Transitional Operand Images (2026-11-20)
+
+**1. S3 Credential Timing and Single Authority:**
+Under the original split, `infisical-db` consumed `s3-credentials-escrowed` while the other four clusters (`zitadel-db`, `credits-db`, `grafana-db`, `billing-db`) referenced `s3-credentials`, delivered by ESO from Infisical via an ExternalSecret. However:
+- All five CNPG clusters are created during Boundary 02 before Infisical (Boundary 03) initializes.
+- CNPG's instance manager caches backup credentials once at instance startup. When the Secret is absent at that moment, it logs `failed to get envs: cache miss` and permanently disables WAL archiving.
+- Restarting CNPG instances post-Infisical was rejected as an unmaintainable runtime patch.
+- In accordance with ADR-076 and the prerequisite principle, all five platform database clusters now consume `platform-data/s3-credentials-escrowed`, which is populated Day-0 by `InstallPlatformCredentials` before Boundary 02 reconciles.
+- Each cluster retains its own discrete archive prefix (`destinationPath`), server identity (`serverName`), backup schedule, and retention policy. Only the credential authority is unified.
+- The obsolete `manifests/hub-core-services/storage/s3-credentials-es.yaml` is removed.
+
+**2. Operand Image Contract for Native Barman Archiving:**
+CloudNativePG operand image taxonomy differentiates between minimal/standard images (designed for the Barman Cloud plugin) and `system` images (which package the legacy `/usr/local/bin/barman-cloud-*` binaries required by native `spec.backup.barmanObjectStore`).
+- The use of `-standard-bookworm` images caused WAL archiving to fail with `exec: "barman-cloud-check-wal-archive": executable file not found in $PATH`.
+- Rather than downgrading PostgreSQL majors or using out-of-tree plugins during stabilization, clusters retaining native `barmanObjectStore` pin same-major `system` images (`ghcr.io/cloudnative-pg/postgresql:17.11-system-bookworm`).
+- The custom billing image (`images/postgres-partman`) builds from `ghcr.io/cloudnative-pg/postgresql:18-system-bookworm`, retaining both pg_partman extensions and barman cloud archiving tooling.

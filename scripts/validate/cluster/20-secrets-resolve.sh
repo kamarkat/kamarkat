@@ -86,17 +86,6 @@ for es in es_items:
         reason = "%s: %s" % (ready.get("reason", "?"), ready.get("message", ""))
     print("\t".join(["BAD", "%s/%s" % (m["namespace"], m["name"]), reason.strip(), location(es)]))
 
-# The one that matters most, reported whether or not it is in the failing set.
-for es in es_items:
-    m = es["metadata"]
-    if m["name"] == "s3-credentials" and m["namespace"] == "platform-data":
-        conds = es.get("status", {}).get("conditions", []) or []
-        ready = next((c for c in conds if c.get("type") == "Ready"), conds[0] if conds else None)
-        st = ready.get("status") if ready else "none"
-        print("\t".join(["S3", st or "none", location(es)]))
-        break
-else:
-    print("\t".join(["S3", "absent", ""]))
 PY
 )
 
@@ -120,47 +109,18 @@ PY
         fi
     fi
 
-    _validate_s3_backup_credentials "$report"
+    _validate_s3_backup_credentials
 }
 
-# s3-credentials backs the CNPG backup of the cluster holding the PKI root of
-# trust. Without it the platform runs with no durable copy of any platform
-# secret, and nothing else in the stack ever reports that.
+# s3-credentials-escrowed backs the CNPG backup of all clusters including the cluster
+# holding the PKI root of trust. Without it the platform runs with no durable copy of
+# any platform secret, and nothing else in the stack ever reports that.
 _validate_s3_backup_credentials() {
-    local report="$1"
-    local line status loc
-    line=$(grep $'^S3\t' <<< "$report" | head -1)
-    status=$(cut -f2 <<< "$line")
-    loc=$(cut -f3 <<< "$line")
-
-    if [[ "$status" == "True" ]]; then
-        pass "s3-credentials resolved — CNPG can back up the root of trust"
+    if kc get secret s3-credentials-escrowed -n platform-data >/dev/null 2>&1; then
+        pass "s3-credentials-escrowed present — CNPG can back up the root of trust"
         return 0
     fi
 
-    soft_fail "s3-credentials not resolved (status=${status}) — no CNPG cluster on this box has a durable backup"
-
-    if [[ -n "$loc" ]]; then
-        note "Seed these in Infisical: $loc"
-    else
-        # Before the ExternalSecret exists there is nothing to resolve from, so
-        # fall back to the coordinates the manifest ships with.
-        # The management scope as the box DECLARES it (ADR-111 Revision 7), read
-        # from the same ConfigMap the hub-operator reads. It printed $ENVIRONMENT,
-        # which told an operator to seed the secret into a workload environment --
-        # a place nothing on this hub reads.
-        local scope
-        scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
-            -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}')
-        note "Seed in Infisical: project=hub-secrets env=${scope:-<undeclared>} path=/ keys=S3_ACCESS_KEY_ID,S3_SECRET_ACCESS_KEY"
-    fi
-
-    local host
-    host=$(kc get clustersecretstore infisical-backend -o jsonpath='{.spec.provider.infisical.hostAPI}')
-    note "Infisical API: ${host:-http://infisical-standalone-infisical.platform-security.svc:8080}"
-    local console_scope
-    console_scope=$(kc -n platform-ops get configmap hub-bootstrap-config \
-        -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}')
-    note "Console path:  Projects -> hub-secrets -> ${console_scope:-<undeclared>} -> Secrets, at the root path '/'"
-    note "Use Hetzner Object Storage keys (these start 0A…), NOT the hcloud API token (HT…)."
+    soft_fail "s3-credentials-escrowed absent in platform-data — no CNPG cluster on this box has a durable backup"
+    note "Deliver via Day-0 InstallPlatformCredentials or \`kakt escrow deliver-backup-credentials\`"
 }

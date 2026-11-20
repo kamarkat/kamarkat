@@ -1,5 +1,5 @@
 # PostgreSQL for the billing engine's cluster (ADR-113 §3): CloudNativePG's
-# standard PostgreSQL 18 image with pg_partman added, and nothing else.
+# system PostgreSQL 18 image with pg_partman added, and nothing else.
 #
 # The engine's schema creates pg_partman on an empty database, and a cluster
 # cannot load an extension its image does not ship. CloudNativePG's image-volume
@@ -17,7 +17,7 @@
 # the build rather than installing another. The engine uses pg_partman's
 # functions only (partman.create_parent in its migration) and never runs its
 # maintenance, so the background worker is not loaded.
-FROM ghcr.io/cloudnative-pg/postgresql:18-standard-bookworm@sha256:fedcc3ff1abb4024997e065f449c2201d92cbf093dca238efbc9147004023ab9
+FROM ghcr.io/cloudnative-pg/postgresql:18-system-bookworm@sha256:5774670ec4a849c08d14f9db34320dff32a1a5f4ad6d41601ac492966ded3ad9
 
 ARG PG_PARTMAN_VERSION=5.5.0-1.pgdg12+1
 

@@ -123,13 +123,13 @@ spec:
       endpointURL: https://hel1.your-objectstorage.com
       s3Credentials:
         accessKeyId:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: access-key-id
         secretAccessKey:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: secret-access-key
         region:
-          name: s3-credentials
+          name: s3-credentials-escrowed
           key: region
       wal:
         compression: gzip

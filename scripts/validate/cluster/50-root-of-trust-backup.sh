@@ -117,7 +117,6 @@ validate_root_of_trust_backup() {
     # What changes is that the list now has the reason at the top of it.
     local missing_creds=()
     kc get secret s3-object-storage -n platform-ops >/dev/null 2>&1         || missing_creds+=("platform-ops/s3-object-storage")
-    kc get secret s3-credentials -n platform-data >/dev/null 2>&1         || missing_creds+=("platform-data/s3-credentials")
     kc get secret s3-credentials-escrowed -n platform-data >/dev/null 2>&1         || missing_creds+=("platform-data/s3-credentials-escrowed")
     if (( ${#missing_creds[@]} > 0 )); then
         hard_fail "the object-store credential has not reached this cluster (${missing_creds[*]} absent) — EVERY failure below follows from this one, and no database on this box has a durable backup until it is fixed"

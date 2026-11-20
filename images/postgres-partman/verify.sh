@@ -19,6 +19,9 @@ docker run --rm --entrypoint bash \
   -e WANT_MAJOR="$want_major" -e WANT_PARTMAN="$want_partman" \
   "$image" -c '
 set -euo pipefail
+for tool in barman-cloud-wal-archive barman-cloud-check-wal-archive barman-cloud-backup; do
+  which "$tool" >/dev/null || { echo "missing $tool in image" >&2; exit 1; }
+done
 bin=/usr/lib/postgresql/$WANT_MAJOR/bin
 [ -x "$bin/postgres" ] || { echo "no PostgreSQL $WANT_MAJOR in the image" >&2; exit 1; }
 data=$(mktemp -d)
