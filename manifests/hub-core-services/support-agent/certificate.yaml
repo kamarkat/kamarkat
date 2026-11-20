@@ -33,15 +33,32 @@ spec:
   # renews at 10 days, plus a blocklist that does not wait for expiry, answers
   # that more completely than an exchange would.
   # 24h/8h, which is what every other agent identity in this platform already
-  # uses (argocd-agent and alloy both carry exactly these
-  # values in manifests/spoke/spoke-catalog/infra/certificates.yaml). A support
-  # credential is not more special than a reconciliation credential, and a
-  # second rotation cadence is a second thing to be wrong about.
+  # uses (argocd-agent and alloy carry exactly this duration and renewBefore in
+  # manifests/spoke/spoke-catalog/infra/certificates.yaml; they declare no key
+  # algorithm, which is a difference this file got wrong -- see privateKey
+  # below). A support credential is not more special than a reconciliation
+  # credential, and a second rotation cadence is a second thing to be wrong
+  # about.
   duration: 24h
   renewBefore: 8h
+  # RSA 2048, because the CA that signs this can sign nothing else. The Fleet
+  # Intermediate CA is an RSA key, and Infisical refuses a request whose
+  # signature algorithm it cannot produce:
+  #
+  #   Requested signature algorithm ECDSA-SHA256 is not compatible with CA key
+  #   algorithm RSA_2048. CA can only sign with RSA-based signature algorithms.
+  #
+  # This declared ECDSA P-256, so this certificate was never signed once, and
+  # the comment above claiming it carries "exactly these values" as argocd-agent
+  # and alloy was wrong about this field: those two declare no privateKey block
+  # at all and take cert-manager's RSA 2048 default, which is why they issue.
+  #
+  # Not an endorsement of RSA over ECDSA for a 24-hour client credential. It is
+  # what this CA can sign, and the key algorithm of a CA with certificates
+  # already issued under it is not something a leaf's manifest gets to change.
   privateKey:
-    algorithm: ECDSA
-    size: 256
+    algorithm: RSA
+    size: 2048
     # A new key on every renewal. Rotating the certificate while keeping the key
     # leaves the thing most worth stealing unchanged for the life of the box.
     rotationPolicy: Always
