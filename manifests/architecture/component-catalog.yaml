@@ -284,6 +284,10 @@ components:
     repo: stakater/Reloader
     layer: machinery
     match: ["ghcr.io/stakater/*"]
+    behind:
+      - versions: ["v1.4.24"]
+        status: held
+        reason: Current version qualified with the platform chart baseline
   # ── Networking ──────────────────────────────────────────────────────────
   - name: Cilium
     description: Container networking, network policy and the Gateway API implementation.
@@ -474,10 +478,12 @@ components:
           store documents support but has an unresolved fresh-install failure on it, and the
           secret store documents only a floor.
         ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
-      - versions: ["17.11-standard-bookworm", "18.6"]
+      - versions: ["17.11-system-bookworm", "18.6"]
         status: declined
-        reason: Chosen per application; its consumers do not support 18
-        ref: docs/plans/k8s-cnpg-upgrade-and-restore-drill.md
+        reason: >-
+          Chosen per application. System image flavor provides legacy barman tooling
+          required for native backup in CloudNativePG.
+        ref: docs/adr/112-each-platform-application-owns-its-postgresql-cluster.md
   - name: Redis
     description: The platform cache.
     license: "BSD-3-Clause (7.x); AGPL-3.0-only (8.x)"
@@ -761,3 +767,8 @@ components:
     track: ghcr
     layer: capability
     match: ["ghcr.io/kamarkat/kamarkat/postgres-partman"]
+    behind:
+      - versions: ["18"]
+        status: declined
+        reason: Pinned to PostgreSQL 18 with pg_partman 5.5.0 and Barman cloud tooling
+        ref: docs/adr/112-each-platform-application-owns-its-postgresql-cluster.md
