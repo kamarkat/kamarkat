@@ -619,7 +619,13 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 			// cert-manager's backoff, and it does not retry for an hour after
 			// the second failure -- long enough for this bootstrap to time out
 			// waiting for a certificate its own previous step has just made
-			// issuable.
+			// issuable. Clearing the CertificateRequests alone is not enough:
+			// failedIssuanceAttempts lives on the Certificate, not the request,
+			// and when the next CR is nil cert-manager skips the spec-change
+			// comparison and falls through to the backoff delay. So the
+			// function also deletes the Certificate and its Secret for any
+			// stuck certificate, letting ArgoCD (selfHeal) recreate it from
+			// Git with zero failure history.
 			return o.clearFailedInfisicalCertificateRequests(ctx, mgmtKubeconfig)
 		},
 		func() { fmt.Println("[bootstrap-infisical-api] ✓ Infisical API bootstrapped") },
