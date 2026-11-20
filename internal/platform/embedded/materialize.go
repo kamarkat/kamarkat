@@ -36,8 +36,18 @@ func MaterializeScripts() (root string, cleanup func(), err error) {
 	}
 	cleanup = func() { _ = os.RemoveAll(root) }
 
+	// BOTH ROOTS. This extracted `scripts` alone, and the binary carries
+	// `manifests` too -- so a validator that reads a platform file found nothing
+	// at $VALIDATE_ROOT/manifests and said the release did not carry it, while
+	// the release did. The support-agent allowlist is named explicitly in the
+	// embed set for exactly that reason and was still unreadable at Day-0,
+	// failing one acceptance check on every released box (2026-11-19).
+	//
+	// The copy is a few megabytes and lives in a temp directory for the length
+	// of one run. Extracting half of what the binary holds, and then reasoning
+	// about the half that is missing, cost more than that.
 	written := 0
-	err = fs.WalkDir(FS, "scripts", func(p string, d fs.DirEntry, walkErr error) error {
+	walk := func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -56,10 +66,12 @@ func MaterializeScripts() (root string, cleanup func(), err error) {
 		}
 		written++
 		return nil
-	})
-	if err != nil {
-		cleanup()
-		return "", nil, err
+	}
+	for _, root := range []string{"scripts", "manifests"} {
+		if err = fs.WalkDir(FS, root, walk); err != nil {
+			cleanup()
+			return "", nil, err
+		}
 	}
 	if written == 0 {
 		cleanup()

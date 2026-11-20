@@ -856,6 +856,28 @@ func (o *Orchestrator) runPhase(
 		opt(&spec)
 	}
 
+	// REGISTRATION IS ENOUGH. phasePostconditions is the single place a phase's
+	// postcondition is declared, and it was consulted here only if the call site
+	// ALSO passed withPostcondition -- so three of the seven registered
+	// postconditions were evaluated on one path and not the other: a bootstrap
+	// recorded `complete` had them checked, and a resumed one skipped the phase
+	// with "already completed" and never looked.
+	//
+	// That is how a box ran for two days with no object-store credential on it:
+	// the postcondition that would have withdrawn the record existed, was
+	// registered, and was never reached. Looked up here instead, a registered
+	// postcondition cannot be dead, and a call site that passes one explicitly
+	// still wins.
+	//
+	// Only with a kubeconfig to check against. Early phases run before the
+	// management cluster exists, and a check that cannot reach a cluster reports
+	// every phase unmet -- withdrawing records for work that is fine.
+	if spec.postcondition == nil && strings.TrimSpace(bs.MgmtKubeconfig) != "" {
+		if check, ok := o.phasePostconditions(bs.MgmtKubeconfig)[phase]; ok {
+			spec.postcondition = func() error { return check(ctx) }
+		}
+	}
+
 	if o.phaseDone(bs, phase) {
 		if spec.postcondition == nil {
 			fmt.Printf("[%s] ✓ Skipped (already completed)\n", label)

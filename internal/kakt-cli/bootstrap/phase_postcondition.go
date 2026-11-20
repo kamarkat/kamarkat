@@ -56,7 +56,14 @@ func (o *Orchestrator) phasePostconditions(kubeconfig string) map[state.Bootstra
 		// artifact is present after the clone, and an uncommitted one is absent --
 		// which is exactly the distinction the completion record cannot make.
 		state.PhaseBootstrapInfisicalAPI: func(ctx context.Context) error {
-			return o.generatedIdentityValuesPresent()
+			if err := o.generatedIdentityValuesPresent(); err != nil {
+				return err
+			}
+			// The artifact AND the effect. The file alone was satisfied by a copy
+			// written against a different Infisical, which is how the PKI
+			// application and its profiles went unregistered while this phase
+			// reported itself done.
+			return o.certificateIssuersReady(ctx, kubeconfig)
 		},
 
 		// This phase gained the platform-credential installer long after the

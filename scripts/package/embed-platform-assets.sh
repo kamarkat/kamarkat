@@ -46,6 +46,14 @@ PATHS=(
     # the repository plainly has, which is exactly the failure mode this embed
     # set exists to prevent.
     "manifests/hub-core-services/support-agent/allowlist.yaml"
+    # The issuer CRD Day-0 keeps current (bootstrap/vendored_crds.go).
+    #
+    # Carried because the repair has to work on a released box: ArgoCD cannot
+    # sync an Application whose CRD schema change and whose resources using the
+    # new fields arrive together, so Day-0 applies this definition directly
+    # before that boundary. A binary without it can read the stale schema and do
+    # nothing about it.
+    "manifests/hub-core-services/security/files/infisical-issuer-crd.yaml"
 )
 
 # THE RUNTIME SCRIPT CLOSURE, computed rather than listed.

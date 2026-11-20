@@ -165,7 +165,19 @@ func check(c capability, run func(*Orchestrator, context.Context, string) error)
 //	number, label, activates, refreshesSchema, prepare, readiness
 var boundaryContracts = []boundaryContract{
 	{
-		1, "01-platform-infra", false, false, nil,
+		1, "01-platform-infra", false, false,
+		// A vendored CRD whose schema this release changed is brought up to date
+		// HERE, before the Application that manages both it and the resources
+		// using its new fields is reconciled. That pairing deadlocks ArgoCD's
+		// comparison, and the Application that would resolve it is the one the
+		// deadlock blocks -- see vendored_crds.go. Day-0 applies directly and has
+		// no comparison to deadlock, which is why the repair lives in a prepare
+		// step and not in a chart.
+		//
+		// A no-op on every box whose live schema already declares the fields,
+		// which is every box but the one in the middle of such a migration.
+		&namedStep{"", "bring vendored CRD schemas up to this release",
+			(*Orchestrator).ensureVendoredCRDSchemas},
 		requiresNothingBecause(
 			"the first boundary. The seed has activated it and the phases before it " +
 				"created the cluster; there is no earlier boundary to depend on."),
