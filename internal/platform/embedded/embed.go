@@ -25,5 +25,5 @@ import "embed"
 // bit itself; a caller that copies the mode out of the FS writes a file nothing
 // can run.
 //
-//go:embed all:manifests all:scripts
+//go:embed all:manifests all:scripts all:_operators
 var FS embed.FS

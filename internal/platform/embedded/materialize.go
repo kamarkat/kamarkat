@@ -51,7 +51,7 @@ func MaterializeScripts() (root string, cleanup func(), err error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		target := filepath.Join(root, filepath.FromSlash(p))
+		target := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(p, "_")))
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
@@ -67,7 +67,16 @@ func MaterializeScripts() (root string, cleanup func(), err error) {
 		written++
 		return nil
 	}
-	for _, root := range []string{"scripts", "manifests"} {
+	// _operators too: a validator parses the hub-operator's own mapping table
+	// and namespace constants as its contract, so those files are part of the
+	// closure and have to be on disk where the check runs. Staged in the binary
+	// and not extracted is the same as absent.
+	//
+	// The underscore is a packaging detail and is stripped on the way out. It
+	// exists because the go tool treats a staged .go file as a package of THIS
+	// module and fails to build it; a leading underscore makes the tool ignore
+	// the directory, while `go:embed all:` still carries it.
+	for _, root := range []string{"scripts", "manifests", "_operators"} {
 		if err = fs.WalkDir(FS, root, walk); err != nil {
 			cleanup()
 			return "", nil, err

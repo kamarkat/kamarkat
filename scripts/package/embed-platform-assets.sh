@@ -88,7 +88,7 @@ PATHS+=("${SCRIPT_CLOSURE[@]}")
 # destroyed by `make build`, which runs this. The package legitimately holds
 # source beside the generated tree, because the code that extracts the embedded
 # content is the code that owns the FS.
-rm -rf "$DEST/manifests" "$DEST/scripts"
+rm -rf "$DEST/manifests" "$DEST/scripts" "$DEST/_operators"
 mkdir -p "$DEST"
 
 for p in "${PATHS[@]}"; do
@@ -96,8 +96,22 @@ for p in "${PATHS[@]}"; do
         echo "embed-platform-assets: $p does not exist; the embed set names content the repository does not have" >&2
         exit 1
     fi
-    mkdir -p "$DEST/$(dirname "$p")"
-    cp -R "$p" "$DEST/$(dirname "$p")/"
+    # UNDER AN UNDERSCORE for Go source. A validator parses the hub-operator's
+    # constants and mapping table as its contract, so the closure carries them --
+    # and staging them as .go files inside this module made them PACKAGES of it:
+    # `go test ./...` then tried to build an operator's source from a path where
+    # its imports do not resolve, and two packages failed to set up.
+    #
+    # The go tool ignores a directory whose name begins with an underscore, and
+    # `go:embed all:` includes such a directory anyway. The underscore is stripped
+    # again when the tree is extracted, so a script still reads operators/... --
+    # see internal/platform/embedded/materialize.go.
+    staged="$p"
+    case "$p" in
+        operators/*) staged="_$p" ;;
+    esac
+    mkdir -p "$DEST/$(dirname "$staged")"
+    cp -R "$p" "$DEST/$(dirname "$staged")/"
 done
 
 # Generated per-cluster artifacts are instance data (ADR-045). A released binary
@@ -133,7 +147,7 @@ import "embed"
 // bit itself; a caller that copies the mode out of the FS writes a file nothing
 // can run.
 //
-//go:embed all:manifests all:scripts
+//go:embed all:manifests all:scripts all:_operators
 var FS embed.FS
 GOEOF
 

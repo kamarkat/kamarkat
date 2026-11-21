@@ -134,3 +134,7 @@ manifests/argocd/environment-manager/descriptors/
 # `make test`, and scripts/package/build-cli.sh, which the release uses.
 /internal/platform/embedded/manifests/
 /internal/platform/embedded/scripts/
+# A validator parses the hub-operator's own constants and mapping table as its
+# contract, so the closure carries those sources and the generator stages them
+# here. Generated like the two above, and ignored for the same reason.
+/internal/platform/embedded/_operators/

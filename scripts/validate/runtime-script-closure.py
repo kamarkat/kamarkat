@@ -41,17 +41,48 @@ GLOB_DIRS = ("scripts/validate/preflight", "scripts/validate/cluster")
 #   scripts/x.sh                 a repository-relative path
 #   $PLATFORM_DIR/scripts/x.sh   the platform root, which is dirname(SCRIPT_DIR)
 #   $SCRIPT_DIR/lib/x.sh         relative to scripts/ itself
-REFERENCE = re.compile(r"(?:\./)?(scripts/[A-Za-z0-9_./-]+\.(?:sh|py))")
-PLATFORM_REL = re.compile(r"\$\{?PLATFORM_DIR\}?/(scripts/[A-Za-z0-9_./-]+\.(?:sh|py))")
-SCRIPT_REL = re.compile(r"\$\{?SCRIPT_DIR\}?/([A-Za-z0-9_./-]+\.(?:sh|py))")
+# DATA, NOT ONLY EXECUTABLES. These traced .sh and .py alone, so a validator's
+# data dependency was invisible: `078-collection-floor.sh` reads
+# scripts/observability/mixin/metrics-allowlist.json, the file was never
+# embedded, and on a released box the module crashed on FileNotFoundError before
+# asserting anything -- which the acceptance run reports as unverified, correctly
+# and unhelpfully, because the fault is in the packaging and not the box.
+#
+# A script that reads a file needs that file. The extension says whether the
+# closure can follow it further, not whether it has to carry it.
+REFERENCE = re.compile(r"(?:\./)?(scripts/[A-Za-z0-9_./-]+\.(?:sh|py|json|ya?ml))")
+PLATFORM_REL = re.compile(r"\$\{?PLATFORM_DIR\}?/(scripts/[A-Za-z0-9_./-]+\.(?:sh|py|json|ya?ml))")
+SCRIPT_REL = re.compile(r"\$\{?SCRIPT_DIR\}?/([A-Za-z0-9_./-]+\.(?:sh|py|json|ya?ml))")
+
+# THE SOURCE A VALIDATOR READS AS ITS CONTRACT. 003-seeded-credential-sources.sh
+# parses the hub-operator's own mapping table and namespace constants, so that a
+# renamed namespace cannot make the check silently examine the wrong one -- a
+# deliberate choice, and one that needs the files to exist wherever the check
+# runs. They are outside scripts/, so no pattern above would ever see them.
+SOURCE_REF = re.compile(r"(?:\./)?(operators/[A-Za-z0-9_./-]+\.go)")
 EMBEDDED = "internal/platform/embedded"
 
 
 def closure(root):
     tracked = set(subprocess.run(
-        ["git", "-C", root, "ls-files", "scripts"],
+        ["git", "-C", root, "ls-files", "scripts", "operators"],
         capture_output=True, text=True, check=False).stdout.split())
+    # THE GLOBBED MODULES ARE TRACED, NOT JUST LISTED. Every file in GLOB_DIRS
+    # used to be added to the result after the walk, so a module's own
+    # dependencies were never followed -- the walk only ever read the entry
+    # points and what they source. A validator that reads a data file or a source
+    # file it parses therefore contributed nothing to the closure, and the file it
+    # needs was absent from every release.
+    #
+    # Queued instead, so each module is read exactly as the entry points are.
     seen, queue = set(), list(ENTRY_POINTS)
+    for d in GLOB_DIRS:
+        full = os.path.join(root, d)
+        if not os.path.isdir(full):
+            continue
+        for name in sorted(os.listdir(full)):
+            if os.path.isfile(os.path.join(full, name)):
+                queue.append(f"{d}/{name}")
     while queue:
         rel = queue.pop()
         full = os.path.join(root, rel)
@@ -63,14 +94,11 @@ def closure(root):
         refs = set(REFERENCE.findall(body)) | set(PLATFORM_REL.findall(body))
         # $SCRIPT_DIR is scripts/ itself, so its matches are relative to it.
         refs |= {"scripts/" + r for r in SCRIPT_REL.findall(body)}
+        # Go sources a validator parses as its contract. Added to the closure and
+        # not followed further: the closure's job is to carry what a run reads,
+        # and nothing reads an import graph.
+        refs |= set(SOURCE_REF.findall(body))
         queue.extend(r for r in refs if r not in seen)
-    for d in GLOB_DIRS:
-        full = os.path.join(root, d)
-        if not os.path.isdir(full):
-            continue
-        for name in sorted(os.listdir(full)):
-            if os.path.isfile(os.path.join(full, name)):
-                seen.add(f"{d}/{name}")
     # UNTRACKED IS A FAILURE, NOT AN OMISSION. The closure is filtered to
     # git-tracked files so a scratch copy in a working tree cannot enter a
     # release. But a NEW script an entry point already sources is a different
@@ -105,13 +133,26 @@ def main():
     directive = os.path.join(root, EMBEDDED, "embed.go")
     if os.path.isfile(directive):
         with open(directive, encoding="utf-8") as fh:
-            if "all:scripts" not in fh.read():
-                print(f"FAIL {EMBEDDED}/embed.go does not embed scripts: the closure is "
-                      f"staged on disk and compiled into nothing", file=sys.stderr)
-                return 1
+            directive_body = fh.read()
+            # Every root the closure can name. A validator's contract is a Go
+            # source under operators/, so staging it without widening the
+            # directive copies the file onto disk and compiles in nothing --
+            # which is the failure this block already existed to catch, for a
+            # root that did not exist when it was written.
+            for root_dir in ("all:scripts", "all:_operators"):
+                if root_dir not in directive_body:
+                    print(f"FAIL {EMBEDDED}/embed.go does not embed {root_dir[4:]}: part of the "
+                          f"closure is staged on disk and compiled into nothing", file=sys.stderr)
+                    return 1
+
+    # Go source is STAGED under an underscore so the go tool does not treat it as
+    # a package of this module, and extracted without one. The closure names the
+    # path a run reads; this looks for the path the generator writes.
+    def staged(rel):
+        return "_" + rel if rel.startswith("operators/") else rel
 
     missing = [f for f in want
-               if not os.path.isfile(os.path.join(root, EMBEDDED, f))]
+               if not os.path.isfile(os.path.join(root, EMBEDDED, staged(f)))]
     for f in missing:
         print(f"FAIL {EMBEDDED} carries no {f}, which Day-0 reaches from "
               f"{' or '.join(ENTRY_POINTS)}", file=sys.stderr)
