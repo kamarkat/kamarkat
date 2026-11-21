@@ -77,6 +77,10 @@ def location(es):
 
 for es in es_items:
     m = es["metadata"]
+    # ghcr-pull-secret is an optional capability (ADR-066); skipped when no GHCR_TOKEN is configured.
+    target_name = es.get("spec", {}).get("target", {}).get("name", "")
+    if m["name"] == "ghcr-pull-secret-credentials" or target_name == "ghcr-pull-secret":
+        continue
     conds = es.get("status", {}).get("conditions", []) or []
     ready = next((c for c in conds if c.get("type") == "Ready"), conds[0] if conds else None)
     if ready and ready.get("status") == "True":

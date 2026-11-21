@@ -282,6 +282,9 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 	)
 	if output, err := checkCmd.Output(); err == nil && string(output) == "Provisioned" {
 		fmt.Println("[cluster-provision] ✓ Cluster already exists and provisioned")
+		if err := provisioner.EnsureTopologyRecorded(); err != nil {
+			return fmt.Errorf("failed to record cluster topology: %w", err)
+		}
 	} else {
 		if err := provisioner.Provision(ctx); err != nil {
 			return fmt.Errorf("failed to provision cluster: %w", err)

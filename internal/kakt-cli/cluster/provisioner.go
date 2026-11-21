@@ -405,6 +405,22 @@ func (p *Provisioner) applyCluster(ctx context.Context) error {
 //
 // A no-op without a tenant repository: the platform's own box has no file to write
 // into, and Day-0 there is run by someone with the working tree in front of them.
+// EnsureTopologyRecorded ensures clusters/<name>/generated/hub-cluster.yaml exists in GitOps repo.
+func (p *Provisioner) EnsureTopologyRecorded() error {
+	if p.Config.GitopsDir == "" || p.Config.ClusterName == "" {
+		return nil
+	}
+	path := filepath.Join(p.Config.GitopsDir, tenant.RegistryDir, "clusters", p.Config.ClusterName, "generated", "hub-cluster.yaml")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	rendered, err := p.renderClusterManifest()
+	if err != nil {
+		return fmt.Errorf("render cluster manifest for topology record: %w", err)
+	}
+	return p.writeClusterToRepo(rendered)
+}
+
 func (p *Provisioner) writeClusterToRepo(rendered string) error {
 	if p.Config.GitopsDir == "" {
 		return nil

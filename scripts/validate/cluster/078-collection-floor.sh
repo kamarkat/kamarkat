@@ -165,7 +165,12 @@ validate_adr078_collection_floor() {
 
     _c078_check hub "$HUB_KUBECONFIG" CLUSTER_NAME kubelet cadvisor node-exporter kube-state-metrics
 
-    if ensure_spoke_kubeconfig; then
+    if command -v resolve_spoke_state >/dev/null; then
+        resolve_spoke_state
+    fi
+    if [[ "${SPOKE_STATE:-}" == "undeclared" ]]; then
+        note "this box declares no workload cluster; spoke collection floor skipped"
+    elif ensure_spoke_kubeconfig; then
         _c078_check spoke "$SPOKE_KUBECONFIG" CELL_ID kubelet cadvisor node-exporter kube-state-metrics cnpg
     else
         soft_fail "no spoke kubeconfig; the spoke collection floor was not checked"

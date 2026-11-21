@@ -145,6 +145,12 @@ func (su *SecretUploader) uploadSecret(ctx context.Context, infisicalClient *inf
 	}
 
 	if len(value) == 0 {
+		if mapping.AllowEmpty {
+			logger.Info("Source secret key is empty (inert capability, ADR-075), skipping upload",
+				"source", fmt.Sprintf("%s/%s", mapping.SourceNamespace, mapping.SourceName),
+				"key", mapping.SourceKey)
+			return nil
+		}
 		return fmt.Errorf("source secret key %s is empty", mapping.SourceKey)
 	}
 

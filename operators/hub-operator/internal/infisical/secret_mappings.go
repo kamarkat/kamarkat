@@ -40,6 +40,10 @@ type SecretMapping struct {
 	InfisicalKey    string // Key name in Infisical
 	Description     string // Human-readable description for logging
 
+	// AllowEmpty, when true, means an empty secret key is valid and should be skipped
+	// without failing upload (e.g. inert capability placeholders like tailscale-hybrid-psk, ADR-075).
+	AllowEmpty bool
+
 	// InfisicalPath is the folder the key is written to. Empty means "/". It may
 	// contain TenantPlaceholder, replaced by this box's tenant id (TENANT_ID, from
 	// hub-bootstrap-config) -- for a credential that belongs to the box owner and
@@ -297,6 +301,7 @@ var CLISecretMappings = []SecretMapping{
 		SourceKey:       "authkey",              // authkey
 		InfisicalKey:    KeyTailscaleAuthkey,    // tailscale-authkey
 		Description:     "Tailscale auth key for hybrid spoke CP",
+		AllowEmpty:      true,
 	},
 
 	// ========================================================================
@@ -308,6 +313,7 @@ var CLISecretMappings = []SecretMapping{
 		SourceKey:       "hostname",             // hostname
 		InfisicalKey:    KeyTailscaleHostname,   // tailscale-hostname
 		Description:     "Tailscale hostname for hybrid spoke CP",
+		AllowEmpty:      true,
 	},
 
 	// ========================================================================

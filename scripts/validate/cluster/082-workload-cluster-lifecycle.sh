@@ -81,8 +81,8 @@ for app in apps:
     meta = app["metadata"]
     name = meta["name"]
     kind = next((k for k in OWNER if name.endswith("-" + k)), None)
-    if kind is None or name == MGMT + "-generated":
-        continue  # the management cluster's own, and anything else in platform-ops
+    if kind is None or name == MGMT + "-generated" or name.startswith("platform-"):
+        continue  # the management cluster's own, platform applications, and anything else in platform-ops
     cluster = name[: -len(kind) - 1]
     if cluster == MGMT:
         continue

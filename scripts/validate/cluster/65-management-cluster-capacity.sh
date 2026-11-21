@@ -23,11 +23,11 @@ validate_hub_placement_capacity() {
 
     # The control plane is tainted on a hybrid hub, so it is not capacity. On a
     # pure-Hetzner hub the worker MachineDeployment provides nodes and no
-    # workload-location label exists at all — nothing to assert, so skip cleanly.
+    # on-prem home worker exists — nothing to assert, so skip cleanly.
     local labelled
-    labelled=$(kc get nodes -l 'workload-location' -o name | grep -c . || true)
+    labelled=$(kc get nodes -l 'workload-location=on-prem' -o name | grep -c . || true)
     if [[ "${labelled:-0}" -eq 0 ]]; then
-        pass "no workload-location nodes — not a hybrid hub, placement is CAPI-managed"
+        pass "no workload-location=on-prem nodes — not a hybrid hub, placement is CAPI-managed"
         return 0
     fi
 

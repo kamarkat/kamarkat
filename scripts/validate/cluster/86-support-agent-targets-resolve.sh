@@ -52,7 +52,7 @@ for doc in yaml.safe_load_all(open(sys.argv[1])):
             and "allowlist.yaml" in (doc.get("data") or {}):
         for c in yaml.safe_load(doc["data"]["allowlist.yaml"]) or []:
             src = c.get("source") or {}
-            print("\t".join([
+            print("|".join([
                 c.get("collector", "?"),
                 src.get("kind", "?"),
                 src.get("namespace", ""),
@@ -70,7 +70,7 @@ PY
         || { hard_fail "the hub allowlist could not be read from $hub"; return 0; }
 
     local failed=0 total=0 name kind ns svc port path
-    while IFS=$'\t' read -r name kind ns svc port path; do
+    while IFS='|' read -r name kind ns svc port path; do
         [[ -z "$name" ]] && continue
         (( total++ ))
         case "$kind" in
@@ -103,7 +103,9 @@ PY
                 if [[ -z "$path" ]]; then
                     hard_fail "collector '$name' is kind: artefact with no path"
                     failed=1
-                elif ! compgen -G "$VALIDATE_ROOT/$path" >/dev/null; then
+                elif ! compgen -G "${ZERO_OPS_DIR:-$VALIDATE_ROOT}/$path" >/dev/null \
+                     && ! compgen -G "${ZERO_OPS_DIR:-$VALIDATE_ROOT}/registry/$path" >/dev/null \
+                     && ! compgen -G "$VALIDATE_ROOT/$path" >/dev/null; then
                     hard_fail "collector '$name' reads '$path', which matches no file in this repository"
                     failed=1
                 fi

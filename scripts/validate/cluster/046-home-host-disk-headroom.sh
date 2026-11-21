@@ -37,6 +37,15 @@ _resolve_target() {
 validate_home_host_disk_headroom() {
     section "Home-lab Windows host disk headroom (ADR-046)"
 
+    # On a pure-Hetzner hub the worker MachineDeployment provides nodes and no
+    # on-prem home worker exists — nothing to assert, so skip cleanly.
+    local labelled
+    labelled=$(kc get nodes -l 'workload-location=on-prem' -o name 2>/dev/null | grep -c . || true)
+    if [[ "${labelled:-0}" -eq 0 ]]; then
+        pass "no workload-location=on-prem nodes — not a hybrid hub, no home-lab hosts to check"
+        return 0
+    fi
+
     local env_file="${VALIDATE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/scripts/hybrid/home-lab.env"
     if [[ ! -f "$env_file" ]]; then
         hard_fail "home-lab.env not found at $env_file"

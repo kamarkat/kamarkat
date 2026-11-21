@@ -61,11 +61,11 @@ data:
     - collector: certificate-expiry
       source:
         kind: metrics
-        namespace: platform-ops
-        service: cert-manager-metrics
+        namespace: cert-manager
+        service: cert-manager
         query: certmanager_certificate_expiration_timestamp_seconds
-      schema: [name, namespace, issuer_name, expiration_timestamp]
-      emit: [issuer_name, expiration_timestamp]
+      schema: [name, namespace, issuer_name, value]
+      emit: [issuer_name, value]
 
     - collector: node-pressure
       source:

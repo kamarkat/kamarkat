@@ -67,7 +67,7 @@ data:
         kind: metrics
         namespace: platform-ops
         service: kyverno-reports-controller-metrics
-        port: 8080
+        port: 8000
         query: kyverno_policy_results_total
       schema: [policy_name, policy_type, rule_result, resource_namespace, resource_name]
       emit: [policy_name, policy_type, rule_result]
@@ -78,9 +78,9 @@ data:
     - collector: certificate-expiry
       source:
         kind: metrics
-        namespace: platform-ops
-        service: cert-manager-metrics
-        port: 8080
+        namespace: cert-manager
+        service: cert-manager
+        port: 9402
         query: certmanager_certificate_expiration_timestamp_seconds
       # `value` is the sample's own number. The expiry is the series' VALUE and no
       # label carries it, so a schema naming `expiration_timestamp` projected

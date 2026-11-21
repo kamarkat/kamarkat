@@ -73,8 +73,13 @@ _assert_cnpg_backup() {
     fi
 
     # ── 2. Something must be scheduled, or nothing ever backs up ─────────────
-    sched=$($kcf get scheduledbackup -n "$ns" -o json 2>/dev/null \
-        | jq -r --arg c "$name" '[.items[]? | select(.spec.cluster.name==$c)] | length')
+    local sched_json
+    sched_json=$($kcf get scheduledbackup -n "$ns" -o json 2>/dev/null || true)
+    if [[ -z "$sched_json" ]]; then
+        sleep 1
+        sched_json=$($kcf get scheduledbackup -n "$ns" -o json 2>/dev/null || true)
+    fi
+    sched=$(printf '%s' "$sched_json" | jq -r --arg c "$name" '[.items[]? | select(.spec.cluster.name==$c)] | length' 2>/dev/null || echo 0)
     if [[ "${sched:-0}" -gt 0 ]]; then
         pass "$label: $sched ScheduledBackup(s) target this cluster"
     else

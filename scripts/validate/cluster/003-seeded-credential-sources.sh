@@ -53,11 +53,12 @@ for entry in re.findall(r'\{(.*?)\n\t\}', body, re.S):
     name = re.search(r'SourceName:\s*"([^"]+)"', entry)
     key = re.search(r'SourceKey:\s*"([^"]+)"', entry)
     ikey = re.search(r'InfisicalKey:\s*"([^"]+)"', entry)
+    allow_empty = bool(re.search(r'AllowEmpty:\s*true', entry))
     if not (ns and name and key):
         continue
     namespace = ns_by_const.get(ns.group(1), ns.group(1))
     wanted.setdefault((namespace, name.group(1)), []).append(
-        (key.group(1), ikey.group(1) if ikey else "?"))
+        (key.group(1), ikey.group(1) if ikey else "?", allow_empty))
 
 if not wanted:
     print("FAIL no source mappings parsed from CLISecretMappings; the check would pass "
@@ -75,8 +76,9 @@ for (namespace, name), keys in sorted(wanted.items()):
               "uploader" % (namespace, name, len(keys)))
         continue
     data = json.loads(r.stdout).get("data") or {}
-    missing = [k for k, _ in keys if k not in data]
-    empty = [k for k, _ in keys if k in data and len(data[k]) == 0]
+    missing = [k for k, _, _ in keys if k not in data]
+    empty = [k for k, _, allow in keys if k in data and len(data[k]) == 0 and not allow]
+    inert = [k for k, _, allow in keys if k in data and len(data[k]) == 0 and allow]
     if missing:
         print("FAIL %s/%s exists but is missing %s -- the uploader fails this on every "
               "reconcile with 'source secret missing key', and the Infisical value is "
@@ -86,7 +88,14 @@ for (namespace, name), keys in sorted(wanted.items()):
         print("FAIL %s/%s has empty value(s) for %s -- the uploader rejects empty, so "
               "nothing is published and nothing says so"
               % (namespace, name, ", ".join(sorted(empty))))
-    if not missing and not empty:
+    if inert:
+        print("PASS %s/%s carries inert key(s) %s (optional capability, ADR-075)"
+              % (namespace, name, ", ".join(sorted(inert))))
+    active = [k for k, _, _ in keys if k in data and len(data[k]) > 0]
+    if active and not empty and not missing:
+        print("PASS %s/%s carries all %d active key(s) its mappings read"
+              % (namespace, name, len(active)))
+    elif not missing and not empty and not inert:
         print("PASS %s/%s carries all %d key(s) its mappings read"
               % (namespace, name, len(keys)))
 
@@ -100,7 +109,7 @@ for (namespace, name), keys in sorted(wanted.items()):
     if r.returncode != 0:
         continue
     data = json.loads(r.stdout).get("data") or {}
-    extra = sorted(set(data) - {k for k, _ in keys})
+    extra = sorted(set(data) - {k for k, _, _ in keys})
     if extra:
         print("NOTE %s/%s also carries %s, which no mapping reads"
               % (namespace, name, ", ".join(extra)))

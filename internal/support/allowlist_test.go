@@ -84,7 +84,7 @@ func TestNoIdentifyingMaterialReachesThePayload(t *testing.T) {
 	r := fixtureReader{metrics: map[string]string{
 		"platform-ops/argocd-applicationset-controller-metrics": fixtureMetrics,
 		"platform-ops/kyverno-reports-controller-metrics":       fixturePolicy,
-		"platform-ops/cert-manager-metrics":                     fixtureCerts,
+		"cert-manager/cert-manager":                             fixtureCerts,
 	}}
 
 	p := Collect(context.Background(), a, r, "hashed-cluster-id")

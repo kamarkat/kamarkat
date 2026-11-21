@@ -218,6 +218,9 @@ func (c *ClusterReader) Artefact(_ context.Context, pattern string) ([]byte, err
 		return nil, fmt.Errorf("no repository to read %s from", pattern)
 	}
 	matches, err := filepath.Glob(filepath.Join(c.GitopsDir, pattern))
+	if err == nil && len(matches) == 0 {
+		matches, err = filepath.Glob(filepath.Join(c.GitopsDir, "registry", pattern))
+	}
 	if err != nil {
 		return nil, err
 	}

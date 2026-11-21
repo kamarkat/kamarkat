@@ -231,6 +231,16 @@ check_deployment() {
 check_argocd_app() {
     local app="$1"
     local severity="${2:-FAIL}"   # FAIL or WARN
+
+    if ! kc get application "$app" -n platform-ops >/dev/null 2>&1; then
+        if [[ "$severity" == "WARN" ]]; then
+            log_warn "ArgoCD app $app does not exist (optional)"
+        else
+            log_fail "ArgoCD app $app does not exist"
+        fi
+        return 0
+    fi
+
     # Synced+Healthy is a converging state, so it is waited for rather than
     # sampled. platform-database was reported OutOfSync on an ExternalSecret that
     # was Synced a minute later, and that one line failed the run.
@@ -936,7 +946,11 @@ check_platform_argocd_apps() {
         "platform-crossplane-providers"
         "platform-cluster-secret-store"
         "platform-cloudnative-pg"
-        "platform-database"
+        "platform-infisical-db"
+        "platform-zitadel-db"
+        "platform-credits-db"
+        "platform-grafana-db"
+        "platform-billing-db"
         "hub-environment"
         "hub-operator"
         "platform-redis"
@@ -959,8 +973,8 @@ check_platform_argocd_apps() {
 # ─── 13. OBSERVABILITY ────────────────────────────────────────────────────────
 check_observability() {
     log_section "13. OBSERVABILITY"
-    check_argocd_app "victoria-metrics-cluster" "WARN"
-    check_argocd_app "victoria-metrics-alerts" "WARN"
+    check_argocd_app "victoriametrics" "WARN"
+    check_argocd_app "platform-alerts" "WARN"
     check_argocd_app "grafana-alloy" "WARN"
 
     local obs_ready

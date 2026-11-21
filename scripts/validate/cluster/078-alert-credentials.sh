@@ -56,7 +56,12 @@ validate_adr078_alert_credentials() {
 
     _c078_alert_credentials hub "$HUB_KUBECONFIG"
 
-    if ensure_spoke_kubeconfig; then
+    if command -v resolve_spoke_state >/dev/null; then
+        resolve_spoke_state
+    fi
+    if [[ "${SPOKE_STATE:-}" == "undeclared" ]]; then
+        note "this box declares no workload cluster; spoke Alertmanager check skipped"
+    elif ensure_spoke_kubeconfig; then
         _c078_alert_credentials spoke "$SPOKE_KUBECONFIG"
     else
         hard_fail "no spoke kubeconfig — the per-cell heartbeat credential is exactly what a hub-only check cannot see, so this is not a pass"

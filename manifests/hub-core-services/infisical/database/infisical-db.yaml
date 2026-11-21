@@ -108,7 +108,7 @@ spec:
       maintenance_work_mem: "32MB"
       max_connections: "50"
   storage:
-    size: 4Gi
+    size: 15Gi
     # Rendered per box by templated-fields.yaml (ADR-046 §11).
     storageClass: PLACEHOLDER_PLACEMENT
 
