@@ -233,7 +233,7 @@ func (p Promotion) filesReferencing(version string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(body), version) {
+		if containsVersion(string(body), version) {
 			rel, err := filepath.Rel(p.GitopsDir, path)
 			if err != nil {
 				return err
@@ -259,12 +259,56 @@ func (p Promotion) grepRegistry(version string) ([]string, error) {
 			return nil, err
 		}
 		for i, line := range strings.Split(string(body), "\n") {
-			if strings.Contains(line, version) {
+			if containsVersion(line, version) {
 				hits = append(hits, fmt.Sprintf("  %s:%d: %s", f, i+1, strings.TrimSpace(line)))
 			}
 		}
 	}
 	return hits, nil
+}
+
+// containsVersion reports whether content contains version as an exact version token
+// rather than as a substring of a longer prerelease or version string (e.g. "0.3.38"
+// inside "0.3.38-rc.1").
+func containsVersion(content, version string) bool {
+	if version == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(content[start:], version)
+		if idx == -1 {
+			return false
+		}
+		pos := start + idx
+		end := pos + len(version)
+		start = end
+
+		// Check predecessor character
+		if pos > 0 {
+			prev := content[pos-1]
+			if isVersionChar(prev) {
+				continue
+			}
+		}
+
+		// Check successor character
+		if end < len(content) {
+			next := content[end]
+			if isVersionChar(next) {
+				continue
+			}
+		}
+
+		return true
+	}
+}
+
+func isVersionChar(b byte) bool {
+	return (b >= '0' && b <= '9') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		b == '.' || b == '-'
 }
 
 // commit stages the rewritten files BY NAME and commits them.
