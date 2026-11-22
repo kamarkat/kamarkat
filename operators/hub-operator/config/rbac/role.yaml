@@ -42,22 +42,18 @@ rules:
   - get
   - list
   - watch
-# The SpokePool validating webhook reads the Composition the provider registry
-# names, to establish that this box carries it and that it composes SpokePool.
-# Read-only: compositions are delivered by GitOps and are not this operator's to
-# write.
 - apiGroups:
-  - apiextensions.crossplane.io
+  - admissionregistration.k8s.io
   resources:
-  - compositions
+  - validatingwebhookconfigurations
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - admissionregistration.k8s.io
+  - apiextensions.crossplane.io
   resources:
-  - validatingwebhookconfigurations
+  - compositions
   verbs:
   - get
   - list

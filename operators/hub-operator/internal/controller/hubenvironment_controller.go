@@ -1338,6 +1338,7 @@ func (r *HubEnvironmentReconciler) findHubEnvironmentForCLISecret(ctx context.Co
 
 	return requests
 }
+
 // Requirement 12.13: Implement mapper function for StatefulSet
 func (r *HubEnvironmentReconciler) findHubEnvironmentForStatefulSet(ctx context.Context, obj client.Object) []reconcile.Request {
 	// List all HubEnvironment CRs

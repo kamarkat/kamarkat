@@ -6,13 +6,16 @@
 # cert-manager renewed a serving certificate for four days for a Service that did
 # not exist. Renaming the Service would silently break TLS verification instead,
 # so the name matches the SAN already in use.
+#
+# `webhook-service` here, plus this base's namePrefix, IS that name. Spelling the
+# prefixed name here instead would produce hub-operator-hub-operator-webhook-service.
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     control-plane: hub-operator
     app.kubernetes.io/name: hub-operator
-  name: hub-operator-webhook-service
+  name: webhook-service
   namespace: system
 spec:
   ports:

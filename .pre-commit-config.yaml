@@ -114,14 +114,27 @@ repos:
         pass_filenames: false
         files: 'operators/hub-operator/.*\.go$'
       - id: embedded-platform-assets
-        name: Embedded Platform Assets Match Their Source
-        # The embedded tree is a copy, so it can drift from the manifests it was
-        # copied from. A released CLI would then carry content the repository no
-        # longer has, and nothing would say so until a tenant bootstrapped from it.
-        # Syncs to a temporary tree and compares. An earlier version synced over
-        # the checked-in copy and then diffed it, so it repaired the drift it was
-        # checking for and could never fail.
-        entry: bash -c '. scripts/lib/tool-path.sh && t=$(mktemp -d); trap "rm -rf $t" EXIT; ./scripts/package/embed-platform-assets.sh "$t/embedded" >/dev/null && diff -r -x embed.go internal/platform/embedded "$t/embedded" >/dev/null || { echo "internal/platform/embedded is stale; run scripts/package/embed-platform-assets.sh and commit the result"; exit 1; }'
+        name: The Embed Set Carries Every Script Day-0 Reaches
+        # WHAT THIS ASKS NOW. The embedded tree is generated and NOT committed
+        # (.gitignore covers manifests/, scripts/ and _operators/), and both
+        # build-cli.sh and publish.sh regenerate it before they read it -- so it
+        # cannot drift from its source, and the drift this hook was written for
+        # is no longer reachable.
+        #
+        # It asked that question anyway, by syncing to a temporary tree and
+        # diffing it against internal/platform/embedded. On a clean checkout that
+        # directory holds four .go files and the synced tree holds 286, so the
+        # diff always differed: the hook could never PASS, the way the version
+        # before it could never FAIL. It took a push to main to find out, because
+        # until 2026-11-22 nothing ran it outside a workstation whose tree
+        # happened to be populated.
+        #
+        # The question that still has meaning is completeness: does the embed set
+        # carry every script and manifest Day-0 and the validators reach? That is
+        # what runtime-script-closure.py asks, and embed-platform-assets.sh runs
+        # it and exits non-zero on a missing one. So the generator IS the check,
+        # and it can both pass and fail.
+        entry: bash -c '. scripts/lib/tool-path.sh && ./scripts/package/embed-platform-assets.sh'
         language: system
         pass_filenames: false
         # Any manifest, not the embed set restated. The set lives in

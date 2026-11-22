@@ -1,23 +1,14 @@
-# Generated from the +kubebuilder:webhook markers in
-# internal/webhook/spokepool_webhook.go.
-#
-# The two configurations are named for this operator. The scaffold's
-# `mutating-webhook-configuration` is cluster-scoped and generic enough that a
-# second kubebuilder operator on the same hub would adopt or fight over it, and
-# namePrefix is off in default/kustomization.yaml, so the name is written here.
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  annotations:
-    cert-manager.io/inject-ca-from: platform-ops/hub-operator-serving-cert
-  name: hub-operator-mutating-webhook-configuration
+  name: mutating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     service:
-      name: hub-operator-webhook-service
+      name: webhook-service
       namespace: system
       path: /mutate-nutgraf-in-v1alpha1-spokepool
   failurePolicy: Fail
@@ -38,15 +29,13 @@ webhooks:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  annotations:
-    cert-manager.io/inject-ca-from: platform-ops/hub-operator-serving-cert
-  name: hub-operator-validating-webhook-configuration
+  name: validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     service:
-      name: hub-operator-webhook-service
+      name: webhook-service
       namespace: system
       path: /validate-nutgraf-in-v1alpha1-spokepool
   failurePolicy: Fail

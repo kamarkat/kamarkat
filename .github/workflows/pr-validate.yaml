@@ -163,10 +163,15 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
-      - name: Refuse an embedded tree that has drifted from its source
-        run: |
-          pip install pre-commit
-          pre-commit run embedded-platform-assets --all-files --show-diff-on-failure
+      # NOT A DRIFT CHECK. internal/platform/embedded is generated and gitignored,
+      # so a clean checkout carries none of it and there is nothing to drift from
+      # -- this step compared four .go files against a 286-file sync and could
+      # never pass. What it establishes instead is completeness: the generator
+      # runs runtime-script-closure.py and exits non-zero when the embed set
+      # misses a script Day-0 or a validator reaches, which is the failure that
+      # would otherwise surface as a released suite silently skipping.
+      - name: Stage the platform content a release carries, and refuse a gap in it
+        run: ./scripts/package/embed-platform-assets.sh
 
   validate-manifests:
     runs-on: ubuntu-24.04

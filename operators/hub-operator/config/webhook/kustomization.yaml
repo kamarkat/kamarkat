@@ -3,6 +3,47 @@ kind: Kustomization
 
 # This directory held manifests.yaml alone and no kustomization.yaml, so it was
 # not a buildable target: default/ could not have listed it even if it had tried.
+#
+# manifests.yaml IS CONTROLLER-GEN'S OUTPUT and is never edited. `make manifests`
+# regenerates it from the +kubebuilder:webhook markers in internal/webhook, and CI
+# then refuses a diff -- so the names, the Service it points at and the CA
+# annotation are applied here, where they survive regeneration. Editing the
+# generated file instead is what failed run 45003337333.
 resources:
   - manifests.yaml
   - service.yaml
+
+# NAMES THIS OPERATOR OWNS. controller-gen emits `mutating-webhook-configuration`
+# and `validating-webhook-configuration`, which are cluster-scoped and generic
+# enough that a second kubebuilder operator on the same hub would adopt or fight
+# over them; namePrefix is off in default/kustomization.yaml, so it is set here
+# for this base alone. It renames the Service to hub-operator-webhook-service as
+# well -- which is the name certmanager/certificate.yaml has been issuing for
+# since this tree was scaffolded -- and kustomize rewrites each configuration's
+# clientConfig.service.name to match, so the three cannot drift apart.
+namePrefix: hub-operator-
+
+patches:
+  # THE CA BUNDLE. cert-manager's ca-injector fills caBundle from the named
+  # Certificate; without it the API server has no way to verify the endpoint it is
+  # told to call, and refuses the call rather than admitting without it.
+  #
+  # Stated on the objects rather than assembled by the scaffold's `replacements`
+  # block in default/kustomization.yaml: certmanager/certificate.yaml already
+  # hardcodes platform-ops in its dnsNames, so the namespace is not a variable in
+  # this tree and composing it from field paths would only hide where it comes
+  # from.
+  - patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/inject-ca-from: platform-ops/hub-operator-serving-cert
+    target:
+      kind: MutatingWebhookConfiguration
+  - patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/inject-ca-from: platform-ops/hub-operator-serving-cert
+    target:
+      kind: ValidatingWebhookConfiguration

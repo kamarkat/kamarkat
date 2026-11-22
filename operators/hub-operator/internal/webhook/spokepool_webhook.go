@@ -197,6 +197,13 @@ func (d *SpokePoolDefaulter) Default(ctx context.Context, u *unstructured.Unstru
 // by the time this runs. Legacy paths are caught in the rendered source instead,
 // by scripts/validate/preflight/046-spokepool-composition-contract.py.
 //
+// The validator reads the Composition the registry names. Declared as a marker
+// rather than written into config/rbac/role.yaml, because that file is
+// controller-gen's output: `make manifests` regenerates it from the markers in
+// this tree and discards anything added by hand, which is what happened to this
+// rule on its first CI run.
+//
+// +kubebuilder:rbac:groups=apiextensions.crossplane.io,resources=compositions,verbs=get;list;watch
 // +kubebuilder:webhook:path=/validate-nutgraf-in-v1alpha1-spokepool,mutating=false,failurePolicy=fail,groups=nutgraf.in,resources=spokepools,verbs=create;update,versions=v1alpha1,name=vspokepool.kb.io,admissionReviewVersions=v1,sideEffects=None,matchPolicy=Equivalent
 
 type SpokePoolValidator struct {
