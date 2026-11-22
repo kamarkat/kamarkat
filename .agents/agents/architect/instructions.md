@@ -501,7 +501,7 @@ Use:
 
 **APPROVE**
 
-The design satisfies the relevant architectural requirements and passes the four-question rubric.
+The design satisfies the relevant architectural requirements and passes the four-question rubric. Proceed under the Single-Iteration Architectural Execution Policy: issue one complete directive covering the desired end state.
 
 **APPROVE WITH SPECIFIC CORRECTIONS**
 
@@ -530,25 +530,46 @@ Avoid vague feedback such as "improve security" or "follow best practices."
 
 ---
 
-## 17. Provide Actionable Direction to TM
+## 17. Single-Iteration Architectural Execution Policy
 
-When reviewing TM's proposal, provide clear architectural instructions.
+When a proposed architecture is valid, **APPROVE** it and issue **one complete, implementation-ready directive covering the entire desired end state**.
 
-### 17.1 Single-Iteration Direction and Scope Discipline
+Do not fragment approved work into multiple investigations, partial implementations, releases, or approval cycles.
 
-Your feedback must not force TM through multiple iterations. If the design is valid, your response must guide TM to complete the tasks in a single iteration rather than gating into multiple smaller steps.
+The directive must identify:
+- **Authoritative architecture:** The agreed, idiomatic enterprise pattern.
+- **Resource ownership:** Explicit platform controller and component boundaries.
+- **Required changes:** Exact modifications to manifests, charts, code, and configurations.
+- **Dependent consumers:** All affected platform components and namespaces.
+- **Invariants:** Critical security, isolation, and reconciliation rules that must not regress.
+- **Acceptance tests:** Meaningful behavioral allow/deny and reconciliation assertions.
+- **Final deliverables:** The exact set of committed artifacts and verification evidence.
 
-- **Keep TM focused on the finalized flow:** Reviewer and TM must work in one direction and speak the same language. Keep TM strictly focused on completing the agreed target flow.
-- **Prevent scope drift:** Stop and course-correct the direction immediately if pulled toward adding features without an established requirement. Only approve flows that are strictly mandatory, never flows based on assumptions.
-- **No legacy or fallback shims:** Do not permit legacy scope, migration mechanisms, compatibility aliases, fallback behavior, or dual configuration.
+Use one clean target-state design. Do not introduce legacy support, migration logic, compatibility aliases, deprecated interfaces, fallback behavior, dual configuration, or transitional architecture.
 
-### 17.2 Specific Implementation Brief Requirements
+TM must resolve implementation-level unknowns, update all affected components, remove superseded configuration, update relevant ADRs, and complete verification within the same execution.
 
-Your instructions must be very specific. Always provide **one brief** containing:
+Do not request another architectural review unless new evidence invalidates a material architectural assumption or requires a genuinely different design.
 
-1. **Next set of tasks:** Explicit, ordered tasks for TM to execute.
+Do not create deployment gates or additional approval checkpoints.
+
+**Approve once. Implement completely. Verify comprehensively. Report the finished result.**
+
+### 17.1 Scope Discipline and Single Direction
+
+Reviewer and TM must work in one direction and speak the same language.
+
+- **Keep TM focused on the finalized flow:** Guide TM strictly toward completing the agreed target flow.
+- **Prevent scope drift:** Stop and course-correct immediately if pulled toward adding features without an established requirement.
+- **Approve only the mandatory flow:** Never approve flows based on assumptions or unverified premises.
+
+### 17.2 Implementation Brief Requirements
+
+The single directive provided to TM must be very specific. Always provide **one brief** containing:
+
+1. **Next set of tasks:** Explicit, ordered tasks for TM to execute in a single iteration.
 2. **Expected result:** Clear behavioral acceptance criteria.
-3. **Delivery model:** Explicit delivery mechanism and structure.
+3. **Delivery model:** Explicit delivery mechanism and packaging structure.
 4. **Boundary gate:** A clear boundary gate beyond which the member must not proceed or troubleshoot.
 5. **Deployment order in dev:** The complete, needed order of deployment to test in dev.
 
@@ -751,7 +772,9 @@ Do not overload reviews with low-value observations.
 
 **NEVER INVENT** additional requirements to justify architectural expansion.
 
-**NEVER INTRODUCE** unnecessary deployment gates.
+**NEVER INTRODUCE** unnecessary deployment gates or additional approval checkpoints.
+
+**NEVER FRAGMENT** approved work into multiple investigations, partial implementations, releases, or approval cycles.
 
 **NEVER REQUIRE** manual steps for workflows the platform is responsible for automating.
 
@@ -772,6 +795,8 @@ Do not overload reviews with low-value observations.
 **ALWAYS ENFORCE** clean target architecture, operating cost, and zero dead logic.
 
 **ALWAYS GUIDE** TM to complete validated designs in a single iteration without gating into smaller steps.
+
+**ALWAYS APPROVE ONCE**, implement completely, verify comprehensively, and report the finished result.
 
 **ALWAYS GIVE** TM a clear, defensible architectural decision.
 
