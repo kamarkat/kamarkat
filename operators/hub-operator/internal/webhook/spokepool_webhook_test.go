@@ -2,15 +2,18 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // The admission contract, exercised through the two entry points the API server
@@ -335,5 +338,65 @@ func TestAnEmptyRegistryIsNotLoaded(t *testing.T) {
 	if err := LoadProviderRegistry(context.Background(), c); err == nil {
 		t.Fatal("a registry declaring no mapping loaded, so the operator would start " +
 			"and refuse every workload cluster with a message about itself")
+	}
+}
+
+// The handlers serve a real AdmissionRequest for a type NO Go scheme knows.
+//
+// This is the layer that broke on box 7 and that no test above reaches. A
+// SpokePool is an unstructured XR whose CRD Crossplane generates from the XRD, so
+// it is in no scheme -- and ctrl.NewWebhookManagedBy(...).Complete() ends in a
+// conversion check that resolves the type THROUGH the scheme
+// (conversion.objectGVKs keeps only GVKs in scheme.AllKnownTypes()). It found
+// nothing, returned "error retrieving gvks for object", main exited, and the pod
+// crash-looped 22 times while the previous ReplicaSet kept serving 404s on these
+// paths. Everything above still passed.
+//
+// So this drives the registration main uses, against an EMPTY scheme, and asserts
+// a patch comes back. A registration that cannot decode the request, or that
+// refuses the type, fails here instead of in a rollout.
+func TestTheRegisteredHandlersServeAnUnregisteredType(t *testing.T) {
+	loadedRegistry(t, map[string]string{"hetzner": hetznerComposition})
+
+	raw, err := json.Marshal(spokePool("hetzner").Object)
+	if err != nil {
+		t.Fatalf("marshalling the request object: %v", err)
+	}
+	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		Kind:      metav1.GroupVersionKind{Group: "nutgraf.in", Version: "v1alpha1", Kind: "SpokePool"},
+		Object:    runtime.RawExtension{Raw: raw},
+	}}
+
+	// An empty scheme, deliberately: the manager's scheme does not know this type
+	// either, and a test that registered it would be testing a cluster we do not
+	// ship.
+	mutate := admission.WithDefaulter(runtime.NewScheme(), &SpokePoolDefaulter{})
+	resp := mutate.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("the mutating handler refused the request: %v", resp.Result)
+	}
+	patch, err := json.Marshal(resp.Patches)
+	if err != nil {
+		t.Fatalf("marshalling the patch: %v", err)
+	}
+	if !strings.Contains(string(patch), hetznerComposition) {
+		t.Errorf("the mutating handler returned no composition reference; patch was %s", patch)
+	}
+
+	validate := admission.WithValidator(runtime.NewScheme(),
+		NewSpokePoolValidator(validatorWith(composition(hetznerComposition, spokePoolAPIVersion, "SpokePool")).reader))
+	// The request as the API server would send it after mutation: the platform's
+	// reference is in place.
+	admitted := spokePool("hetzner")
+	if err := (&SpokePoolDefaulter{}).Default(context.Background(), admitted); err != nil {
+		t.Fatalf("defaulting: %v", err)
+	}
+	if raw, err = json.Marshal(admitted.Object); err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	req.Object = runtime.RawExtension{Raw: raw}
+	if resp := validate.Handle(context.Background(), req); !resp.Allowed {
+		t.Fatalf("the validating handler refused a canonical SpokePool: %v", resp.Result)
 	}
 }
