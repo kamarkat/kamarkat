@@ -85,7 +85,7 @@ MANAGED_CLASS = "manifests/providers/hetzner/base/spokepool-clusterclass-v1.yaml
 # raw.githubusercontent.com as a Kubernetes tag.
 VERSIONS_GO = "internal/kakt-cli/versions/versions.go"
 TOPOLOGY_COMPOSITIONS = (
-    "manifests/providers/hetzner/k8s/spokepool-hetzner-composition.yaml",
+    "manifests/providers/hetzner/spokepool/spokepool-hetzner-composition.yaml",
     "manifests/providers/hybrid/k8s/spokepool-hybrid-composition.yaml",
 )
 

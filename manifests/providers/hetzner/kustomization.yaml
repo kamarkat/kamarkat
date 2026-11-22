@@ -30,7 +30,7 @@ resources:
   # that does not exist — which also blocks the kustomize-build-providers
   # pre-commit hook for ANY edit under providers/, hybrid included.
   - k8s/hetzner-credentials-es.yaml
-  - k8s/spokepool-hetzner-composition.yaml
+  - spokepool
   - k8s/crossplane-provider-hetzner.yaml
   # Static half of the spoke cilium-config (ADR-046 §24): the addon Secret in
   # spoke-bootstrap/ carries the DaemonSet/RBAC/Services, this carries the

@@ -23,7 +23,49 @@ spec:
           properties:
             spec:
               type: object
-              additionalProperties: true
+              # NO additionalProperties. It said `true` here until 2026-11-22 and
+              # never reached the generated CRD: xcrd.genCrdVersion copies the
+              # XRD's required, x-kubernetes-preserve-unknown-fields,
+              # x-kubernetes-validations, oneOf, description and properties, and
+              # not additionalProperties. So the XR has always pruned unknown
+              # fields while this claimed otherwise -- which is how
+              # spec.compositionSelector survived in two claim templates for
+              # three weeks after Crossplane v2 moved it under spec.crossplane.
+              # It is not replaced by x-kubernetes-preserve-unknown-fields, which
+              # IS copied: preserving them is what would have hidden this.
+              x-kubernetes-validations:
+                # THE COMPOSITION IS CHOSEN BY NAME, BY THE PLATFORM, ALWAYS.
+                #
+                # Without a reference, Crossplane lists the compositions matching
+                # the selector's labels -- every composition, when there is no
+                # selector -- narrows to those composing SpokePool and picks one
+                # at random (crossplane-runtime v2.4.3
+                # APILabelSelectorResolver.SelectComposition). A box carries only
+                # its own provider's composition, so that single candidate wins
+                # whatever the cluster declared: a `provider: hetzner` cluster on
+                # a hybrid box was composed as hybrid, silently.
+                #
+                # hub-operator's mutating webhook injects the reference from the
+                # provider registry, and mutating admission runs before schema
+                # validation, so an ordinary tenant declaration -- which names a
+                # provider and no Crossplane field -- satisfies this. What it
+                # refuses is the object that reached validation WITHOUT having
+                # passed through that webhook: unregistered, unreachable, or a
+                # provider the registry cannot resolve. The API server then says
+                # so instead of letting Crossplane choose. That is the one
+                # guarantee here that does not depend on the webhook being up.
+                - rule: >-
+                    has(self.crossplane) &&
+                    has(self.crossplane.compositionRef) &&
+                    size(self.crossplane.compositionRef.name) > 0 &&
+                    !has(self.crossplane.compositionSelector)
+                  message: >-
+                    a SpokePool needs an exact composition reference at
+                    spec.crossplane.compositionRef, which the platform resolves
+                    from spec.provider and injects; selector-based selection is
+                    not allowed because it lets Crossplane choose. An empty
+                    reference means hub-operator's admission webhook did not run
+                    -- check that it is registered and serving.
               required:
                 - provider
                 - region
@@ -38,6 +80,19 @@ spec:
                     The platform maps this to the internal composition at admission time.
                     Changing the provider after provisioning requires a full teardown and
                     re-provision.
+                  x-kubernetes-validations:
+                    # The sentence above was a description and nothing enforced
+                    # it. The provider decides which composition builds this
+                    # cluster, so editing it on a provisioned SpokePool asks the
+                    # platform to replace a running cluster's machine class,
+                    # control-plane topology and storage in place. A transition
+                    # rule refuses it at the API server, so it holds whether or
+                    # not the admission webhook is reachable.
+                    - rule: self == oldSelf
+                      message: >-
+                        spec.provider is immutable: it selects the composition
+                        that built this cluster. Declare a new cluster and remove
+                        this one.
                 region:
                   type: string
                   description: "Provider region (e.g., hel1, nbg1, hel1) or 'hybrid' for home-lab"
@@ -73,12 +128,6 @@ spec:
                   type: string
                 clientKey:
                   type: string
-                resolvedProvider:
-                  type: string
-                  description: "Platform-resolved provider from spec.provider after validation"
-                resolvedComposition:
-                  type: string
-                  description: "Platform-resolved composition name used for Crossplane provisioning"
                 conditions:
                   type: array
                   x-kubernetes-list-map-keys:

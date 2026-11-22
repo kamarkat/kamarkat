@@ -32,7 +32,6 @@ apiVersion: nutgraf.in/v1alpha1
 kind: SpokePool
 metadata:
   name: <CLUSTER_NAME>
-  namespace: platform-ops
   labels:
     spoke-type: pool
     environment: <ENVIRONMENT>
@@ -64,10 +63,21 @@ metadata:
     home-workers: '[]'
     home-worker-ttl: "24h"
 spec:
+  # THE ONLY PROVIDER DECLARATION, and the tenant's whole say in the matter.
+  #
+  # There was a compositionSelector here naming the Crossplane composition's
+  # labels. It was written for Crossplane v1, where an XR's machinery lived
+  # directly under spec; v2 moved it to spec.crossplane for a cluster-scoped XR,
+  # so the generated CRD stopped declaring the field and the API server pruned it
+  # -- and ArgoCD, which builds a typed patch against that schema before it syncs,
+  # refused the whole claim with ".spec.compositionSelector: field not declared in
+  # schema". That is where nutgraf-stg-01 stopped on 2026-11-22.
+  #
+  # It is not moved, it is gone. Which composition builds a cluster is the
+  # platform's to decide: hub-operator resolves this provider through its
+  # registry and injects spec.crossplane.compositionRef at admission, and the XRD
+  # refuses a SpokePool that arrives without one.
   provider: <CLOUD_PROVIDER>
-  compositionSelector:
-    matchLabels:
-      provider: <CLOUD_PROVIDER>
   region: <CLOUD_REGION>
   nodePool:
     count: <WORKER_COUNT>

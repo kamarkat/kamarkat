@@ -69,7 +69,7 @@ readonly PUBLISHED_LABELS="$CLUSTER_LABEL environment spoke-type"
 readonly TAKE_ALONG_PREFIX="take-along-label.capi-to-argocd"
 
 compositions=(
-  "$repo_root/manifests/providers/hetzner/k8s/spokepool-hetzner-composition.yaml"
+  "$repo_root/manifests/providers/hetzner/spokepool/spokepool-hetzner-composition.yaml"
   "$repo_root/manifests/providers/hybrid/k8s/spokepool-hybrid-composition.yaml"
 )
 

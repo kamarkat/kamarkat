@@ -13,6 +13,29 @@ resources:
   - ../hetzner/base
   - k8s/hetzner-credentials-es.yaml
   - k8s/spokepool-hybrid-composition.yaml
+  # THE HETZNER COMPOSITION, on a hybrid box, because a hybrid box may declare
+  # hetzner workload clusters.
+  #
+  # The box's provider and a workload cluster's provider are not the same fact.
+  # 03-platform-services-appset.yaml syncs manifests/providers/<the BOX's
+  # provider>, so a hybrid box carried only spokepool-hybrid -- and
+  # `kakt tenant add-cluster --name x --environment prod` with provider hetzner is
+  # a combination the platform supports (hybrid capacity is the premises; cloud
+  # burst beside it is the point of the pairing). Before the composition
+  # reference was injected at admission, that cluster was composed by the only
+  # composition present, which is to say as hybrid: burst-worker instead of
+  # default-worker, no replicas patch, no general capacity.
+  #
+  # Referenced, not copied. The composition's prerequisites are already here --
+  # ../hetzner/base carries spokepool-clusterclass-v1 and the ccm/csi addon
+  # templates its ClusterResourceSet names, k8s/hetzner-credentials-es.yaml
+  # carries the credentials, and cilium-addon-template is a boundary-03 component
+  # on every box.
+  #
+  # Not the reverse: a hetzner box does not carry spokepool-hybrid, because a
+  # hybrid cluster is premises the box does not have and `kakt tenant add-cluster`
+  # refuses to declare one there.
+  - ../hetzner/spokepool
   - k8s/home-worker-integration.yaml
   - k8s/tailscale-psk-es.yaml
   # Cilium: the addon Secret carries the DaemonSet/RBAC/Services only. The

@@ -162,7 +162,7 @@ The shared `cilium-addon-template` used by Hetzner spokes is left unchanged.
 shared cgroup2 mount itself (the stock mount-cgroup init does this, but the
 cgroup2 mount is lost on `/run` tmpfs reboots, so cilium-host-prep
 re-creates it at boot). Codified in the shared
-ClusterClass (`_shared/spokepool-clusterclass-v1.yaml`): a
+ClusterClass (`providers/hetzner/base/spokepool-clusterclass-v1.yaml`): a
 `cilium-host-prep.service` systemd unit is written via `files[]` and
 enabled/started in `preKubeadmCommands`, re-creating the shared cgroup2/BPF
 mounts at every boot (`/run` is tmpfs), with a fail-closed `findmnt` gate.
@@ -174,6 +174,63 @@ Idempotent and harmless on pure-hetzner spokes (it pre-creates what stock
 `operators/hub-operator/config/manager/provider-registry.yaml` maps exactly:
 `hetzner → spokepool-hetzner`, `hybrid → spokepool-hybrid`. `capd` and `aws`
 entries were removed (no compositions exist; sole-developer clean cut).
+
+**Correction (2026-11-22).** The registry existed and nothing consumed it. The
+three facts that make it load-bearing were each missing, and the first workload
+cluster declared after the Crossplane 2 migration found all three at once.
+
+1. **The map was never read on any box.** `hub-operator`'s SpokePool defaulter
+   and validator were committed in a56502c4 and never registered:
+   `cmd/main.go` did not import the package, `config/default/kustomization.yaml`
+   did not list `../webhook`, and `manager_webhook_patch.yaml` was commented out,
+   so the Deployment had `ports: []` and no certificate mount. What a box did
+   receive was `config/certmanager`, so cert-manager renewed a serving
+   certificate for a `hub-operator-webhook-service` that was never created.
+2. **What it wrote went to the wrong path.** The defaulter set
+   `spec.compositionSelector`, which is where a `LegacyCluster` XR carries it.
+   Commit 4a086204 took the XRD to `apiextensions.crossplane.io/v2` with
+   `scope: Cluster`, and a modern XR carries its machinery under
+   `spec.crossplane` (crossplane-runtime v2.4.3 `pkg/xcrd/schemas.go`). The
+   generated CRD stopped declaring the field, so the API server pruned it when it
+   decoded the request — before admission, which is also why no validating
+   webhook could ever have caught it.
+3. **Selection then fell through to Crossplane.** With no reference,
+   `APILabelSelectorResolver` lists every Composition, narrows to those composing
+   `SpokePool` and picks one at random. A box syncs
+   `manifests/providers/<the box's provider>`, so that single candidate won
+   whatever the cluster declared: on a hybrid box a `provider: hetzner` cluster
+   was composed as hybrid.
+
+The registry is now the authority for an **exact** reference. `hub-operator`
+resolves `spec.provider` through it and writes
+`spec.crossplane.compositionRef.name`; the validator refuses any other value, a
+selector beside it, or `compositionUpdatePolicy: Manual` (which is the one
+setting that lets a revision reference leave the referenced composition — under
+`Automatic`, revisions are listed by `crossplane.io/composition-name` and cannot).
+`compositionRevisionRef` itself is left alone: Crossplane writes it on every
+revision change, and refusing it would block that update and the XR would never
+reconcile.
+
+Two invariants do not depend on the webhook being reachable, because the XRD
+carries them as CEL rules the API server evaluates: `spec.provider` is immutable
+(`self == oldSelf`), and a SpokePool must carry an exact composition reference.
+The second is what refuses a cluster that reached the API server without the
+platform's injection, instead of letting Crossplane choose for it.
+
+Because a box's provider and a **workload cluster's** provider are different
+facts, `manifests/providers/hetzner/spokepool/` holds the hetzner composition in
+its own directory and the hybrid cell references it: a hybrid box may declare
+hetzner workload clusters, and `kakt tenant add-cluster` permits that. The
+reverse is not delivered — a hybrid cluster is premises a cloud box does not
+have, and `add-cluster` refuses to declare one there.
+
+Gated by `scripts/validate/preflight/008-spokepool-composition-contract.py`,
+which asserts the XRD's scope, that every CEL rule reads a path the generated CRD
+declares, that no shipped claim declares a legacy machinery path, that every
+registry mapping resolves to a delivered Composition composing `SpokePool`, that
+each box provider carries the composition for every workload provider it may
+declare, and that the admission path is both registered in `main.go` and
+delivered by the kustomization.
 
 ## Ownership
 

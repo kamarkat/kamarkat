@@ -19,6 +19,11 @@ resources:
 - ../rbac
 - ../manager
 - ../certmanager
+# [WEBHOOK] SpokePool admission. Listed from 2026-11-22; before that the
+# configurations in ../webhook were never delivered, so hub-operator's provider
+# resolution was not in force on any box and nothing said so -- see the comment
+# on the patch below.
+- ../webhook
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 # - ../prometheus
 # [METRICS] Expose the controller manager metrics service.
@@ -208,11 +213,22 @@ patches:
 #  target:
 #    kind: Deployment
 
-# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
-# crd/kustomization.yaml
-# - path: manager_webhook_patch.yaml
-#   target:
-#     kind: Deployment
+# [WEBHOOK] The webhook server's port and serving certificate.
+#
+# This patch was commented out, ../webhook was not in resources, and main.go
+# registered nothing -- three halves of one omission, which is why it read as
+# deliberate for three weeks. The Deployment had `ports: []` and no cert mount,
+# so even a registered webhook had nothing to serve on.
+#
+# The CA bundle is injected by cert-manager from the annotation on each
+# configuration in ../webhook rather than by the scaffold's `replacements`
+# block below: certmanager/certificate.yaml already names platform-ops in its
+# dnsNames, so the namespace is not a variable here and assembling it from
+# field paths would only hide where it comes from.
+- path: manager_webhook_patch.yaml
+  target:
+    kind: Deployment
+    name: hub-operator
 
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 # Uncomment the following replacements to add the cert-manager CA injection annotations

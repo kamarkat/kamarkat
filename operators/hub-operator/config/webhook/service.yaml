@@ -1,0 +1,27 @@
+# The endpoint the API server calls for SpokePool admission.
+#
+# NAMED FOR THE CERTIFICATE, not the other way round: certmanager/certificate.yaml
+# has issued for hub-operator-webhook-service.platform-ops.svc since this tree was
+# scaffolded, and it was the only part of the webhook that ever reached a box --
+# cert-manager renewed a serving certificate for four days for a Service that did
+# not exist. Renaming the Service would silently break TLS verification instead,
+# so the name matches the SAN already in use.
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: hub-operator
+    app.kubernetes.io/name: hub-operator
+  name: hub-operator-webhook-service
+  namespace: system
+spec:
+  ports:
+    - name: https
+      port: 443
+      protocol: TCP
+      # 9443 is controller-runtime's default webhook port and what
+      # default/manager_webhook_patch.yaml exposes on the container.
+      targetPort: 9443
+  selector:
+    control-plane: hub-operator
+    app.kubernetes.io/name: hub-operator

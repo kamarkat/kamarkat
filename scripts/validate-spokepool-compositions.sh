@@ -25,7 +25,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Compositions to validate — add new spokepool providers here.
 compositions=(
   "$repo_root/manifests/providers/hybrid/k8s/spokepool-hybrid-composition.yaml"
-  "$repo_root/manifests/providers/hetzner/k8s/spokepool-hetzner-composition.yaml"
+  "$repo_root/manifests/providers/hetzner/spokepool/spokepool-hetzner-composition.yaml"
 )
 
 TEST_CLAIM="test-spokepool"

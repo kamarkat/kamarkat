@@ -32,7 +32,9 @@ import (
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -48,6 +50,7 @@ import (
 	hubclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/controller"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
+	hubwebhook "github.com/kamarkat/kamarkat/operators/hub-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -404,6 +407,44 @@ func main() {
 	//
 	// It also made KRATOS_ADMIN_URL a hard startup requirement, so the operator
 	// could not run at all without a Kratos to point at.
+
+	// SpokePool admission: the declared provider resolves to ONE composition.
+	//
+	// WHAT THIS CLOSES. The defaulter and validator have existed since a56502c4
+	// and were never registered here, so the invariant they describe was not in
+	// force on any box: box 7 carried the admission implementation, a cert-manager
+	// Certificate for a webhook Service that was never created, and no
+	// MutatingWebhookConfiguration at all. A webhook source file without a
+	// registered endpoint is not an enforced contract, and this is where it is
+	// registered.
+	//
+	// BEFORE THE MANAGER STARTS, with the API reader rather than the manager's
+	// client: the cached client cannot serve a read until the cache has started,
+	// and the registry has to be in hand before the first admission request. A
+	// failure here exits, because every path that follows -- the defaulter's
+	// resolution, the validator's refusal, the XRD's CEL rule -- depends on this
+	// mapping, and an operator serving admission without it would reject every
+	// workload cluster with a message about itself.
+	if err := hubwebhook.LoadProviderRegistry(ctx, mgr.GetAPIReader()); err != nil {
+		setupLog.Error(err, "Failed to load the provider registry, without which no workload "+
+			"cluster can be admitted")
+		os.Exit(1)
+	}
+
+	spokePool := &unstructured.Unstructured{}
+	spokePool.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "nutgraf.in", Version: "v1alpha1", Kind: "SpokePool",
+	})
+	if err := ctrl.NewWebhookManagedBy(mgr, spokePool).
+		WithDefaulter(&hubwebhook.SpokePoolDefaulter{}).
+		// The API reader again, and for the same reason it is used above: the
+		// validator reads the Composition the registry names, which is read a
+		// handful of times in a box's life and does not earn an informer.
+		WithValidator(hubwebhook.NewSpokePoolValidator(mgr.GetAPIReader())).
+		Complete(); err != nil {
+		setupLog.Error(err, "Failed to register the SpokePool admission webhooks")
+		os.Exit(1)
+	}
 
 	// +kubebuilder:scaffold:builder
 

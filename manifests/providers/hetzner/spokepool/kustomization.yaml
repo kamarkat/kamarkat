@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The composition that builds a HETZNER workload cluster, in its own directory
+# because more than one provider's cell delivers it.
+#
+# A box syncs manifests/providers/<the box's provider>
+# (03-platform-services-appset.yaml), and a box's provider is not the same fact as
+# a workload cluster's provider: a hybrid box's capacity is the premises, and
+# declaring hetzner workload clusters beside it is the point of that pairing. So a
+# hybrid box has to carry this composition too, and kustomize will not accept a
+# loose file from above its root -- a directory is how `base/` is already shared
+# between the two cells, and this follows it.
+#
+# There is no hybrid equivalent. A hybrid cluster is premises a cloud box does not
+# have, and `kakt tenant add-cluster` refuses to declare one there, so
+# spokepool-hybrid stays inside the hybrid cell.
+resources:
+  - spokepool-hetzner-composition.yaml

@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# This directory held manifests.yaml alone and no kustomization.yaml, so it was
+# not a buildable target: default/ could not have listed it even if it had tried.
+resources:
+  - manifests.yaml
+  - service.yaml

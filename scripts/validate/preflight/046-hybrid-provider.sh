@@ -313,7 +313,7 @@ PY
     #    DaemonSet with no config.
     local comp
     for comp in "manifests/providers/hybrid/k8s/spokepool-hybrid-composition.yaml" \
-                "manifests/providers/hetzner/k8s/spokepool-hetzner-composition.yaml"; do
+                "manifests/providers/hetzner/spokepool/spokepool-hetzner-composition.yaml"; do
         if grep -q '%s-cilium-config' "$VALIDATE_ROOT/$comp" 2>/dev/null; then
             pass "$(basename "$comp" | cut -d- -f2) composition registers the cilium-config wrapper"
         else
