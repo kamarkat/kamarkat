@@ -192,6 +192,29 @@ spec:
             parameters:
               - name: deployXR
                 value: "true"
+              # THE CLUSTER IS THE PLATFORM'S TO NAME, and this is where it is
+              # named. universal-tenant builds each application's Infisical path
+              # from it (/spoke-pool/<cluster>/tenants/<app>, six templates), so
+              # it is required and has no default.
+              #
+              # It used to come from the application's own values.yaml, written
+              # there by `kakt tenant add-cluster`. That made the application's
+              # declaration the placement decision, which is what ADR-082 took
+              # away: an environment's applications go to every cluster serving
+              # that environment, selected by the generator above. So the field
+              # was dropped from what the CLI writes -- and nothing replaced it
+              # here, so the first application declared afterwards failed to
+              # render with "clusterName must be supplied"
+              # (nutgraf-waypoint-stg on nutgraf-stg-01, 2026-11-22).
+              #
+              # `.name` is the cluster this element was generated for, the same
+              # value the Application's own name is built from above. As a
+              # PARAMETER rather than a values file, so it overrides a stale
+              # clusterName an older application still carries instead of
+              # merging with it -- the cluster an application runs on cannot be
+              # the application's to assert.
+              - name: clusterName
+                value: '{{"{{"}} .name {{"}}"}}'
 
         # Source 2: the instance repository's values file
         - repoURL: {{ include "environment-manager.instanceRepoURL" . | quote }}
@@ -364,6 +387,29 @@ spec:
             parameters:
               - name: deployXR
                 value: "false"
+              # THE CLUSTER IS THE PLATFORM'S TO NAME, and this is where it is
+              # named. universal-tenant builds each application's Infisical path
+              # from it (/spoke-pool/<cluster>/tenants/<app>, six templates), so
+              # it is required and has no default.
+              #
+              # It used to come from the application's own values.yaml, written
+              # there by `kakt tenant add-cluster`. That made the application's
+              # declaration the placement decision, which is what ADR-082 took
+              # away: an environment's applications go to every cluster serving
+              # that environment, selected by the generator above. So the field
+              # was dropped from what the CLI writes -- and nothing replaced it
+              # here, so the first application declared afterwards failed to
+              # render with "clusterName must be supplied"
+              # (nutgraf-waypoint-stg on nutgraf-stg-01, 2026-11-22).
+              #
+              # `.name` is the cluster this element was generated for, the same
+              # value the Application's own name is built from above. As a
+              # PARAMETER rather than a values file, so it overrides a stale
+              # clusterName an older application still carries instead of
+              # merging with it -- the cluster an application runs on cannot be
+              # the application's to assert.
+              - name: clusterName
+                value: '{{"{{"}} .name {{"}}"}}'
               # Environment-owned, never application-supplied (ADR-050). Passed as a
               # parameter so it overrides anything an application's values file might
               # set, rather than merging with it.
