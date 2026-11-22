@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,8 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"k8s.io/client-go/kubernetes"
 
+	"github.com/kamarkat/kamarkat/internal/assets"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
+	"github.com/kamarkat/kamarkat/internal/platform/encryption"
 )
 
 // workloadClusterWorkers is read through a -1 sentinel rather than written
@@ -349,6 +353,47 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Preflight 1: Check cluster name collision
+	clusterDir := filepath.Join(workloadCluster.GitopsDir, "registry", "clusters", workloadCluster.Name)
+	if _, err := os.Stat(clusterDir); err == nil {
+		return fmt.Errorf("preflight check failed: cluster %q is already declared in %s",
+			workloadCluster.Name, workloadCluster.GitopsDir)
+	}
+
+	// Preflight 2: Verify management cluster declaration exists
+	coords, err := hubaccess.Declaration(workloadCluster.GitopsDir, workloadCluster.MgmtCluster)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: reading management cluster declaration: %w", err)
+	}
+
+	// Preflight 3: Connect to escrow and management cluster
+	access, err := hubaccess.Open(cmd.Context(), coords)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: connecting to escrow and management cluster: %w", err)
+	}
+
+	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
+
+	// Preflight 4: Target provider configuration exists
+	if workloadCluster.Provider != "hybrid" {
+		if _, err := access.Provider(cmd.Context(), id, workloadCluster.Provider); err != nil {
+			return fmt.Errorf("preflight check failed: provider credentials for %q absent in escrow: %w",
+				workloadCluster.Provider, err)
+		}
+	}
+
+	// Preflight 5: Management cluster API connectivity
+	cfg, _, cleanup, err := access.Kubernetes(cmd.Context(), id)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: connecting to management cluster API: %w", err)
+	}
+	defer cleanup()
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: creating management cluster clientset: %w", err)
+	}
+
 	// The sentinel resolved against the provider, here rather than in Add(), so
 	// the struct that reaches the tenant package carries a real number.
 	//
@@ -370,6 +415,32 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		workloadCluster.Workers = 2
 	default:
 		workloadCluster.Workers = workloadClusterWorkers
+	}
+
+	// Automatic Encryption Key & Configuration Provisioning:
+	// Resolve/generate key, persist to escrow BEFORE writing cluster manifests,
+	// and ensure Secret exists in platform-capi on management cluster.
+	fmt.Printf("Ensuring encryption configuration for %q...\n", workloadCluster.Name)
+	encOpts := encryption.EnsureOptions{
+		BoxID:        coords.BoxID,
+		ClusterName:  workloadCluster.Name,
+		Namespace:    "platform-capi",
+		EscrowClient: access.Escrow(),
+		SecretClient: encryption.KubeSecretClient{Clientset: clientset},
+	}
+	encRes, err := encryption.EnsureClusterEncryption(cmd.Context(), encOpts)
+	if err != nil {
+		return fmt.Errorf("provisioning encryption configuration for %q: %w", workloadCluster.Name, err)
+	}
+	if encRes.KeyGenerated {
+		fmt.Println("  ✓ encryption key generated and escrowed")
+	} else {
+		fmt.Println("  ✓ encryption key restored from escrow")
+	}
+	if encRes.SecretCreated {
+		fmt.Printf("  ✓ secret platform-capi/%s created on management cluster\n", assets.EncryptionSecretName(workloadCluster.Name))
+	} else if encRes.SecretAlreadyExisted {
+		fmt.Printf("  ✓ secret platform-capi/%s verified on management cluster\n", assets.EncryptionSecretName(workloadCluster.Name))
 	}
 
 	written, err := workloadCluster.Add()

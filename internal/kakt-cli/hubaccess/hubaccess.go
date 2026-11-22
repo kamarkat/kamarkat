@@ -74,55 +74,98 @@ type Coordinates struct {
 	PlatformAdmin string
 }
 
-// registry/clusters/<cluster>/values.yaml is where a box declares itself.
+// boxDeclPath is the box's authoritative declaration (registry/box.yaml).
+func boxDeclPath(gitopsDir string) string {
+	return filepath.Join(gitopsDir, "registry", "box.yaml")
+}
+
+// registry/clusters/<cluster>/values.yaml is where a cluster declares itself.
 func declarationPath(gitopsDir, clusterName string) string {
 	return filepath.Join(gitopsDir, "registry", "clusters", clusterName, "values.yaml")
 }
 
-// readDeclaration parses the box's declaration without judging what is missing;
-// the callers decide which fields they require.
+// readDeclaration resolves box-scoped coordinates from registry/box.yaml (the authoritative
+// authority per ADR-111 §1) and cluster-scoped values from registry/clusters/<cluster>/values.yaml,
+// falling back to legacy values.yaml fields when box.yaml is absent.
 func readDeclaration(gitopsDir, clusterName string) (Coordinates, error) {
 	var c Coordinates
 	if strings.TrimSpace(gitopsDir) == "" {
 		return c, fmt.Errorf("no gitops directory: a box's declarations live in " +
-			"registry/clusters/<cluster>/values.yaml, and there is nowhere to read them")
+			"registry/box.yaml and registry/clusters/<cluster>/values.yaml, and there is nowhere to read them")
 	}
 	if strings.TrimSpace(clusterName) == "" {
 		return c, fmt.Errorf("no cluster name: these declarations belong to one cluster")
 	}
-	path := declarationPath(gitopsDir, clusterName)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return c, fmt.Errorf("read the box's declarations at %s: %w", path, err)
-	}
-	var decl struct {
-		BoxID       string `yaml:"boxId"`
-		ClusterName string `yaml:"clusterName"`
-		Escrow      struct {
-			URL            string `yaml:"url"`
-			ProjectID      string `yaml:"projectId"`
-			OrganizationID string `yaml:"organizationId"`
-		} `yaml:"escrow"`
-		PlatformAdminIdentity string `yaml:"platformAdminIdentity"`
-	}
-	if err := yaml.Unmarshal(raw, &decl); err != nil {
-		return c, fmt.Errorf("parse %s: %w", path, err)
+
+	c.ClusterName = strings.TrimSpace(clusterName)
+
+	boxPath := boxDeclPath(gitopsDir)
+	boxRaw, boxErr := os.ReadFile(boxPath)
+	if boxErr == nil {
+		var boxDecl struct {
+			BoxID  string `yaml:"boxId"`
+			Escrow struct {
+				URL            string `yaml:"url"`
+				ProjectID      string `yaml:"projectId"`
+				OrganizationID string `yaml:"organizationId"`
+			} `yaml:"escrow"`
+			PlatformAdminIdentity string `yaml:"platformAdminIdentity"`
+		}
+		if err := yaml.Unmarshal(boxRaw, &boxDecl); err != nil {
+			return c, fmt.Errorf("parse %s: %w", boxPath, err)
+		}
+		c.BoxID = strings.TrimSpace(boxDecl.BoxID)
+		c.EscrowURL = strings.TrimSpace(boxDecl.Escrow.URL)
+		c.EscrowProjectID = strings.TrimSpace(boxDecl.Escrow.ProjectID)
+		c.EscrowOrgID = strings.TrimSpace(boxDecl.Escrow.OrganizationID)
+		c.PlatformAdmin = strings.TrimSpace(boxDecl.PlatformAdminIdentity)
 	}
 
-	c.BoxID = strings.TrimSpace(decl.BoxID)
-	c.ClusterName = strings.TrimSpace(decl.ClusterName)
-	if c.ClusterName == "" {
-		c.ClusterName = clusterName
+	clusterPath := declarationPath(gitopsDir, clusterName)
+	clusterRaw, clusterErr := os.ReadFile(clusterPath)
+	if clusterErr == nil {
+		var decl struct {
+			BoxID       string `yaml:"boxId"`
+			ClusterName string `yaml:"clusterName"`
+			Escrow      struct {
+				URL            string `yaml:"url"`
+				ProjectID      string `yaml:"projectId"`
+				OrganizationID string `yaml:"organizationId"`
+			} `yaml:"escrow"`
+			PlatformAdminIdentity string `yaml:"platformAdminIdentity"`
+		}
+		if err := yaml.Unmarshal(clusterRaw, &decl); err != nil {
+			return c, fmt.Errorf("parse %s: %w", clusterPath, err)
+		}
+		if strings.TrimSpace(decl.ClusterName) != "" {
+			c.ClusterName = strings.TrimSpace(decl.ClusterName)
+		}
+		if c.BoxID == "" {
+			c.BoxID = strings.TrimSpace(decl.BoxID)
+		}
+		if c.EscrowURL == "" {
+			c.EscrowURL = strings.TrimSpace(decl.Escrow.URL)
+		}
+		if c.EscrowProjectID == "" {
+			c.EscrowProjectID = strings.TrimSpace(decl.Escrow.ProjectID)
+		}
+		if c.EscrowOrgID == "" {
+			c.EscrowOrgID = strings.TrimSpace(decl.Escrow.OrganizationID)
+		}
+		if c.PlatformAdmin == "" {
+			c.PlatformAdmin = strings.TrimSpace(decl.PlatformAdminIdentity)
+		}
 	}
-	c.EscrowURL = strings.TrimSpace(decl.Escrow.URL)
-	c.EscrowProjectID = strings.TrimSpace(decl.Escrow.ProjectID)
-	c.EscrowOrgID = strings.TrimSpace(decl.Escrow.OrganizationID)
-	c.PlatformAdmin = strings.TrimSpace(decl.PlatformAdminIdentity)
+
+	if boxErr != nil && clusterErr != nil {
+		return c, fmt.Errorf("read the box's declarations: neither %s nor %s could be read: %v",
+			boxPath, clusterPath, clusterErr)
+	}
 
 	return c, nil
 }
 
-// Declaration reads a box's coordinates from the one file that holds them,
+// Declaration reads a box's coordinates from registry/box.yaml or
 // registry/clusters/<cluster>/values.yaml.
 //
 // The canonical declaration, read the same way the chart and Day-0 read their own
@@ -134,21 +177,20 @@ func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
 	if err != nil {
 		return c, err
 	}
-	path := declarationPath(gitopsDir, clusterName)
 	if c.BoxID == "" {
-		return c, fmt.Errorf("%s declares no boxId: artefacts are escrowed under the logical "+
+		return c, fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical "+
 			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
-			"cluster name", path)
+			"cluster name")
 	}
 	if c.EscrowURL == "" || c.EscrowProjectID == "" {
-		return c, fmt.Errorf("%s declares no escrow coordinates.\n\n"+
+		return c, fmt.Errorf("registry/box.yaml declares no escrow coordinates.\n\n"+
 			"Add them -- they are names, not credentials, and they are what lets any\n"+
 			"authorized workstation reach this box:\n\n"+
 			"  escrow:\n"+
 			"    url: https://app.infisical.com\n"+
 			"    projectId: <the escrow project this box was enrolled in>\n\n"+
 			"`kakt escrow init` prints both when it creates the project, and they are in\n"+
-			"the escrow store of whoever ran it.", path)
+			"the escrow store of whoever ran it.")
 	}
 	return c, nil
 }
@@ -166,9 +208,9 @@ func DeclaredBoxID(gitopsDir, clusterName string) (string, error) {
 		return "", err
 	}
 	if c.BoxID == "" {
-		return "", fmt.Errorf("%s declares no boxId: artefacts are escrowed under the logical "+
+		return "", fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical "+
 			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
-			"cluster name", declarationPath(gitopsDir, clusterName))
+			"cluster name")
 	}
 	return c.BoxID, nil
 }
@@ -203,6 +245,9 @@ type Access interface {
 	// methods above.
 	Artifact(ctx context.Context, id Identity, name string) (string, error)
 	PutArtifact(ctx context.Context, id Identity, name, payload string) error
+
+	// Escrow returns the underlying EscrowClient.
+	Escrow() escrow.EscrowClient
 }
 
 // escrowAccess derives access from an escrow, however that escrow was
@@ -445,6 +490,10 @@ func (a *escrowAccess) PutArtifact(ctx context.Context, id Identity, name, paylo
 		return fmt.Errorf("%s could not write %s for box %s: %w", a.who, name, id.BoxID, err)
 	}
 	return nil
+}
+
+func (a *escrowAccess) Escrow() escrow.EscrowClient {
+	return a.store
 }
 
 func (a *escrowAccess) Provider(ctx context.Context, id Identity, provider string) (string, error) {

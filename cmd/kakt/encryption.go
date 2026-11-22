@@ -3,17 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"os/exec"
-	"text/template"
 
 	"github.com/kamarkat/kamarkat/internal/assets"
 	"github.com/kamarkat/kamarkat/internal/platform/embedded"
+	"github.com/kamarkat/kamarkat/internal/platform/encryption"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -180,58 +179,27 @@ func runEncryptionEnable(cmd *cobra.Command, _ []string) error {
 			"not built without one (ADR-076): %w", err)
 	}
 
-	key, err := store.RestoreArtifact(ctx, escrow.ForCluster(encBoxID, encClusterName), escrow.ArtifactSecretEncryptionKey)
-	if err != nil {
-		// Unreadable is not absent. Treating it as absent would mint a second key for
-		// a cluster that already has one, and the first thing that key would do is
-		// fail to decrypt everything already written.
-		return fmt.Errorf("reading the escrow for %q: %w", encClusterName, err)
-	}
-
-	generated := false
-	if key == "" {
-		raw := make([]byte, 32)
-		if _, err := rand.Read(raw); err != nil {
-			return fmt.Errorf("generating the encryption key: %w", err)
+	var secClient encryption.SecretClient
+	if !encDryRun {
+		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+		if encKubeconfig != "" {
+			loadingRules.ExplicitPath = encKubeconfig
 		}
-		key = hex.EncodeToString(raw)
-		generated = true
-		fmt.Printf("[encryption] no key in the escrow for %q; generating one\n", encClusterName)
-	} else {
-		fmt.Printf("[encryption] key restored from the escrow for %q\n", encClusterName)
-	}
-
-	rawKey, err := hex.DecodeString(key)
-	if err != nil || len(rawKey) != 32 {
-		return fmt.Errorf("the encryption key must be 32 hex-encoded bytes, got %d (decode error: %v); "+
-			"a key of any other length is refused by the API server at start", len(rawKey), err)
-	}
-
-	// Escrowed BEFORE anything is applied, and only when generated.
-	//
-	// Before, because the alternative is a cluster that comes up encrypted while the
-	// backup attempt is still outstanding. Only when generated, because a restored key
-	// is already there and rewriting it is one more chance to write something else.
-	if generated {
-		if encDryRun {
-			fmt.Println("[encryption] dry-run: would escrow the generated key")
-		} else if err := store.BackupArtifact(ctx, escrow.ForCluster(encBoxID, encClusterName), escrow.ArtifactSecretEncryptionKey, key); err != nil {
-			return fmt.Errorf("the key was generated but could not be escrowed, so nothing was "+
-				"applied: %w", err)
-		} else {
-			fmt.Println("[encryption] generated key escrowed")
+		configOverrides := &clientcmd.ConfigOverrides{}
+		if encContext != "" {
+			configOverrides.CurrentContext = encContext
 		}
+		cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides).ClientConfig()
+		if err != nil {
+			return fmt.Errorf("loading kubeconfig: %w", err)
+		}
+		clientset, err := kubernetes.NewForConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("building kubernetes client: %w", err)
+		}
+		secClient = encryption.KubeSecretClient{Clientset: clientset}
 	}
 
-	tmplData, err := readEncryptionConfigTemplate()
-	if err != nil {
-		return fmt.Errorf("reading the provider configuration template: %w", err)
-	}
-	tmpl, err := template.New("enc").Parse(string(tmplData))
-	if err != nil {
-		return fmt.Errorf("parsing the provider configuration template: %w", err)
-	}
-	var secretOut bytes.Buffer
 	if encNoFallback {
 		// Said out loud, because the consequence is not reversible by re-running this
 		// command: a Secret that was missed is unreadable from the next roll onward,
@@ -239,75 +207,43 @@ func runEncryptionEnable(cmd *cobra.Command, _ []string) error {
 		fmt.Println("[encryption] rendering WITHOUT the identity provider; any Secret still in " +
 			"plaintext will become unreadable once the control plane rolls")
 	}
-	if err := tmpl.Execute(&secretOut, map[string]any{
-		"SecretName": assets.EncryptionSecretName(encClusterName),
-		"Namespace":  encNamespace,
-		// Generation 1, and no fallback key. `enable` is the FIRST adoption; a
-		// rotation is `kakt encryption rotate`, which is a staged procedure because
-		// the previous key has to survive until the rewrite is verified.
-		"PrimaryKeyName":      assets.EncryptionKeyName(1),
-		"PrimaryKeyB64":       base64.StdEncoding.EncodeToString(rawKey),
-		"NoPlaintextFallback": encNoFallback,
-	}); err != nil {
-		return fmt.Errorf("rendering the provider configuration: %w", err)
+
+	opts := encryption.EnsureOptions{
+		BoxID:               encBoxID,
+		ClusterName:         encClusterName,
+		Namespace:           encNamespace,
+		NoPlaintextFallback: encNoFallback,
+		DryRun:              encDryRun,
+		EscrowClient:        store,
+		SecretClient:        secClient,
 	}
 
-	// THE TWO CLUSTERCLASSES LIVE IN DIFFERENT EMBEDS, and the command must reach
-	// both — the workload cluster is where this is adopted FIRST, because a failed
-	// control-plane roll there leaves the management plane up to repair it.
-	//
-	//   the management cluster's   internal/assets/manifests/classes/...
-	//   a workload cluster's       internal/platform/embedded/manifests/providers/...
-	//
-	// Two accessors rather than one because the two trees are embedded separately:
-	// the CLI's own assets, and the platform manifests packaged for shipping. A
-	// single read would silently miss whichever tree it did not look in.
-	// The Secret BEFORE anything that references it. A control plane whose provider
-	// configuration Secret does not exist cannot start -- and under v3 the Secret is
-	// what a node's bootstrap data is rendered FROM, so a missing one stalls the
-	// KubeadmConfig rather than the API server.
-	stages := []struct {
-		what string
-		body []byte
-	}{
-		{fmt.Sprintf("provider configuration Secret in %s", encNamespace), secretOut.Bytes()},
+	res, err := encryption.EnsureClusterEncryption(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	if res.KeyGenerated {
+		fmt.Printf("[encryption] no key in the escrow for %q; generating one\n", encClusterName)
+		if encDryRun {
+			fmt.Println("[encryption] dry-run: would escrow the generated key")
+		} else {
+			fmt.Println("[encryption] generated key escrowed")
+		}
+	} else {
+		fmt.Printf("[encryption] key restored from the escrow for %q\n", encClusterName)
+	}
+
+	if encDryRun {
+		fmt.Printf("[encryption] dry-run: would apply the provider configuration Secret in %s\n", encNamespace)
+	} else if res.SecretCreated {
+		fmt.Printf("[encryption] applied the provider configuration Secret in %s\n", encNamespace)
+	} else if res.SecretAlreadyExisted {
+		fmt.Printf("[encryption] provider configuration Secret in %s verified against escrowed key\n", encNamespace)
 	}
 
 	// THE CLUSTERCLASS IS NOT APPLIED BY DEFAULT, BECAUSE ARGOCD ALREADY OWNS IT.
-	//
-	// This command used to apply it unconditionally, on the belief that nothing
-	// reconciled it. That was wrong, and wrong in a way that took a failed task to
-	// surface: the `infrastructure-provider` ApplicationSet (boundary 03) syncs
-	// `manifests/providers/<provider>`, whose kustomization pulls in base/ and with
-	// it spokepool-clusterclass-v1.yaml. A published and promoted bundle therefore
-	// puts the class on the box by itself -- 0.1.16-rc.142 is how
-	// spokepool-control-plane-v3 arrived, with nobody running this command.
-	//
-	// Applying it from here makes the CLI a second writer for a GitOps-owned
-	// object. Harmless while the content is byte-identical, and exactly the kind of
-	// drift that is invisible until the two disagree: whoever ran this last wins
-	// until the next sync, and the sync is silent about having reverted it.
-	//
-	// So the only thing this command owns is the SECRET, which is deliberately not
-	// in that kustomization (it carries key material sourced from the escrow, per
-	// cluster; see the comment in base/kustomization.yaml).
-	//
-	// --apply-class remains for the one case with no ArgoCD to do it: the temporary
-	// bootstrap cluster at Day-0, before the management cluster and its
-	// ApplicationSets exist.
 	if encApplyClass {
-		// IT ADOPTS THE WHOLE CLASS, NOT THE ENCRYPTION PART OF IT.
-		//
-		// Said out loud because the management cluster's class is reconciled by nothing:
-		// it is applied at Day-0 and then diverges from the repository for as long as
-		// nobody runs this. On 2026-10-05 the hub's live class still referenced
-		// `hetzner-mgmt-control-plane` -- an unversioned template from sixteen days
-		// earlier -- and one `--apply-class` moved it to v4, which carries every change
-		// made to the control-plane spec in between, not just the encryption argument.
-		//
-		// The roll that follows applies all of them. That is the correct end state and
-		// it is not what the flag's name suggests, so the operator is told before it
-		// happens rather than after.
 		fmt.Println("[encryption] --apply-class replaces the ENTIRE ClusterClass, not only the")
 		fmt.Println("             encryption parts. If this cluster's class has not been applied")
 		fmt.Println("             for a while, the roll that follows adopts everything that")
@@ -321,31 +257,25 @@ func runEncryptionEnable(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("reading the ClusterClass %q: %w", classFile, err)
 		}
-		stages = append(stages, struct {
-			what string
-			body []byte
-		}{fmt.Sprintf("ClusterClass from %s", classFile), classOut})
-	}
 
-	for _, st := range stages {
 		if encDryRun {
-			fmt.Printf("[encryption] dry-run: would apply the %s\n", st.what)
-			continue
+			fmt.Printf("[encryption] dry-run: would apply the ClusterClass from %s\n", classFile)
+		} else {
+			args := []string{"apply", "-f", "-"}
+			if encKubeconfig != "" {
+				args = append([]string{"--kubeconfig", encKubeconfig}, args...)
+			}
+			if encContext != "" {
+				args = append([]string{"--context", encContext}, args...)
+			}
+			c := exec.CommandContext(ctx, "kubectl", args...)
+			c.Stdin = bytes.NewReader(classOut)
+			out, err := c.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("applying the ClusterClass from %s: %w\n%s", classFile, err, out)
+			}
+			fmt.Printf("[encryption] applied the ClusterClass from %s\n", classFile)
 		}
-		args := []string{"apply", "-f", "-"}
-		if encKubeconfig != "" {
-			args = append([]string{"--kubeconfig", encKubeconfig}, args...)
-		}
-		if encContext != "" {
-			args = append([]string{"--context", encContext}, args...)
-		}
-		c := exec.CommandContext(ctx, "kubectl", args...)
-		c.Stdin = bytes.NewReader(st.body)
-		out, err := c.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("applying the %s: %w\n%s", st.what, err, out)
-		}
-		fmt.Printf("[encryption] applied the %s\n", st.what)
 	}
 
 	if encDryRun {
