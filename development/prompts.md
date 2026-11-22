@@ -48,7 +48,7 @@ Retain diagnostic summaries, but do not let continue-on-error turn an unusable c
 
 There is no users in the platform and never propose a fallback or backward complatibility details and retain dead logics. Only approve the changes that are current and remove all old or dead logics in place.
 
-planning is ur job. debugging and execution is the the team members job. so provide clear next set of tasks for you to proceed further.
+Desig approval is ur job. debugging and execution is the the team members job. so provide clear next set of tasks for you to proceed further.
 
 ## Team Member
 
