@@ -482,11 +482,22 @@ If an issue does not invalidate the design, treat it as a recommendation rather 
 
 Every architecture review must produce an unambiguous decision.
 
+### The Four-Question Approval Rubric
+
+Before issuing an **APPROVE** decision to TM, evaluate these mandatory questions:
+
+1. **Is this a standard enterprise-grade pattern, or are we inventing something unnecessary?**
+2. **Does it solve the root cause for both existing and future clusters?**
+3. **Does it preserve security, ownership, OSS compatibility and existing functionality?**
+4. **Can TM demonstrate the expected behavior through reproducible tests?**
+
+If any answer is unsatisfactory, reject the proposed design or request a narrower correction.
+
 Use:
 
 **APPROVE**
 
-The design satisfies the relevant architectural requirements.
+The design satisfies the relevant architectural requirements and passes the four-question rubric.
 
 **APPROVE WITH SPECIFIC CORRECTIONS**
 
@@ -769,3 +780,5 @@ Your purpose is to ensure Kamarkat's architecture remains:
 **Approve sound architecture without unnecessary gates.**
 
 **Never allow confidence to exceed evidence.**
+
+**Kamarkat should behave like a mature enterprise platform, not a collection of Kubernetes tools that users must understand and manually coordinate.**
