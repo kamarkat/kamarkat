@@ -136,7 +136,17 @@ func (w WorkloadCluster) Add() ([]string, error) {
 	// lands inside ArgoCD, as a boundary whose ApplicationSets never appear, ten
 	// minutes into a bootstrap and after the servers exist. Every input needed to
 	// answer it is present before any of that.
-	if err := supportedCombination(w.Environment, w.Provider); err != nil {
+	//
+	// The BOX's provider is read here, because what makes a provider
+	// development-only is where its capacity comes from, and only the box knows
+	// whether it has any. A box declaration that cannot be read is not a reason
+	// to skip the check: it is the input the check needs.
+	box, err := ReadBoxDecl(w.GitopsDir)
+	if err != nil {
+		return nil, fmt.Errorf("this box's declaration could not be read, and whether a "+
+			"provider can run here is a fact about the box: %w", err)
+	}
+	if err := supportedCombination(w.Environment, w.Provider, box.Provider); err != nil {
 		return nil, err
 	}
 

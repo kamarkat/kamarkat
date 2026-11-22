@@ -23,6 +23,7 @@ import (
 func TestAddClusterWritesOnlyTheDeclaration(t *testing.T) {
 	const mgmt, cluster = "acme-hub", "acme-stg-01"
 	dir := t.TempDir()
+	writeFixtureBox(t, dir, "hetzner")
 
 	// The real template, so this breaks if the template stops carrying one.
 	root := repoRootForTest(t)

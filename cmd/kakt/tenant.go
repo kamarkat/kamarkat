@@ -30,6 +30,7 @@ func newTenantCmd() *cobra.Command {
 	cmd.AddCommand(newRemoveWorkloadClusterCmd())
 	cmd.AddCommand(newClusterStatusCmd())
 	cmd.AddCommand(newAddAppCmd())
+	cmd.AddCommand(newAddWorkloadCmd())
 	return cmd
 }
 
@@ -234,7 +235,7 @@ path and its backup prefix for their whole lives.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&workloadCluster.GitopsDir, "gitops-dir", ".", "the tenant repository")
-	f.StringVar(&workloadCluster.MgmtCluster, "mgmt-cluster", "", "the management cluster that creates this one (required)")
+	f.StringVar(&workloadCluster.MgmtCluster, "mgmt-cluster", "", "the management cluster that creates this one; read from registry/box.yaml when unset")
 	f.StringVar(&workloadCluster.Name, "name", "", "the workload cluster's name, and what applications target (required)")
 	f.StringVar(&workloadCluster.Provider, "provider", "hetzner", "cloud provider")
 	f.StringVar(&workloadCluster.Region, "region", "hel1", "cloud region")
@@ -242,11 +243,12 @@ path and its backup prefix for their whole lives.`,
 	// declares no environment; a workload cluster declares the stage it serves,
 	// and it is this value the supported-topology check is asked about.
 	f.StringVar(&workloadCluster.Environment, "environment", "dev",
-		"the stage THIS workload cluster serves: dev (default), stg or prod. Not a "+
+		"the stage THIS workload cluster serves: any name a DNS label allows, dev by "+
+			"default. Not a "+
 			"destination -- applications name the cluster they run on")
-	f.StringVar(&workloadCluster.BundleVersion, "bundle-version", "", "platform version this cluster starts on (required)")
-	f.StringVar(&workloadCluster.TenantID, "tenant", "", "the tenant that owns it (required)")
-	f.StringVar(&workloadCluster.GitopsRepoURL, "gitops-repo-url", "", "this repository's URL (required)")
+	f.StringVar(&workloadCluster.BundleVersion, "bundle-version", "", "platform version this cluster starts on; read from registry/box.yaml when unset")
+	f.StringVar(&workloadCluster.TenantID, "tenant", "", "the tenant that owns it; read from registry/box.yaml when unset")
+	f.StringVar(&workloadCluster.GitopsRepoURL, "gitops-repo-url", "", "this repository's URL; composed from registry/box.yaml when unset")
 	f.StringVar(&workloadCluster.PlatformRepoURL, "platform-repo-url", "", "the platform repository URL")
 	f.StringVar(&workloadCluster.BundleRegistry, "bundle-registry", "ghcr.io/kamarkat/charts", "the chart registry")
 	f.StringVar(&workloadCluster.ChartSource, "chart-source", "", "chart source, as the management cluster was rendered with")
@@ -259,13 +261,94 @@ path and its backup prefix for their whole lives.`,
 		"cloud worker nodes this cluster starts with (default: 2 on hetzner). "+
 			"Not applicable on hybrid, which runs on your own premises alone (ADR-075)")
 
-	for _, required := range []string{"mgmt-cluster", "name", "bundle-version", "tenant", "gitops-repo-url"} {
+	// ONLY THE NAME. Everything else the box declares is filled by fillFromBox
+	// and checked there, with a message naming the field of registry/box.yaml it
+	// would have come from. Marking them required here would refuse the command
+	// before it had looked.
+	for _, required := range []string{"name"} {
 		_ = cmd.MarkFlagRequired(required)
 	}
 	return cmd
 }
 
+// fillFromBox supplies every value the box already declares, so declaring a
+// cluster asks only for what the box cannot know: its name and the stage it
+// serves.
+//
+// Six flags were required that registry/box.yaml had already recorded -- the
+// management cluster, the tenant, the repository URL, the platform version, the
+// provider and the region. An operator had to open two files and copy them
+// across, and a brief written to do that had eight flags on one command, any of
+// which could disagree with the box and declare a cluster the box cannot build.
+//
+// Flags still win where given. This fills the unset ones, and reports what it
+// filled, so a value that came from somewhere is never silent.
+func fillFromBox(cmd *cobra.Command) error {
+	box, err := tenant.ReadBoxDecl(workloadCluster.GitopsDir)
+	if err != nil {
+		return fmt.Errorf("this box's declaration could not be read, and it is where a "+
+			"cluster's tenant, management cluster, repository and platform version come "+
+			"from: %w", err)
+	}
+
+	filled := map[string]string{}
+	// A flag the caller typed wins; one the box cannot answer is left as it is.
+	// Keyed on Changed rather than on emptiness, so a flag whose default equals
+	// the box's value is still reported as the box's -- and a default that
+	// disagrees with the box, as `--provider hetzner` would on a hybrid box,
+	// does not quietly outrank the declaration.
+	set := func(flag string, target *string, from string) {
+		if cmd.Flags().Changed(flag) || from == "" {
+			return
+		}
+		*target = from
+		filled[flag] = from
+	}
+
+	set("mgmt-cluster", &workloadCluster.MgmtCluster, box.ManagementCluster)
+	set("tenant", &workloadCluster.TenantID, box.TenantID)
+	set("provider", &workloadCluster.Provider, box.Provider)
+	set("region", &workloadCluster.Region, box.Region)
+	set("bundle-version", &workloadCluster.BundleVersion, box.BundleVersion)
+	set("bundle-registry", &workloadCluster.BundleRegistry, box.BundleRegistry)
+	set("platform-repo-url", &workloadCluster.PlatformRepoURL, box.PlatformRepoURL)
+	if !cmd.Flags().Changed("gitops-repo-url") && box.GitOrg != "" && box.GitopsRepo != "" {
+		workloadCluster.GitopsRepoURL = fmt.Sprintf("https://github.com/%s/%s", box.GitOrg, box.GitopsRepo)
+		filled["gitops-repo-url"] = workloadCluster.GitopsRepoURL
+	}
+
+	for _, missing := range []struct {
+		flag, value, why string
+	}{
+		{"name", workloadCluster.Name, "the cluster's name is yours to choose and permanent"},
+		{"mgmt-cluster", workloadCluster.MgmtCluster, "registry/box.yaml declares no managementClusterName"},
+		{"tenant", workloadCluster.TenantID, "registry/box.yaml declares no tenantId"},
+		{"bundle-version", workloadCluster.BundleVersion, "registry/box.yaml declares no bundleVersion"},
+		{"gitops-repo-url", workloadCluster.GitopsRepoURL, "registry/box.yaml declares no gitOrg and gitopsRepo"},
+	} {
+		if strings.TrimSpace(missing.value) == "" {
+			return fmt.Errorf("--%s is required: %s", missing.flag, missing.why)
+		}
+	}
+
+	if len(filled) > 0 {
+		fmt.Println("Read from this box's declaration:")
+		for _, flag := range []string{"mgmt-cluster", "tenant", "provider", "region",
+			"bundle-version", "bundle-registry", "platform-repo-url", "gitops-repo-url"} {
+			if v, ok := filled[flag]; ok {
+				fmt.Printf("  --%-18s %s\n", flag, v)
+			}
+		}
+		fmt.Println()
+	}
+	return nil
+}
+
 func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
+	if err := fillFromBox(cmd); err != nil {
+		return err
+	}
+
 	// The sentinel resolved against the provider, here rather than in Add(), so
 	// the struct that reaches the tenant package carries a real number.
 	//
@@ -451,4 +534,66 @@ Next:
   3. kakt app secrets status %s %s   -- what it declares, and what is present
 `, addApp.Environment, addApp.AppID, addApp.Environment, addApp.AppID)
 	return nil
+}
+
+// addWorkload is what `kakt tenant add-workload` collects.
+var addWorkload tenant.AppSpec
+
+// newAddWorkloadCmd adds a deployable to an application that already exists.
+//
+// A separate command because add-app cannot do it: it refuses an application
+// whose directory is present, which is correct -- an application is declared
+// once, and its values.yaml carries secret declarations and hostnames a second
+// declaration would overwrite. The documented way to add a workload later was to
+// re-run add-app with more --workload flags, and that could only ever report
+// "<app> already exists".
+//
+// It asks for nothing the repository already knows. The environment and the
+// application name the directory; the cluster the workload runs on comes from
+// which clusters serve that environment, the tenant from registry/box.yaml, and
+// the chart version from the placeholder the template carries until the
+// application's own build pins it.
+func newAddWorkloadCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add-workload",
+		Short: "Add a deployable to an application already declared",
+		Long: `Add one or more workloads to an application that exists.
+
+Writes environments/<env>/<app>/<workload>/Chart.yaml per workload, from the
+template this repository keeps. Commit and push, and the management cluster
+generates the workload.
+
+A workload that already exists is left exactly as it is, including a chart
+version a build has pinned: adding a second workload must not reset the first.`,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			written, err := tenant.AddWorkloads(addWorkload)
+			if err != nil {
+				return err
+			}
+			if len(written) == 0 {
+				fmt.Println("Nothing to add.")
+				return nil
+			}
+			fmt.Printf("✓ %d workload(s) added to %q in %s\n",
+				len(written), addWorkload.AppID, addWorkload.Environment)
+			for _, p := range written {
+				fmt.Printf("  %s\n", p)
+			}
+			fmt.Println("\nThe chart version is a placeholder that cannot resolve, on purpose:")
+			fmt.Println("an empty dependency list would render nothing and report healthy.")
+			fmt.Println("The application's first build replaces it.")
+			fmt.Println("\nCommit and push; the management cluster generates it.")
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&addWorkload.GitopsDir, "gitops-dir", ".", "the tenant repository")
+	f.StringVar(&addWorkload.Environment, "env", "", "the environment the application is declared in (required)")
+	f.StringVar(&addWorkload.AppID, "app", "", "the application to add to (required)")
+	f.StringSliceVar(&addWorkload.Workloads, "workload", nil, "a deployable to add; repeat for each")
+	for _, required := range []string{"env", "app", "workload"} {
+		_ = cmd.MarkFlagRequired(required)
+	}
+	return cmd
 }

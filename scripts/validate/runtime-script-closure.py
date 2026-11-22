@@ -60,12 +60,31 @@ SCRIPT_REL = re.compile(r"\$\{?SCRIPT_DIR\}?/([A-Za-z0-9_./-]+\.(?:sh|py|json|ya
 # deliberate choice, and one that needs the files to exist wherever the check
 # runs. They are outside scripts/, so no pattern above would ever see them.
 SOURCE_REF = re.compile(r"(?:\./)?(operators/[A-Za-z0-9_./-]+\.go)")
+
+# A MANIFEST A VALIDATOR READS AS ITS CONTRACT. Four support-agent checks and the
+# observability scoping check parse the manifests they assert about, so that a
+# renamed field cannot make a check silently examine the wrong thing -- and on a
+# released box none of those files was carried, so all five warned instead of
+# asserting. The ADR-077 containment claims the documentation promises had never
+# run against a real box.
+MANIFEST_REF = re.compile(r"(?:\./)?(manifests/[A-Za-z0-9_./-]+\.ya?ml)")
+
+# A BUDGET, because the embedded set is deliberately narrow. Validators name 36
+# manifests totalling over 4 MB, among them a 2 MB CRD bundle and two 400 KB
+# datapath templates -- carrying all of them to make five checks assert is the
+# wrong trade, and a release that silently grew by 4 MB is how the set stopped
+# being narrow in the first place.
+#
+# A file over the budget is NOT skipped: it is named, and refused, so the choice
+# is made deliberately -- either the check reads something smaller, or the file
+# is named in the generator's own list with a reason beside it.
+MANIFEST_BUDGET_BYTES = 64 * 1024
 EMBEDDED = "internal/platform/embedded"
 
 
 def closure(root):
     tracked = set(subprocess.run(
-        ["git", "-C", root, "ls-files", "scripts", "operators"],
+        ["git", "-C", root, "ls-files", "scripts", "operators", "manifests"],
         capture_output=True, text=True, check=False).stdout.split())
     # THE GLOBBED MODULES ARE TRACED, NOT JUST LISTED. Every file in GLOB_DIRS
     # used to be added to the result after the walk, so a module's own
@@ -75,6 +94,7 @@ def closure(root):
     # needs was absent from every release.
     #
     # Queued instead, so each module is read exactly as the entry points are.
+    oversized = {}
     seen, queue = set(), list(ENTRY_POINTS)
     for d in GLOB_DIRS:
         full = os.path.join(root, d)
@@ -98,6 +118,15 @@ def closure(root):
         # not followed further: the closure's job is to carry what a run reads,
         # and nothing reads an import graph.
         refs |= set(SOURCE_REF.findall(body))
+        for manifest in MANIFEST_REF.findall(body):
+            full_manifest = os.path.join(root, manifest)
+            if not os.path.isfile(full_manifest):
+                continue
+            size = os.path.getsize(full_manifest)
+            if size > MANIFEST_BUDGET_BYTES:
+                oversized.setdefault(manifest, (size, rel))
+                continue
+            refs.add(manifest)
         queue.extend(r for r in refs if r not in seen)
     # UNTRACKED IS A FAILURE, NOT AN OMISSION. The closure is filtered to
     # git-tracked files so a scratch copy in a working tree cannot enter a
@@ -114,6 +143,18 @@ def closure(root):
                   f"FAIL {f} is referenced by the Day-0 entry points but is not tracked "
                   f"by git, so the release would not carry it; git add it", file=sys.stderr)
         raise SystemExit(1)
+    # OVERSIZED IS REPORTED, NOT DROPPED. A validator reading a 2 MB CRD bundle is
+    # a check that cannot run on a released box, and saying nothing about it is
+    # how five checks warned on every box for months. The release is not grown
+    # silently either: the choice has to be made by someone.
+    if oversized:
+        for manifest, (size, by) in sorted(oversized.items()):
+            print(f"NOTE {manifest} is {size // 1024} KiB, over the {MANIFEST_BUDGET_BYTES // 1024} KiB "
+                  f"budget, and is read by {by}. The closure does not carry it. If that check has "
+                  f"to assert on a released box, name the file in "
+                  f"scripts/package/embed-platform-assets.sh with a reason beside it, as the "
+                  f"datapath templates already are -- or have the check read something smaller.",
+                  file=sys.stderr)
     return sorted(f for f in seen if f in tracked)
 
 

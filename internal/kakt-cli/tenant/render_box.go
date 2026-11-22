@@ -14,6 +14,7 @@ import (
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 	"io"
 	"io/fs"
+	"regexp"
 	"sort"
 	"strconv"
 
@@ -370,14 +371,31 @@ func setEnvFor(key, value string) (func(), error) {
 // repository exists, on a CLI that may be released and carrying an embedded chart
 // it must not have to render to answer a question about its own flags. The
 // duplication is asserted by TestScaffoldMatrixMatchesTheChart.
-var supportedMatrix = map[string][]string{
-	"dev": {"hetzner", "hybrid"},
-	// stg moved from hybrid to hetzner: hybrid is development-only. Staging
-	// rehearses production, and production is hetzner -- on hybrid it was
-	// rehearsing a tailnet-joined, node-local-storage topology no tenant runs.
-	"stg":  {"hetzner"},
-	"prod": {"hetzner"},
-}
+// THE ENVIRONMENT IS A NAME, NOT A MEMBER OF A SET. This was a map keyed on
+// dev, stg and prod, so a tenant who wanted a qa or a uat cluster was told their
+// environment was "unsupported" -- a refusal about a word, not about anything the
+// platform can or cannot build.
+//
+// What the table actually encoded is in its own per-entry reasons: hybrid is a
+// DEVELOPMENT-ONLY provider. Its capacity comes from a workstation, its nodes
+// join over a tailnet and carry their own placement rules (ADR-046 §11), and its
+// platform database sits on node-local storage. That is a fact about hybrid, and
+// it was expressed as a fact about the string "stg".
+//
+// So the rule is about providers now: any environment name a DNS label allows,
+// on a provider the platform ships a topology for -- and hybrid only where the
+// box itself is hybrid, because a cloud box declaring a hybrid cluster has no
+// premises to run it on.
+var supportedProviders = []string{"hetzner", "hybrid"}
+
+// developmentOnlyProviders may be declared only by a box of the same provider.
+var developmentOnlyProviders = map[string]bool{"hybrid": true}
+
+// environmentName is the label an environment may be. It becomes a directory in
+// the tenant's repository, a Kubernetes label value the ApplicationSets select
+// on, and a DNS label under ADR-051 -- so it is checked against the narrowest of
+// those rather than accepted and failing later at whichever is strictest.
+var environmentName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // supportedCombination refuses a combination the platform supports no topology
 // for, at the moment the cluster is declared.
@@ -388,45 +406,44 @@ var supportedMatrix = map[string][]string{
 // answering the question when the hub stopped having one (ADR-111 Revision 7), and
 // surfaced as a boundary whose ApplicationSets never appear, ten minutes into a
 // bootstrap and after the servers exist.
-func supportedCombination(environment, provider string) error {
-	providers, ok := supportedMatrix[environment]
-	if !ok {
-		return fmt.Errorf("unsupported environment %q. A workload cluster may declare: %s",
-			environment, strings.Join(sortedEnvironments(), ", "))
+func supportedCombination(environment, provider, boxProvider string) error {
+	if !environmentName.MatchString(environment) {
+		return fmt.Errorf("%q cannot be an environment name. It becomes a directory, a label the\n"+
+			"application sets select on, and a DNS label -- so it may hold lower-case letters,\n"+
+			"digits and hyphens, and must start and end with a letter or digit.\n\n"+
+			"Any name that fits is yours to choose: dev, stg, prod, qa, uat, sandbox", environment)
 	}
-	for _, p := range providers {
+
+	known := false
+	for _, p := range supportedProviders {
 		if p == provider {
-			return nil
+			known = true
+			break
 		}
 	}
-	return fmt.Errorf("%s on %s is not a supported combination.\n\n"+
-		"The platform supports no topology for it, so the cluster would be built from\n"+
-		"sources nobody maintains -- and ArgoCD reports an Application that manages\n"+
-		"nothing as Healthy.\n\n"+
-		"Supported: %s\n\n"+
-		"Pass --environment or --provider to choose one.",
-		environment, provider, strings.Join(supportedCombinations(), ", "))
-}
-
-func sortedEnvironments() []string {
-	out := make([]string, 0, len(supportedMatrix))
-	for env := range supportedMatrix {
-		out = append(out, env)
+	if !known {
+		return fmt.Errorf("unsupported provider %q.\n\n"+
+			"The platform ships a topology for: %s.\n\n"+
+			"A cluster declared on anything else would be built from sources nobody\n"+
+			"maintains -- and ArgoCD reports an Application that manages nothing as Healthy.",
+			provider, strings.Join(supportedProviders, ", "))
 	}
-	sort.Strings(out)
-	return out
-}
 
-func supportedCombinations() []string {
-	var out []string
-	for _, env := range sortedEnvironments() {
-		providers := append([]string(nil), supportedMatrix[env]...)
-		sort.Strings(providers)
-		for _, p := range providers {
-			out = append(out, env+"+"+p)
-		}
+	// hybrid on a cloud box has nowhere to run. Checked against the BOX's
+	// provider rather than against the environment's name: what makes hybrid
+	// development-only is where its capacity comes from, and a box that is not
+	// hybrid has none of it.
+	if developmentOnlyProviders[provider] && boxProvider != provider {
+		return fmt.Errorf("a %s cluster cannot be declared on a %s box.\n\n"+
+			"%s capacity is the hardware on your own premises -- nodes that join over your\n"+
+			"tailnet, with their own placement rules and node-local storage. This box is %s,\n"+
+			"so there is no such hardware for the cluster to run on, and its only node would\n"+
+			"be a tainted control plane: every workload pends and the bootstrap fails much\n"+
+			"later reporting a missing database.\n\n"+
+			"Declare it as %s, or declare it on a %s box.",
+			provider, boxProvider, provider, boxProvider, boxProvider, provider)
 	}
-	return out
+	return nil
 }
 
 // tenantTokens are facts about the tenant, true of every cluster in its box.

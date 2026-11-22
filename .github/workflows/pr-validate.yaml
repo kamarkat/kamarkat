@@ -1,5 +1,23 @@
 name: PR Fast-Fail Validation
 on:
+  # PUSHES TO main TOO, because that is how this repository is committed to.
+  # The job list below exists so that "every guard in internal/kakt-cli was
+  # enforced on a laptop and nowhere else" stopped being true -- and it was true
+  # again from the moment work moved to committing straight to main: this
+  # workflow last ran on 2026-10-31, while releases 0.3.20 through 0.3.40 went
+  # out with nothing having compiled or tested them but a workstation.
+  #
+  # The same paths, so a push that touches none of them still runs nothing.
+  push:
+    branches: [main]
+    paths:
+      - 'manifests/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'scripts/**'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/pr-validate.yaml'
+      - 'test/e2e/**'
   pull_request:
     paths:
       - 'manifests/**'
@@ -37,6 +55,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # THE EMBED FIRST. internal/platform/embedded declares
+      # `//go:embed all:manifests all:scripts all:_operators`, and a clean
+      # checkout carries none of those trees -- they are generated. `go test`
+      # cannot compile the package without them, so this job tested the CLI
+      # everywhere except the package that decides what a release carries.
+      - name: Stage the platform content a release carries
+        run: ./scripts/package/embed-platform-assets.sh
       - name: Test the CLI and the platform content it carries
         run: go test ./internal/kakt-cli/... ./internal/platform/... ./cmd/kakt/...
       # The Credit Authority's live suites (ADR-109) run against a deployment;

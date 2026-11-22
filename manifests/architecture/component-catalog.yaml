@@ -302,15 +302,15 @@ components:
       quay.io/cilium/certgen: cilium/certgen
     behind:
       - versions: ["v1.20.4"]
-        status: held
+        status: scheduled
         reason: >-
           Cilium 1.20 is qualified against the platform's Kubernetes 1.36 baseline. The newest
-          1.20 patch waits on one condition: a box accepted on the gateway routing introduced in
-          0.3.31. Moving the datapath before then would make a routing failure impossible to
-          attribute to either change, and that routing is still being driven to acceptance.
-          No target, deliberately. This said 0.3.31, then 0.3.32, then 0.3.34, each release
-          naming the next one -- which is what a date does when the blocker is a condition.
-          The condition above is checkable, and the patch is taken in the release after it holds.
+          1.20 patch waited on one condition -- a box accepted on the gateway routing introduced
+          in 0.3.31 -- and that condition now HOLDS: nutgraf-mgmt-1794929668 was accepted on
+          0.3.40 with 89 assertions passing, the auth and console host redirects among them.
+          So this is scheduled rather than held, and it is the next datapath change to take.
+          It needs the addon template regenerated at the new patch, which is a vendoring step
+          rather than an edit here.
       - versions: ["v0.4.13"]
         status: held
         reason: >-

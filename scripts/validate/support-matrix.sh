@@ -46,9 +46,9 @@ failures=0
 # The Go tests also assert the CLI's copy still matches the chart's, which is the
 # authority (ADR-062's table of who declares what).
 # ---------------------------------------------------------------------------
-topology_tests='TestScaffoldMatrixMatchesTheChart|TestEverySupportedCombinationHasAClaimTemplate|TestSupportedCombinationAcceptsTheMatrixAndRefusesTheRest'
+topology_tests='TestScaffoldMatrixMatchesTheChart|TestEverySupportedProviderHasAClaimTemplate|TestSupportedCombinationJudgesTheProviderAndNotTheName'
 if go test ./internal/kakt-cli/tenant/ -run "$topology_tests" -count=1 >/tmp/.support-matrix.$$ 2>&1; then
-    echo "  ok    workload topology: 4 supported pair(s) accepted, 6 unsupported refused, CLI matches the chart"
+    echo "  ok    workload topology: any environment name accepted, unsupported providers refused, CLI matches the chart"
 else
     echo "  FAIL  workload topology policy is not enforced as declared:"
     sed 's/^/          /' /tmp/.support-matrix.$$ | head -12

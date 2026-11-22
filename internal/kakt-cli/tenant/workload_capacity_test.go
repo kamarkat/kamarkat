@@ -1,6 +1,8 @@
 package tenant
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,8 +42,12 @@ func TestWorkloadClusterCapacityIsProviderSpecific(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// The box runs the provider under test, so the only thing this case
+			// can be refused for is capacity.
+			writeFixtureBox(t, dir, c.provider)
 			w := WorkloadCluster{
-				GitopsDir:   t.TempDir(),
+				GitopsDir:   dir,
 				MgmtCluster: "acme-hub",
 				Name:        "acme-01",
 				Provider:    c.provider,
@@ -68,5 +74,23 @@ func TestWorkloadClusterCapacityIsProviderSpecific(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// writeFixtureBox gives a temporary repository the box declaration every tenant
+// repository has. add-cluster reads it for the tenant, the management cluster and
+// the provider the box runs on -- the last of which decides whether a hybrid
+// cluster may be declared at all -- so a fixture without one is not a repository
+// the command would ever meet.
+func writeFixtureBox(t *testing.T, dir, provider string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, RegistryDir), 0o755); err != nil {
+		t.Fatalf("mkdir registry: %v", err)
+	}
+	body := "boxId: acme-1\ntenantId: acme\ngitOrg: acme-inc\ngitopsRepo: acme-gitops-1\n" +
+		"managementClusterName: acme-hub\ndomain: acme.example\nprovider: " + provider + "\n" +
+		"region: hel1\nbundleVersion: 0.0.0\n"
+	if err := os.WriteFile(filepath.Join(dir, RegistryDir, BoxDeclFile), []byte(body), 0o644); err != nil {
+		t.Fatalf("write box declaration: %v", err)
 	}
 }

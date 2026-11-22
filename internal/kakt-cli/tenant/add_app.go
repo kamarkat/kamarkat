@@ -83,10 +83,9 @@ func AddApp(s AppSpec) ([]string, error) {
 			filepath.Join("environments", s.Environment, s.AppID))
 	}
 
-	tokens := map[string]string{
-		"<APP_ID>":      s.AppID,
-		"<ENVIRONMENT>": s.Environment,
-		"<OWNER_EMAIL>": s.OwnerEmail,
+	tokens, err := appTokens(s)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
@@ -100,6 +99,39 @@ func AddApp(s AppSpec) ([]string, error) {
 	}
 	written = append(written, valuesDst)
 
+	workloadFiles, err := writeWorkloads(s, appDir, tokens)
+	written = append(written, workloadFiles...)
+	if err != nil {
+		return written, err
+	}
+
+	return written, nil
+}
+
+// appTokens is what an application's templates are hydrated with.
+//
+// One definition, because adding a workload to an existing application hydrates
+// the same workload template and must substitute the same values. The owner
+// email is only in the application's own values.yaml, so a workload added later
+// needs no owner and is given none rather than an empty token -- hydrate refuses
+// a file that still carries one, which is how a missing value is caught.
+func appTokens(s AppSpec) (map[string]string, error) {
+	return map[string]string{
+		"<APP_ID>":      s.AppID,
+		"<ENVIRONMENT>": s.Environment,
+		"<OWNER_EMAIL>": s.OwnerEmail,
+	}, nil
+}
+
+// writeWorkloads creates one directory and Chart.yaml per workload.
+//
+// Factored out of AddApp so that adding a workload to an application that
+// already exists runs the same code. It used to live only here, and AddApp
+// refuses an application whose directory is present -- so the documented way to
+// add a workload later, re-running add-app with more --workload flags, could
+// only ever report "shop already exists". There was no second path; this is it.
+func writeWorkloads(s AppSpec, appDir string, tokens map[string]string) ([]string, error) {
+	var written []string
 	for _, workload := range s.Workloads {
 		if strings.TrimSpace(workload) == "" {
 			return written, fmt.Errorf("a workload with no name: it is a directory and a chart, and neither can be unnamed")
@@ -118,8 +150,53 @@ func AddApp(s AppSpec) ([]string, error) {
 		}
 		written = append(written, dst)
 	}
-
 	return written, nil
+}
+
+// AddWorkloads adds workloads to an application that is already declared.
+//
+// The application must exist: a workload is a deployable INSIDE one, and
+// creating the application as a side effect of naming a workload would write an
+// app whose values.yaml nobody filled in. A workload that already exists is left
+// exactly as it is, including a chart version a build has pinned -- re-running
+// this to add a second workload must not reset the first.
+func AddWorkloads(s AppSpec) ([]string, error) {
+	if strings.TrimSpace(s.Environment) == "" || strings.TrimSpace(s.AppID) == "" {
+		return nil, fmt.Errorf("an environment and an application are required: a workload is " +
+			"a directory inside one application in one environment")
+	}
+	if len(s.Workloads) == 0 {
+		return nil, fmt.Errorf("no workload named: pass --workload once per deployable to add")
+	}
+
+	appDir := filepath.Join(s.GitopsDir, "environments", s.Environment, s.AppID)
+	if _, err := os.Stat(appDir); err != nil {
+		return nil, fmt.Errorf("%s is not declared in %s: declare the application first with "+
+			"`kakt tenant add-app --env %s --app %s`, which writes the values.yaml a workload "+
+			"is deployed from", s.AppID, s.Environment, s.Environment, s.AppID)
+	}
+
+	var skipped, add []string
+	for _, w := range s.Workloads {
+		if _, err := os.Stat(filepath.Join(appDir, w, "Chart.yaml")); err == nil {
+			skipped = append(skipped, w)
+			continue
+		}
+		add = append(add, w)
+	}
+	for _, w := range skipped {
+		fmt.Printf("  %s already exists, left as it is\n", w)
+	}
+	if len(add) == 0 {
+		return nil, nil
+	}
+
+	tokens, err := appTokens(s)
+	if err != nil {
+		return nil, err
+	}
+	return writeWorkloads(AppSpec{GitopsDir: s.GitopsDir, Environment: s.Environment,
+		AppID: s.AppID, Workloads: add}, appDir, tokens)
 }
 
 // hydrate copies one template file, substituting tokens, and refuses to write a
