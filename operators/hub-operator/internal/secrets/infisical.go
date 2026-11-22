@@ -257,6 +257,42 @@ func (c *InfisicalClient) newAuthenticatedRequest(ctx context.Context, method, u
 // FOLDER OPERATIONS
 // ============================================================================
 
+// EnsureEnvironment ensures the client's environment exists in the Infisical project.
+// Idempotent: if the environment already exists, it succeeds immediately.
+func (c *InfisicalClient) EnsureEnvironment(ctx context.Context) error {
+	if c.EnvironmentSlug == "" {
+		return nil
+	}
+	createURL := fmt.Sprintf("%s/api/v1/projects/%s/environments", c.BaseURL, c.ProjectID)
+	payload, err := json.Marshal(map[string]string{
+		"name": c.EnvironmentSlug,
+		"slug": c.EnvironmentSlug,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal create environment %s: %w", c.EnvironmentSlug, err)
+	}
+	req, err := c.newAuthenticatedRequest(ctx, "POST", createURL, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("create request for environment %s: %w", c.EnvironmentSlug, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("execute create environment %s: %w", c.EnvironmentSlug, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	if strings.Contains(string(respBody), "already exists") {
+		return nil
+	}
+	return fmt.Errorf("ensure environment %s: status %d: %s", c.EnvironmentSlug, resp.StatusCode, string(respBody))
+}
+
 // EnsureFolder creates a folder hierarchy in Infisical.
 // Multi-segment paths (e.g. /spoke-pool/<clusterName>/tenants/<tenantId>) are
 // created one segment at a time. Idempotent: 400 "already exists" is treated
@@ -306,6 +342,28 @@ func (c *InfisicalClient) EnsureFolder(ctx context.Context, folderPath string) e
 		if resp.StatusCode == http.StatusConflict || (resp.StatusCode == http.StatusBadRequest && bytes.Contains(respBody, []byte("already exists"))) {
 			// Idempotent: folder already exists
 			continue
+		}
+		if resp.StatusCode == http.StatusNotFound && bytes.Contains(respBody, []byte("Environment with slug")) {
+			if envErr := c.EnsureEnvironment(ctx); envErr != nil {
+				return fmt.Errorf("failed to ensure environment %s for folder %s: %w", c.EnvironmentSlug, segment, envErr)
+			}
+			retryReq, err := c.newAuthenticatedRequest(ctx, "POST", c.BaseURL+constant.APIEndpointFolders, bytes.NewReader(body))
+			if err != nil {
+				return fmt.Errorf("failed to create retry request for folder %s: %w", segment, err)
+			}
+			retryReq.Header.Set("Content-Type", "application/json")
+			retryResp, err := c.httpClient.Do(retryReq)
+			if err != nil {
+				return fmt.Errorf("failed to execute retry folder request for %s: %w", segment, err)
+			}
+			retryRespBody, _ := io.ReadAll(retryResp.Body)
+			retryResp.Body.Close()
+			if retryResp.StatusCode == http.StatusOK || retryResp.StatusCode == http.StatusCreated ||
+				retryResp.StatusCode == http.StatusConflict ||
+				(retryResp.StatusCode == http.StatusBadRequest && bytes.Contains(retryRespBody, []byte("already exists"))) {
+				continue
+			}
+			return fmt.Errorf("failed to create folder %s after creating environment: status %d: %s", segment, retryResp.StatusCode, string(retryRespBody))
 		}
 		if resp.StatusCode >= 500 {
 			return fmt.Errorf("failed to create folder %s with status %d (transient)", segment, resp.StatusCode)
@@ -853,6 +911,10 @@ type OAuthClient struct {
 //   - If missing AND !isFirstTime → return Missing (manual intervention required).
 func (c *InfisicalClient) EnsureInfisicalCredentials(ctx context.Context, clusterName string, isFirstTime bool) (*EnsureInfisicalCredentialsResult, error) {
 	logger := log.FromContext(ctx)
+	if err := c.EnsureEnvironment(ctx); err != nil {
+		logger.Error(err, "Failed to ensure Infisical environment", "environment", c.EnvironmentSlug)
+		return nil, fmt.Errorf("failed to ensure Infisical environment %s: %w", c.EnvironmentSlug, err)
+	}
 	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
 
 	logger.Info("Ensuring Infisical folder hierarchy", "path", sharedPath)
