@@ -60,6 +60,13 @@ endpoints:
     # a new identity can do before any project membership exists.
     notes: "role defaults to OrgMembershipRole.NoAccess in the router's schema"
 
+  # response_fields: top-level keys of the route's declared 200 body that our code
+  # PARSES. Recorded because a route existing says nothing about the shape of its
+  # answer, and a wrong field name fails silently: the parse succeeds, the field is
+  # absent, and the zero value reads as "not found". On 0.3.45-rc.1 three parsers
+  # and a test fake all read `workspaces` -- the key the DIFFERENT /api/v1/workspace
+  # endpoint uses -- so every project lookup came back empty, a published project
+  # was reported non-existent, and the fake agreed with the bug.
   - name: project create and list
     # Recorded ahead of the per-cluster secrets project work, so that lifecycle is
     # written against a route this version serves rather than against an assumed
@@ -74,6 +81,7 @@ endpoints:
     mount: /projects
     local: /
     methods: [POST, GET]
+    response_fields: [projects, totalCount]
     index: backend/src/server/routes/v1/index.ts
     router: backend/src/server/routes/v1/project-router.ts
 

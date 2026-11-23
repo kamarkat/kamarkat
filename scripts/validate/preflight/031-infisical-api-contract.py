@@ -233,9 +233,25 @@ def main():
                 f"version we deploy does not serve")
             continue
 
+        # The SHAPE of the answer, for the endpoints whose body we parse. A route
+        # that exists and a body we misread are indistinguishable at runtime: the
+        # parse succeeds and the missing field's zero value reads as an answer.
+        missing_fields = []
+        for field in ep.get("response_fields") or []:
+            if not re.search(rf'\b{re.escape(field)}:\s', router):
+                missing_fields.append(field)
+        if missing_fields:
+            bad(f"{ep['name']}: {ep['router']} at {c['tag']} declares no "
+                f"{', '.join(missing_fields)} in its response, and this platform parses "
+                f"{'that key' if len(missing_fields) == 1 else 'those keys'}. A wrong field "
+                f"name does not error -- the zero value reads as an answer")
+            continue
+
         checked += 1
+        fields = ep.get("response_fields") or []
         ok(f"{ep['name']}: re-derived from {vendor.name} at {c['tag']} -- prefix "
-           f"{ep['mount']} + {ep['local']}, methods {', '.join(ep['methods'])}")
+           f"{ep['mount']} + {ep['local']}, methods {', '.join(ep['methods'])}"
+           + (f", response carries {', '.join(fields)}" if fields else ""))
 
     for dep in c.get("deprecated", []):
         router = show(vendor, c["tag"], dep["router"])

@@ -163,7 +163,20 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Error(err, "Failed to ensure the cluster's own secrets project", "spoke", spokeName)
 	} else if clusterSecrets, err := r.InfisicalClient.ForProjectAndEnvironment(clusterProjectID, spokeEnvironment); err != nil {
 		logger.Error(err, "Failed to scope a client to the cluster's secrets project", "spoke", spokeName)
-	} else if fleet, err := spokeInfisical.MaterialiseFleetCredentialsInto(ctx, spokeName, clusterSecrets); err != nil {
+		// THE SOURCE IS THE HUB'S ENVIRONMENT, not the spoke's.
+		//
+		// The box seeds its credentials where the uploader writes them:
+		// managementEnvironmentSlug(), the hub's own environment, at the root of
+		// hub-secrets. r.InfisicalClient is scoped there; spokeInfisical is scoped
+		// to the SPOKE's environment, whose root holds nothing.
+		//
+		// Reading the spoke's environment is why 0.3.45-rc.1 reported all six fleet
+		// credentials "missing at root" for a stg cluster. It was never visible
+		// before because a box's first workload cluster served dev, the same
+		// environment as its hub -- so source and destination happened to coincide,
+		// and the first cluster on any other environment could never have received
+		// them.
+	} else if fleet, err := r.InfisicalClient.MaterialiseFleetCredentialsInto(ctx, spokeName, clusterSecrets); err != nil {
 		logger.Error(err, "Failed to materialise fleet credentials into the cluster's project", "spoke", spokeName)
 	} else if len(fleet.MissingAtRoot) > 0 {
 		// Published anyway: the project holds what the box could give it, and the

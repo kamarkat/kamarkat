@@ -38,7 +38,7 @@ func (c *Client) FindProjectBySlug(ctx context.Context, slug string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("authenticate: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+PathProjects, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+PathProjects+"?limit=100", nil)
 	if err != nil {
 		return "", fmt.Errorf("list projects request: %w", err)
 	}
@@ -54,19 +54,28 @@ func (c *Client) FindProjectBySlug(ctx context.Context, slug string) (string, er
 		return "", fmt.Errorf("list projects: Infisical answered %d: %s", resp.StatusCode, firstLine(raw))
 	}
 
+	// `projects`, per project-router.ts's declared 200 body. Reading `workspaces`
+	// -- the key the DIFFERENT /api/v1/workspace endpoint uses -- made every
+	// published project look absent, which is what reported nutgraf-stg-01's
+	// secrets project as non-existent on 0.3.45-rc.1.
 	var listed struct {
-		Workspaces []struct {
+		Projects []struct {
 			ID   string `json:"id"`
 			Slug string `json:"slug"`
-		} `json:"workspaces"`
+		} `json:"projects"`
+		TotalCount int `json:"totalCount"`
 	}
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return "", fmt.Errorf("list projects: a 200 this operator could not read: %w", err)
 	}
-	for _, w := range listed.Workspaces {
-		if w.Slug == slug {
-			return w.ID, nil
+	for _, p := range listed.Projects {
+		if p.Slug == slug {
+			return p.ID, nil
 		}
+	}
+	if listed.TotalCount > len(listed.Projects) {
+		return "", fmt.Errorf("the organization has %d projects and this page carried %d, so "+
+			"%q cannot be said to be absent", listed.TotalCount, len(listed.Projects), slug)
 	}
 	return "", nil
 }

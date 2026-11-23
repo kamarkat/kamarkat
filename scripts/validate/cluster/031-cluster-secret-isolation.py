@@ -44,11 +44,13 @@ if status != 200 or "accessToken" not in body:
     sys.exit(0)
 hdr = {"Authorization": "Bearer " + body["accessToken"].strip()}
 
-status, listed = http("GET", f"{INF}/api/v1/projects", headers=hdr)
+status, listed = http("GET", f"{INF}/api/v1/projects?limit=100", headers=hdr)
 if status != 200:
     print("SOFT|the project list is unreadable, so a membership cannot be placed in a project")
     sys.exit(0)
-by_id = {w["id"]: w.get("slug", "") for w in listed.get("workspaces", [])}
+# `projects`, per the route's declared 200 body; `workspaces` belongs to the
+# different /api/v1/workspace endpoint.
+by_id = {p["id"]: p.get("slug", "") for p in listed.get("projects", [])}
 by_slug = {v: k for k, v in by_id.items()}
 
 

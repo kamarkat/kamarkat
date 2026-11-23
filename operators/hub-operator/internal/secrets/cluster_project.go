@@ -110,7 +110,12 @@ func (c *InfisicalClient) EnsureClusterProject(ctx context.Context, clusterName,
 // a second project for a cluster, and then the store would read one while the
 // publisher wrote the other.
 func (c *InfisicalClient) findProjectBySlug(ctx context.Context, slug string) (string, error) {
-	req, err := c.newAuthenticatedRequest(ctx, "GET", c.BaseURL+constant.APIEndpointProjects, nil)
+	// limit=100 is the schema's maximum, and totalCount below says whether one page
+	// was enough. The default page size is not documented, so asking for the
+	// maximum and then checking the count is the difference between "no such
+	// project" and "not on the first page" -- and this function's "" means the
+	// former, which a caller acts on by CREATING a project.
+	req, err := c.newAuthenticatedRequest(ctx, "GET", c.BaseURL+constant.APIEndpointProjects+"?limit=100", nil)
 	if err != nil {
 		return "", err
 	}
@@ -124,19 +129,32 @@ func (c *InfisicalClient) findProjectBySlug(ctx context.Context, slug string) (s
 		return "", fmt.Errorf("list Infisical projects: status %d", resp.StatusCode)
 	}
 
+	// `projects`, which is what the route returns at both pinned versions
+	// (project-router.ts `response: { 200: z.object({ projects, totalCount }) }`).
+	// This read `workspaces` -- the key /api/v1/workspace uses, a different
+	// endpoint -- so every lookup came back empty: the identity operator reported
+	// a published project as non-existent, and this function told its own caller to
+	// create a project that was already there.
 	var listed struct {
-		Workspaces []struct {
+		Projects []struct {
 			ID   string `json:"id"`
 			Slug string `json:"slug"`
-		} `json:"workspaces"`
+		} `json:"projects"`
+		TotalCount int `json:"totalCount"`
 	}
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return "", fmt.Errorf("list Infisical projects: a 200 this operator could not read: %w", err)
 	}
-	for _, w := range listed.Workspaces {
-		if w.Slug == slug {
-			return w.ID, nil
+	for _, p := range listed.Projects {
+		if p.Slug == slug {
+			return p.ID, nil
 		}
+	}
+	if listed.TotalCount > len(listed.Projects) {
+		// Not found AND not fully read. Returning "" would have the caller create a
+		// second project for a cluster that already has one.
+		return "", fmt.Errorf("the organization has %d projects and this page carried %d, so "+
+			"%q cannot be said to be absent", listed.TotalCount, len(listed.Projects), slug)
 	}
 	return "", nil
 }

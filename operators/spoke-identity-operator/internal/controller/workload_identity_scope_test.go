@@ -39,12 +39,13 @@ func (s *scopeServer) handler(t *testing.T) http.HandlerFunc {
 		s.calls = append(s.calls, r.Method+" "+r.URL.Path)
 		switch {
 		case r.URL.Path == "/api/v1/projects" && r.Method == http.MethodGet:
-			out := map[string]any{"workspaces": []map[string]string{}}
+			out := map[string]any{"projects": []map[string]string{}}
 			list := []map[string]string{}
 			for slug, id := range s.projects {
 				list = append(list, map[string]string{"id": id, "slug": slug})
 			}
-			out["workspaces"] = list
+			out["projects"] = list
+			out["totalCount"] = len(list)
 			b, _ := json.Marshal(out)
 			w.Write(b)
 		case strings.Contains(r.URL.Path, "/memberships/identities/"):
