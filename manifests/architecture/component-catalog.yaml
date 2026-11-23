@@ -387,6 +387,12 @@ components:
       registry.k8s.io/sig-storage/livenessprobe: kubernetes-csi/livenessprobe
     layer: machinery
     match: ["registry.k8s.io/sig-storage/*"]
+    behind:
+      - versions: ["v2.18.0", "v2.20.0", "v2.3.0", "v4.13.0", "v6.4.0"]
+        status: not assessed
+        reason: >-
+          Shipped with the Hetzner CSI driver deployment manifest. Upstream sidecar patch
+          releases have not yet been qualified against this driver version.
   - name: Local path provisioner
     description: Node-local volumes on clusters without cloud block storage.
     license: Apache-2.0
