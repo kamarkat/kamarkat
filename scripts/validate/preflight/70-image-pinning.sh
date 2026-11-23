@@ -16,7 +16,22 @@ validate_image_pinning() {
     out=$(cd "$VALIDATE_ROOT" && python3 - <<'PY'
 import os, re, subprocess, sys
 
-SKIP_DIRS = ("/vendor/", "/node_modules/", "/.git/", "/reference-projects/")
+# internal/platform/embedded is the PACKAGING tree, and a pin it does not carry is
+# not an unpinned image.
+#
+# The embed copies the manifests the runtime closure needs, NOT the kustomizations
+# that own them: the embedded auth-proxy directory holds deployment.yaml alone. The
+# digest lives in auth-proxy/kustomization.yaml's `images:` entry -- rewritten by
+# the auth-proxy workflow after every build -- so it is absent from the copy, and
+# the bare `image: ghcr.io/kamarkat/kamarkat/auth-proxy` that is CORRECTLY bare in
+# source reads as untagged there. `kubectl kustomize` on the real directory
+# resolves it to ...auth-proxy@sha256:1cf69a31...
+#
+# The originals under manifests/ are still scanned, and still judged through the
+# kustomization that owns them. Nothing is skipped; a copy is simply not judged by
+# a rule its directory cannot answer.
+SKIP_DIRS = ("/vendor/", "/node_modules/", "/.git/", "/reference-projects/",
+             "/internal/platform/embedded/")
 ROOTS = ["manifests", "operators", "internal", "test"]
 
 def skip(p):
