@@ -82,7 +82,8 @@ def main() -> int:
             # identity, not which.
             shared += ["--set", "tenantId=probe",
                        "--set", "appId=probeapp",
-                       "--set", "clusterName=probe-01"]
+                       "--set", "clusterName=probe-01",
+                       "--set", "hubDomain=example.test"]
             expected, err = render(
                 ["helm", "template", "x", os.path.join(src, origin)] + shared)
             if err:
@@ -96,6 +97,7 @@ def main() -> int:
                 "--set", f"{component}.tenantId=probe",
                 "--set", f"{component}.appId=probeapp",
                 "--set", f"{component}.clusterName=probe-01",
+                "--set", f"{component}.hubDomain=example.test",
                 "--set", f"global.environmentSlug={env}",
                 "--set", f"global.provider={provider}",
                 "--set", "global.previewDomain=example-preview.test", "--set", "global.alerting.emailTo[0]=alerts@example.test",
