@@ -35,18 +35,35 @@ def http(method, url, body=None, headers=None, timeout=20):
         return 0, {}
 
 
+# The organization, which the identity listing REQUIRES. identity-router.ts
+# declares `querystring: z.object({ orgId: z.string() })` -- not optional -- and
+# declares no limit or offset at all. This asked for `?limit=200` and no orgId, so
+# Infisical answered 422 Required: ["orgId"] every time, the lookup returned None,
+# and the module reported that the identity "could not be found": a verifier that
+# never once put its question, reporting the shape of an answer.
+#
+# No default. An org id guessed from anywhere would make this check assert about
+# somebody else's organization, which is worse than not running.
+ORG_ID = os.environ["SECRET_STORE_ORGANIZATION_ID"].strip()
+if not ORG_ID:
+    print("UNVERIFIED|the organization id is empty, so no identity can be looked up")
+    sys.exit(0)
+
 status, body = http("POST", f"{INF}/api/v1/auth/universal-auth/login", {
     "clientId": os.environ["SECRET_STORE_CLIENT_ID"].strip(),
     "clientSecret": os.environ["SECRET_STORE_CLIENT_SECRET"].strip(),
 })
 if status != 200 or "accessToken" not in body:
-    print("SOFT|Infisical authentication failed, so no identity's memberships could be read")
+    # NOT soft. soft_fail means "not yet converged, expected to self-heal", and a
+# refused credential or a malformed query never self-heals into a narrow scope.
+    print("UNVERIFIED|Infisical refused the platform's own credential, so no identity's "
+          "memberships could be read")
     sys.exit(0)
 hdr = {"Authorization": "Bearer " + body["accessToken"].strip()}
 
 status, listed = http("GET", f"{INF}/api/v1/projects?limit=100", headers=hdr)
 if status != 200:
-    print("SOFT|the project list is unreadable, so a membership cannot be placed in a project")
+    print("UNVERIFIED|the project list is unreadable, so a membership cannot be placed in a project")
     sys.exit(0)
 # `projects`, per the route's declared 200 body; `workspaces` belongs to the
 # different /api/v1/workspace endpoint.
@@ -66,14 +83,36 @@ def memberships(identity_id):
                 (r.get("customRole") or {}).get("slug") or r.get("role", "?")
                 for r in roles)
         elif st != 404:
+            # Only the specific 404 is an answer. Anything else means this project
+            # would not say, and a project that would not say cannot be counted as
+            # one this identity is absent from.
             unknown = True
-    return (None if unknown and not found else found)
+    # ANY unanswered project makes the inventory incomplete, whatever the others
+    # said. This read `unknown and not found`, so one project refusing to answer
+    # while the cluster's own project answered produced a complete-looking
+    # inventory -- and the caller asserted "a member of nothing else" on it. That
+    # is a false green on the one property this check exists to establish, and it
+    # passes most loudly in exactly the case worth catching: an identity still
+    # holding hub-secrets while hub-secrets is the project that errored.
+    return (None if unknown else found)
+
+
+class Unobtainable(Exception):
+    """The question could not be put. Distinct from an answer of "no"."""
 
 
 def identity_id(name):
-    st, b = http("GET", f"{INF}/api/v1/identities?limit=200", headers=hdr)
+    """The identity's id, or None if the organization genuinely has no such identity.
+
+    These two were one value before: any HTTP failure returned None, which read as
+    "no such identity" and was then reported as an unconverged scope. The lookup
+    failing and the identity being absent are different findings, and only one of
+    them is about this platform's authorization.
+    """
+    st, b = http("GET", f"{INF}/api/v1/identities?orgId={ORG_ID}", headers=hdr)
     if st != 200:
-        return None
+        raise Unobtainable(f"the identity listing returned HTTP {st}")
+    # `identities`, per the route's declared 200 body.
     for entry in b.get("identities", []):
         ident = entry.get("identity", entry)
         if ident.get("name") == name:
@@ -106,13 +145,22 @@ for raw in os.environ["DECLARED"].strip().splitlines():
         continue
 
     # ── the ESO identity ────────────────────────────────────────────────────
-    eso = identity_id(f"spoke-{cluster}")
+    try:
+        eso = identity_id(f"spoke-{cluster}")
+        pki_lookup = identity_id(f"spoke-{cluster}-pki")
+    except Unobtainable as e:
+        # The listing itself failed: say so once for this cluster and assess
+        # nothing, rather than reporting an absent identity we never asked about.
+        print(f"UNVERIFIED|{cluster}: {e}, so no identity's scope could be assessed")
+        continue
     if eso is None:
-        print(f"SOFT|{cluster}: its workload identity could not be found, so its scope is unknown")
+        print(f"FAIL|{cluster}: the organization has no identity named spoke-{cluster}, so "
+              f"nothing holds this cluster's secret access and the narrowing this check exists "
+              f"to confirm has not happened")
     else:
         held = memberships(eso)
         if held is None:
-            print(f"SOFT|{cluster}: at least one project would not say whether its workload "
+            print(f"UNVERIFIED|{cluster}: at least one project would not say whether its workload "
                   f"identity is a member, so 'a member of nothing else' is unestablished")
         elif list(held) == [want_slug] and held[want_slug] == ["viewer"]:
             print(f"PASS|{cluster}: its workload identity is viewer of {want_slug} and a member "
@@ -126,15 +174,15 @@ for raw in os.environ["DECLARED"].strip().splitlines():
                      "The role in its own project is not viewer"))
 
     # ── the PKI identity ────────────────────────────────────────────────────
-    pki = identity_id(f"spoke-{cluster}-pki")
+    pki = pki_lookup
     if pki is None:
-        print(f"SOFT|{cluster}: its certificate issuer identity could not be found, so whether "
+        print(f"FAIL|{cluster}: the organization has no identity named spoke-{cluster}-pki, so whether "
               f"issuance is separately authorised is unknown")
         continue
     held = memberships(pki)
     cert_slug = by_id.get(CERT_PROJECT, CERT_PROJECT)
     if held is None:
-        print(f"SOFT|{cluster}: the issuer identity's memberships are partly unreadable")
+        print(f"UNVERIFIED|{cluster}: the issuer identity's memberships are partly unreadable")
     elif want_slug in held:
         print(f"FAIL|{cluster}: its certificate issuer identity is a member of the cluster's "
               f"secrets project, so a compromised issuer credential reads workload secrets")

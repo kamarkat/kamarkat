@@ -61,6 +61,17 @@ for i in items:
     client_id=$(kc get secret infisical-auth -n platform-ops -o jsonpath='{.data.client-id}' | base64 -d 2>/dev/null)
     client_secret=$(kc get secret infisical-auth -n platform-ops -o jsonpath='{.data.client-secret}' | base64 -d 2>/dev/null)
     cert_project=$(kc get secret infisical-auth -n platform-ops -o jsonpath='{.data.projectId}' | base64 -d 2>/dev/null)
+    # The organization, from the ConfigMap the operators themselves read it from
+    # (hub-bootstrap-config/SECRET_STORE_ORGANIZATION_ID). The identity listing
+    # requires it; without it every lookup returned 422 and the module reported an
+    # identity it had never managed to ask about.
+    local org_id
+    org_id=$(kc get configmap hub-bootstrap-config -n platform-ops \
+        -o jsonpath='{.data.SECRET_STORE_ORGANIZATION_ID}' 2>/dev/null)
+    if [[ -z "$org_id" ]]; then
+        unverified "the organization id is not readable from hub-bootstrap-config, so no identity's memberships could be looked up"
+        return 1
+    fi
     if [[ -z "$client_id" || -z "$client_secret" ]]; then
         unverified "the platform's own Infisical credential is not readable, so no identity's effective memberships could be established"
         return 0
@@ -75,7 +86,8 @@ for i in items:
 
     local out
     out=$(SECRET_STORE_BASE="http://127.0.0.1:$port" \
-          SECRET_STORE_CLIENT_ID="$client_id" \
+          SECRET_STORE_ORGANIZATION_ID="$org_id" \
+        SECRET_STORE_CLIENT_ID="$client_id" \
           SECRET_STORE_CLIENT_SECRET="$client_secret" \
           CERT_PROJECT_ID="$cert_project" \
           DECLARED="$declared" \
@@ -89,6 +101,11 @@ for i in items:
             PASS\|*) pass "${line#PASS|}" ;;
             FAIL\|*) hard_fail "${line#FAIL|}" ;;
             SOFT\|*) soft_fail "${line#SOFT|}" ;;
+            # A verifier that could not put its question is not a converging
+            # system. soft_fail says "expected to self-heal"; this says the
+            # property was not assessed, which is the honest result and does not
+            # read as a pass in the summary.
+            UNVERIFIED\|*) unverified "${line#UNVERIFIED|}" ;;
             NOTE\|*) note "${line#NOTE|}" ;;
             *)       note "$line" ;;
         esac
