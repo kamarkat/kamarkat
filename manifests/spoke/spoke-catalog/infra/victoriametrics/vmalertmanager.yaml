@@ -76,30 +76,41 @@ spec:
       group_interval: 5m
       repeat_interval: 4h
       routes:
-        # The heartbeat: always firing, re-sent every 50s. IRM pages when it stops.
-        - receiver: irm-heartbeat
+        # PlatformHeartbeat IS ROUTED TO NOWHERE, DELIBERATELY, AND NOT LEFT TO FALL
+        # THROUGH TO EMAIL.
+        #
+        # It is a dead-man's switch: always firing, and its ABSENCE is the signal. A
+        # switch delivered by the path it tests proves nothing, so emailing it would
+        # be worse than dropping it -- a silent cluster and a healthy one would send
+        # the same number of mails, which is none.
+        #
+        # On this cluster nothing outside it can witness that silence. The HUB does,
+        # over the read route ADR-078 add.8 gives it: this cluster publishes its
+        # liveness as a recording-rule series and a hub-side rule pages when the
+        # series goes absent (add.10 §5). The observer is outside the cluster it
+        # watches, which is the property the switch needs; it is the hub rather than
+        # a rented endpoint, because add.10 §1 keeps third-party cloud off a spoke.
+        #
+        # The hub's own VMAlertmanager keeps its irm-heartbeat receiver: nothing
+        # inside the box can witness the whole box going quiet.
+        - receiver: platform-heartbeat-is-observed-by-the-hub
           matchers: ['alertname="PlatformHeartbeat"']
           group_wait: 0s
           group_interval: 1m
           repeat_interval: 50s
-        - receiver: platform-email-and-irm
+        # Critical and warning go to EMAIL ONLY on a spoke. The hub adds Grafana IRM
+        # here; a spoke pages nobody through a third-party incident tool and holds no
+        # credential for one (add.10 §4).
+        - receiver: platform-email
           matchers: ['severity=~"critical|warning"']
     receivers:
       - name: platform-email
         email_configs:
           - to: 'PLACEHOLDER_ALERT_EMAIL_TO'
             send_resolved: true
-      - name: platform-email-and-irm
-        email_configs:
-          - to: 'PLACEHOLDER_ALERT_EMAIL_TO'
-            send_resolved: true
-        webhook_configs:
-          - url_file: /etc/vm/secrets/alertmanager-credentials/irm_alertmanager_url
-            send_resolved: true
-      - name: irm-heartbeat
-        webhook_configs:
-          - url_file: /etc/vm/secrets/alertmanager-credentials/irm_heartbeat_url
-            send_resolved: false
+      # Intentionally empty. Alertmanager requires a declared receiver for a route,
+      # and this one must deliver nothing: see the route above.
+      - name: platform-heartbeat-is-observed-by-the-hub
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -123,10 +134,15 @@ spec:
     - secretKey: smtp_password
       remoteRef:
         key: /spoke-pool/PLACEHOLDER/shared/ALERT_SMTP_PASSWORD
-    - secretKey: irm_alertmanager_url
-      remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/GRAFANA_IRM_ALERTMANAGER_URL
-    # This cluster's own heartbeat: one IRM heartbeat per cluster.
-    - secretKey: irm_heartbeat_url
-      remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/GRAFANA_IRM_HEARTBEAT_URL
+    # ONE KEY. The two Grafana IRM entries that were here are the hub's.
+    #
+    # irm_alertmanager_url and irm_heartbeat_url read
+    # /spoke-pool/<cluster>/shared/GRAFANA_IRM_* -- the box owner's own incident
+    # integration, copied into every cluster's project. Removed with the receivers
+    # that read them (ADR-078 add.10 §4): a spoke delivers its alerts by email and
+    # pages nobody through a third-party tool.
+    #
+    # This also unblocks alert delivery. ESO is atomic across spec.data, so the
+    # heartbeat key -- which nothing ever seeded, because no per-cell integration was
+    # ever created -- kept this whole Secret from existing, and with it SMTP. An
+    # optional credential was taking down the mandatory one.

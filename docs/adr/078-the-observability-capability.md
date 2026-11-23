@@ -6,12 +6,85 @@
 
 *Constrained by: ADR-065 (The Control Plane Ships Into the Box), ADR-066 (The Platform Boundary), ADR-069 (The Maintenance Promise), ADR-070 (The Minimum Supported Box), ADR-071 (How This Platform Differs from Kubefirst), ADR-077 (The Support Agent)*
 
-*Amended by: addendum 3 (2026-10-24) — the backend and UI move to the box owner's Grafana Cloud stack; the in-box stores, Grafana and ADR-083's federation are removed.*
+*Amended by: addendum 3 (2026-10-24) — SUPERSEDED BY ADDENDUM 5. It moved the backend
+and UI to the box owner's Grafana Cloud stack and removed the in-box stores, Grafana
+and ADR-083's federation. Addendum 5 (2026-10-28) reversed that to a self-hosted
+backend, and addendum 10 (2026-11-24) settles the principle it was decided without:
+a third-party stack serves the HUB's monitoring only, and never a spoke's. This line
+told every reader of this ADR the opposite for a month after the decision changed.*
+
+*Amended by: addendum 10 (2026-11-24) — the governing principle for this whole
+capability: local observability is authoritative on every cluster, the hub's Grafana
+is the one read interface, and a spoke uses no third-party cloud infrastructure.
+Supersedes addendum 5 §2's external per-cluster heartbeat and addendum 7's per-cell
+alert credentials.*
 
 *Amended by: ADR-098 (Metering Sources over Spoke Egress and Records in Lago) — add.1
 §6's tenant series exclusion gains a metering carve-out: in-cluster container
 usage series for `tenant-*` namespaces are collected as accounting data.
 Off-cluster opt-in, tenant log policy and trace policy are unchanged.*
+
+## The architecture at a glance
+
+As it stands after addendum 10. Nine addenda changed this twice over, so the shape
+is drawn here rather than reassembled from them.
+
+```text
+        ┌──────────────────────── OUTSIDE THE BOX ───────────────────────┐
+        │                                                                │
+        │   Grafana IRM                                  SMTP relay      │
+        │   pages · dead-man's heartbeat                 mail out        │
+        │                                                                │
+        └────────▲─────────────────────────────────▲──────────────▲──────┘
+                 │                                 │              │
+          HUB ONLY. The one rented                 │              │
+          dependency, for the case                 │   every cluster emails its
+          the box cannot witness                   │   own alerts: mail is not
+          itself going quiet.                      │   self-hosted, and SMTP is
+          Same carve-out as the escrow.            │   transport, not monitoring
+                 │                                 │              │
+ ╔═══════════════╧═════════════════════╗   ╔═══════╧══════════════╧══════════╗
+ ║  MANAGEMENT CLUSTER — the hub       ║   ║  WORKLOAD CLUSTER — a spoke     ║
+ ║                                     ║   ║  one of N; nothing shared       ║
+ ║  Alloy                              ║   ║  Alloy                          ║
+ ║    │ collect, OTLP                  ║   ║    │ collect, OTLP              ║
+ ║    ▼                                ║   ║    ▼                            ║
+ ║  VictoriaMetrics   Loki             ║   ║  VictoriaMetrics   Loki         ║
+ ║    │                                ║   ║    │                 │          ║
+ ║    ▼                                ║   ║    ▼                 ▼          ║
+ ║  VMAlert        platform + fleet    ║   ║  VMAlert        its own S3      ║
+ ║    │            rules               ║   ║    │       platform + tenant    ║
+ ║    ▼                                ║   ║    ▼       rules                ║
+ ║  VMAlertmanager ───────────────▶    ║   ║  VMAlertmanager ────────────▶   ║
+ ║    IRM + email                      ║   ║    email only                   ║
+ ║                                     ║   ║                                 ║
+ ║  Grafana OSS                        ║   ║  VMAuth                         ║
+ ║  grafana.<hubDomain>                ║   ║  read-only, OIDC at the edge    ║
+ ║  the ONE read interface             ║   ║                                 ║
+ ╚═════════════════════════════════════╝   ╚═════════════════════════════════╝
+            │                                           ▲
+            └───────────────────────────────────────────┘
+              the hub QUERIES each spoke, on demand, through one datasource
+              pair per spoke (add.8). Nothing is pushed up: no remote-write,
+              no central store, no federation tier.
+
+            ┌───────────────────────────────────────────┐
+            ▼                                           │
+   SpokeAlertPathSilent                      cluster:alert_path_alive
+   on the hub, fires on the ABSENCE          on the spoke, a recording
+   of a spoke's liveness series              rule, one sample / 30s
+
+              A dead-man's switch must be watched from outside the cluster
+              whose failure it detects. For the hub that watcher is Grafana
+              IRM. For a spoke it is the HUB — already outside it, already
+              holding a read path — so no spoke is given a cloud endpoint.
+```
+
+**Read it as three rules.** Local is authoritative: every cluster ingests, stores,
+evaluates and notifies for itself, and keeps doing so when the hub is unreachable.
+The hub is the one read interface: it queries, it does not ingest. A third-party
+stack serves the hub's monitoring only, exactly as the escrow is the only cloud
+service in secret management (addendum 10 §1).
 
 > Observability is a capability the platform ships, not a destination the tenant supplies. A box that collects telemetry and has nowhere to put it is not observable.
 
@@ -969,7 +1042,13 @@ introduces each component (§14).
 
 This ADR stays Proposed (addendum 1 §14) until these are applied.
 
-## Addendum 3: the backend is the box owner's Grafana Cloud stack (2026-10-24)
+## Addendum 3: the backend is the box owner's Grafana Cloud stack (2026-10-24) — SUPERSEDED
+
+**Superseded by addendum 5 (2026-10-28)**, which returned the backend, the stores and
+Grafana to the box, and by addendum 10 (2026-11-24), which records why: a box that
+self-hosts its platform does not rent its monitoring. Read for the reasoning it
+collected -- the collection topology and the tenant-authoring model survive it -- but
+not for where telemetry lands. Nothing below is current.
 
 **Supersedes** §1, §4 and §5; addendum 1 §1, §9 and §10; ADR-083's federation
 (Grafana querying per-cluster stores); and addendum 2 §6, §7's store-side guard,
@@ -1652,7 +1731,17 @@ agree with it. What it settles for this capability:
 | ordering between them | none; retry with capped backoff, and `ComparisonError` until the CRDs exist |
 | selection | provisioning-time; a running backend is not disabled by the flag |
 
-## Addendum 7: capacity policy, per-cell alert credentials, and the store inventory (2026-10-30)
+## Addendum 7: capacity policy, per-cell alert credentials, and the store inventory (2026-10-30) — §"per-cell alert credentials" SUPERSEDED
+
+**The per-cell alert credential section below is superseded by addendum 10
+(2026-11-24).** Its reasoning about a shared heartbeat was right -- one integration
+receiving every cluster's heartbeat makes a dead cluster look alive -- and its
+conclusion was wrong, because it never asked whether a spoke may call a third-party
+cloud service at all. It may not: a rented stack serves the hub's monitoring only.
+`ExternalPerCellCredentialKeys` is gone, nothing is seeded per cluster, and a spoke's
+silence is observed by the hub (add.10 §5).
+
+The capacity policy and store inventory in this addendum stand.
 
 ### Replica policy
 
@@ -1771,9 +1860,16 @@ both stores hold every cluster's series.
 
 ## Addendum 8: the viewer query path — hub and every spoke in one Grafana (2026-10-31)
 
-**Status:** Proposed. It supersedes §12's deferral of the spoke query endpoint and
-records the decisions taken between 2026-10-30 and 2026-10-31. One question is open
-and named at the end.
+**Status: Accepted (2026-11-24).** The architecture review of 2026-11-24 adopted this
+addendum as the authoritative query design: Grafana OSS on the hub with one datasource
+pair per spoke, each spoke published through its own read-only VMAuth route, and no
+copied telemetry. The same review rejected a global `vmselect` or any federation tier
+until a genuine requirement for global PromQL evaluation is established -- fleet views
+are built from small recording-rule series the hub combines, not from raw data crossing
+clusters.
+
+It supersedes §12's deferral of the spoke query endpoint and records the decisions
+taken between 2026-10-30 and 2026-10-31. One question is open and named at the end.
 
 The requirement is one URL: `https://grafana.<hubDomain>` showing the hub and every
 spoke, with the `cluster` variable selecting between them. §10 already specified the
@@ -2203,3 +2299,125 @@ uniformly broken one, and only the eleventh row tells them apart.
 The preflight now reads the field, because a denial for the wrong reason is
 indistinguishable from a denial for the right one at every layer that reports
 status.
+
+## Addendum 10: a spoke uses no third-party cloud, and the hub watches it (2026-11-24) — Accepted
+
+**Status: Accepted (2026-11-24).** Approved by the architecture review of 2026-11-24.
+
+**Supersedes** addendum 5 §2's "External: one Grafana IRM heartbeat per cluster" and
+addendum 7's per-cell alert credentials. Marks addendum 3 superseded, which addendum 5
+did in substance and no one recorded. Confirms addendum 4 §2's route tree, which was
+right and which the two addenda above diverged from.
+
+### 1. The principle these decisions were taken without
+
+A box self-hosts its platform. **The same rule governs its monitoring: a third-party
+cloud stack serves the HUB's monitoring only, and never a spoke's.**
+
+This is the shape secret management already has. The escrow is a cloud service, used
+by the hub alone, because a box that does not exist yet cannot hold its own keys.
+Every other secret lives in the box's self-hosted Infisical. Observability is the
+same: Grafana IRM pages on the hub, and every spoke runs the self-hosted stack.
+
+Addendum 5 restored self-hosting for the stores and Grafana and then, in §2, left
+"one Grafana IRM heartbeat per cluster" standing. Addendum 7 hardened that into a
+per-cell credential contract with a seeding requirement, reasoning correctly that a
+shared heartbeat makes a dead cluster look alive — and never asking whether a spoke
+may call a third-party at all. Both were decided on the merits of the heartbeat and
+neither against this principle, which is why both got the same answer wrong.
+
+### 2. Local observability is authoritative
+
+Every cluster, hub included, owns its collectors and OTLP ingestion, its
+VictoriaMetrics metrics storage, its Loki log storage on its own S3-backed bucket,
+its VMAlert evaluation, its VMAlertmanager routing, and its platform and authorised
+tenant rules. Ingestion, evaluation and notification are local decisions.
+
+**A spoke does not depend on the hub for routine monitoring or alert delivery.** A
+spoke that loses the hub keeps evaluating its rules and keeps delivering its own
+alerts. There is no mandatory remote-write replication and no central telemetry
+ingestion.
+
+### 3. The hub's Grafana is the one read interface
+
+Per addendum 8, now Accepted: one URL, `https://grafana.<hubDomain>`, showing the hub
+and every spoke with the `cluster` variable selecting between them. Each registered
+spoke has its own datasource pair, reached through its own read-only VMAuth route
+with OIDC verified at the boundary — no ingestion, deletion or administrative access
+on the viewer path.
+
+The hub queries each spoke on demand. Telemetry is not copied, there is no central
+TSDB, and no federation tier is introduced: fleet-level views are built from small
+recording-rule series each cluster produces locally and the hub combines. A global
+`vmselect` is rejected until global PromQL evaluation is a stated requirement, which
+it is not.
+
+### 4. Receivers, by cluster
+
+Addendum 4 §2's route tree is the platform's on every cluster. What differs is which
+receivers a cluster has:
+
+| Route | Hub | Spoke |
+|---|---|---|
+| `severity` critical or warning | email **and** Grafana IRM | **email only** |
+| anything else | email | email |
+| `PlatformHeartbeat` (always firing) | Grafana IRM heartbeat | **observed by the hub — see §5** |
+
+`PlatformHeartbeat` must never fall through to the email receiver on either: a
+dead-man's switch delivered by the path it is testing proves nothing.
+
+Mail is not self-hosted, and `ALERT_SMTP_PASSWORD` is therefore materialised into
+every cluster's project and used by every cluster. SMTP is the transport alerts leave
+by; it is not monitoring infrastructure, and §1 constrains the latter. Grafana IRM
+incident credentials go to no spoke: `GRAFANA_IRM_ALERTMANAGER_URL` and
+`GRAFANA_IRM_HEARTBEAT_URL` are the hub's and leave `FleetCredentials`.
+
+### 5. The dead-man's switch, without a third party on the spoke
+
+A dead-man's switch has to be observed from outside the cluster whose failure it
+detects. For the hub that observer is Grafana IRM's heartbeat check. For a spoke the
+hub is already outside it, and §3 already gives the hub a read path into it.
+
+So: each spoke's VMAlert carries a recording rule that publishes its liveness as a
+small series, and the hub alerts on that series going **absent** over the spoke's
+VMAuth route. One rule on the spoke, one rule on the hub, registered when the cluster
+is registered. No per-cluster cloud endpoint to provision, no vendor API to drive, no
+controller to own, and nothing asked of the box owner for a second cluster.
+
+**What this does not cover, stated rather than discovered later:** if a spoke and the
+hub go silent together, IRM pages on the hub's silence alone — the operator learns the
+box is in trouble, not that the spoke is also gone. The alternative, a per-spoke cloud
+heartbeat, buys that one case for a third-party dependency on every spoke, and §1
+decides that trade.
+
+Neither this nor the hub's own heartbeat proves that mail was **received**. Each
+proves the evaluation-to-delivery chain is alive. Where end-to-end email delivery is
+guaranteed, that needs a synthetic message received and checked outside the cluster
+that sent it; SMTP connection success is not receipt.
+
+### 6. Where a rule lives
+
+A rule lives where its metrics are produced and where the controller it watches runs.
+
+**Every cluster:** node and kubelet health; pod readiness, crash loops and OOM; local
+storage and database health; VictoriaMetrics, Loki and Alloy pipeline health; local
+Alertmanager and evaluator failure; that cluster's CNPG and backup health.
+
+**The hub only:** ArgoCD controller and application health, because ArgoCD runs
+there; cluster lifecycle and registration health; Grafana datasource failure; hub
+observability health; and the fleet-level conditions only the hub can see, including
+§5's spoke liveness.
+
+Hub-only rules are **not** copied onto spokes to make the two inventories match. An
+inventory is not a contract; a rule firing on metrics that cannot exist is noise.
+
+### 7. Availability is a property of the topology, not the replica count
+
+Use the smallest vendor-supported topology that meets the cluster's declared
+availability requirement. Two of something is not high availability: production
+failure tolerance needs the vendor's own replication and placement across distinct
+failure domains. Independent `VMSingle` instances are not a replicated database, and
+replicated Loki processes are not highly available without the ring, storage and
+replication to match. A development cluster declared single-node does not carry
+production HA overhead. Retention stays configurable, and historical metrics are not
+moved to S3-backed querying merely to extend it.

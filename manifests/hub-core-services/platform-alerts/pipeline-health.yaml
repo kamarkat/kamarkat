@@ -13,6 +13,42 @@ metadata:
     app.kubernetes.io/managed-by: platform
 spec:
   groups:
+    # FLEET-LEVEL: WHAT ONLY THE HUB CAN SEE (ADR-078 add.10 §5 and §6).
+    #
+    # A cluster cannot report its own silence. The hub's silence is reported by
+    # Grafana IRM's heartbeat check, which is the one third-party dependency the box
+    # keeps and the same carve-out the escrow has. A SPOKE's silence is reported
+    # here, because the hub is already outside it and add.8 already gives the hub a
+    # read path into it -- so no spoke needs a rented endpoint of its own.
+    #
+    # Each spoke publishes cluster:alert_path_alive, one sample every 30s from a
+    # local recording rule. This alerts when that series stops arriving. That is the
+    # same dead-man's-switch property as the hub's heartbeat, inverted: there the
+    # absence of a delivery pages, here the absence of a series does.
+    #
+    # PENDING THE READ PATH. This rule evaluates against the hub's own store, so it
+    # fires only once each spoke's cluster:alert_path_alive is reachable from it --
+    # a per-spoke scrape of that one series over the spoke's VMAuth route, registered
+    # when the cluster is registered. Until that lands, the rule is inert rather than
+    # wrong: absent() over a series that was never present does not fire, so this
+    # neither pages falsely nor claims coverage it does not have. The gap is named in
+    # add.10 §5 and is the remaining piece of this architecture.
+    - name: platform.fleet.liveness
+      interval: 30s
+      rules:
+        - alert: SpokeAlertPathSilent
+          expr: absent_over_time(cluster:alert_path_alive[5m])
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A workload cluster's alert path has gone silent"
+            description: >-
+              cluster:alert_path_alive has not arrived from {{ $labels.cluster }} for
+              five minutes. That cluster evaluates and delivers its own alerts, so
+              its silence here means the evaluator, its Alertmanager, or the read
+              path itself has failed -- and a cluster in that state reports nothing
+              wrong rather than reporting a fault.
     - name: platform.pipeline.health
       interval: 30s
       rules:

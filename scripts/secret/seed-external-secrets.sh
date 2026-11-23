@@ -72,10 +72,17 @@ SHARED="/spoke-pool/${CELL_ID}/shared"
 MAPPINGS=(
   "S3_ACCESS_KEY_ID:s3/access-key-id:${SHARED}"
   "S3_SECRET_ACCESS_KEY:s3/secret-access-key:${SHARED}"
-  # ADR-078 add.5 §5: one IRM heartbeat per cluster. This cell's own, from its
-  # own file; the hub's is at the root, below. The IRM alert URL and the mail
-  # password reach each cell through hub-operator's fleet copy.
-  "GRAFANA_IRM_HEARTBEAT_URL:grafana-cloud/irm-heartbeat-url-${CELL_ID}:${SHARED}"
+  # NO PER-CLUSTER HEARTBEAT. This expected a file per cell,
+  # grafana-cloud/irm-heartbeat-url-<cell>, holding that cluster's own Grafana IRM
+  # integration, and wrote it into the cell's shared path (ADR-078 add.5 §5).
+  #
+  # Removed by add.10 §1: a managed cluster calls no third-party endpoint, so there
+  # is no integration to create per cluster and nothing to seed. Its silence is
+  # observed by the hub (add.10 §5), and the only alert credential it needs -- the
+  # mail password -- reaches it through hub-operator's fleet copy.
+  #
+  # The hub's two IRM values stay, at the root, because the hub's monitoring is the
+  # one place a third-party stack is used.
   # The hub's alert delivery, at the root.
   "GRAFANA_IRM_ALERTMANAGER_URL:grafana-cloud/irm-alertmanager-url:/"
   "GRAFANA_IRM_HEARTBEAT_URL:grafana-cloud/irm-heartbeat-url:/"

@@ -46,7 +46,7 @@ spec:
     # patch); PLACEHOLDER is the unreachable default, matching s3-credentials-es.
     - secretKey: hcloudToken
       remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/HCLOUD_TOKEN
+        key: /spoke-pool/PLACEHOLDER/shared/hcloud-token
     - secretKey: databaseUrl
       remoteRef:
         key: /spoke-pool/PLACEHOLDER/shared/EPHEMERAL_JOBS_DATABASE_URL

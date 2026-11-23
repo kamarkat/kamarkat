@@ -50,7 +50,7 @@ given, which is the supported path for replacing one -- rotating the access cred
 does not affect the readability of existing backups, which depends on the SSE-C key
 and not on this.
 
-  kakt escrow enroll-store-credential --box nutgraf-hub < credential.ini`,
+  kakt escrow enroll-store-credential --box acme-hub < credential.ini`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runEnrollStoreCredential(c.Context(), o, c.InOrStdin())
 		},

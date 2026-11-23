@@ -52,7 +52,7 @@ Secret, the repository's CI secret -- stop being reachable.
 The credential arrives on stdin, so it is not in a command argument, a shell history or
 a process list, and it is never printed back.
 
-  kakt escrow enroll-provider-credential --gitops-dir . --cluster nutgraf-hub < token`,
+  kakt escrow enroll-provider-credential --gitops-dir . --cluster acme-hub < token`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runEnrollProviderCredential(c.Context(), o, c.InOrStdin())
 		},

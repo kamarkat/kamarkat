@@ -79,7 +79,11 @@ def main():
     # The parameter names the platform passes, in any of the appsets this file
     # declares. Helm parameters override a values file, which is what makes them
     # the right place for a value the application must not assert.
-    supplied = set(re.findall(r"-\s+name:\s+([A-Za-z0-9_]+)\s*\n\s+value:", appset))
+    # Comment lines between `name:` and `value:` are legal YAML, and requiring the
+    # two to be adjacent made a correctly-supplied parameter invisible: hubDomain was
+    # reported unsupplied because its rationale sat between them.
+    supplied = set(re.findall(
+        r"-\s+name:\s+([A-Za-z0-9_]+)\s*\n(?:\s*#[^\n]*\n)*\s+value:", appset))
     if not supplied:
         out.append(("BAD", f"no helm parameters parsed from {APPSET}; the check cannot tell "
                            f"what the platform supplies"))
@@ -124,7 +128,7 @@ def generated_destination_wins():
     stale, generated = "stale-cluster-01", "generated-cluster-02"
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         # The shape an older application still has on disk.
-        yaml.safe_dump({"tenantId": "example", "appId": "demo",
+        yaml.safe_dump({"tenantId": "example", "hubDomain": "box.example.test", "appId": "demo",
                         "clusterName": stale, "oidcIssuer": "https://id.example.test"}, f)
         values = f.name
 

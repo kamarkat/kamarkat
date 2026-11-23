@@ -1,0 +1,74 @@
+# Live database health, on the cluster whose databases these are.
+#
+# ADR-078 add.10 §6: a rule lives where its metrics are produced and where the
+# controller it watches runs. A workload cluster runs its tenants' CNPG clusters, so
+# pg_up, the connection counters and cnpg_pg_cluster_status all exist here -- and
+# these four alerts existed only on the hub, which means a tenant database going down
+# on a spoke fired nothing anywhere.
+#
+# Not a copy of the hub's inventory. The hub keeps its ArgoCD rules, because ArgoCD
+# runs there and a spoke produces none of those series, and it keeps
+# GrafanaDatasourceErrors, because Grafana is hub-only (add.10 §3). Copying those
+# here to make the two lists match would add rules that can only ever be silent, and
+# a rule that cannot fire is not coverage.
+#
+# cnpg-backup-alerts.yaml beside this file covers whether a database can be RESTORED.
+# This covers whether it is serving.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-database-health
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    component: alerting
+    app.kubernetes.io/managed-by: platform
+spec:
+  groups:
+  - name: platform.database.health
+    interval: 30s
+    rules:
+    - alert: PostgreSQLDown
+      expr: |
+        pg_up == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "PostgreSQL instance {{ $labels.instance }} is down"
+        description: "PostgreSQL instance {{ $labels.instance }} in namespace {{ $labels.namespace }} has been down for more than 1 minute"
+
+    - alert: PostgreSQLHighConnections
+      expr: |
+        (pg_stat_database_numbackends / pg_settings_max_connections) * 100 > 80
+      for: 5m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "High connection count on PostgreSQL {{ $labels.instance }}"
+        description: "PostgreSQL instance {{ $labels.instance }} is using {{ $value | humanize }}% of max connections"
+
+    - alert: PostgreSQLConnectionFailures
+      expr: |
+        rate(pg_stat_database_xact_rollback[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "High transaction rollback rate on {{ $labels.datname }}"
+        description: "Database {{ $labels.datname }} on {{ $labels.instance }} has {{ $value | humanize }} rollbacks per second"
+
+    - alert: CNPGClusterNotHealthy
+      expr: |
+        cnpg_pg_cluster_status{status!="Cluster in healthy state"} == 1
+      for: 5m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "CNPG cluster {{ $labels.cluster }} is not healthy"
+        description: "CNPG cluster {{ $labels.cluster }} in namespace {{ $labels.namespace }} status: {{ $labels.status }}"

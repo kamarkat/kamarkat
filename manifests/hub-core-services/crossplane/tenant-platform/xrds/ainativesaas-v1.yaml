@@ -141,7 +141,7 @@ spec:
               # scoped nothing here.
               clusterName:
                 type: string
-                description: "The managed cluster this tenant runs on (e.g., 'nutgraf-01')"
+                description: "The managed cluster this tenant runs on (e.g., 'acme-01')"
                 pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
               database:
                 type: object

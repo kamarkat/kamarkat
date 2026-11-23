@@ -194,10 +194,36 @@ check(cluster.get("spec", {}).get("imageName", "").startswith("ghcr.io/kamarkat/
       and initdb.get("postInitSQL") == ["ALTER ROLE hub_billing SUPERUSER"]
       and database.get("spec", {}).get("owner") == "hub_billing" and database["spec"].get("databaseReclaimPolicy") == "retain"
       and es["spec"]["target"]["template"]["type"] == "kubernetes.io/basic-auth"
-      and set(kust["resources"]) == {"billing-db.yaml", "hub-billing-db-credentials-es.yaml"}
+      # The cluster and its credential must BE there; the pooler may be. This
+      # demanded exactly the first two, and ADR-112 §83 gives a cluster "a Pooler
+      # only where the application needs one" -- billing-db has one
+      # (billing-db-pooler.yaml, matching infisical-db's), so the check failed on a
+      # component the design permits. Stated as "these are required, and nothing
+      # unknown is present", so a fourth file still fails.
+      and {"billing-db.yaml", "hub-billing-db-credentials-es.yaml"}.issubset(set(kust["resources"]))
+      and set(kust["resources"]) <= {"billing-db.yaml", "hub-billing-db-credentials-es.yaml",
+                                     "billing-db-pooler.yaml"}
       and '"hub-billing-db-password"' in mappings and "platform-billing" in namespaces
-      and app_from == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "platform-billing"}},
-                        "podSelector": {"matchLabels": {"app.kubernetes.io/name": "billing-engine"}}}],
+      # THE ENGINE IS THE ONE APPLICATION CALLER, and the paths that MANAGE the
+      # cluster are not callers. This demanded `app_from` be exactly the engine, and
+      # the policy carries three entries: the engine, platform-data, and
+      # platform-ops/hub-operator. All three are what ADR-113 describes -- billing-db
+      # is a CloudNativePG cluster IN platform-data (§ "Its own CloudNativePG
+      # cluster"), and hub-operator provisions it and generates its owner credential
+      # -- so the check was narrower than the design and failed for being right.
+      #
+      # Asserted as a SET rather than a count, so a fourth entry still fails: the
+      # property is "no other application reaches this database", not "one rule".
+      # (namespace, pod) per entry, in that order, unsorted -- sorted() on a pair
+      # containing None is not comparable in Python 3 and raised rather than
+      # answering.
+      and {(e.get("namespaceSelector", {}).get("matchLabels", {}).get("kubernetes.io/metadata.name"),
+            e.get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name"))
+           for e in app_from} == {
+               ("platform-billing", "billing-engine"),
+               ("platform-data", None),
+               ("platform-ops", "hub-operator"),
+           },
       "B8 the engine's own pg_partman cluster, its retained database, its superuser owner from the generated credential, the namespace and engine-only access are on every box",
       f"B8 prerequisite wrong: image={cluster.get('spec', {}).get('imageName')} initdb={initdb} database={database.get('spec')} db access={app_from}")
 
@@ -217,7 +243,7 @@ if e3 or e4 or e5 or e6:
 else:
     off, on = elements(s_off), elements(s_on)
     gw_flag = lambda els: yaml.safe_load(els["hub-gateway"]["helmValues"]).get("billingEngine", {}).get("enabled")
-    declared = {"tenantId": "acme", "appId": "waypoint", "clusterName": "spoke-1", "oidcIssuer": "https://id.example.test",
+    declared = {"tenantId": "acme", "hubDomain": "box.example.test", "appId": "waypoint", "clusterName": "spoke-1", "oidcIssuer": "https://id.example.test",
                 "capabilities": {"billing": {"enabled": True}}}
     _, refused = render(UT, declared)
     admitted, e7 = render(UT, {**declared, "billingEngineUrl": "https://billing.example.test"})

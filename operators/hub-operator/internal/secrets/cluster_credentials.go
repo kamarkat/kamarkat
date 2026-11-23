@@ -64,6 +64,15 @@ type FleetCredential struct {
 	Key       string
 	Lifecycle Lifecycle
 	Why       string
+
+	// SourceKey is where the value lives at the authority when that is not Key.
+	// One %s receives the cluster's name.
+	//
+	// Needed because a per-cluster value can be named per cluster at the authority
+	// and must not be in the destination: the project IS the cluster now, so
+	// repeating its name in the key says nothing and makes the consumer's path
+	// depend on it twice.
+	SourceKey string
 }
 
 // FleetCredentials are the credentials a workload cluster's own secrets project
@@ -78,12 +87,22 @@ var FleetCredentials = []FleetCredential{
 		Why: "the object store the cell's database archives to; a cell may be pointed at its own bucket"},
 	{Key: "S3_SECRET_ACCESS_KEY", Lifecycle: CopiedOnce,
 		Why: "the other half of the same credential, and rotated with it rather than independently"},
-	// ADR-078 add.5 §5: each spoke's Alertmanager delivers mail and IRM alerts
-	// with the box's credentials. Its heartbeat URL is per cell, seeded per cell.
+	// ADR-078 add.10 §4: mail is NOT self-hosted, so every cluster delivers its own
+	// alerts by email with the box's credential. SMTP is the transport alerts leave
+	// by, not monitoring infrastructure, so add.10 §1's rule does not reach it.
 	{Key: "ALERT_SMTP_PASSWORD", Lifecycle: CopiedOnce,
-		Why: "outbound mail for this cell's alerts"},
-	{Key: "GRAFANA_IRM_ALERTMANAGER_URL", Lifecycle: CopiedOnce,
-		Why: "where this cell's critical alerts page; the heartbeat half is per cell and never copied"},
+		Why: "outbound mail for this cluster's alerts, which every cluster sends for itself"},
+	// GRAFANA_IRM_ALERTMANAGER_URL AND GRAFANA_IRM_HEARTBEAT_URL ARE THE HUB'S.
+	//
+	// Both were here. Copying the box owner's IRM integration into every cluster is
+	// what add.7 warned about in one direction -- one integration receiving every
+	// cluster's heartbeat, so a dead cluster looks alive -- and what add.10 §1
+	// forbids outright in the other: a spoke uses no third-party cloud stack, for
+	// the same reason the box self-hosts Infisical and rents only the escrow.
+	//
+	// A spoke pages nobody through Grafana IRM. It delivers its own alerts by email
+	// (above), and its silence is observed by the hub over its VMAuth read route
+	// (add.10 §5), not by a cloud endpoint it would have to be given.
 	{Key: "ghcr-pull-secret", Lifecycle: CentrallyRotated,
 		Why: "one registry credential for the box, read by every tenant workload's imagePullSecrets. " +
 			"Centrally owned: a rotated token must reach every cluster, or image pulls fail " +
@@ -91,28 +110,38 @@ var FleetCredentials = []FleetCredential{
 	{Key: "hcloud-token", Lifecycle: CentrallyRotated,
 		Why: "provider-owned DNS, for the cell's cert-manager DNS01 solver and external-dns. " +
 			"One account credential for the box, so a rotation converges"},
+	// Generated once per cluster by EnsureCrossplaneAdminPassword, which keeps
+	// writing it to the authority's root as <cluster>-crossplane-admin-password.
+	// That stays the authority; this copies it into the cluster's own project,
+	// which is the only project the cluster's identity can now read.
+	//
+	// COPIEDONCE IS THE WHOLE POINT. This password is the spoke's CNPG
+	// crossplane-admin role: regenerating or converging it desyncs a live database
+	// role, and EnsureCrossplaneAdminPassword treats absence as first-time and
+	// GENERATES. Copying the existing value is what keeps that from happening.
+	{Key: "crossplane-admin-password", Lifecycle: CopiedOnce,
+		SourceKey: "%s-crossplane-admin-password",
+		Why: "this cluster's CNPG crossplane-admin role, generated per cluster at the " +
+			"authority and copied here because the cluster may read only its own project"},
 }
 
-// ExternalPerCellCredentialKeys are per-cell credentials the platform does not and
-// must not generate: each cell has its OWN value, issued by an external system, and
-// copying the hub's into every cell would point every cell's alerts at one
-// integration (ADR-078 add.5 §5, 2026-10-30).
+// NOTHING IS SEEDED PER CLUSTER. There used to be a list here.
 //
-// Declared here so the producer check can tell "externally provisioned per cell"
-// apart from "nothing produces this", and so that a key added to a consumer without
-// a seeding contract still fails. Declaration is NOT evidence the value exists: that
-// is verified live, per cell, by scripts/validate/cluster/078-alert-credentials.sh,
-// because a credential that is merely declared is a credential that silently is not
-// there.
+// ExternalPerCellCredentialKeys declared GRAFANA_IRM_HEARTBEAT_URL as a credential
+// the box owner creates per cell in the incident-response tool and seeds by hand
+// (ADR-078 add.7, 2026-10-30). Removed by add.10: a spoke calls no third-party
+// cloud endpoint, so there is no per-cell heartbeat integration to create, and
+// creating a managed cluster asks the box owner for nothing a second time.
 //
-//	key                         source                                   seeded by
-//	GRAFANA_IRM_HEARTBEAT_URL   one heartbeat integration per cell,       the box owner,
-//	                            created in the incident-response tool;    into
-//	                            each cell needs its own, so this is       /spoke-pool/<cell>/shared/
-//	                            never derived from the hub's
-var ExternalPerCellCredentialKeys = []string{
-	"GRAFANA_IRM_HEARTBEAT_URL",
-}
+// A spoke's silence is observed by the HUB, over the read route add.8 gives it: the
+// spoke publishes its liveness as a small recording-rule series and a hub-side rule
+// pages when that series goes absent (add.10 §5). The observer is still outside the
+// cluster it watches, which is the property a dead-man's switch needs; it is simply
+// the hub rather than a rented endpoint.
+//
+// The hub's own heartbeat still goes to Grafana IRM, because nothing inside the box
+// can witness the whole box going quiet. That is the same carve-out the escrow has:
+// one cloud dependency, at the hub, for the case the box cannot cover itself.
 
 // MaterialiseFleetCredentialsResult reports per-key outcomes so a partially seeded
 // fleet is visible rather than reduced to a single pass/fail.
@@ -156,12 +185,16 @@ func (c *InfisicalClient) MaterialiseFleetCredentialsInto(ctx context.Context, c
 
 	for _, cred := range FleetCredentials {
 		key := cred.Key
+		sourceKey := key
+		if cred.SourceKey != "" {
+			sourceKey = fmt.Sprintf(cred.SourceKey, clusterName)
+		}
 
 		// The authority first: a cell's copy is only as good as the value it came
 		// from, and a credential absent at the source cannot be converged to.
-		value, err := c.GetSecret(ctx, "/", key)
+		value, err := c.GetSecret(ctx, "/", sourceKey)
 		if err != nil || value == "" {
-			out.MissingAtRoot = append(out.MissingAtRoot, key)
+			out.MissingAtRoot = append(out.MissingAtRoot, sourceKey)
 			continue
 		}
 

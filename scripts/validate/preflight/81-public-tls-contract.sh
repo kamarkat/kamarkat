@@ -111,14 +111,38 @@ PY
         hard_fail "AppSet does not forward the environment issuer, lost its boundary-06 project scope, or lost its empty-issuer guard"
     fi
 
-    # ── R6: bootstrap issuer mapping is strict ───────────────────────────────
+    # ── R6: the issuer has ONE authority, and it is the box's declaration ────
+    #
+    # This asserted the opposite of the current design and failed for it. It grepped
+    # for `case "ephemeral":` and `case "dev", "stg", "prod":` -- a switch over the
+    # environment slug inside publicTlsIssuerFor() -- and reported its absence as
+    # "mapping drifted from ADR-051 policy".
+    #
+    # The mapping did not drift. ADR-111 Revision 7 §3 REMOVED it: the switch was a
+    # second authority for a policy the environment-manager chart already requires
+    # as a value, so two mappings had to agree and only one of them shipped to the
+    # cluster. The function now reads the box's own publicTlsIssuer.
+    #
+    # So the contract to assert is the one that replaced it: read, never derived,
+    # and refused when absent. A reintroduced switch is the regression now, and
+    # this fails on it rather than requiring it.
     local orch="$VALIDATE_ROOT/internal/kakt-cli/bootstrap/orchestrator.go"
-    if grep -q 'case "ephemeral":' "$orch" \
-        && grep -A12 'case "dev", "stg", "prod":' "$orch" | grep -q 'letsencrypt-prod' \
-        && grep -q 'refusing to guess TLS policy' "$orch"; then
-        pass "bootstrap issuer mapping: ephemeral→staging, dev/stg/prod→prod, unknown→hard error"
+    local boxvals="$VALIDATE_ROOT/internal/kakt-cli/bootstrap/box_values.go"
+    local fn
+    fn=$(sed -n '/func (o \*Orchestrator) publicTlsIssuerFor()/,/^}/p' "$orch")
+
+    if [[ -z "$fn" ]]; then
+        hard_fail "publicTlsIssuerFor() is gone: the issuer half of ADR-051's policy has no reader"
+    elif grep -qE 'case "(ephemeral|dev|stg|prod)"' <<< "$fn"; then
+        hard_fail "publicTlsIssuerFor() switches on the environment slug again — that is a SECOND authority for a policy the chart already requires as a value (ADR-111 Revision 7 §3), and the two can disagree with only one of them reaching the cluster"
+    elif ! grep -q 'ReadBoxValues' <<< "$fn"; then
+        hard_fail "publicTlsIssuerFor() no longer reads the box's declarations, so the issuer it returns is not the one the chart is given"
+    elif ! grep -q 'PublicTlsIssuer' <<< "$fn"; then
+        hard_fail "publicTlsIssuerFor() does not return the declared publicTlsIssuer"
+    elif ! grep -q 'declares no publicTlsIssuer' "$boxvals"; then
+        hard_fail "nothing refuses an empty publicTlsIssuer: a staging certificate is an explicit choice for a throwaway box, never something a long-lived one inherits by default"
     else
-        hard_fail "publicTlsIssuerFor() mapping drifted from ADR-051 policy (ephemeral=staging; dev/stg/prod=prod; no default)"
+        pass "the public TLS issuer has one authority: read from the box's declarations, no environment switch beside it, and an absent value is refused"
     fi
 
     # ── registry-side checks ─────────────────────────────────────────────────

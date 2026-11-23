@@ -25,6 +25,9 @@
 {{- if not .Values.issuer -}}
 {{- fail "issuer is required with no default: environment bootstrap must pass publicTlsIssuer (ephemeral=letsencrypt-staging, dev/stg/prod=letsencrypt-prod)" -}}
 {{- end -}}
+{{- if and .Values.public.hosts (not .Values.gateway.enabled) -}}
+{{- fail (printf "public.hosts declares %d hostname(s) but gateway.enabled is not set for app %q: the backend this chart routes to, Service agentgateway-%s, is rendered by universal-tenant under that same flag, together with the ReferenceGrant that permits a platform-ops route to reach it. Without it this chart would publish an HTTPRoute to a Service that was never asked for, and Gateway API reports that as RefNotPermitted -- which reads as a permission fault and is really a backend nobody declared. Set gateway.enabled in this app's values file, or remove public.hosts." (len .Values.public.hosts) .Values.appId .Values.appId) -}}
+{{- end -}}
 {{- range .Values.public.hosts -}}
 {{- if hasPrefix "*." . -}}
 {{- fail (printf "wildcard hostname %q declared: wildcard certificates are unissuable under the HTTP-01 solver model (ADR-051)" .) -}}

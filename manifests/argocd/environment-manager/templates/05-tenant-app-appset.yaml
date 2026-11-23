@@ -410,6 +410,22 @@ spec:
               # the application's to assert.
               - name: clusterName
                 value: '{{"{{"}} .name {{"}}"}}'
+              # THE HUB'S DOMAIN, for the one object in this chart that has to
+              # address the hub by name: the application's own SecretStore, whose
+              # hostAPI is the box's Infisical.
+              #
+              # That store used to be built by the tenant-platform composition,
+              # which got this through the templated-fields replaceAll on
+              # dev.nutgraf.in. It moved here because its lifecycle was wrong there
+              # -- see tenant-secret-store.yaml -- and a chart that renders it needs
+              # the same value the composition was given.
+              #
+              # Passed plainly, and REQUIRED where it is used rather than here: the
+              # only consumer is the application's SecretStore, so an empty value
+              # should fail that one object's render with a reason, not this whole
+              # ApplicationSet and with it every application on the box.
+              - name: hubDomain
+                value: {{ $.Values.hubDomain | quote }}
               # Environment-owned, never application-supplied (ADR-050). Passed as a
               # parameter so it overrides anything an application's values file might
               # set, rather than merging with it.

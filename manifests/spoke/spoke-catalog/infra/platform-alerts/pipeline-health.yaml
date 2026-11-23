@@ -1,6 +1,13 @@
 # ADR-078 add.5 §5: the pipeline reports its own failure. A cluster cannot report
-# its own silence; its heartbeat does, by its absence at the external IRM
-# heartbeat. The rules below report loss the agents can still see.
+# its own silence; something outside it has to notice.
+#
+# On a SPOKE that observer is the hub, not an external IRM heartbeat (add.10 §1 and
+# §5): the recording rule below publishes this cluster's liveness as a small series,
+# and a hub-side rule pages when the series goes absent over this cluster's VMAuth
+# read route. The hub is outside the cluster it watches, which is what the switch
+# needs, and no spoke is given a third-party cloud endpoint to call.
+#
+# The rules after it report loss the agents can still see.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -16,9 +23,22 @@ spec:
     - name: platform.pipeline.health
       interval: 30s
       rules:
+        # WHAT THE HUB READS. A recording rule, not an alert: alerts live in this
+        # cluster's Alertmanager and go no further, while a series is queryable from
+        # the hub over the read route (add.8) without copying any telemetry.
+        #
+        # Deliberately one sample, one label set, every 30s -- the whole fleet's
+        # liveness costs the hub one instant query per cluster. This is the shape the
+        # 2026-11-24 review approved for every fleet-level view: a small series each
+        # cluster computes locally, combined by the hub, rather than raw data
+        # crossing clusters or a federation tier to evaluate it.
+        - record: cluster:alert_path_alive
+          expr: vector(1)
         # Always firing. Its ABSENCE at a receiver means the alert path itself
         # (ruler, Alertmanager, receiver) is broken -- which no other alert
-        # can report.
+        # can report. On this cluster it is routed to a receiver that delivers
+        # nothing, because the hub watches the series above instead; see
+        # vmalertmanager.yaml.
         - alert: PlatformHeartbeat
           expr: vector(1)
           labels:

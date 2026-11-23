@@ -30,7 +30,19 @@
 # (spoke-catalog's tenant-redirect), hostname-agnostic, covering every tenant
 # rather than being restated per tenant here.
 #
-# Backends are same-namespace, so no ReferenceGrant exists to be abused.
+# Backends are CROSS-namespace: this route lives in platform-ops and every
+# backendRef below names tenant-<tenant>-<app>. Gateway API refuses that unless the
+# TARGET namespace consents, and universal-tenant issues exactly that consent -- a
+# ReferenceGrant scoped to one kind, one source namespace and one Service name,
+# rendered beside the Service under the same gateway.enabled flag.
+#
+# That direction is the security property: the grant is issued BY the namespace
+# being referenced, so no tenant can make another tenant's services routable.
+#
+# This comment previously claimed the backends were same-namespace and that no
+# grant existed. Both halves were wrong, and the claim is why a dangling route
+# reporting RefNotPermitted looked like a Gateway API quirk rather than an app
+# whose gateway was never enabled.
 #
 # Coexists with spoke-catalog's hostname-less tenant-ingress: Gateway API resolves
 # overlapping routes by hostname specificity, so these explicit names win for this

@@ -111,6 +111,92 @@ def main():
                f"ApplicationSet and hub-operator, so a packaged box and an unreleased one "
                f"resolve the store identically")
 
+    # EVERY reader, against the one writer.
+    #
+    # THE INVARIANT: the only thing that writes into a cluster's project is
+    # hub-operator's FleetCredentials table. So every key the spoke reads from that
+    # project must appear in that table. Anything else resolves to nothing -- the
+    # key may well exist, in hub-secrets, which the spoke's identity is no longer a
+    # member of.
+    #
+    # A prefix rule cannot express this. Three consumers were migrated one at a
+    # time, each found only when something broke, and two more were still wrong
+    # after stable shipped: crossplane-admin-credentials reads a password
+    # hub-operator writes to hub-secrets, and the IRM heartbeat reads a key nothing
+    # materialises into the cluster's project at all. Both are cluster-scoped by
+    # name and both resolve to nothing.
+    import yaml
+    fleet_src = Path("operators/hub-operator/internal/secrets/cluster_credentials.go").read_text()
+    written = set(re.findall(r'(?<!Source)\bKey:\s*"([^"]+)"', fleet_src))
+    # NOTHING IS SEEDED PER CLUSTER (ADR-078 add.10 §1). There was a derivation
+    # here reading ExternalPerCellCredentialKeys, which is gone: no spoke calls a
+    # third-party endpoint, so there is no per-cell credential for an owner to seed.
+    # Creating a managed cluster asks for nothing.
+    external_keys = set()
+
+    # Keys with a recorded reason for having no producer, read from the ONE place
+    # that records them: 95-infisical-key-producers.sh's PENDING registry. Its
+    # EPHEMERAL_JOBS_DATABASE_URL entry predates this work and says the open
+    # question outright -- whether the platform mints a least-privilege role or the
+    # tenant supplies the DSN. Re-listing it here would make two registries that
+    # can disagree, and a reader of a pending key is already that check's finding,
+    # not this one's.
+    producers = Path("scripts/validate/preflight/95-infisical-key-producers.sh").read_text()
+    pending_block = re.search(r"^PENDING\s*=\s*\{(.*?)^\}", producers, re.S | re.M)
+    if not pending_block:
+        bad("95-infisical-key-producers.sh declares no PENDING registry, so a key with no "
+            "producer cannot be told from one with a recorded reason")
+        pending = set()
+    else:
+        pending = set(re.findall(r'"([^"]+)":\s*\(', pending_block.group(1)))
+        ok(f"{len(pending)} key(s) have a recorded open producer question and are assessed by "
+           f"95-infisical-key-producers, not here: {', '.join(sorted(pending))}")
+    written |= pending
+    if not written:
+        bad("no FleetCredentials keys could be derived, so what a spoke may read is unknown")
+        written = set()
+    else:
+        ok(f"a cluster's project holds {len(written)} key(s): "
+           f"{len(written - pending)} materialised by hub-operator, and nothing seeded "
+           f"per cluster by the box owner")
+
+    catalogue = Path("manifests/spoke/spoke-catalog")
+    unwritten = []
+    for f in sorted(catalogue.rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(f.read_text()))
+        except yaml.YAMLError:
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "ExternalSecret":
+                continue
+            name = (doc.get("metadata") or {}).get("name") or ""
+            rule = re.search(rf"name:\s*{re.escape(name)}\b(.*?)(?=\n- kind:|\Z)", tf, re.S)
+            for i, entry in enumerate((doc.get("spec") or {}).get("data") or []):
+                source_key = ((entry or {}).get("remoteRef") or {}).get("key")
+                if not isinstance(source_key, str) or not source_key:
+                    continue
+                # The released path's rule wins, because that is what a box runs.
+                effective = source_key
+                if rule:
+                    rewritten = re.search(rf"path:\s*\[spec,\s*data,\s*{i},\s*remoteRef,\s*key\]"
+                                          rf"(?:\s*\n\s*#[^\n]*)*"
+                                          rf"\s*\n\s*value:\s*'([^']+)'", rule.group(1))
+                    if rewritten:
+                        effective = rewritten.group(1)
+                leaf = effective.rstrip("/").rsplit("/", 1)[-1]
+                if leaf in written:
+                    continue
+                unwritten.append(f"{name} ({f.relative_to(catalogue)}) reads {effective!r}")
+    if unwritten:
+        for u in unwritten:
+            bad(f"a spoke reads a key nothing materialises into its project: {u}. The key may "
+                f"exist in hub-secrets, which this identity is deliberately not a member of, so "
+                f"it resolves to nothing")
+    else:
+        ok("every key the spoke catalogue reads is one hub-operator materialises into that "
+           "cluster's project, so nothing resolves outside what the identity may read")
+
     # The DNS credential travels the same two paths, and was migrated on one.
     dns = re.search(r"name:\s*hetzner-dns-credentials(.*?)(?=\n- kind:|\Z)", tf, re.S)
     if not dns:

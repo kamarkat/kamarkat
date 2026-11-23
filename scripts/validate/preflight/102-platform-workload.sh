@@ -32,7 +32,7 @@ import copy, json, os, shutil, subprocess, tempfile, yaml
 LIB = os.path.abspath("manifests/tenants/charts/platform-workload")
 DIGEST = "sha256:" + "0" * 64
 BASE = {
-    "tenantId": "acme", "appId": "shop", "costCenter": "platform",
+    "tenantId": "acme", "hubDomain": "box.example.test", "appId": "shop", "costCenter": "platform",
     "workload": {"component": "bff", "image": {"repository": "ghcr.io/example/shop-bff"},
                  "ports": {"http": 3001}},
 }

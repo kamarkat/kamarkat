@@ -83,6 +83,14 @@ externalDnsTarget: ""
 # only when this is on, so the route to it must carry the same condition -- the
 # two charts render one decision and disagreeing is a 503 on a public hostname.
 gateway:
+  # DECLARED HERE BECAUSE THIS CHART DEPENDS ON IT, not because it owns it.
+  #
+  # universal-tenant renders Service agentgateway-<app> and the ReferenceGrant
+  # letting a platform-ops HTTPRoute reach it, both under this flag. This chart's
+  # route targets that Service, so public.hosts without this is an HTTPRoute
+  # pointing at nothing -- refused as RefNotPermitted, which names the wrong
+  # cause. tenant-public-tls.requirements fails the render instead, naming this.
+  enabled: false
   webhooks:
     enabled: false
   # Read from the same per-app values file as universal-tenant, which binds the

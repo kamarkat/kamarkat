@@ -1,23 +1,21 @@
-# The tenant-platform composition reaches Infisical by URL when it provisions a
-# tenant, and that URL was the platform's own instance.
+# NOTHING IN THIS COMPOSITION IS TEMPLATED PER BOX ANY MORE.
 #
-# NOT the API group. spokepools.nutgraf.in, ainativesaases.nutgraf.in and
+# Two rules lived here, both for objects that have moved to universal-tenant's
+# workload path (see the composition's own note where items 7 and 8 were):
+#
+#   - replaceAll dev.nutgraf.in -> global.hubDomain, for the tenant SecretStore's
+#     hostAPI, the one name in this composition that anyone resolved;
+#   - resources[8] ... secretsScope.environmentSlug -> the box's management scope,
+#     addressed by index because the literal is the bare word `management`.
+#
+# Both are now the chart's: the ApplicationSet passes hubDomain as a parameter and
+# the store declares the management scope directly. Keeping either rule here would
+# fail the release rather than drift silently -- replaceAll raises on zero matches
+# and assign() refuses a path that is not there -- which is how this file is
+# supposed to behave and why removing the rules is part of moving the objects.
+#
+# NOT the API groups. spokepools.nutgraf.in, ainativesaases.nutgraf.in and
 # nutgraf.in/v1alpha1 identify the platform's CRDs in the same sense as
 # cluster.x-k8s.io; templating them would rename the API a cluster serves and
-# leave every claim referencing a group nothing registers. Only the hostAPI is a
-# name anyone resolves, which is why the literal named below carries the
-# environment prefix that the group names never do.
-- kind: Composition
-  name: ainativesaas-starter-hetzner
-  fields:
-    - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
-    # The tenant SecretStore's scope, addressed rather than substituted: the
-    # literal is the bare word `management`, and replaceAll would rewrite it
-    # wherever it appeared in a 900-line Composition.
-    #
-    # The index is checked at packaging -- assign() refuses a path that is not
-    # there -- so a resource inserted above it fails the release rather than
-    # publishing a store that reads an unrelated scope.
-    - path: [spec, pipeline, 0, input, resources, 8, base, spec, forProvider, manifest, spec, provider,
-             infisical, secretsScope, environmentSlug]
-      value: '{{ .Values.global.management.infisicalEnvironmentSlug }}'
+# leave every claim referencing a group nothing registers.
+[]

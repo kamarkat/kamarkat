@@ -609,186 +609,22 @@ spec:
           # rather than receiving an unrouted API it never requested: nothing routed to
           # this one, and no application in this box's fleets ever called it.
 
-          # 7. Infisical Credentials for SDK (ADR-003, ADR-019)
-          #    Pulls the Machine Identity credentials from the shared Infisical path.
-          #    MUST use ClusterSecretStore since the tenant SecretStore doesn't exist yet!
-          - name: infisical-credentials-secret
-            base:
-              apiVersion: kubernetes.crossplane.io/v1alpha2
-              kind: Object
-              spec:
-                managementPolicies: ["*"]
-                forProvider:
-                  manifest:
-                    apiVersion: external-secrets.io/v1
-                    kind: ExternalSecret
-                    metadata:
-                      namespace: ""  # Patched to tenant-<id>
-                    spec:
-                      refreshInterval: 1h
-                      secretStoreRef:
-                        name: infisical-backend
-                        kind: ClusterSecretStore
-                      target:
-                        name: ""  # Patched to <tenantId>-infisical-credentials
-                        creationPolicy: Owner
-                        template:
-                          data:
-                            client-id: '{{ index . "client-id" }}'
-                            client-secret: '{{ index . "client-secret" }}'
-                            project-id: '{{ index . "project-id" }}'
-                          engineVersion: v2
-                          mergePolicy: Replace
-                          type: Opaque
-                      data:
-                        - secretKey: client-id
-                          remoteRef:
-                            key: ""  # Patched dynamically
-                            property: client-id
-                        - secretKey: client-secret
-                          remoteRef:
-                            key: ""  # Patched dynamically
-                            property: client-secret
-                        - secretKey: project-id
-                          remoteRef:
-                            key: ""  # Patched dynamically
-                            property: project-id
-                providerConfigRef:
-                  name: ""  # Patched to cellId
-            readinessChecks:
-              - type: MatchCondition
-                matchCondition:
-                  type: Ready
-                  status: "True"
-            patches:
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.clusterName
-              toFieldPath: spec.providerConfigRef.name
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.scopeId
-              toFieldPath: metadata.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-infisical-credentials-es"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.appId
-              toFieldPath: spec.forProvider.manifest.metadata.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-infisical-credentials"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.scopeId
-              toFieldPath: spec.forProvider.manifest.metadata.namespace
-              transforms:
-              - type: string
-                string:
-                  fmt: "tenant-%s"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.appId
-              toFieldPath: spec.forProvider.manifest.spec.target.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-infisical-credentials"
-            # PULL COMPOSITE JSON OBJECT FROM SHARED PATH
-            - type: CombineFromComposite
-              combine:
-                variables:
-                  - fromFieldPath: spec.clusterName
-                strategy: string
-                string:
-                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
-              toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
-            - type: CombineFromComposite
-              combine:
-                variables:
-                  - fromFieldPath: spec.clusterName
-                strategy: string
-                string:
-                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
-              toFieldPath: spec.forProvider.manifest.spec.data[1].remoteRef.key
-            - type: CombineFromComposite
-              combine:
-                variables:
-                  - fromFieldPath: spec.clusterName
-                strategy: string
-                string:
-                  fmt: "/spoke-pool/%s/shared/infisical-credentials"
-              toFieldPath: spec.forProvider.manifest.spec.data[2].remoteRef.key
-
-          # 8. Tenant-specific SecretStore (ESO)
-          #    Provides ESO scope isolation per tenant. Uses the shared Machine Identity
-          #    projected into the tenant namespace.
-          - name: tenant-secret-store
-            base:
-              apiVersion: kubernetes.crossplane.io/v1alpha2
-              kind: Object
-              spec:
-                managementPolicies: ["*"]
-                forProvider:
-                  manifest:
-                    apiVersion: external-secrets.io/v1
-                    kind: SecretStore
-                    metadata:
-                      name: tenant-secret-store
-                      namespace: ""  # Patched to tenant-<id>
-                    spec:
-                      provider:
-                        infisical:
-                          hostAPI: "https://infisical.dev.nutgraf.in"
-                          secretsScope:
-                            projectSlug: "hub-secrets"
-                            # The MANAGEMENT scope (ADR-111 Revision 7 §2), templated per box.
-                            # This store reads /spoke-pool/<cell>/tenants/<tenant>/... , which
-                            # hub-operator writes through the box's declared management scope,
-                            # so it follows that scope and not the cell's environment.
-                            environmentSlug: "management"
-                          auth:
-                            universalAuthCredentials:
-                              clientId:
-                                name: ""  # Patched to <tenantId>-infisical-credentials
-                                key: client-id
-                              clientSecret:
-                                name: ""  # Patched to <tenantId>-infisical-credentials
-                                key: client-secret
-                providerConfigRef:
-                  name: ""  # Patched to cellId
-            readinessChecks:
-              - type: MatchCondition
-                matchCondition:
-                  type: Ready
-                  status: "True"
-            patches:
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.clusterName
-              toFieldPath: spec.providerConfigRef.name
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.scopeId
-              toFieldPath: metadata.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-tenant-secret-store"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.scopeId
-              toFieldPath: spec.forProvider.manifest.metadata.namespace
-              transforms:
-              - type: string
-                string:
-                  fmt: "tenant-%s"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.appId
-              toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientId.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-infisical-credentials"
-            - type: FromCompositeFieldPath
-              fromFieldPath: spec.appId
-              toFieldPath: spec.forProvider.manifest.spec.provider.infisical.auth.universalAuthCredentials.clientSecret.name
-              transforms:
-              - type: string
-                string:
-                  fmt: "%s-infisical-credentials"
+          # ITEMS 7 AND 8 MOVED OUT, to universal-tenant's workload path.
+          #
+          # They were the application's Infisical credential ExternalSecret and its
+          # tenant-secret-store SecretStore -- plain Kubernetes objects that needed
+          # nothing from Crossplane, and whose lifecycle was wrong here. This XR is
+          # gated on `database.enabled` (ainativesaas.yaml), so an application with
+          # no database never received a SecretStore, while the templates that read
+          # it -- workload-secrets, workload-oauth-secrets, agentgateway -- render
+          # regardless. The platform credentials every application needs are not
+          # conditional on a database.
+          #
+          # nutgraf-waypoint-stg was exactly that: database.enabled false, and two
+          # platform ExternalSecrets reporting
+          # `SecretStore "tenant-secret-store" not found`.
+          #
+          # They now render beside the ExternalSecrets that consume them, in
+          # universal-tenant/templates/tenant-secret-store.yaml, so whatever renders
+          # a reader renders its store. Nothing here addresses Infisical any more,
+          # which is why this composition no longer has a templated-fields entry.

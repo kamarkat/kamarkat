@@ -52,6 +52,7 @@ resources:
   # ADR-014 recovery contract made observable: every rule here fires on a
   # condition CNPG itself reports as "Cluster in healthy state".
   - platform-alerts/cnpg-backup-alerts.yaml
+  - platform-alerts/database-health.yaml
   # ADR-078 add.3 §5: the pipeline's own failure, detected in the stack.
   - platform-alerts/pipeline-health.yaml
   # ADR-078 addendum 5: the spoke's own stores, evaluators and Alertmanager.

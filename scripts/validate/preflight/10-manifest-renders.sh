@@ -67,7 +67,12 @@ validate_manifest_renders() {
     # ADR-088: the tenant chart renders one APP of one TENANT, and neither
     # identifier defaults to the other. A fixture short of either reports the
     # chart broken when it is the fixture that is incomplete.
+    # hubDomain: the application's own SecretStore addresses the box's Infisical by
+    # name, and the chart refuses to guess it -- so a fixture without it reports the
+    # chart broken when it is the fixture that is short. The ApplicationSet passes it
+    # as a parameter on every render (05-tenant-app-appset).
     local ut_values=(--set tenantId=example --set appId=demo --set clusterName=spoke-01
+                     --set hubDomain=box.example.test
                      --set oidcIssuer=https://id.example.test)
 
     local chart

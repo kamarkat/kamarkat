@@ -15,11 +15,27 @@ import subprocess
 import sys
 import tempfile
 
+from pathlib import Path
 import yaml
 
 CELL = "test-cell"  # stand-in for the ArgoCD {{.name}} substitution
 ALLOWED = (f"/spoke-pool/{CELL}/shared/", f"/spoke-pool/{CELL}/tenants/")
-CATALOG = "manifests/spoke/spoke-catalog/infra"
+# THE REAL RENDER ROOTS, not the provider-neutral base.
+#
+# This built .../infra alone, which is what providers/<prov>/kustomization.yaml
+# lists FIRST and not what any box renders: each provider root also pulls in
+# ../../provider/<prov>, and an ExternalSecret contributed there was invisible
+# here. cert-manager/hetzner-dns-cert-manager lives in the hetzner overlay, so a
+# correct ApplicationSet patch for it was reported as patching an object the
+# catalogue does not render -- while the object itself, reading the project root,
+# went unexamined for exactly as long.
+#
+# The union across providers is the right set: a patch may legitimately target an
+# object only one provider contributes, and every provider root includes infra.
+CATALOG_ROOTS = sorted(
+    str(d) for d in Path("manifests/spoke/spoke-catalog/providers").iterdir()
+    if (d / "kustomization.yaml").is_file()
+)
 
 # Known root-path consumers, recorded so the rule is enforceable TODAY while the
 # debt stays visible — the same pattern 99-tenant-identifiers.sh uses.
@@ -63,8 +79,11 @@ def run(cmd, what):
 
 # ── 1. the ExternalSecrets the spoke actually receives ───────────────────────
 secrets = {}
-for doc in yaml.safe_load_all(run(["kubectl", "kustomize", CATALOG],
-                                  "spoke-catalog does not build")):
+rendered = []
+for root in CATALOG_ROOTS:
+    rendered.extend(d for d in yaml.safe_load_all(
+        run(["kubectl", "kustomize", root], f"spoke-catalog does not build at {root}")) if d)
+for doc in rendered:
     if not doc or doc.get("kind") != "ExternalSecret":
         continue
     name = doc["metadata"]["name"]

@@ -219,7 +219,19 @@ for root in PLATFORM:
         if not f:
             continue
         # Vendored or generated trees are not authored platform code.
-        if "/vendor/" in f or "/reference-projects/" in f:
+        #
+        # internal/platform/embedded is the packaging tree: a COPY of manifests and
+        # scripts already checked at the paths they are authored in. Counting the
+        # copy duplicates every real finding and manufactures false ones -- this
+        # very file is embedded, and its own pattern list contains the tenant names
+        # it searches for, so it failed on a copy of itself. Fourteen of the twenty
+        # preflight failures were that, including embedded copies of six other
+        # checks whose subject is tenant naming.
+        #
+        # The authored originals are still checked. Nothing is skipped; the same
+        # bytes are simply not counted twice.
+        if ("/vendor/" in f or "/reference-projects/" in f
+                or "internal/platform/embedded/" in f):
             continue
         # A TEST FIXTURE IS NOT A RUNTIME DEPENDENCY, and this rule is about
         # runtime dependencies. The header's own example says why: the

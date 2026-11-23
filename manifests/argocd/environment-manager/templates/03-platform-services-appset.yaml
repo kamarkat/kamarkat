@@ -825,7 +825,7 @@ spec:
               patch: |
                 - op: replace
                   path: /spec/data/0/remoteRef/key
-                  value: '{{"{{"}}.name{{"}}"}}-crossplane-admin-password'
+                  value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/crossplane-admin-password'
             # ADR-014 backup contract: per-spoke barman prefix. destinationPath is
             # a Cluster property — ScheduledBackup has no destination fields and
             # inherits this configuration.
@@ -896,6 +896,19 @@ spec:
                 - op: replace
                   path: /spec/data/0/remoteRef/key
                   value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/hcloud-token'
+            # The same credential, read a second time by cert-manager's DNS-01
+            # solver through Secret cert-manager/hetzner-dns. A different object in
+            # a different namespace from the hetzner provider overlay, and the one
+            # that gates public TLS: without it the solver cannot present a
+            # challenge, so no certificate, no programmed listener, and no DNS
+            # record for the tenant's hostname.
+            - target:
+                kind: ExternalSecret
+                name: hetzner-dns-cert-manager
+              patch: |
+                - op: replace
+                  path: /spec/data/0/remoteRef/key
+                  value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/hcloud-token'
             # ADR-031 cell-scoped authorisation. The cell Machine Identity may read
             # /spoke-pool/<cell-id>/ only, so every spoke ExternalSecret must resolve
             # inside that prefix. Both of these previously used ROOT-path keys and so
@@ -921,12 +934,6 @@ spec:
                 - op: replace
                   path: /spec/data/0/remoteRef/key
                   value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/ALERT_SMTP_PASSWORD'
-                - op: replace
-                  path: /spec/data/1/remoteRef/key
-                  value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/GRAFANA_IRM_ALERTMANAGER_URL'
-                - op: replace
-                  path: /spec/data/2/remoteRef/key
-                  value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/GRAFANA_IRM_HEARTBEAT_URL'
             # ADR-078 add.5 §4: the spoke Loki's object-storage keys, in its own cell.
             - target:
                 kind: ExternalSecret

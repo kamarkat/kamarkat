@@ -22,7 +22,7 @@ validate_gateway_egress_not_partially_restricted() {
 import subprocess, tempfile, yaml
 
 FIXTURE = {
-    "tenantId": "test-tenant",
+    "tenantId": "test-tenant", "hubDomain": "box.example.test",
     "appId": "test-app",
     "clusterName": "spoke-1",
     "oidcIssuer": "https://id.example.test",

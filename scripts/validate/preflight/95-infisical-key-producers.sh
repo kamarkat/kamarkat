@@ -105,12 +105,14 @@ cell_produced |= set(re.findall(r'Key:\s*"([^"]+)"', block.group(1)))
 # Being declared is not evidence the value exists. These are reported, and presence
 # is asserted live per cell by cluster/078-alert-credentials.sh -- a static
 # allowlist would turn a missing credential into a permanent pass.
+# NOTHING IS EXTERNALLY PROVISIONED PER CELL (ADR-078 add.10 §1).
+#
+# This derived ExternalPerCellCredentialKeys, which carried GRAFANA_IRM_HEARTBEAT_URL
+# as a credential the box owner created per cluster in an incident-response tool and
+# seeded by hand. That key is the hub's, a spoke calls no third-party endpoint, and a
+# spoke's silence is observed by the hub instead (add.10 §5). The set stays, empty, so
+# the reports below read the same way and a future per-cell contract has one home.
 external_cell = set()
-if os.path.exists(CELL_SRC):
-    block = re.search(r'ExternalPerCellCredentialKeys\s*=\s*\[\]string\{(.*?)\}',
-                      open(CELL_SRC).read(), re.S)
-    if block:
-        external_cell = set(re.findall(r'"([^"]+)"', block.group(1)))
 
 # GENERATED into each cell by the application-secret uploader. These are produced,
 # not copied, so they are declared alongside the other generated secrets: any

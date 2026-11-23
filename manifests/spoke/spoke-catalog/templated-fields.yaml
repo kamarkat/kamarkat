@@ -21,7 +21,16 @@
   # resolves.
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '{{ .Values.spokeName }}-crossplane-admin-password'
+      # THIS CLUSTER'S COPY. The authority still names it per cluster at its root
+      # (<cluster>-crossplane-admin-password, written by
+      # EnsureCrossplaneAdminPassword); hub-operator copies it here, because the
+      # cluster's identity may read only its own project and the authority's
+      # project is not it. Copied once, never converged: this is the spoke's CNPG
+      # crossplane-admin role.
+      #
+      # The cluster's name is gone from the key. The project is the cluster now, so
+      # naming it again said nothing and made this path depend on it twice.
+      value: '/spoke-pool/{{ .Values.spokeName }}/shared/crossplane-admin-password'
 
 - kind: Cluster
   name: shared-cnpg
@@ -177,6 +186,22 @@
   #
   # The ApplicationSet patches the same field on the unreleased path. Both paths
   # deliver this object, and only one of them is what a released box runs.
+  fields:
+    - path: [spec, data, 0, remoteRef, key]
+      value: '/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token'
+
+- kind: ExternalSecret
+  name: hetzner-dns-cert-manager
+  # THE SECOND READER OF THE SAME CREDENTIAL, and the one that blocks public TLS.
+  #
+  # cert-manager's DNS-01 solver reads Secret cert-manager/hetzner-dns, which this
+  # ExternalSecret populates -- a separate object from platform-ops'
+  # hetzner-dns-credentials, in a different namespace, delivered by the hetzner
+  # provider overlay rather than infra/. Migrating only the one I knew about left
+  # this reading the project root, so after the narrowing the solver failed with
+  # `secrets "hetzner-dns" not found`, the Gateway's HTTPS listener had no
+  # certificate, external-dns published no record, and the tenant's hostname did
+  # not resolve at all. One unmigrated key, four symptoms, none of them naming it.
   fields:
     - path: [spec, data, 0, remoteRef, key]
       value: '/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token'
@@ -419,10 +444,11 @@
   fields:
     - path: [spec, data, 0, remoteRef, key]
       value: '/spoke-pool/{{ .Values.spokeName }}/shared/ALERT_SMTP_PASSWORD'
-    - path: [spec, data, 1, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/GRAFANA_IRM_ALERTMANAGER_URL'
-    - path: [spec, data, 2, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/GRAFANA_IRM_HEARTBEAT_URL'
+    # Indices 1 and 2 are gone with the two Grafana IRM entries they rewrote: a
+    # spoke holds no third-party incident credential (ADR-078 add.10 §4). Removing
+    # the manifest entries without these would have left both delivery paths
+    # patching /spec/data/1 and /2 on a one-entry object -- index drift, caught by
+    # 96-spoke-secret-authz before it reached a cluster.
 
 # ── ADR-078 addendum 5 §4: the spoke's Loki ──────────────────────────────────
 - kind: ConfigMap

@@ -57,11 +57,27 @@ def main():
     if not files:
         print(f"BAD\tno tenant compositions found under {COMPOSITIONS}")
         return
+    examined = 0
     for path in files:
         for doc in yaml.safe_load_all(path.read_text()):
             if not doc or doc.get("kind") != "Composition":
                 continue
-            for res in (doc.get("spec") or {}).get("resources") or []:
+            # BOTH FORMS. This read spec.resources only, and these compositions are
+            # written in the pipeline form -- spec.pipeline[].input.resources, with
+            # function-patch-and-transform -- so the loop ran zero times, the script
+            # printed nothing at all, and the wrapper reported "the tenant selector
+            # check produced no output" rather than any finding. It had stopped
+            # checking, silently, whenever the migration happened.
+            resources = list((doc.get("spec") or {}).get("resources") or [])
+            for step in (doc.get("spec") or {}).get("pipeline") or []:
+                resources.extend(((step.get("input") or {}).get("resources")) or [])
+            if not resources:
+                print(f"BAD\t{path.name}: a Composition declaring no resources in "
+                      f"spec.resources or spec.pipeline[].input.resources — this check "
+                      f"cannot see what it composes")
+                continue
+            for res in resources:
+                examined += 1
                 manifest = dig(res, "base.spec.forProvider.manifest") or {}
                 kind = manifest.get("kind")
                 name = f"{path.name}: {res.get('name')} ({kind})"
@@ -94,6 +110,11 @@ def main():
                     print(f"BAD\t{name}: {', '.join(missing)} must carry app-id patched from spec.appId")
                 else:
                     print(f"OK\t{name}: selects by app-id")
+
+    # Printing nothing is how this failed for as long as it did. Say so here, where
+    # the reason is known, instead of leaving the wrapper to infer it from silence.
+    if examined == 0:
+        print("BAD\tno composed resources were examined, so no selector was checked")
 
 
 if __name__ == "__main__":
