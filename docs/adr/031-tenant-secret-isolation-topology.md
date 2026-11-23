@@ -124,3 +124,50 @@ that project's content -- PKI objects, never this platform's secrets.
 
 Gated by `scripts/validate/preflight/037-cluster-secret-project.py` and
 `031-infisical-api-contract.py`.
+
+## Delivering a per-spoke field (learned releasing 0.3.45)
+
+A per-spoke field on the spoke catalogue is delivered twice, and changing one path
+is the failure that cost two release candidates:
+
+- **Unreleased manifests** — the `kustomize.patches` on the ApplicationSet
+  (`03-platform-services-appset.yaml`, the `{{- else }}` branch).
+- **A released box** — the field rules in
+  `manifests/spoke/spoke-catalog/templated-fields.yaml`, because an ArgoCD source
+  naming a Helm chart cannot also carry patches (ADR-063).
+
+The store's `projectSlug` was patched on the ApplicationSet alone. Every check
+agreed, because the only check that compared the slug read the same path that had
+been edited. The packaged chart — what a released box actually runs — still named
+`hub-secrets`, so on `nutgraf-stg-01` the identity was narrowed correctly and the
+store then could not validate: it was pointed at a project the identity is
+deliberately not a member of. `hetzner-dns-credentials` had the same omission one
+release later.
+
+`037-cluster-secret-project.py` now reads both paths and asserts they name the
+same project. A check that knows one of two delivery paths cannot see a
+divergence between them.
+
+## What a verifier may conclude (learned releasing 0.3.45)
+
+`031-cluster-secret-isolation` could not run for its first three candidates: it
+called the identity listing without the `orgId` that route requires, took the 422
+as "no such identity", and reported that through `soft_fail` — which means *not
+yet converged, expected to self-heal*. A malformed query never self-heals, and the
+property had to be established by hand instead.
+
+Three rules follow, and they apply to any check that asserts an authorization
+property:
+
+1. **"Could not put the question" is not "the answer is no."** One return value
+   for both makes a broken verifier indistinguishable from a finding.
+2. **Unobtainable is `unverified`, never `soft_fail`.** Soft means converging.
+   Nothing about a refused credential or a rejected query converges.
+3. **A partial inventory asserts nothing.** Only the specific "membership not
+   found" 404 is an answer; any other response means that project would not say,
+   and the identity cannot be counted absent from it. This check returned its
+   partial result whenever anything had been found, so one project erroring while
+   the cluster's own project answered produced a complete-looking inventory and a
+   PASS on "a member of nothing else" — loudest in exactly the case worth
+   catching, an identity still holding `hub-secrets` when `hub-secrets` is the
+   project that errored.
