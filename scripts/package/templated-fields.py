@@ -222,14 +222,14 @@ def int_placeholder(template):
 
 
 def _dump(doc):
-    text = yaml.dump(doc, Dumper=_Dumper, sort_keys=False, width=10**6)
+    text = yaml.dump(doc, Dumper=_Dumper, sort_keys=False, width=10**6, allow_unicode=True)
     for key, template in _INT_TEMPLATES.items():
         text = text.replace(key, template)
     return text
 
 
 def _dump_all(docs, handle):
-    yaml.dump_all(docs, handle, Dumper=_Dumper, sort_keys=False, width=10**6)
+    yaml.dump_all(docs, handle, Dumper=_Dumper, sort_keys=False, width=10**6, allow_unicode=True)
 
 
 
