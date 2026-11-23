@@ -28,6 +28,18 @@ from pathlib import Path
 
 HUB_SOURCE = Path("operators/hub-operator/internal/secrets/cluster_project.go")
 APPSET = Path("manifests/argocd/environment-manager/templates/03-platform-services-appset.yaml")
+# THE RELEASED PATH. A per-spoke field on the spoke catalogue is delivered twice:
+# the ApplicationSet's kustomize patches when the box runs unreleased manifests,
+# and these field rules when it runs a packaged chart -- because an ArgoCD source
+# naming a Helm chart cannot also carry patches (ADR-063).
+#
+# This file was not read here, and the omission cost a release: the store's
+# projectSlug was patched on the ApplicationSet alone, so every check agreed while
+# the packaged chart -- what a released box actually runs -- still named
+# hub-secrets. On nutgraf-stg-01 the identity was narrowed correctly and then the
+# store could not validate, because it was pointed at a project the identity is
+# deliberately not a member of.
+TEMPLATED_FIELDS = Path("manifests/spoke/spoke-catalog/templated-fields.yaml")
 IDENTITY_SCOPE = Path("operators/spoke-identity-operator/internal/controller/workload_identity_scope.go")
 PULL_SECRET = Path("manifests/tenants/charts/universal-tenant/templates/pull-secret-es.yaml")
 
@@ -76,6 +88,40 @@ def main():
         return
     ok(f"the ApplicationSet points each spoke's store at the project hub-operator creates "
        f"({declared})")
+
+    # The same field, on the path a released box runs.
+    tf = TEMPLATED_FIELDS.read_text()
+    tf_rule = re.search(r"path:\s*\[spec,\s*provider,\s*infisical,\s*secretsScope,\s*projectSlug\]"
+                        r"\s*\n\s*value:\s*'([^']+)'", tf)
+    if not tf_rule:
+        bad(f"{TEMPLATED_FIELDS.name} carries no rule for the store's projectSlug, so the "
+            f"PACKAGED chart keeps whatever the catalogue hardcodes. The ApplicationSet's "
+            f"patches do not apply to a released box -- a Helm source cannot carry them -- so "
+            f"the spoke's store names a project its identity is not a member of, and every "
+            f"ExternalSecret on it fails at the store")
+    else:
+        released = tf_rule.group(1).replace("{{ .Values.spokeName }}", "%s").strip()
+        if released != formula:
+            bad(f"the released path points a spoke's store at {released!r} while hub-operator "
+                f"creates {formula!r}. The two delivery paths must name the same project, or a "
+                f"box reads one and the publisher writes the other depending only on whether it "
+                f"runs a packaged chart")
+        else:
+            ok(f"the released path ({TEMPLATED_FIELDS.name}) names the same project as the "
+               f"ApplicationSet and hub-operator, so a packaged box and an unreleased one "
+               f"resolve the store identically")
+
+    # The DNS credential travels the same two paths, and was migrated on one.
+    dns = re.search(r"name:\s*hetzner-dns-credentials(.*?)(?=\n- kind:|\Z)", tf, re.S)
+    if not dns:
+        bad(f"{TEMPLATED_FIELDS.name} carries no rule for hetzner-dns-credentials, so the "
+            f"packaged chart reads hcloud-token at the project ROOT. Under one project per "
+            f"cluster the root holds nothing and the identity may not read it")
+    elif "/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token" not in dns.group(1):
+        bad(f"{TEMPLATED_FIELDS.name} templates hetzner-dns-credentials but not to this "
+            f"cluster's own prefix")
+    else:
+        ok("the DNS credential is read from this cluster's own prefix on the released path too")
 
     # The identity operator must NOT carry a second formula.
     scope = IDENTITY_SCOPE.read_text()

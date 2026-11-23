@@ -130,6 +130,24 @@
   fields:
     - path: [spec, provider, infisical, secretsScope, environmentSlug]
       value: '{{ .Values.global.environmentSlug }}'
+    # THE CLUSTER'S OWN PROJECT (ADR-031). The catalogue hardcodes hub-secrets,
+    # which every cluster shared while one project held them all. Under one
+    # project per cluster the spoke's identity is a viewer of its own project
+    # alone, so a store still naming hub-secrets cannot validate -- the identity
+    # is not a member of it -- and every ExternalSecret on the spoke fails with
+    # the store, not with anything about the secret.
+    #
+    # This rule is why the released path needs one at all: the ApplicationSet's
+    # kustomize patches apply ONLY to the unreleased branch, because an ArgoCD
+    # source naming a Helm chart cannot also carry patches. Patching there and
+    # stopping left the packaged chart -- which is what a released box runs --
+    # pointing at hub-secrets, and that is what 0.3.45-rc.2 hit on
+    # nutgraf-stg-01. Changing a per-spoke field means changing BOTH paths.
+    #
+    # spokeName, not global.clusterName: globalValues carries the name of the
+    # cluster that PROVISIONED this spoke, and the project belongs to the spoke.
+    - path: [spec, provider, infisical, secretsScope, projectSlug]
+      value: 'spoke-{{ .Values.spokeName }}-secrets'
 
 # ── The hub this spoke belongs to (ADR-051) ────────────────────────────────
 #
@@ -149,6 +167,19 @@
   # The spoke's credentials live in ITS hub's Infisical.
   fields:
     - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
+
+- kind: ExternalSecret
+  name: hetzner-dns-credentials
+  # THIS CLUSTER'S COPY, not the project root (ADR-031). It read `hcloud-token`
+  # at the root, which resolved while the spoke identity could read the whole
+  # shared project. A viewer of its own project reads what hub-operator
+  # materialised into this path, and the root of that project is empty.
+  #
+  # The ApplicationSet patches the same field on the unreleased path. Both paths
+  # deliver this object, and only one of them is what a released box runs.
+  fields:
+    - path: [spec, data, 0, remoteRef, key]
+      value: '/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token'
 
 - kind: ClusterIssuer
   name: letsencrypt-prod
