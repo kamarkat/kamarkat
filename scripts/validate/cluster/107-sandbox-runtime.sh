@@ -3,7 +3,7 @@
 # ADR-107: the sandboxed runtime is in force where it is offered. LIVE checks.
 #
 #   R1  RuntimeClass `sandboxed` exists, with handler runsc and a node selector
-#   R2  every node offering it (label sandbox.zero-ops.io/runtime=sandboxed) has
+#   R2  every node offering it (label sandbox.kamarkat.io/runtime=sandboxed) has
 #       a Ready installer pod, i.e. runsc and its shim are on the host and
 #       containerd reports the handler
 #   R3  every offering node's Cilium agent runs with the socket-LB bypass: the
@@ -24,9 +24,9 @@ validate_adr107_sandbox_runtime() {
     fi
 
     local nodes node
-    nodes=$(kc_spoke get nodes -l sandbox.zero-ops.io/runtime=sandboxed -o jsonpath='{.items[*].metadata.name}')
+    nodes=$(kc_spoke get nodes -l sandbox.kamarkat.io/runtime=sandboxed -o jsonpath='{.items[*].metadata.name}')
     if [[ -z "$nodes" ]]; then
-        soft_fail "R2 no node offers the sandboxed runtime yet (label sandbox.zero-ops.io/runtime=sandboxed): Sandboxed jobs stay Pending by design"
+        soft_fail "R2 no node offers the sandboxed runtime yet (label sandbox.kamarkat.io/runtime=sandboxed): Sandboxed jobs stay Pending by design"
         return 0
     fi
     for node in $nodes; do

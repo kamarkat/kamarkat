@@ -42,8 +42,10 @@ spec:
                 # at random (crossplane-runtime v2.4.3
                 # APILabelSelectorResolver.SelectComposition). A box carries only
                 # its own provider's composition, so that single candidate wins
-                # whatever the cluster declared: a `provider: hetzner` cluster on
-                # a hybrid box was composed as hybrid, silently.
+                # whatever the cluster declared. A `provider: hetzner` cluster on
+                # a hybrid box would therefore be composed as hybrid -- derived
+                # from that code path, not observed: no hybrid box existed while
+                # the defect was present.
                 #
                 # hub-operator's mutating webhook injects the reference from the
                 # provider registry, and mutating admission runs before schema

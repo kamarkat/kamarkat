@@ -198,8 +198,11 @@ cluster declared after the Crossplane 2 migration found all three at once.
    `APILabelSelectorResolver` lists every Composition, narrows to those composing
    `SpokePool` and picks one at random. A box syncs
    `manifests/providers/<the box's provider>`, so that single candidate won
-   whatever the cluster declared: on a hybrid box a `provider: hetzner` cluster
-   was composed as hybrid.
+   whatever the cluster declared. On a hetzner box that candidate is the right
+   one, which is why box 7 was unaffected. The consequence on a hybrid box --
+   a `provider: hetzner` cluster composed by `spokepool-hybrid` -- follows from
+   the same code path and has not been observed on a running box; no hybrid box
+   existed while the defect was present.
 
 The registry is now the authority for an **exact** reference. `hub-operator`
 resolves `spec.provider` through it and writes

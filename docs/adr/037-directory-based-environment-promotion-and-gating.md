@@ -55,3 +55,27 @@ See ADR-039 for the complete ownership matrix.
 ### Negative
 - Promotion depends on automated workflow coordination across environment overlays, introducing additional pipeline complexity and operational ownership requirements.
 - A single management hub reconciles every environment, so the physical impossibility clause 2 originally asserted is gone. One ArgoCD holds credentials for, and can apply to, dev and prod alike. The remaining controls are the repository gates (clauses 4-6) and per-cluster declaration -- both of which were already load-bearing, and neither of which is a physical boundary. Accepted deliberately: environment-bound hubs required a production-grade hub per environment, which is three times the management-plane cost to defend a boundary that the repository gates were already defending.
+
+
+## Correction (2026-11-23): environment isolation is a project, not a selector
+
+`spoke-catalog/templated-fields.yaml` patches each spoke's `ClusterSecretStore`
+`environmentSlug` with the cluster's own environment, commented *"a stg or prod
+spoke would read DEV secrets out of Infisical"*. That patch is still correct and
+still necessary, and it never provided the isolation.
+
+`secretsScope.environmentSlug` is a **selector**: it says which environment a
+lookup resolves in. It is not an authorisation boundary. An identity with access
+to a project reads every environment of it, because a built-in Infisical role
+carries no environment condition and conditioning one requires a paid feature
+(ADR-031 Correction, 2026-11-23).
+
+Environment isolation is now a consequence of the per-cluster project: a cluster's
+project holds exactly the environment that cluster declares, and its identity
+belongs to no other project. A `stg` cluster cannot read `dev` secrets because
+they are in a different project, not because its store selects a different slug.
+
+The store is pointed at its cluster's project by the same ApplicationSet patch
+that sets the environment, so the two cannot drift apart, and
+`scripts/validate/preflight/037-cluster-secret-project.py` asserts that the slug
+there matches the one `hub-operator` creates.

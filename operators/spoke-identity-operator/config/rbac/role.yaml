@@ -1,22 +1,9 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: spoke-identity-operator-role
 rules:
-- apiGroups:
-  - identity.zeroops.io
-  resources:
-  - spokemachineidentities
-  - spokemachineidentities/status
-  - spokemachineidentities/finalizers
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-  - delete
 - apiGroups:
   - ""
   resources:
@@ -29,10 +16,36 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
+  - delete
   - get
   - list
-  - watch
-  - create
-  - update
   - patch
+  - update
+  - watch
+- apiGroups:
+  - identity.kamarkat.io
+  resources:
+  - spokemachineidentities
+  verbs:
+  - create
   - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - identity.kamarkat.io
+  resources:
+  - spokemachineidentities/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - identity.kamarkat.io
+  resources:
+  - spokemachineidentities/status
+  verbs:
+  - get
+  - patch
+  - update

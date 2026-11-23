@@ -9,7 +9,7 @@
 #
 # OPT-IN PER NODE, BY ONE LABEL:
 #
-#   kubectl label node <node> sandbox.zero-ops.io/runtime=sandboxed
+#   kubectl label node <node> sandbox.kamarkat.io/runtime=sandboxed
 #
 # That label does three things, all keyed on it:
 #   1. the installer DaemonSet below runs on the node and installs the runtime;
@@ -44,7 +44,7 @@ metadata:
 handler: runsc
 scheduling:
   nodeSelector:
-    sandbox.zero-ops.io/runtime: sandboxed
+    sandbox.kamarkat.io/runtime: sandboxed
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -63,7 +63,7 @@ spec:
         app.kubernetes.io/name: sandboxed-runtime-installer
     spec:
       nodeSelector:
-        sandbox.zero-ops.io/runtime: sandboxed
+        sandbox.kamarkat.io/runtime: sandboxed
       # hostPID so /proc shows the host's containerd, whose --config is read
       # below. Without it the installer could edit a file containerd does not
       # load, and report success.

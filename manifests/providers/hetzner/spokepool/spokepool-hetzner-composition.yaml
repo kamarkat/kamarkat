@@ -217,7 +217,25 @@ spec:
                         # this is the object's only owner.
                         - name: ""
                           kind: Secret
-                      strategy: ApplyOnce
+                      # Reconcile, matching the hybrid cell, which moved first and
+                      # recorded why: CRS re-applies to EXISTING spokes when the hub
+                      # payload's content hash changes, which is what day-2
+                      # Cilium/Gateway-API upgrades need (ADR-049) and what closes
+                      # the ApplyOnce gap ADR-048 worked around for the ClusterIssuer.
+                      #
+                      # This cell was left at ApplyOnce, so the two providers
+                      # disagreed and the common one took the worse half: a corrected
+                      # ClusterIssuer or a rotated credential reached new spokes and
+                      # no existing one, with nothing to say so. That is the same
+                      # convergence gap as a CR created once and never reconciled,
+                      # and this is the single authoritative mechanism for it rather
+                      # than a second delivery path beside it.
+                      #
+                      # strategy is immutable: changing it deletes and recreates the
+                      # CRS. CAPI does not delete managed spoke resources on CRS
+                      # deletion, so an existing spoke keeps what it has and then
+                      # receives the current payload.
+                      strategy: Reconcile
                 providerConfigRef:
                   name: kubernetes-provider
             patches:

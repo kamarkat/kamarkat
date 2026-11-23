@@ -54,7 +54,7 @@ const (
 	// The label the universal-tenant chart puts on every tenant gateway pod.
 	// The app API admits connections from these pods only, and derives the
 	// caller's namespace from which one it was.
-	gatewayPodLabel = "zero-ops.io/tenant-gateway"
+	gatewayPodLabel = "kamarkat.io/tenant-gateway"
 
 	signingKeySecret = "preview-access-signing-key"
 )

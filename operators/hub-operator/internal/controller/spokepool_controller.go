@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -144,11 +145,39 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Non-fatal: a spoke missing these credentials is degraded, not
 	// unprovisionable, and failing here would block the cluster lifecycle on a
 	// credential this operator may not be able to obtain.
-	if fleet, err := spokeInfisical.EnsureFleetCredentialsMaterialised(ctx, spokeName); err != nil {
-		logger.Error(err, "Failed to materialise fleet credentials into the cluster path", "spoke", spokeName)
+	// THE CLUSTER'S OWN PROJECT IS THE DESTINATION, and creating it is this
+	// operator's job because this operator writes the secrets.
+	//
+	// The project is the only boundary an unlicensed Infisical enforces: a built-in
+	// role carries no environment or path condition, so /spoke-pool/<cluster>/ and
+	// the store's environmentSlug express ownership while the project is what stops
+	// one cluster reading another's. The identity operator scopes the spoke's
+	// identity to this project by the slug published below; it does not create it.
+	//
+	// secretsProjectSlug stays EMPTY unless everything here succeeds, and that
+	// emptiness is what keeps the identity operator from narrowing an identity to a
+	// project that does not yet hold its secrets.
+	var secretsProjectSlug string
+	clusterProjectID, err := spokeInfisical.EnsureClusterProject(ctx, spokeName, spokeEnvironment)
+	if err != nil {
+		logger.Error(err, "Failed to ensure the cluster's own secrets project", "spoke", spokeName)
+	} else if clusterSecrets, err := r.InfisicalClient.ForProjectAndEnvironment(clusterProjectID, spokeEnvironment); err != nil {
+		logger.Error(err, "Failed to scope a client to the cluster's secrets project", "spoke", spokeName)
+	} else if fleet, err := spokeInfisical.MaterialiseFleetCredentialsInto(ctx, spokeName, clusterSecrets); err != nil {
+		logger.Error(err, "Failed to materialise fleet credentials into the cluster's project", "spoke", spokeName)
 	} else if len(fleet.MissingAtRoot) > 0 {
+		// Published anyway: the project holds what the box could give it, and the
+		// absent keys are the box owner's to seed. Withholding the slug here would
+		// leave the identity broad because an OPTIONAL credential was missing.
+		secretsProjectSlug = secrets.ClusterProjectSlug(spokeName)
 		logger.Error(nil, "Fleet credentials absent at the Infisical root; seed them there or the consuming feature stays down",
-			"spoke", spokeName, "missing", fleet.MissingAtRoot)
+			"spoke", spokeName, "missing", fleet.MissingAtRoot,
+			"created", fleet.Created, "converged", fleet.Converged)
+	} else {
+		secretsProjectSlug = secrets.ClusterProjectSlug(spokeName)
+		logger.Info("The cluster's secrets project holds its credentials",
+			"spoke", spokeName, "project", secretsProjectSlug,
+			"created", fleet.Created, "converged", fleet.Converged)
 	}
 
 	// ADR-078 add.5 §4: the spoke's Loki writes to <spoke>-logs. Non-fatal, like
@@ -191,7 +220,7 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// create SpokeMachineIdentity CR for identity lifecycle (spoke-identity-operator reconciles)
-	if err := r.ensureSpokeMachineIdentity(ctx, spokePool); err != nil {
+	if err := r.ensureSpokeMachineIdentity(ctx, spokePool, secretsProjectSlug); err != nil {
 		logger.Error(err, "Failed to ensure SpokeMachineIdentity", "spoke", spokeName)
 		// Non-fatal: spoke-identity-operator will reconcile once CR exists.
 	}
@@ -453,29 +482,84 @@ func (r *SpokePoolReconciler) ensureBootstrapCertificate(ctx context.Context, sp
 }
 
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=identity.zeroops.io,resources=spokemachineidentities,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=identity.kamarkat.io,resources=spokemachineidentities,verbs=get;list;watch;create;update;patch
+
+// desiredSpokeMachineIdentitySpec is what this SpokePool declares its identity to
+// be. hub-operator owns this spec; the identity operator owns the status.
+//
+// secretsProjectSlug is EMPTY until this cluster's secrets project holds its
+// credentials, and that emptiness is the signal the identity operator waits on:
+// narrowing an identity to a project that does not yet hold its secrets is how a
+// working spoke is broken by a security correction. The field carries the
+// readiness and the destination together so the two cannot disagree.
+func (r *SpokePoolReconciler) desiredSpokeMachineIdentitySpec(spokePool *unstructured.Unstructured, spokeName, secretsProjectSlug string) map[string]interface{} {
+	// THE ENVIRONMENT TRAVELS WITH THE REFERENCE, read from the label the
+	// composition writes from the tenant's claim. Passed empty rather than
+	// defaulted when absent: a wrong environment is a cluster reading another
+	// environment's secrets, and an empty one is a cluster that waits.
+	infisical := map[string]interface{}{
+		"authMethod":      "universal-auth",
+		"clientSecretTTL": "90d",
+	}
+	if secretsProjectSlug != "" {
+		infisical["secretsProjectSlug"] = secretsProjectSlug
+	}
+
+	return map[string]interface{}{
+		"spokeRef": map[string]interface{}{
+			"name":        spokeName,
+			"environment": spokePool.GetLabels()["environment"],
+		},
+		"infisical": infisical,
+		"rotationPolicy": map[string]interface{}{
+			"enabled":       true,
+			"interval":      "60d",
+			"overlapPeriod": "24h",
+		},
+		"revocationPolicy": map[string]interface{}{
+			"revokeOnDelete": true,
+			"gracePeriod":    "72h",
+		},
+	}
+}
 
 // ensureSpokeMachineIdentity creates a SpokeMachineIdentity CR declaring desired Machine Identity state.
 // The spoke-identity-operator watches this CR and reconciles it against Infisical to create, rotate,
 // and manage lifecycle of the Spoke's Machine Identity.
 // PKI operations remain cert-manager's domain (ADR-035). Domain: platform-capi (ADR-015).
-func (r *SpokePoolReconciler) ensureSpokeMachineIdentity(ctx context.Context, spokePool *unstructured.Unstructured) error {
+func (r *SpokePoolReconciler) ensureSpokeMachineIdentity(ctx context.Context, spokePool *unstructured.Unstructured, secretsProjectSlug string) error {
 	logger := log.FromContext(ctx)
 	spokeName := spokePool.GetName()
 
 	smi := &unstructured.Unstructured{}
 	smi.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "identity.zeroops.io",
+		Group:   "identity.kamarkat.io",
 		Version: "v1alpha1",
 		Kind:    "SpokeMachineIdentity",
 	})
 	smi.SetName(spokeName)
 	smi.SetNamespace("platform-capi")
 
-	// Check if already exists (idempotent)
-	err := r.Get(ctx, client.ObjectKeyFromObject(smi), smi)
+	// RECONCILED, NOT CREATED ONCE.
+	//
+	// This returned here the moment the CR existed, so a field added to the spec
+	// afterwards reached new spokes and no existing one -- the same shape as CRS
+	// ApplyOnce, and the reason an existing spoke would never learn its
+	// environment or its secrets project. hub-operator owns this spec (the identity
+	// operator owns the status), so converging it is a single authoritative
+	// mechanism rather than a second configuration path.
+	existing := smi.DeepCopy()
+	err := r.Get(ctx, client.ObjectKeyFromObject(existing), existing)
 	if err == nil {
-		logger.Info("SpokeMachineIdentity already exists", "smi", smi.GetName())
+		desired := r.desiredSpokeMachineIdentitySpec(spokePool, spokeName, secretsProjectSlug)
+		if reflect.DeepEqual(existing.Object["spec"], desired) {
+			return nil
+		}
+		existing.Object["spec"] = desired
+		if err := r.Update(ctx, existing); err != nil {
+			return fmt.Errorf("converge SpokeMachineIdentity CR: %w", err)
+		}
+		logger.Info("Converged SpokeMachineIdentity spec", "smi", existing.GetName(), "spoke", spokeName)
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
@@ -502,24 +586,7 @@ func (r *SpokePoolReconciler) ensureSpokeMachineIdentity(ctx context.Context, sp
 		},
 	}
 
-	smi.Object["spec"] = map[string]interface{}{
-		"spokeRef": map[string]interface{}{
-			"name": spokeName,
-		},
-		"infisical": map[string]interface{}{
-			"authMethod":      "universal-auth",
-			"clientSecretTTL": "90d",
-		},
-		"rotationPolicy": map[string]interface{}{
-			"enabled":       true,
-			"interval":      "60d",
-			"overlapPeriod": "24h",
-		},
-		"revocationPolicy": map[string]interface{}{
-			"revokeOnDelete": true,
-			"gracePeriod":    "72h",
-		},
-	}
+	smi.Object["spec"] = r.desiredSpokeMachineIdentitySpec(spokePool, spokeName, secretsProjectSlug)
 
 	logger.Info(
 		"SpokeMachineIdentity before create",
@@ -969,7 +1036,11 @@ func (r *SpokePoolReconciler) ensureEncryptionSecret(ctx context.Context, spokeP
 		}
 	}
 
-	secClient := encryption.CtrlSecretClient{Client: r.Client}
+	secReader := r.Client
+	if r.UncachedClient != nil {
+		secReader = r.UncachedClient
+	}
+	secClient := encryption.CtrlSecretClient{Client: secReader}
 	opts := encryption.EnsureOptions{
 		BoxID:        boxID,
 		ClusterName:  spokeName,
@@ -1034,7 +1105,7 @@ func (r *SpokePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 
 	smiGVK := schema.GroupVersionKind{
-		Group:   "identity.zeroops.io",
+		Group:   "identity.kamarkat.io",
 		Version: "v1alpha1",
 		Kind:    "SpokeMachineIdentity",
 	}

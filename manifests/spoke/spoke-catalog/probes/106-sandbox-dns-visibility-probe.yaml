@@ -40,7 +40,7 @@ kind: Namespace
 metadata:
   name: adr106-probe
   labels:
-    zero-ops.io/probe: adr-106
+    kamarkat.io/probe: adr-106
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -54,7 +54,7 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      zero-ops.io/probe: adr-106
+      kamarkat.io/probe: adr-106
   egress:
     # The same two DNS backends as agent-sandbox-default-deny, now with the L7
     # rule. The proxy allows every query: this is about visibility, not about
@@ -91,7 +91,7 @@ metadata:
   name: probe
   namespace: adr106-probe
   labels:
-    zero-ops.io/probe: adr-106
+    kamarkat.io/probe: adr-106
 spec:
   automountServiceAccountToken: false
   securityContext:

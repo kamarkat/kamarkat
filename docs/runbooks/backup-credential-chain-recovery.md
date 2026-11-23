@@ -72,10 +72,10 @@ healthy; do NOT add them to manifests.
 
 ```bash
 kubectl --kubeconfig $SPOKE_KC annotate clustersecretstore infisical-backend \
-  "recovery.zeroops.io/rotation-triggered=$(date -Iseconds)" --overwrite
+  "recovery.kamarkat.io/rotation-triggered=$(date -Iseconds)" --overwrite
 # repeat on each ExternalSecret that must revalidate, e.g.:
 for es in $(kubectl --kubeconfig $SPOKE_KC get externalsecrets -A -o name); do
-  kubectl --kubeconfig $SPOKE_KC annotate $es "recovery.zeroops.io/rotation-triggered=$(date -Iseconds)" --overwrite
+  kubectl --kubeconfig $SPOKE_KC annotate $es "recovery.kamarkat.io/rotation-triggered=$(date -Iseconds)" --overwrite
 done
 kubectl --kubeconfig $SPOKE_KC get clustersecretstore infisical-backend \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
@@ -84,9 +84,9 @@ kubectl --kubeconfig $SPOKE_KC get clustersecretstore infisical-backend \
 Cleanup (Git-state convergence):
 
 ```bash
-kubectl --kubeconfig $SPOKE_KC annotate clustersecretstore infisical-backend recovery.zeroops.io/rotation-triggered-
+kubectl --kubeconfig $SPOKE_KC annotate clustersecretstore infisical-backend recovery.kamarkat.io/rotation-triggered-
 # for each annotated ExternalSecret
-kubectl --kubeconfig $SPOKE_KC annotate externalsecret -n <ns> <name> recovery.zeroops.io/rotation-triggered-
+kubectl --kubeconfig $SPOKE_KC annotate externalsecret -n <ns> <name> recovery.kamarkat.io/rotation-triggered-
 ```
 
 ### 4. Restart the CNPG instance (stale barman envs)

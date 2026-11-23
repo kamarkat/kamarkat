@@ -22,4 +22,10 @@ const (
 	APIEndpointCACertificate = "/api/v1/cert-manager/ca/internal/%s/certificate"
 	APIEndpointWorkspace     = "/api/v1/workspace"
 	APIEndpointFolders       = "/api/v2/folders"
+
+	// A workload cluster's own secrets project and the one environment inside it.
+	// Recorded in scripts/validate/infisical-api-contract.yaml with their complete
+	// resolved routes.
+	APIEndpointProjectEnvironments    = "/api/v1/projects/%s/environments"
+	APIEndpointProjectEnvironmentSlug = "/api/v1/projects/%s/environments/slug/%s"
 )

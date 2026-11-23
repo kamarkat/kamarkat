@@ -907,7 +907,7 @@ spec:
         # ADR-108: the preview-access service admits app-API calls from pods
         # carrying this label only, and reads which application is calling
         # from the pod's address -- never from anything in the request.
-        zero-ops.io/tenant-gateway: "true"
+        kamarkat.io/tenant-gateway: "true"
       annotations:
         # The configuration is rendered into the ConfigMap above, so a change to
         # this tenant's declarations must restart this pod. AgentGateway watches

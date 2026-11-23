@@ -25,21 +25,21 @@ spec:
         image: docker.io/infisical/pki-issuer:v1.1.0
         args:
         - --metrics-bind-address=:8443
+        # NO SECRET_STORE_* ENV. pki-issuer v1.1.0 reads one variable from its
+        # environment -- POD_NAMESPACE (cmd/main.go) -- and takes every credential
+        # from the secret references on each ClusterIssuer
+        # (internal/auth/universal.go resolves clientIdRef and clientSecretRef).
+        #
+        # Three variables lived here, carried over from v0.2.0, and they were worse
+        # than inert: SECRET_STORE_CLIENT_ID and SECRET_STORE_CLIENT_SECRET handed
+        # this pod the WORKLOAD identity's credential -- the one ESO authenticates
+        # with -- for a consumer that never read it. The issuer authenticates as
+        # its own identity, through infisical-pki-auth, and nothing else.
         env:
-        - name: SECRET_STORE_API_URL
-          value: "http://infisical-standalone-infisical.platform-security.svc:8080"
-        - name: SECRET_STORE_CLIENT_ID
+        - name: POD_NAMESPACE
           valueFrom:
-            secretKeyRef:
-              name: infisical-auth
-              key: client-id
-              optional: true
-        - name: SECRET_STORE_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: infisical-auth
-              key: client-secret
-              optional: true
+            fieldRef:
+              fieldPath: metadata.namespace
         securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false

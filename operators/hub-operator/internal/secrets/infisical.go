@@ -125,6 +125,42 @@ func (c *InfisicalClient) ForEnvironment(slug string) (*InfisicalClient, error) 
 	return scoped, nil
 }
 
+// ForProjectAndEnvironment scopes a client to another PROJECT as well as an
+// environment.
+//
+// ForEnvironment above carries ProjectID through unchanged, which is right for
+// the hub's own secrets and wrong for a workload cluster's: the project is the
+// enforced boundary, so a client that changes only the environment still reads
+// and writes hub-secrets. Both dimensions are named here, and neither is
+// defaulted -- a credential written to a guessed project is unreadable by the
+// cluster that needs it and indistinguishable from one never written.
+func (c *InfisicalClient) ForProjectAndEnvironment(projectID, slug string) (*InfisicalClient, error) {
+	projectID = strings.TrimSpace(projectID)
+	slug = strings.TrimSpace(slug)
+	if projectID == "" || slug == "" {
+		return nil, fmt.Errorf("a project and an environment are both required to scope a " +
+			"client; refusing to fall back to the hub's own, which is the project this " +
+			"separation exists to stop a workload cluster reading")
+	}
+	if projectID == c.ProjectID && slug == c.EnvironmentSlug {
+		return c, nil
+	}
+
+	key := projectID + "/" + slug
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if existing, ok := c.derived[key]; ok {
+		return existing, nil
+	}
+	scoped := NewInfisicalClient(c.BaseURL, c.ClientID, c.ClientSecret, projectID, c.OrganizationID)
+	scoped.EnvironmentSlug = slug
+	if c.derived == nil {
+		c.derived = make(map[string]*InfisicalClient)
+	}
+	c.derived[key] = scoped
+	return scoped, nil
+}
+
 // authenticate performs Universal Auth login to get an access token.
 func (c *InfisicalClient) authenticate(ctx context.Context) error {
 	loginReq := map[string]string{

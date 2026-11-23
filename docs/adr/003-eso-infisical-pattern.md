@@ -560,3 +560,36 @@ This rewrite supersedes the original ADR-003 (ESO-Infisical Integration Pattern)
 - ADR-024: Crossplane Password Rotation
 - ADR-030: Autonomous Credential Rotation Lifecycle
 - ADR-035: Enterprise PKI and Delegated Trust
+
+
+## Correction (2026-11-23): one producer, per-cluster destinations, and a lifecycle
+
+This ADR makes Infisical the system of record and ESO the only delivery path. Both
+hold. Two things it left unsaid have now been decided.
+
+**A credential has one destination per consumer, and a workload cluster's
+consumers read that cluster's own project.** The box's authority stays at the root
+of `hub-secrets`; `hub-operator` copies the explicitly classified subset into
+`/spoke-pool/<cluster>/shared/` in the cluster's own project. It is not the whole
+of `CLISecretMappings`: that registry also carries the Infisical database
+credentials, the GitHub repository tokens and the identity service's, whose blast
+radius is the box rather than a cluster. Only what a cluster's own workloads must
+read crosses the boundary.
+
+**Each copy has a declared lifecycle**, because "copy if absent" is right for one
+kind of credential and wrong for another:
+
+| | behaviour | why |
+| :- | :- | :- |
+| `CopiedOnce` | written when absent, never overwritten | a cell may legitimately hold its own value, and a reconcile must not fight a deliberate override |
+| `CentrallyRotated` | converged on the authority whenever they differ | one credential for the box -- the registry token, the provider DNS token -- so a rotation that did not reach every cluster leaves clusters authenticating with a replaced value |
+| externally per-cell | never copied | each cell's value is issued elsewhere; copying the hub's would point every cell at one integration (ADR-078 add.5 §5) |
+
+A credential absent at the authority is reported, never fabricated: an invented
+value authenticates to nothing and fails further from its cause.
+
+`scripts/validate/preflight/95-infisical-key-producers.sh` derives the classified
+set from the operator source rather than restating it -- and had been deriving
+nothing at all, because it named `cell_credentials.go` after that file became
+`cluster_credentials.go` and guarded the read with `os.path.exists`. A check that
+cannot see its source now fails instead of passing.

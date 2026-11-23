@@ -143,10 +143,10 @@ The industry uses `provider-kubernetes` Objects for **remote cluster delivery**,
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: ainativesaas.zero-ops.io
+  name: ainativesaas.kamarkat.io
 spec:
   scope: Namespaced  # v2.0+ namespaced by default
-  group: zero-ops.io
+  group: kamarkat.io
   names:
     kind: AINativeSaaS
     plural: ainativesaas
@@ -177,7 +177,7 @@ metadata:
   name: ainativesaas-enterprise
 spec:
   compositeTypeRef:
-    apiVersion: zero-ops.io/v1
+    apiVersion: kamarkat.io/v1
     kind: AINativeSaaS
   mode: Pipeline
   pipeline:

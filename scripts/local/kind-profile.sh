@@ -19,7 +19,7 @@
 set -euo pipefail
 
 ZERO_OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LABEL="sandbox.zero-ops.io/runtime=sandboxed"
+LABEL="sandbox.kamarkat.io/runtime=sandboxed"
 log() { echo "[kind-profile] $*"; }
 fail() { echo "[kind-profile] FAILED: $*" >&2; exit 1; }
 

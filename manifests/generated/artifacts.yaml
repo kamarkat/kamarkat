@@ -2,7 +2,7 @@
 # CLI parses this file during PhaseInitSecrets to determine
 # which artifacts must be generated and validated before
 # PhaseBoundary03 can proceed.
-apiVersion: bootstrap.zeroops.io/v1alpha1
+apiVersion: bootstrap.kamarkat.io/v1alpha1
 kind: GeneratedArtifactRegistry
 artifacts:
   # Paths are relative to repo root. The CLI generates these files

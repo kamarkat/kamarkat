@@ -50,7 +50,7 @@
 - [x] 1.2 Manual Validation - XRD Schema
   - **What to verify**: XRD accepts resourceQuota and ownerEmail fields
   - **How to verify**: 
-    - `kubectl get xrd ainativesaas.platform.zero-ops.io -o yaml` - confirm new fields in schema
+    - `kubectl get xrd ainativesaas.platform.kamarkat.io -o yaml` - confirm new fields in schema
     - Create test XR with resourceQuota and ownerEmail fields
     - `kubectl apply -f test-xr.yaml` - should succeed without validation errors
   - **Expected outcome**: XR created successfully, no validation errors

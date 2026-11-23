@@ -43,13 +43,54 @@ import (
 //
 // Keep in step with the EXTERNAL set in
 // scripts/validate/preflight/95-infisical-key-producers.sh.
-var FleetCredentialKeys = []string{
-	"S3_ACCESS_KEY_ID",
-	"S3_SECRET_ACCESS_KEY",
+// Lifecycle says what happens to a cell's copy when the authority changes.
+//
+// The distinction is the whole reason this is a table rather than a list. A
+// credential the box owns centrally must CONVERGE when it is rotated, or every
+// cluster keeps authenticating with a value that has been replaced. A credential
+// a cell may legitimately hold its own version of must NOT be overwritten, or the
+// operator fights a deliberate per-cell override on every reconcile.
+type Lifecycle int
+
+const (
+	// CopiedOnce is written when absent and never touched again.
+	CopiedOnce Lifecycle = iota
+	// CentrallyRotated is converged on the authority whenever the two differ.
+	CentrallyRotated
+)
+
+// FleetCredential is one credential a cell receives, and its lifecycle.
+type FleetCredential struct {
+	Key       string
+	Lifecycle Lifecycle
+	Why       string
+}
+
+// FleetCredentials are the credentials a workload cluster's own secrets project
+// receives from the box's authority.
+//
+// EXPLICITLY CLASSIFIED, not the whole of CLISecretMappings. That registry also
+// carries the Infisical database credentials, the GitHub repository tokens and
+// the identity service's -- values whose blast radius is the box, not a cluster.
+// Only what a cluster's own workloads must read crosses into a cluster's project.
+var FleetCredentials = []FleetCredential{
+	{Key: "S3_ACCESS_KEY_ID", Lifecycle: CopiedOnce,
+		Why: "the object store the cell's database archives to; a cell may be pointed at its own bucket"},
+	{Key: "S3_SECRET_ACCESS_KEY", Lifecycle: CopiedOnce,
+		Why: "the other half of the same credential, and rotated with it rather than independently"},
 	// ADR-078 add.5 §5: each spoke's Alertmanager delivers mail and IRM alerts
 	// with the box's credentials. Its heartbeat URL is per cell, seeded per cell.
-	"ALERT_SMTP_PASSWORD",
-	"GRAFANA_IRM_ALERTMANAGER_URL",
+	{Key: "ALERT_SMTP_PASSWORD", Lifecycle: CopiedOnce,
+		Why: "outbound mail for this cell's alerts"},
+	{Key: "GRAFANA_IRM_ALERTMANAGER_URL", Lifecycle: CopiedOnce,
+		Why: "where this cell's critical alerts page; the heartbeat half is per cell and never copied"},
+	{Key: "ghcr-pull-secret", Lifecycle: CentrallyRotated,
+		Why: "one registry credential for the box, read by every tenant workload's imagePullSecrets. " +
+			"Centrally owned: a rotated token must reach every cluster, or image pulls fail " +
+			"everywhere the old copy survived"},
+	{Key: "hcloud-token", Lifecycle: CentrallyRotated,
+		Why: "provider-owned DNS, for the cell's cert-manager DNS01 solver and external-dns. " +
+			"One account credential for the box, so a rotation converges"},
 }
 
 // ExternalPerCellCredentialKeys are per-cell credentials the platform does not and
@@ -78,6 +119,9 @@ var ExternalPerCellCredentialKeys = []string{
 type MaterialiseFleetCredentialsResult struct {
 	Created  []string
 	Existing []string
+	// Converged are centrally-owned keys whose cell copy was brought back onto the
+	// authority because the two differed -- a rotation reaching this cluster.
+	Converged []string
 	// MissingAtRoot are keys absent from the Infisical root, i.e. never seeded at
 	// Day-0. They are reported, not fabricated: inventing a value for
 	// an externally-issued credential yields a secret that authenticates to
@@ -97,40 +141,70 @@ type MaterialiseFleetCredentialsResult struct {
 // Existing cell values are left alone. Overwriting on every reconcile would make
 // the operator fight any deliberate per-cell override, and rotation at the root is
 // a fleet-wide operation that should propagate explicitly, not as a side effect.
-func (c *InfisicalClient) EnsureFleetCredentialsMaterialised(ctx context.Context, clusterName string) (*MaterialiseFleetCredentialsResult, error) {
+func (c *InfisicalClient) MaterialiseFleetCredentialsInto(ctx context.Context, clusterName string, dest *InfisicalClient) (*MaterialiseFleetCredentialsResult, error) {
+	if dest == nil {
+		return nil, fmt.Errorf("no destination project for %s's credentials: writing them into "+
+			"the hub's own project is what the per-cluster boundary exists to stop", clusterName)
+	}
 	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
 	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
 	out := &MaterialiseFleetCredentialsResult{}
 
-	if err := c.EnsureFolder(ctx, sharedPath); err != nil {
+	if err := dest.EnsureFolder(ctx, sharedPath); err != nil {
 		return nil, fmt.Errorf("failed to ensure shared folder %s: %w", sharedPath, err)
 	}
 
-	for _, key := range FleetCredentialKeys {
-		exists, err := c.SecretExists(ctx, sharedPath, key)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check %s at %s: %w", key, sharedPath, err)
-		}
-		if exists {
-			out.Existing = append(out.Existing, key)
-			continue
-		}
+	for _, cred := range FleetCredentials {
+		key := cred.Key
 
+		// The authority first: a cell's copy is only as good as the value it came
+		// from, and a credential absent at the source cannot be converged to.
 		value, err := c.GetSecret(ctx, "/", key)
 		if err != nil || value == "" {
 			out.MissingAtRoot = append(out.MissingAtRoot, key)
 			continue
 		}
 
-		if err := c.CreateSecret(ctx, sharedPath, key, value); err != nil {
-			return nil, fmt.Errorf("failed to materialise %s into %s: %w", key, sharedPath, err)
+		exists, err := dest.SecretExists(ctx, sharedPath, key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check %s at %s: %w", key, sharedPath, err)
 		}
-		out.Created = append(out.Created, key)
+
+		if !exists {
+			if err := dest.CreateSecret(ctx, sharedPath, key, value); err != nil {
+				return nil, fmt.Errorf("failed to materialise %s into %s: %w", key, sharedPath, err)
+			}
+			out.Created = append(out.Created, key)
+			continue
+		}
+
+		if cred.Lifecycle == CopiedOnce {
+			// Left alone deliberately: this cell may hold its own version, and
+			// overwriting it every reconcile would fight that.
+			out.Existing = append(out.Existing, key)
+			continue
+		}
+
+		// CentrallyRotated: converge, and only when the values actually differ, so
+		// an unchanged authority writes nothing.
+		current, err := dest.GetSecret(ctx, sharedPath, key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s at %s before converging it: %w", key, sharedPath, err)
+		}
+		if current == value {
+			out.Existing = append(out.Existing, key)
+			continue
+		}
+		if err := dest.UpdateSecret(ctx, sharedPath, key, value); err != nil {
+			return nil, fmt.Errorf("failed to converge %s at %s onto its authority: %w", key, sharedPath, err)
+		}
+		out.Converged = append(out.Converged, key)
 	}
 
-	logger.Info("Fleet credentials materialised into cell path",
+	logger.Info("Fleet credentials materialised into the cluster's own project",
 		"path", sharedPath,
-		"created", len(out.Created),
+		"created", out.Created,
+		"converged", out.Converged,
 		"existing", len(out.Existing),
 		"missingAtRoot", out.MissingAtRoot)
 	return out, nil

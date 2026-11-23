@@ -349,8 +349,9 @@ func TestAnEmptyRegistryIsNotLoaded(t *testing.T) {
 // conversion check that resolves the type THROUGH the scheme
 // (conversion.objectGVKs keeps only GVKs in scheme.AllKnownTypes()). It found
 // nothing, returned "error retrieving gvks for object", main exited, and the pod
-// crash-looped 22 times while the previous ReplicaSet kept serving 404s on these
-// paths. Everything above still passed.
+// crash-looped 22 times while the previous ReplicaSet -- which registers no
+// webhook -- stayed the only ready pod behind the Service. Everything above
+// still passed.
 //
 // So this drives the registration main uses, against an EMPTY scheme, and asserts
 // a patch comes back. A registration that cannot decode the request, or that

@@ -50,6 +50,20 @@ type SpokeMachineIdentitySpec struct {
 
 type SpokeRef struct {
 	Name string `json:"name"`
+
+	// Environment is the environment this workload cluster serves -- the slug its
+	// ClusterSecretStore selects and every ExternalSecret on it resolves through.
+	//
+	// Carried on the reference rather than read from the SpokePool, so the identity
+	// operator needs no access to another operator's custom resource to know what
+	// it is scoping. hub-operator copies it from the SpokePool's `environment`
+	// label, which the composition writes from the claim the tenant authored.
+	//
+	// Required for the cluster's secrets project: Infisical creates dev/staging/
+	// prod by default and a cluster serving `stg` would select an environment one
+	// word away and find it empty, so the declared slug is created explicitly.
+	// +optional
+	Environment string `json:"environment,omitempty"`
 }
 
 type InfisicalConfig struct {
@@ -63,6 +77,23 @@ type InfisicalConfig struct {
 	// Defaults to the operator's --infisical-secrets-project-id flag when unset.
 	// +optional
 	SecretsProjectID string `json:"secretsProjectID,omitempty"`
+
+	// SecretsProjectSlug is this cluster's own Infisical secrets project, and it is
+	// also the signal that the project is READY to be the cluster's only source of
+	// secrets.
+	//
+	// hub-operator sets it only after it has materialised this cluster's
+	// credentials into that project. Until then it is empty and the identity
+	// operator leaves the identity's existing memberships alone -- narrowing an
+	// identity to a project that does not yet hold its secrets is how a working
+	// spoke is broken by a security fix.
+	//
+	// One field, one writer, and it carries the readiness and the destination
+	// together so the two cannot disagree. It is also what removes the slug
+	// formula from the identity operator: the component that populated the project
+	// names it.
+	// +optional
+	SecretsProjectSlug string `json:"secretsProjectSlug,omitempty"`
 	// +kubebuilder:default="universal-auth"
 	// +optional
 	AuthMethod string `json:"authMethod,omitempty"`
@@ -109,6 +140,23 @@ type SpokeMachineIdentityStatus struct {
 	// NextRotation is when the next rotation is due
 	// +optional
 	NextRotation *metav1.Time `json:"nextRotation,omitempty"`
+	// LastAuthorizationInventory is when this identity's Infisical memberships were
+	// last READ -- and it is deliberately not the Conditions' observedGeneration.
+	//
+	// That generation says which version of THIS resource the controller has seen;
+	// this says how fresh the state retrieved from INFISICAL is. They move
+	// independently: nothing about a spec change refreshes an external read, and a
+	// successful read does not mean the spec was reconciled. Reporting one as
+	// evidence of the other is how a stale authorization observation gets read as
+	// current.
+	//
+	// What the inventory found is NOT published here. A role list in a cluster
+	// object is authorization metadata on the wrong side of the boundary, and
+	// nothing in Kubernetes needs it: the condition says whether the read
+	// succeeded, the operator's log carries the detail, and the tests carry the
+	// assertions.
+	// +optional
+	LastAuthorizationInventory *metav1.Time `json:"lastAuthorizationInventory,omitempty"`
 }
 
 // +kubebuilder:object:root=true

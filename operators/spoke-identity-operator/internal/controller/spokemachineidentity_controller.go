@@ -46,10 +46,17 @@ func clusterIssuerURLFor() (string, error) {
 }
 
 const (
-	smiFinalizer                  = "identity.zeroops.io/finalizer"
+	smiFinalizer                  = "identity.kamarkat.io/finalizer"
 	conditionTypeReady            = "Ready"
 	conditionTypeIdentityCreated  = "IdentityProvisioned"
 	conditionTypeRotationComplete = "RotationComplete"
+	// conditionTypeAuthorizationInventoried reports whether this identity's
+	// Infisical memberships were READ -- not whether they are correct. There is no
+	// intended policy to compare them against until project-per-cluster is
+	// reconciled, and a role name is not an access decision: only attempting a
+	// permitted and a forbidden operation establishes effective authorization.
+	// True here means observed. It never means compliant or verified.
+	conditionTypeAuthorizationInventoried = "AuthorizationInventoried"
 	// conditionTypeIssuerConfigured reports the ADR-048 second-stage ClusterIssuer
 	// CRS wrapper delivery. The wrapper is only meaningful when both
 	// clientId (rotation-stable machine identity) and projectId (fleet-constant)
@@ -64,12 +71,15 @@ const (
 const (
 	// clusterIssuerTemplate is the Infisical PKI certificate template backed by the
 	// Fleet Intermediate CA chain (Offline Root -> Fleet Intermediate -> Leaf).
-	clusterIssuerTemplate = "infrastructure-services"
+	// The certificate profile the fleet issues with. Named `profile` by
+	// pki-issuer v1.x; it was `certificateTemplateName` at v0.2.0, and the
+	// rename is why the value survived a schema change that the field did not.
+	clusterIssuerProfile = "infrastructure-services"
 )
 
-// +kubebuilder:rbac:groups=identity.zeroops.io,resources=spokemachineidentities,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=identity.zeroops.io,resources=spokemachineidentities/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=identity.zeroops.io,resources=spokemachineidentities/finalizers,verbs=update
+// +kubebuilder:rbac:groups=identity.kamarkat.io,resources=spokemachineidentities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=identity.kamarkat.io,resources=spokemachineidentities/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=identity.kamarkat.io,resources=spokemachineidentities/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
@@ -174,14 +184,85 @@ func (r *SpokeMachineIdentityReconciler) Reconcile(ctx context.Context, req ctrl
 		smi.Status.NextRotation = nil
 	}
 
-	// Grant project access. The identity is granted access to both the
-	// configured cert-manager project (hub-platform) and the secrets project
-	// (hub-secrets) so it can authenticate for both cert issuance and
-	// ExternalSecret delivery.
 	secretsProjectID := r.SecretsProjectID
 	if smi.Spec.Infisical.SecretsProjectID != "" {
 		secretsProjectID = smi.Spec.Infisical.SecretsProjectID
 	}
+
+	// WHAT THIS IDENTITY IS AUTHORIZED TO DO, READ BEFORE ANYTHING WRITES IT.
+	//
+	// Ordering is the whole point. The grant below asks for an "admin" membership
+	// on both projects, so an inventory taken after it would observe this
+	// reconcile's own write and report it as the identity's existing state --
+	// measuring the operator instead of the box.
+	//
+	// WHAT IT DOES AND DOES NOT ESTABLISH. Taken here, it is the state immediately
+	// before THIS reconciliation's grant. It is NOT a baseline of what any earlier
+	// release provisioned: this controller has reconciled these identities many
+	// times, and each of those reconciliations ran the same grant. The first
+	// observation on a box is simply the earliest one anybody looked at.
+	//
+	// READ-ONLY and NON-FATAL. It issues GETs and nothing else, and a failure to
+	// read authorization must not stop an identity being reconciled: the
+	// inventory's job is to say what is true, including that it could not find
+	// out.
+	//
+	// It establishes OBSERVED and nothing further. There is no intended policy to
+	// compare against until project-per-cluster is reconciled, and a role name is
+	// not an access decision -- so the condition below says whether the read
+	// succeeded, never that the identity is compliant.
+	inventory, invErr := r.InfisicalClient.InventoryProjectMemberships(ctx, identity.ID,
+		[]string{projectID, secretsProjectID})
+	switch {
+	case invErr != nil:
+		logger.Error(invErr, "Could not inventory this identity's Infisical memberships",
+			"identityID", identity.ID)
+		// The previous observation's timestamp is left alone -- it records when a read
+		// last succeeded, which is still true -- but it is repeated in this message so
+		// a reader seeing the failure cannot take that timestamp for current state.
+		r.setCondition(smi, conditionTypeAuthorizationInventoried, metav1.ConditionFalse,
+			"InventoryFailed", fmt.Sprintf("%v; %s", invErr, lastObservedPhrase(smi)))
+	default:
+		summaries := make([]string, 0, len(inventory.Memberships))
+		for _, m := range inventory.Memberships {
+			summaries = append(summaries, m.Summary())
+		}
+		// The DETAIL goes to the log, not to the resource: a role list in a cluster
+		// object is authorization metadata on the wrong side of the boundary, and
+		// nothing in Kubernetes reads it.
+		logger.Info("Observed this identity's Infisical memberships",
+			"identityID", identity.ID,
+			"memberships", summaries,
+			"notInspected", inventory.NotInspected,
+			"complete", inventory.Complete())
+		now := metav1.Now()
+		smi.Status.LastAuthorizationInventory = &now
+		if unresolved := inventory.Unresolved(); len(unresolved) > 0 {
+			r.setCondition(smi, conditionTypeAuthorizationInventoried, metav1.ConditionFalse,
+				"PartiallyObserved",
+				fmt.Sprintf("read %d membership(s); unresolved: %s",
+					len(inventory.Memberships), strings.Join(unresolved, "; ")))
+			// Partial is not success: the timestamp above says a read happened, and
+			// this condition is what says it was incomplete.
+		} else {
+			r.setCondition(smi, conditionTypeAuthorizationInventoried, metav1.ConditionTrue,
+				"Observed",
+				fmt.Sprintf("read %d membership(s); this records what was observed, not that it is correct",
+					len(inventory.Memberships)))
+		}
+	}
+
+	// Grant project access. The identity is granted access to both the
+	// configured cert-manager project (hub-platform) and the secrets project
+	// (hub-secrets) so it can authenticate for both cert issuance and
+	// ExternalSecret delivery.
+	//
+	// UNCHANGED, DELIBERATELY. The role this asks for is too broad and the
+	// correction is designed (one secrets project per workload cluster, this
+	// identity a viewer of its own project alone, PKI on a separately scoped
+	// identity). It is not applied here: narrowing a live identity before every
+	// ESO and PKI consumer has been moved would turn an over-privilege defect into
+	// failed image pulls, database bootstrap and certificate issuance.
 	for _, pid := range []string{projectID, secretsProjectID} {
 		if pid == "" {
 			continue
@@ -212,13 +293,42 @@ func (r *SpokeMachineIdentityReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, err
 	}
 
+	// THE WORKLOAD IDENTITY, narrowed to its own cluster's secrets project.
+	//
+	// Non-fatal and reported: a failure to narrow leaves the identity as it was,
+	// which is the state the box is in today -- degraded security rather than a
+	// broken cluster. Failing the reconcile here would also stop the rotation and
+	// delivery below, which is a worse outcome than a membership left broad for
+	// one more loop.
+	if err := r.ensureWorkloadIdentityScope(ctx, smi, identity.ID); err != nil {
+		logger.Error(err, "Failed to scope the workload identity to its own project")
+		r.setCondition(smi, conditionTypeWorkloadScoped, metav1.ConditionFalse, "ScopingFailed", err.Error())
+	}
+
+	// THE ISSUER'S OWN IDENTITY, scoped to issuance and nothing else.
+	//
+	// Separate from the identity above because ESO and the certificate issuer have
+	// different consequences if compromised: one reads a cluster's secrets, the
+	// other mints certificates the whole fleet trusts. They shared one credential
+	// -- infisical-auth, delivered to both platform-ops and platform-security --
+	// so either consumer could exercise the other's authority.
+	//
+	// Non-fatal on its own, and reported: a cluster whose issuer is not yet scoped
+	// has no certificates, which is a degraded cluster rather than one that should
+	// stop being reconciled. The wrapper below publishes nothing without it.
+	pki, pkiErr := r.ensurePKIIdentity(ctx, smi)
+	r.setPKICondition(smi, pkiErr)
+	if pkiErr != nil {
+		logger.Error(pkiErr, "Failed to scope the certificate issuer's identity")
+	}
+
 	// Ensure ADR-048 second-stage ClusterIssuer CRS wrapper. The identity operator
 	// GENERATES the {spoke}-cluster-issuer wrapper Secret; it never watches or
 	// mutates the spoke's infisical-fleet-issuer ClusterIssuer. CAPI ClusterResourceSet
 	// delivers the completed ClusterIssuer to the spoke. Fail-closed: no payload is
-	// published while clientId or projectId is empty, and the reason is surfaced via
-	// the ClusterIssuerConfigured condition so the Wrapper-Ready invariant holds.
-	if err := r.ensureClusterIssuerCRSWrapper(ctx, smi); err != nil {
+	// published until the issuer's own credential exists, and the reason is surfaced
+	// via the ClusterIssuerConfigured condition so the Wrapper-Ready invariant holds.
+	if err := r.ensureClusterIssuerCRSWrapper(ctx, smi, pki); err != nil {
 		logger.Error(err, "Failed to ensure ClusterIssuer CRS wrapper")
 		r.setCondition(smi, conditionTypeIssuerConfigured, metav1.ConditionFalse, "ClusterIssuerWrapperFailed", err.Error())
 		_ = r.Status().Update(ctx, smi)
@@ -450,11 +560,11 @@ func (r *SpokeMachineIdentityReconciler) handleRotation(ctx context.Context, smi
 				Name:      fmt.Sprintf("smi-%s-auth", smi.Spec.SpokeRef.Name),
 				Namespace: smi.Namespace,
 				Labels: map[string]string{
-					"identity.zeroops.io/spoke": smi.Spec.SpokeRef.Name,
-					"identity.zeroops.io/type":  "machine-identity",
+					"identity.kamarkat.io/spoke": smi.Spec.SpokeRef.Name,
+					"identity.kamarkat.io/type":  "machine-identity",
 				},
 				Annotations: map[string]string{
-					"identity.zeroops.io/identityId": identityID,
+					"identity.kamarkat.io/identityId": identityID,
 				},
 			},
 			StringData: map[string]string{
@@ -513,16 +623,21 @@ func (r *SpokeMachineIdentityReconciler) ensureCRSWrapper(ctx context.Context, s
 	clientID := string(authSecret.Data["clientId"])
 	clientSecret := string(authSecret.Data["clientSecret"])
 
-	// The cert-manager copy must carry a duplicate `clientSecret` data key in
-	// addition to `client-secret`: infisical-issuer v0.2.0 authenticates by
-	// reading secretData["clientSecret"] hardcoded (internal/issuer/signer/
-	// signer.go) and never consults the ClusterIssuer secretRef.key. Without it
-	// the issuer signs in with an empty client secret, tripping identity login
-	// lockout (401 Invalid credentials x3 -> 401 "temporarily locked" retry
-	// loop) and leaving every spoke CertificateRequest pending. `client-secret`
-	// stays for the ESO ClusterSecretStore and the issuer Deployment env, which
-	// reference those keys by name; the platform-ops copy carries clientSecret
-	// too to keep parity with the hub-delivered secret shape.
+	// THE WORKLOAD IDENTITY, DELIVERED ONCE, TO ITS ONE CONSUMER.
+	//
+	// This is ESO's credential: the spoke's ClusterSecretStore authenticates with
+	// it to resolve ExternalSecrets. Nothing else reads it.
+	//
+	// Two things used to be here for the certificate issuer and are gone. A
+	// SECOND COPY in cert-manager, because the issuer authenticated as this same
+	// identity -- it now has its own, infisical-pki-auth, so one credential no
+	// longer serves two consumers with different consequences if compromised. And
+	// a DUPLICATE `clientSecret` key beside `client-secret`, because pki-issuer
+	// v0.2.0 read secretData["clientSecret"] hardcoded whatever the ClusterIssuer
+	// declared; v1.1.0 resolves both halves through ResolveSecretReference and
+	// honours the key it is told (internal/auth/universal.go), so the second
+	// spelling has no reader. The issuer Deployment's SECRET_STORE_* env went with
+	// it: v1.1.0's main reads POD_NAMESPACE and nothing else.
 	identityYAML := fmt.Sprintf(`apiVersion: v1
 kind: Secret
 metadata:
@@ -532,19 +647,7 @@ type: Opaque
 stringData:
   client-id: %s
   client-secret: %s
-  clientSecret: %s
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: infisical-auth
-  namespace: cert-manager
-type: Opaque
-stringData:
-  client-id: %s
-  client-secret: %s
-  clientSecret: %s
-`, clientID, clientSecret, clientSecret, clientID, clientSecret, clientSecret)
+`, clientID, clientSecret)
 
 	wrapper := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -600,22 +703,17 @@ stringData:
 // (not an error): the ClusterIssuerConfigured condition is set by the caller after
 // a successful reconcile, so "ClusterIssuerConfigured=True" is the invariant for
 // "wrapper present AND identifiers populated".
-func (r *SpokeMachineIdentityReconciler) ensureClusterIssuerCRSWrapper(ctx context.Context, smi *identityv1alpha1.SpokeMachineIdentity) error {
+func (r *SpokeMachineIdentityReconciler) ensureClusterIssuerCRSWrapper(ctx context.Context, smi *identityv1alpha1.SpokeMachineIdentity, pki *pkiIdentity) error {
 	logger := log.FromContext(ctx)
 
 	wrapperName := fmt.Sprintf("%s-cluster-issuer", smi.Spec.SpokeRef.Name)
-	clientID := smi.Status.ClientID
-	projectID := r.ProjectID
-	if smi.Spec.Infisical.ProjectID != "" {
-		projectID = smi.Spec.Infisical.ProjectID
-	}
 
-	// Fail-closed (ADR-048, constraint 4): never publish a ClusterIssuer with
-	// empty clientId/projectId. These are rotation-stable identity outputs; an
-	// empty payload is a half-rendered artifact that must not reach the spoke.
-	if clientID == "" || projectID == "" {
-		logger.Info("Deferring ClusterIssuer CRS wrapper until machine identity material is available",
-			"wrapper", wrapperName, "clientId", clientID != "", "projectId", projectID != "")
+	// Fail-closed (ADR-048, constraint 4): never publish a half-rendered payload.
+	// CRS delivery is ApplyOnce, so a ClusterIssuer that reaches a spoke without a
+	// resolvable credential breaks that spoke's certificate issuance permanently.
+	if pki == nil || pki.ClientID == "" || pki.ClientSecret == "" {
+		logger.Info("Deferring ClusterIssuer CRS wrapper until the issuer's own identity is scoped",
+			"wrapper", wrapperName)
 		return nil
 	}
 
@@ -628,21 +726,64 @@ func (r *SpokeMachineIdentityReconciler) ensureClusterIssuerCRSWrapper(ctx conte
 		return err
 	}
 
-	clusterIssuerYAML := fmt.Sprintf(`apiVersion: infisical-issuer.infisical.com/v1alpha1
+	// THE ISSUER'S CREDENTIAL AND THE ISSUER, IN ONE PAYLOAD.
+	//
+	// Delivered together because they are useless apart: a ClusterIssuer whose
+	// secret references resolve to nothing leaves every CertificateRequest
+	// pending, and the credential alone configures nothing. One CRS slot keeps
+	// them atomic and needs no new resource in the SpokePool composition.
+	//
+	// THE SCHEMA IS pki-issuer v1.1.0's, which is the image
+	// spoke-catalog/infra/infisical-issuer.yaml deploys. This rendered the v0.2.0
+	// shape until 2026-11-23 -- `authentication.universalAuth` with an inlined
+	// clientId, plus `certificateTemplateName` and `projectId` -- and v1.1.0's
+	// IssuerSpec declares none of those, while REQUIRING `application` and
+	// `profile`. So the object could not be admitted at all: a CRD rejection for
+	// missing required fields, on the only producer of the issuer three spoke
+	// certificates name.
+	//
+	// `profile` carries the value the old `certificateTemplateName` did. v1.x
+	// renamed the concept -- a certificate profile of a PKI application -- so the
+	// value was right and the field was not.
+	//
+	// SECRET REFERENCES, not an inlined client id, and no duplicate key. v0.2.0
+	// read secretData["clientSecret"] regardless of what the issuer declared,
+	// which is why the identity wrapper carries that second copy; v1.1.0 resolves
+	// both halves through ResolveSecretReference and honours Name, Namespace and
+	// Key (internal/auth/universal.go). So the credential is written once, under
+	// the names the issuer is told to read.
+	clusterIssuerYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: %s
+type: Opaque
+stringData:
+  client-id: %s
+  client-secret: %s
+---
+apiVersion: infisical-issuer.infisical.com/v1alpha1
 kind: ClusterIssuer
 metadata:
   name: infisical-fleet-issuer
 spec:
   url: %s
+  application: %s
+  profile: %s
   authentication:
-    universalAuth:
-      clientId: %s
-      secretRef:
-        name: infisical-auth
+    method: universal
+    universal:
+      clientIdRef:
+        name: %s
+        namespace: %s
+        key: client-id
+      clientSecretRef:
+        name: %s
+        namespace: %s
         key: client-secret
-  certificateTemplateName: %s
-  projectId: %s
-`, issuerURL, clientID, clusterIssuerTemplate, projectID)
+`, pkiAuthSecretName, pkiAuthNamespace, pki.ClientID, pki.ClientSecret,
+		issuerURL, pkiApplicationName, clusterIssuerProfile,
+		pkiAuthSecretName, pkiAuthNamespace, pkiAuthSecretName, pkiAuthNamespace)
 
 	wrapper := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -719,4 +860,16 @@ func (r *SpokeMachineIdentityReconciler) SetupWithManager(mgr ctrl.Manager) erro
 		For(&identityv1alpha1.SpokeMachineIdentity{}).
 		Named("spokemachineidentity").
 		Complete(r)
+}
+
+// lastObservedPhrase says when this identity's authorization was last read
+// successfully, for a message reporting that the current read was not. Without it,
+// status.lastAuthorizationInventory sits beside a failure looking like the state
+// of the world now.
+func lastObservedPhrase(smi *identityv1alpha1.SpokeMachineIdentity) string {
+	if smi.Status.LastAuthorizationInventory == nil {
+		return "this identity's authorization has never been read successfully"
+	}
+	return fmt.Sprintf("the last successful read was %s and is now stale",
+		smi.Status.LastAuthorizationInventory.UTC().Format(time.RFC3339))
 }

@@ -88,7 +88,7 @@ func main() {
 		WebhookServer:                 webhook.NewServer(webhookServerOptions),
 		HealthProbeBindAddress:        probeAddr,
 		LeaderElection:                enableLeaderElection,
-		LeaderElectionID:              "spoke-identity-operator.zeroops.io",
+		LeaderElectionID:              "spoke-identity-operator.kamarkat.io",
 		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {

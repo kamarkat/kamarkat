@@ -22,7 +22,7 @@ metadata:
   labels:
     app.kubernetes.io/name: cluster-autoscaler
     app.kubernetes.io/component: burst-capacity
-    zero-ops.io/workload-cluster: spoke-pool-hybrid-dev-01
+    kamarkat.io/workload-cluster: spoke-pool-hybrid-dev-01
 spec:
   # Fixed at one. Two autoscalers deciding one node count is a scale-up race
   # that costs real servers; leader election is configured for safety but the
@@ -31,12 +31,12 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: cluster-autoscaler
-      zero-ops.io/workload-cluster: spoke-pool-hybrid-dev-01
+      kamarkat.io/workload-cluster: spoke-pool-hybrid-dev-01
   template:
     metadata:
       labels:
         app.kubernetes.io/name: cluster-autoscaler
-        zero-ops.io/workload-cluster: spoke-pool-hybrid-dev-01
+        kamarkat.io/workload-cluster: spoke-pool-hybrid-dev-01
     spec:
       serviceAccountName: cluster-autoscaler
       securityContext:

@@ -880,6 +880,22 @@ spec:
                 - op: replace
                   path: /spec/data/1/remoteRef/key
                   value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/S3_SECRET_ACCESS_KEY'
+            # The provider DNS credential, from this cluster's own project.
+            #
+            # It read `hcloud-token` at the project ROOT, which was reachable while
+            # every cluster shared hub-secrets. Under one project per cluster the
+            # root of a cluster's project holds nothing: the box's authority is
+            # elsewhere, and what this cluster may read is materialised into
+            # /spoke-pool/<cluster>/shared/ by hub-operator. Classified as
+            # centrally rotated, so a replaced account token converges here rather
+            # than leaving each cluster on whatever it was first given.
+            - target:
+                kind: ExternalSecret
+                name: hetzner-dns-credentials
+              patch: |
+                - op: replace
+                  path: /spec/data/0/remoteRef/key
+                  value: '/spoke-pool/{{"{{"}}.name{{"}}"}}/shared/hcloud-token'
             # ADR-031 cell-scoped authorisation. The cell Machine Identity may read
             # /spoke-pool/<cell-id>/ only, so every spoke ExternalSecret must resolve
             # inside that prefix. Both of these previously used ROOT-path keys and so
@@ -1013,6 +1029,25 @@ spec:
                 - op: replace
                   path: /spec/provider/infisical/secretsScope/environmentSlug
                   value: '{{"{{"}} index .metadata.labels "environment" {{"}}"}}'
+                # THE PROJECT IS THE ENFORCED BOUNDARY, and this is where a spoke
+                # is pointed at its own.
+                #
+                # environmentSlug above is a SELECTOR: an identity with project
+                # access reads every environment of that project regardless of it,
+                # because a built-in Infisical role carries no environment or path
+                # condition (default-roles.ts buildViewerPermissionRules grants
+                # DescribeSecret and ReadValue on Secrets with none), and
+                # conditioning one needs PlanFeature.Rbac, which the default plan
+                # does not include. So the isolation ADR-037 describes cannot come
+                # from the scope -- only from which project the identity belongs to.
+                #
+                # `.name` is this cluster, the same value the paths above are built
+                # from, and the slug matches infisical.ProjectSlug in
+                # spoke-identity-operator, which creates the project and scopes the
+                # identity to it. One cluster, one project, one viewer.
+                - op: replace
+                  path: /spec/provider/infisical/secretsScope/projectSlug
+                  value: 'spoke-{{"{{"}} .name {{"}}"}}-secrets'
 
 {{- end }}
       destination:

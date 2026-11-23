@@ -16,6 +16,6 @@ metadata:
 spec:
   nodeSelector:
     matchLabels:
-      sandbox.zero-ops.io/runtime: sandboxed
+      sandbox.kamarkat.io/runtime: sandboxed
   defaults:
     bpf-lb-sock-hostns-only: "true"

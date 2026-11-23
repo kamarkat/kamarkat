@@ -35,7 +35,7 @@ Verified on nutgraf-01 on 2026-10-20:
 
 ### 2. Offered per node, by one label
 
-`sandbox.zero-ops.io/runtime=sandboxed` on a node is the single statement that the
+`sandbox.kamarkat.io/runtime=sandboxed` on a node is the single statement that the
 node offers the runtime. It drives three things:
 
 - **The installer** (`spoke-catalog/infra/sandbox-runtime/`, a DaemonSet).

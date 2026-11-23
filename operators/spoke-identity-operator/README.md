@@ -46,7 +46,7 @@ Spoke ESO pulls rotated credentials from Infisical (Day-1)
 
 | Name | Group | Kind | Scope |
 |---|---|---|---|
-| `SpokeMachineIdentity` | `identity.zeroops.io/v1alpha1` | `SpokeMachineIdentity` | Namespaced |
+| `SpokeMachineIdentity` | `identity.kamarkat.io/v1alpha1` | `SpokeMachineIdentity` | Namespaced |
 
 ### Status Conditions
 

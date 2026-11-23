@@ -63,7 +63,8 @@ PENDING = {
 
 SRC = glob.glob("operators/hub-operator/internal/infisical/*.go") + \
       glob.glob("operators/hub-operator/internal/database/*.go") + \
-      glob.glob("operators/hub-operator/internal/secrets/*.go")
+      glob.glob("operators/hub-operator/internal/secrets/*.go") + \
+      glob.glob("operators/hub-operator/internal/controller/*.go")
 
 # Keys produced INTO a cluster path (/spoke-pool/<clusterName>/...), as opposed to the
 # Infisical root. This distinction is the whole point of the check: a spoke's
@@ -74,14 +75,27 @@ SRC = glob.glob("operators/hub-operator/internal/infisical/*.go") + \
 #
 # Derived from the operator source rather than restated here, so deleting a
 # producer breaks this check instead of silently narrowing it.
-CELL_SRC = "operators/hub-operator/internal/secrets/cell_credentials.go"
+# THE PATH IS ASSERTED, NOT GUARDED. This named cell_credentials.go, which has
+# been cluster_credentials.go for some time, and the `if os.path.exists` around it
+# turned that into a silent skip: the fleet keys below were never derived, so a
+# consumer of a copied credential has been passing this check on an empty set.
+# A check that cannot see its source must fail, not shrug.
+CELL_SRC = "operators/hub-operator/internal/secrets/cluster_credentials.go"
 cell_produced = {"infisical-credentials"}  # EnsureInfisicalCredentials, shared path
-if os.path.exists(CELL_SRC):
-    csrc = open(CELL_SRC).read()
-    # Copied from the root into each cell by EnsureFleetCredentialsMaterialised.
-    block = re.search(r'FleetCredentialKeys\s*=\s*\[\]string\{(.*?)\}', csrc, re.S)
-    if block:
-        cell_produced |= set(re.findall(r'"([^"]+)"', block.group(1)))
+if not os.path.exists(CELL_SRC):
+    print(f"BAD\t{CELL_SRC} is missing, so the credentials copied into each cell cannot be "
+          f"derived and every consumer of one would pass this check unexamined")
+    raise SystemExit
+csrc = open(CELL_SRC).read()
+# Copied from the authority into each cluster's project by
+# MaterialiseFleetCredentialsInto. A table rather than a list since 2026-11-23:
+# each entry carries the lifecycle that decides whether a rotation converges.
+block = re.search(r'FleetCredentials\s*=\s*\[\]FleetCredential\{(.*?)\n\}', csrc, re.S)
+if not block:
+    print("BAD\tFleetCredentials was not found in " + CELL_SRC + ", so the keys each cluster "
+          "receives cannot be derived")
+    raise SystemExit
+cell_produced |= set(re.findall(r'Key:\s*"([^"]+)"', block.group(1)))
 
 # Externally provisioned PER CELL: each cell has its own value, issued outside the
 # platform, so no producer here writes it and the hub's must never be copied in
@@ -129,7 +143,12 @@ for f in SRC:
     # hub database role failed to provision behind it.
     #
     # Count a constant only when its identifier is used outside its own declaration.
-    for ident, key in re.findall(r'\b(Key[A-Za-z0-9_]*)\s*=\s*"([^"]+)"', src):
+    # Either spelling of the convention: KeyFoo and fooKey both name a key, and
+    # matching only the prefix form missed the keys a controller declares --
+    # observability_viewer.go's grafanaOIDCClientIDKey produces
+    # hub-grafana-oidc-client-id, and this check reported that consumer as having
+    # no producer at all.
+    for ident, key in re.findall(r'\b([A-Za-z0-9_]*[Kk]ey[A-Za-z0-9_]*)\s*=\s*"([^"]+)"', src):
         if any(re.search(r'\b' + re.escape(ident) + r'\b', open(f).read())
                for f in SRC if not f.endswith("constants.go")):
             produced.add(key)

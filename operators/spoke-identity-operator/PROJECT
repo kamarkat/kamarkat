@@ -1,4 +1,4 @@
-domain: zeroops.io
+domain: kamarkat.io
 layout:
 - go.kubebuilder.io/v4
 projectName: spoke-identity-operator

@@ -78,3 +78,49 @@ Mandatory for tenants requiring PCI, HIPAA, or SOC2 strict compliance. These ten
 * **ADR-003**: Infisical as Single Source of Truth
 * **ADR-019**: Runtime Plugin Credential Resolution
 * **ADR-021**: GitOps Governance and Tenant ABI Enforcement
+
+
+## Correction (2026-11-23): the path was never the boundary
+
+This ADR describes a spoke's Machine Identity as authorised for
+`/spoke-pool/<clusterName>/` only. It was not, and could not be, on the Infisical
+this platform ships.
+
+A built-in project role carries no conditions. Infisical v0.167.12's
+`buildViewerPermissionRules` grants `DescribeSecret` and `ReadValue` on `Secrets`
+with no `environment` and no `secretPath` qualifier, so a member of a project reads
+every path of it. Conditioning a role on either requires a custom role, and
+`createRole` refuses one without `PlanFeature.Rbac` -- `false` in the default
+entitlement set, along with `secretsFolderRbac`. The grants in effect were broader
+still: `spoke-identity-operator` requested `admin` on two projects and
+`hub-operator` requested project `viewer` for a second identity.
+
+So the prefix expressed **ownership** and enforced nothing. The live evidence was
+in plain sight: the tenant image-pull `ExternalSecret` read `ghcr-pull-secret` at
+the project ROOT, outside any cluster prefix, and resolved.
+
+**What enforces it now.** One Infisical project per workload cluster, slug
+`spoke-<cluster>-secrets`, created by `hub-operator` -- which owns it because it
+writes the credentials into it -- with only the environment the cluster declares.
+The spoke's identity is a `viewer` of that project and a member of nothing else;
+`hub-secrets` and the Certificate Manager project are removed from it. The prefix
+stays, because it still says who owns a secret, and because a project is a
+container rather than a naming scheme.
+
+**The identity is narrowed only once the project holds its credentials.**
+`hub-operator` publishes the slug on the `SpokeMachineIdentity` after
+materialising them, and `spoke-identity-operator` waits for that field. Narrowing
+first would turn an over-privilege defect into failed image pulls and a database
+with no backup credential.
+
+**PKI is a separate authority.** Certificate issuance authorises through
+Infisical's application surface, not a project: the issuer's identity holds
+`operator` on the PKI application, plus `member` on the Certificate Manager
+project, which is the minimum built-in role that can read a certificate profile by
+slug (`viewer` cannot). It is a different identity from ESO's, with its own
+credential, so neither consumer can exercise the other's authority. `member` is
+broader than the one read it exists for and OSS cannot narrow it; what bounds it is
+that project's content -- PKI objects, never this platform's secrets.
+
+Gated by `scripts/validate/preflight/037-cluster-secret-project.py` and
+`031-infisical-api-contract.py`.

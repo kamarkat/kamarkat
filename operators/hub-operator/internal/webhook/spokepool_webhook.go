@@ -114,10 +114,13 @@ func validProviders() []string {
 // `candidates[random.Intn(len(candidates))]`). A box installs only its own
 // provider's composition (03-platform-services-appset.yaml syncs
 // manifests/providers/<box provider>), so in practice that single candidate wins
-// regardless of what the cluster declared: on a hybrid box, a cluster declaring
-// provider: hetzner was composed as hybrid -- burst-worker instead of
-// default-worker, no replicas patch, no general capacity, and a home-worker join
-// config for hardware nobody declared. Deterministic, silent, and wrong.
+// regardless of what the cluster declared. DERIVED, not observed: on a hybrid
+// box -- which carries only spokepool-hybrid -- a cluster declaring
+// provider: hetzner would be composed by it, giving burst-worker instead of
+// default-worker, no replicas patch, no general capacity and a home-worker join
+// config for hardware nobody declared. No such box has been observed; box 7 is
+// hetzner and carries one composition, so the single candidate there happened to
+// be the right one.
 //
 // A reference removes the choice: SelectComposition returns immediately when one
 // is set, and a reference naming a composition the box does not carry is reported

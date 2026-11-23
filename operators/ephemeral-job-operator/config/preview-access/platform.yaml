@@ -94,7 +94,7 @@ spec:
     # admitting all of them here grants none of them another's records.
     - fromEndpoints:
         - matchLabels:
-            zero-ops.io/tenant-gateway: "true"
+            kamarkat.io/tenant-gateway: "true"
           matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists

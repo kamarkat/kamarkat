@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
 
 	identityv1alpha1 "github.com/kamarkat/kamarkat/operators/spoke-identity-operator/api/v1alpha1"
 	"github.com/kamarkat/kamarkat/operators/spoke-identity-operator/internal/infisical"
@@ -67,232 +68,239 @@ func getWrapperSecret(t *testing.T, c client.Client, name string) (*corev1.Secre
 	return secret, payload
 }
 
-// ensureCRSWrapper renders both infisical-auth copies. infisical-issuer v0.2.0
-// authenticates via the hardcoded secretData["clientSecret"] key (secretRef.key
-// is never consulted), so the cert-manager copy MUST contain clientSecret or
-// the issuer logs in with an empty secret and trips identity lockout
-// (401 Invalid credentials x3 -> 401 "temporarily locked" loop, CRs pending).
-func TestEnsureCRSWrapperRendersClientSecretKey(t *testing.T) {
+// The workload credential is delivered ONCE, to its one consumer.
+//
+// There were two copies and a duplicate key, both for the certificate issuer:
+// pki-issuer v0.2.0 read secretData["clientSecret"] hardcoded, and the issuer
+// authenticated as this same identity. v1.1.0 resolves credentials through the
+// references its ClusterIssuer declares, and the issuer now has its own identity,
+// so a second copy of a workload credential in cert-manager is a credential in a
+// place nothing reads it from.
+func TestEnsureCRSWrapperDeliversTheWorkloadCredentialOnce(t *testing.T) {
 	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
-
-	smi := newTestSMI("spoke-h", "b3d5ec56-623e-4a04-b82e-3960d84196c7")
 	authSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "smi-spoke-h-auth", Namespace: "platform-capi"},
-		StringData: map[string]string{
-			"clientId":     "b3d5ec56-623e-4a04-b82e-3960d84196c7",
-			"clientSecret": "c54dc1e82716766396779dcd75b678f1ecbc7ffcb026db8a189d6be6b0fa21c1",
+		ObjectMeta: metav1.ObjectMeta{Name: "smi-spoke-a-auth", Namespace: "platform-capi"},
+		Data: map[string][]byte{
+			"clientId":     []byte("client-id-value"),
+			"clientSecret": []byte("client-secret-value"),
 		},
 	}
-	if err := c.Create(context.Background(), authSecret); err != nil {
-		t.Fatalf("seed auth secret: %v", err)
-	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(authSecret).Build()
+	r := &SpokeMachineIdentityReconciler{Client: c}
 
+	smi := newTestSMI("spoke-a", "client-id-value")
 	if err := r.ensureCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("render identity CRS wrapper: %v", err)
+		t.Fatalf("ensureCRSWrapper: %v", err)
 	}
 
-	wrapper := &corev1.Secret{}
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "spoke-h-machine-identity", Namespace: "platform-capi"}, wrapper); err != nil {
+	secret := &corev1.Secret{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "spoke-a-machine-identity", Namespace: "platform-capi"}, secret); err != nil {
 		t.Fatalf("get identity wrapper: %v", err)
 	}
-	payload := string(wrapper.Data["identity.yaml"])
+	payload := string(secret.Data["identity.yaml"])
 	if payload == "" {
-		payload = wrapper.StringData["identity.yaml"]
+		payload = secret.StringData["identity.yaml"]
 	}
 
-	wantSecretBlocks := []string{
-		"name: infisical-auth\n  namespace: platform-ops",
-		"name: infisical-auth\n  namespace: cert-manager",
+	if n := strings.Count(payload, "namespace: platform-ops"); n != 1 {
+		t.Errorf("expected exactly one delivered copy, in platform-ops; got %d in:\n%s", n, payload)
 	}
-	for _, want := range wantSecretBlocks {
-		if !strings.Contains(payload, want) {
-			t.Errorf("rendered identity.yaml missing %q in:\n%s", want, payload)
+	if strings.Contains(payload, "cert-manager") {
+		t.Errorf("the workload credential is still delivered to cert-manager, where the issuer "+
+			"no longer reads it:\n%s", payload)
+	}
+	if strings.Contains(payload, "clientSecret:") {
+		t.Errorf("the v0.2.0 duplicate clientSecret key survived; v1.1.0 honours the key its "+
+			"ClusterIssuer names:\n%s", payload)
+	}
+	for _, key := range []string{"client-id:", "client-secret:"} {
+		if n := strings.Count(payload, key); n != 1 {
+			t.Errorf("expected %q exactly once, got %d", key, n)
 		}
 	}
-	// Both copies: client-id/client-secret for ESO + issuer env, clientSecret
-	// for the isser's hardcoded signer lookup.
-	for _, key := range []string{"client-id", "client-secret", "clientSecret"} {
-		if got := strings.Count(payload, key+":"); got != 2 {
-			t.Errorf("expected %q exactly twice (platform-ops + cert-manager), got %d in:\n%s", key, got, payload)
+}
+
+func pkiFixture() *pkiIdentity {
+	return &pkiIdentity{ID: "pki-identity-1", ClientID: "pki-client-id", ClientSecret: "pki-client-secret"}
+}
+
+// The ClusterIssuer conforms to the schema the PINNED issuer image accepts.
+//
+// pki-issuer v1.1.0's IssuerSpec REQUIRES application and profile and declares
+// neither certificateTemplateName nor projectId, and its authentication is
+// method + universal.clientIdRef/clientSecretRef. This rendered the v0.2.0 shape
+// until 2026-11-23, so the only producer of the issuer three spoke certificates
+// name emitted an object the CRD could not admit.
+func TestEnsureClusterIssuerCRSWrapperRendersThePinnedIssuerContract(t *testing.T) {
+	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
+	scheme := newSchemeForTest(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "proj-1"}
+
+	smi := newTestSMI("spoke-a", "client-id-value")
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi, pkiFixture()); err != nil {
+		t.Fatalf("ensureClusterIssuerCRSWrapper: %v", err)
+	}
+	_, payload := getWrapperSecret(t, c, "spoke-a-cluster-issuer")
+
+	var issuer map[string]any
+	for _, doc := range strings.Split(payload, "\n---\n") {
+		var parsed map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &parsed); err != nil {
+			t.Fatalf("payload document is not YAML: %v\n%s", err, doc)
+		}
+		if parsed["kind"] == "ClusterIssuer" {
+			issuer = parsed
+		}
+	}
+	if issuer == nil {
+		t.Fatalf("no ClusterIssuer in the payload:\n%s", payload)
+	}
+
+	spec, _ := issuer["spec"].(map[string]any)
+	for _, required := range []string{"url", "application", "profile", "authentication"} {
+		if _, ok := spec[required]; !ok {
+			t.Errorf("spec.%s is absent, and v1.1.0's IssuerSpec requires it", required)
+		}
+	}
+	for _, gone := range []string{"certificateTemplateName", "projectId"} {
+		if _, ok := spec[gone]; ok {
+			t.Errorf("spec.%s is a v0.2.0 field that v1.1.0 does not declare", gone)
+		}
+	}
+	if spec["application"] != pkiApplicationName {
+		t.Errorf("spec.application is %v, want %q -- the issuer resolves it by name",
+			spec["application"], pkiApplicationName)
+	}
+	if spec["profile"] != clusterIssuerProfile {
+		t.Errorf("spec.profile is %v, want %q", spec["profile"], clusterIssuerProfile)
+	}
+
+	auth, _ := spec["authentication"].(map[string]any)
+	if auth["method"] != "universal" {
+		t.Errorf("spec.authentication.method is %v, want universal", auth["method"])
+	}
+	if _, ok := auth["universalAuth"]; ok {
+		t.Error("spec.authentication.universalAuth is the v0.2.0 shape; v1.1.0 reads .universal")
+	}
+	universal, _ := auth["universal"].(map[string]any)
+	for _, ref := range []string{"clientIdRef", "clientSecretRef"} {
+		r, ok := universal[ref].(map[string]any)
+		if !ok {
+			t.Fatalf("spec.authentication.universal.%s is absent", ref)
+		}
+		if r["name"] != pkiAuthSecretName || r["namespace"] != pkiAuthNamespace {
+			t.Errorf("%s points at %v/%v, want %s/%s -- the issuer's own credential, not ESO's",
+				ref, r["namespace"], r["name"], pkiAuthNamespace, pkiAuthSecretName)
 		}
 	}
 }
 
-// missing machine identity material -> no wrapper is ever published (fail-closed)
-func TestEnsureClusterIssuerCRSWrapperEmptyIdentityNotPublished(t *testing.T) {
+// The issuer's credential travels WITH the issuer. Apart they are useless: a
+// ClusterIssuer whose references resolve to nothing leaves every
+// CertificateRequest pending, and CRS delivery is ApplyOnce.
+func TestEnsureClusterIssuerCRSWrapperCarriesTheIssuersOwnCredential(t *testing.T) {
 	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
 	scheme := newSchemeForTest(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
+	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "proj-1"}
 
-	smi := newTestSMI("spoke-a", "")
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("expected nil error for deferred (empty) identity, got %v", err)
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), newTestSMI("spoke-a", "x"), pkiFixture()); err != nil {
+		t.Fatalf("ensureClusterIssuerCRSWrapper: %v", err)
 	}
+	_, payload := getWrapperSecret(t, c, "spoke-a-cluster-issuer")
 
-	var secret corev1.Secret
-	err := c.Get(context.Background(), client.ObjectKey{Name: "spoke-a-cluster-issuer", Namespace: "platform-capi"}, &secret)
-	if err == nil {
-		t.Fatalf("wrapper must NOT be published when clientId is empty, got secret %q", secret.Name)
+	var found bool
+	for _, doc := range strings.Split(payload, "\n---\n") {
+		var parsed map[string]any
+		_ = yaml.Unmarshal([]byte(doc), &parsed)
+		meta, _ := parsed["metadata"].(map[string]any)
+		if parsed["kind"] == "Secret" && meta["name"] == pkiAuthSecretName {
+			found = true
+			if meta["namespace"] != pkiAuthNamespace {
+				t.Errorf("the issuer credential is in %v, want %s", meta["namespace"], pkiAuthNamespace)
+			}
+			data, _ := parsed["stringData"].(map[string]any)
+			if data["client-id"] != "pki-client-id" || data["client-secret"] != "pki-client-secret" {
+				t.Errorf("the issuer credential does not carry the PKI identity's material: %v", data)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the payload carries no %s Secret:\n%s", pkiAuthSecretName, payload)
+	}
+	// ESO's credential has no business in this payload.
+	if strings.Contains(payload, "name: infisical-auth") {
+		t.Errorf("the issuer payload references the workload credential:\n%s", payload)
 	}
 }
 
-// empty projectId -> no wrapper is published
-func TestEnsureClusterIssuerCRSWrapperEmptyProjectNotPublished(t *testing.T) {
+// Fail-closed. CRS is ApplyOnce, so a payload published without a resolvable
+// credential breaks that spoke's issuance permanently.
+func TestEnsureClusterIssuerCRSWrapperPublishesNothingWithoutAnIssuerCredential(t *testing.T) {
 	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
-	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c} // ProjectID empty
-
-	smi := newTestSMI("spoke-b", "b3d5ec56-623e-4a04-b82e-3960d84196c7")
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("expected nil error for deferred (empty) project, got %v", err)
-	}
-
-	var secret corev1.Secret
-	err := c.Get(context.Background(), client.ObjectKey{Name: "spoke-b-cluster-issuer", Namespace: "platform-capi"}, &secret)
-	if err == nil {
-		t.Fatalf("wrapper must NOT be published when projectId is empty, got secret %q", secret.Name)
-	}
-}
-
-// initial identity + project -> correct clientId and projectId rendered
-func TestEnsureClusterIssuerCRSWrapperInitialRendersCompletedIssuer(t *testing.T) {
-	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
-	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
-
-	smi := newTestSMI("spoke-c", "b3d5ec56-623e-4a04-b82e-3960d84196c7")
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("render: %v", err)
-	}
-
-	_, yamlBody := getWrapperSecret(t, c, "spoke-c-cluster-issuer")
-	for _, want := range []string{
-		"kind: ClusterIssuer",
-		"name: infisical-fleet-issuer",
-		"clientId: b3d5ec56-623e-4a04-b82e-3960d84196c7",
-		"projectId: 20958df6-ac81-4e11-8259-d1ddd1becb5c",
-		"name: infisical-auth",
-		"key: client-secret",
-		"certificateTemplateName: infrastructure-services",
-		// The BOX's Infisical, from SECRET_STORE_URL. It was asserted as a literal
-		// platform host, which is what let the hardcoded constant survive: the
-		// test passed precisely because the value was wrong in the same way.
-		"url: https://infisical.dev.acme.example",
+	for name, pki := range map[string]*pkiIdentity{
+		"no identity at all": nil,
+		"no client id":       {ID: "p", ClientSecret: "s"},
+		"no client secret":   {ID: "p", ClientID: "c"},
 	} {
-		if !strings.Contains(yamlBody, want) {
-			t.Errorf("rendered ClusterIssuer missing %q in:\n%s", want, yamlBody)
+		scheme := newSchemeForTest(t)
+		c := fake.NewClientBuilder().WithScheme(scheme).Build()
+		r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "proj-1"}
+
+		if err := r.ensureClusterIssuerCRSWrapper(context.Background(), newTestSMI("spoke-a", "x"), pki); err != nil {
+			t.Fatalf("%s: expected a deferral rather than an error, got %v", name, err)
+		}
+		secret := &corev1.Secret{}
+		if err := c.Get(context.Background(), client.ObjectKey{Name: "spoke-a-cluster-issuer", Namespace: "platform-capi"}, secret); err == nil {
+			t.Errorf("%s: a wrapper was published", name)
 		}
 	}
 }
 
-// spec-level projectId overrides the operator flag projectId
-func TestEnsureClusterIssuerCRSWrapperSpecProjectIDOverrides(t *testing.T) {
+func TestEnsureClusterIssuerCRSWrapperIsIdempotent(t *testing.T) {
 	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
 	scheme := newSchemeForTest(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "flag-project-id"}
+	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "proj-1"}
+	smi := newTestSMI("spoke-a", "x")
 
-	smi := newTestSMI("spoke-d", "b3d5ec56-623e-4a04-b82e-3960d84196c7")
-	smi.Spec.Infisical.ProjectID = "spec-project-id"
-
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("render: %v", err)
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi, pkiFixture()); err != nil {
+		t.Fatalf("first: %v", err)
 	}
-
-	_, yamlBody := getWrapperSecret(t, c, "spoke-d-cluster-issuer")
-	if !strings.Contains(yamlBody, "projectId: spec-project-id") {
-		t.Errorf("expected spec projectId to win, got:\n%s", yamlBody)
+	before, _ := getWrapperSecret(t, c, "spoke-a-cluster-issuer")
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi, pkiFixture()); err != nil {
+		t.Fatalf("second: %v", err)
 	}
-	if strings.Contains(yamlBody, "projectId: flag-project-id") {
-		t.Errorf("flag projectId must not be used when spec overrides:\n%s", yamlBody)
-	}
-}
-
-// reconciliation with same values -> no unnecessary update (idempotent)
-func TestEnsureClusterIssuerCRSWrapperIdempotentNoUpdate(t *testing.T) {
-	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
-	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&identityv1alpha1.SpokeMachineIdentity{}).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
-
-	smi := newTestSMI("spoke-e", "b3d5ec56-623e-4a04-b82e-3960d84196c7")
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("first render: %v", err)
-	}
-	before, _ := getWrapperSecret(t, c, "spoke-e-cluster-issuer")
-
-	// Second reconcile with identical material. The wrapper content is unchanged, so
-	// no update should be issued. Assert via resourceVersion staying identical.
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("second render: %v", err)
-	}
-	after, _ := getWrapperSecret(t, c, "spoke-e-cluster-issuer")
+	after, _ := getWrapperSecret(t, c, "spoke-a-cluster-issuer")
 	if before.ResourceVersion != after.ResourceVersion {
-		t.Errorf("wrapper was updated unnecessarily: rv %s -> %s", before.ResourceVersion, after.ResourceVersion)
+		t.Errorf("an unchanged payload was rewritten (%s -> %s)", before.ResourceVersion, after.ResourceVersion)
 	}
 }
 
-// secret rotation keeps the same clientId (rotation-stable): wrapper must NOT be
-// regenerated and the rendered clientId must remain stable across rotation.
-func TestEnsureClusterIssuerCRSWrapperClientSecretRotationNoRegen(t *testing.T) {
+// A ROTATED ISSUER SECRET MUST REACH THE WRAPPER. This inverts what the payload
+// used to assert: it carried a rotation-stable clientId and read the secret from
+// elsewhere, so a rotation deliberately did not regenerate it. The payload now
+// CONTAINS the credential, so a wrapper left unchanged after a rotation would
+// hand the next provisioned spoke a secret that no longer authenticates.
+func TestEnsureClusterIssuerCRSWrapperFollowsARotatedIssuerSecret(t *testing.T) {
 	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
 	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&identityv1alpha1.SpokeMachineIdentity{}).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "proj-1"}
+	smi := newTestSMI("spoke-a", "x")
 
-	stableClientID := "b3d5ec56-623e-4a04-b82e-3960d84196c7"
-	smi := newTestSMI("spoke-f", stableClientID)
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("first render: %v", err)
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi, pkiFixture()); err != nil {
+		t.Fatalf("first: %v", err)
 	}
-	before, yamlBefore := getWrapperSecret(t, c, "spoke-f-cluster-issuer")
-
-	// Rotation rotates only the client secret; the clientId is stable. Reconcile again.
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("re-render after rotation: %v", err)
+	rotated := pkiFixture()
+	rotated.ClientSecret = "pki-client-secret-rotated"
+	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi, rotated); err != nil {
+		t.Fatalf("after rotation: %v", err)
 	}
-	after, yamlAfter := getWrapperSecret(t, c, "spoke-f-cluster-issuer")
-
-	if before.ResourceVersion != after.ResourceVersion {
-		t.Errorf("rotation must not regenerate the wrapper (rv %s -> %s)", before.ResourceVersion, after.ResourceVersion)
-	}
-	if yamlBefore != yamlAfter {
-		t.Errorf("rotation must not change the rendered ClusterIssuer payload")
-	}
-	if !strings.Contains(yamlAfter, "clientId: "+stableClientID) {
-		t.Errorf("rotation-stable clientId missing from payload:\n%s", yamlAfter)
-	}
-}
-
-// clientId actually changes (identity recreated): wrapper updates so future
-// (re)provisioned spokes receive the new identifier.
-func TestEnsureClusterIssuerCRSWrapperClientIDChangesUpdatesWrapper(t *testing.T) {
-	t.Setenv("SECRET_STORE_URL", "https://infisical.dev.acme.example")
-	scheme := newSchemeForTest(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&identityv1alpha1.SpokeMachineIdentity{}).Build()
-	r := &SpokeMachineIdentityReconciler{Client: c, ProjectID: "20958df6-ac81-4e11-8259-d1ddd1becb5c"}
-
-	smi := newTestSMI("spoke-g", "old-client-id-00000000-0000-0000-0000-000000000000")
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("first render: %v", err)
-	}
-
-	smi.Status.ClientID = "new-client-id-11111111-1111-1111-1111-111111111111"
-	if err := r.ensureClusterIssuerCRSWrapper(context.Background(), smi); err != nil {
-		t.Fatalf("re-render after clientId change: %v", err)
-	}
-
-	_, yamlBody := getWrapperSecret(t, c, "spoke-g-cluster-issuer")
-	if !strings.Contains(yamlBody, "clientId: new-client-id-11111111-1111-1111-1111-111111111111") {
-		t.Errorf("updated clientId not present in wrapper payload:\n%s", yamlBody)
-	}
-	if strings.Contains(yamlBody, "old-client-id") {
-		t.Errorf("stale clientId still present in wrapper payload:\n%s", yamlBody)
+	_, payload := getWrapperSecret(t, c, "spoke-a-cluster-issuer")
+	if !strings.Contains(payload, "pki-client-secret-rotated") {
+		t.Errorf("the rotated issuer secret did not reach the wrapper:\n%s", payload)
 	}
 }
 
@@ -364,6 +372,7 @@ func readyCondition(smi *identityv1alpha1.SpokeMachineIdentity) *metav1.Conditio
 }
 
 // identity locked -> clear-lockout called with admin token, re-probe healthy.
+
 func TestEnsureIdentityUnlockClearsLockout(t *testing.T) {
 	var sawClear bool
 	handler := func(w http.ResponseWriter, r *http.Request) {

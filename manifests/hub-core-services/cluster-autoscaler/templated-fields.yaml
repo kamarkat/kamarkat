@@ -14,11 +14,11 @@
 - kind: Deployment
   name: cluster-autoscaler-spoke-pool-hybrid-dev-01
   fields:
-    - path: [metadata, labels, zero-ops.io/workload-cluster]
+    - path: [metadata, labels, kamarkat.io/workload-cluster]
       value: '{{ .Values.global.burstSpokePool }}'
-    - path: [spec, selector, matchLabels, zero-ops.io/workload-cluster]
+    - path: [spec, selector, matchLabels, kamarkat.io/workload-cluster]
       value: '{{ .Values.global.burstSpokePool }}'
-    - path: [spec, template, metadata, labels, zero-ops.io/workload-cluster]
+    - path: [spec, template, metadata, labels, kamarkat.io/workload-cluster]
       value: '{{ .Values.global.burstSpokePool }}'
     # The provider's discovery argument. A substitution rather than an assignment
     # so the rest of the flag -- the clusterapi prefix and the namespace -- stays
