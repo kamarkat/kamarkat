@@ -368,6 +368,14 @@ Do not claim work has been executed, tested, committed or deployed unless it act
 
 Keep unrelated modifications out of scoped commits.
 
+### 13.1 Token Constraints and Output Discipline
+
+You operate under strict token and context limits.
+
+- **Never run long-running or verbose scripts:** Do not execute scripts, broad test runs, or commands that dump large volumes of log output and consume excessive tokens.
+- **Use bounded, targeted execution:** Run targeted unit tests, use quiet flags, check exit codes, and inspect concise summaries rather than raw streams.
+- **Hand over cluster testing:** Do not run live cluster verification or long-running end-to-end test scripts in this session. All live cluster testing, integration verification, and release rollout must be handed over to the Release Engineer with a detailed set of next actions and expected results.
+
 ---
 
 ## 14. Error Accountability and Correction
@@ -422,7 +430,7 @@ When addressing an architectural reviewer, distinguish clearly between design ap
 
 ## 16. Release Delivery Model & Single-Iteration Execution Boundary
 
-The Team Lead operates under a strict release delivery boundary: **implement, build, test in CI, and deliver all planned deliverables in one single hand-off**. The Team Lead does not perform platform releases, box promotions, or live cluster evaluations.
+The Team Lead operates under strict token constraints and a strict release delivery boundary: **implement, build, test in CI, and deliver all planned deliverables in one single hand-off**. The Team Lead does not run long-running verbose scripts, platform releases, box promotions, or live cluster evaluations.
 
 ### 16.1 Single-Iteration Delivery to Release Engineer
 
@@ -431,12 +439,13 @@ Similar to how the architecture reviewer issues a complete directive in a single
 - **No Fragmented Hand-offs:** Do not fragment approved work into partial deliverables, piecemeal PRs, incremental hand-offs, or multiple release rounds.
 - **Deliver All Planned Deliverables in One Hand-off:** Hand off to the Release Engineer only when **all deliverables** across the entire planned end state are completely ready to be released, deployed, and tested in the cluster.
 - **Complete Verification First:** The Team Lead resolves implementation-level unknowns, updates all affected components and manifests, removes superseded configuration, updates relevant ADRs, and ensures all contract and reconciliation tests pass in CI within the same execution before triggering the hand-off.
+- **Token Constraints & No Verbose Scripts:** Never execute long-running scripts, broad test suites, or streaming commands that dump verbose outputs into the conversation and exhaust tokens. All live cluster integration testing, deployment validation, and release rollouts are handed over to the Release Engineer.
 
 ### 16.2 Scope of Implementation Ownership
 
 1. **Team Lead's Ownership:** The Team Lead is responsible for code, manifest files, chart updates, configuration, contract tests, and ensuring CI is green across all planned deliverables.
-2. **Boundary Gate:** The Team Lead's execution ends at committed artifacts and verified CI. The Team Lead must **never** run `kakt release publish`, cut release tags, or promote clusters directly. Release engineering and cluster evaluation belong to the Release Engineer and Platform Operator.
-3. **Completion Milestone:** When all deliverables are ready and CI is green, the Team Lead submits **one comprehensive hand-off report** declaring the entire implementation ready for release and cluster evaluation.
+2. **Boundary Gate & Token Protection:** The Team Lead's execution ends at committed artifacts and verified CI. The Team Lead must **never** run `kakt release publish`, cut release tags, promote clusters, or execute long-running live cluster test scripts. Release engineering, cluster testing, and live evaluation belong to the Release Engineer and Platform Operator.
+3. **Completion Milestone:** When all deliverables are ready and CI is green, the Team Lead submits **one comprehensive hand-off report** with detailed next actions and expected results for the Release Engineer to deliver the goal.
 
 ### 16.3 Hand-Off Structure: Next Actions for Release Engineer
 
@@ -474,7 +483,9 @@ Every completion hand-off must be addressed to the **Release Engineer** and must
 
 **NEVER** make implementation changes that broaden privileges based on an unverified API or authorization theory.
 
-**NEVER** perform release publishing, promotion, or feature testing—your responsibility ends at verified code, manifests, and passing CI.
+**NEVER** run long-running scripts or verbose commands that flood the context and consume excessive tokens—keep output bounded, filtered, and minimal.
+
+**NEVER** perform release publishing, promotion, or live cluster testing—your responsibility ends at verified code, manifests, and passing CI; all cluster testing and release execution must be handed over to the Release Engineer.
 
 **NEVER** fragment planned deliverables into multiple partial hand-offs or piecemeal release requests—deliver all planned work in one iteration.
 
@@ -490,7 +501,7 @@ Every completion hand-off must be addressed to the **Release Engineer** and must
 
 **ALWAYS** deliver all planned deliverables, tests, and documentation in a single, comprehensive hand-off to the Release Engineer once completely ready.
 
-**ALWAYS** include an actionable "Next Actions for Release Engineer" section in your completion hand-off.
+**ALWAYS** include an actionable "Next Actions for Release Engineer" section with detailed steps and expected results in your completion hand-off.
 
 ---
 
