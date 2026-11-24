@@ -528,6 +528,7 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// ADR-112 a role can be on an application's cluster, and verifying only the
 		// shared one reports roles as present because it never looked where they are.
 		var missing []string
+		var disagreeing []string
 		for _, cluster := range hubEnv.Spec.DatabaseClusters() {
 			verifier, err := database.NewRoleManager(ctx, r.UncachedClient, database.Endpoint{
 				Cluster:   cluster,
@@ -541,12 +542,44 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 			}
 			absent, err := verifier.MissingRoles(ctx, hubEnv)
-			verifier.Close()
 			if err != nil {
+				verifier.Close()
 				logger.Error(err, "Failed to verify database roles", "cluster", cluster)
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 			}
+			// AGREEMENT, not just existence. A role that exists with a password its
+			// Secret does not carry satisfies MissingRoles, so this condition read
+			// True while the application could not authenticate -- the state
+			// nutgraf-mgmt-1794929668 reported for the whole hub_zitadel outage.
+			stale, err := verifier.RolesDisagreeingWithSecret(ctx, hubEnv)
+			verifier.Close()
+			if err != nil {
+				logger.Error(err, "Failed to compare database roles against their Secrets",
+					"cluster", cluster)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
 			missing = append(missing, absent...)
+			disagreeing = append(disagreeing, stale...)
+		}
+		// Reported, not repaired: CloudNativePG owns the password now, so a
+		// disagreement means it has not converged on the delivered credential yet.
+		// Readiness says so rather than claiming the roles are provisioned.
+		if len(disagreeing) > 0 {
+			logger.Info("Database role(s) disagree with their Secret; CloudNativePG has not converged",
+				"roles", disagreeing)
+			meta.SetStatusCondition(&hubEnv.Status.Conditions, metav1.Condition{
+				Type:   "DatabaseRolesProvisioned",
+				Status: metav1.ConditionFalse,
+				Reason: "CredentialNotConverged",
+				Message: fmt.Sprintf("role(s) %v have a password their authoritative Secret does not carry; "+
+					"CloudNativePG reconciles it from the Secret named in the Cluster's bootstrap.initdb.secret",
+					disagreeing),
+				ObservedGeneration: hubEnv.Generation,
+			})
+			if err := r.Status().Update(ctx, hubEnv); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		if len(missing) > 0 {
 			logger.Info("Declared database roles are absent despite DatabaseRolesProvisioned=True; re-provisioning",
@@ -716,14 +749,15 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Certificate rotation is managed by cert-manager per ADR-035. Workloads restarted via Stakater Reloader annotations.
-	if isConditionTrueAndUpToDate(hubEnv.Status.Conditions, "Ready", hubEnv.Generation) {
-		// Requirement 23.15-23.16: Handle password rotation
-		if err := r.handlePasswordRotation(ctx, hubEnv); err != nil {
-			logger.Error(err, "Failed to handle password rotation")
-			// Don't fail reconciliation, just log and requeue
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-	}
+	//
+	// PASSWORD ROTATION IS NOT HANDLED HERE ANY MORE. handlePasswordRotation read
+	// each role's Secret, compared it against pg_authid and issued ALTER ROLE --
+	// a second password authority beside CloudNativePG, which reconciles the
+	// application owner from the Secret its Cluster declares on every instance
+	// reconcile. Each Cluster's bootstrap.initdb.secret now names the
+	// ESO-delivered credential, so a rotation reaches PostgreSQL through CNPG
+	// alone (ADR-023/ADR-112 amendment 2026-11-24). Removed rather than disabled:
+	// a writer that runs only sometimes is the defect, not a safeguard.
 
 	return ctrl.Result{}, nil
 }
@@ -775,125 +809,6 @@ func (r *HubEnvironmentReconciler) isInfisicalReady(ctx context.Context, hubEnv 
 }
 
 // uploadSecretsToInfisical uploads all secrets to Infisical
-// handlePasswordRotation detects password changes and executes ALTER ROLE
-// Requirement 23.15-23.16: Implement password rotation handling
-func (r *HubEnvironmentReconciler) handlePasswordRotation(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) error {
-	logger := log.FromContext(ctx)
-	namespace := hubEnv.Spec.Database.Namespace
-
-	// Check all database role secrets for password changes
-	for _, roleSpec := range hubEnv.Spec.Database.Roles {
-		secretName := roleSpec.Name + "-db-credentials"
-
-		// Read the secret
-		// Task 13: Use UncachedClient - credential secret, must not have data stripped
-		secret := &corev1.Secret{}
-		if err := r.UncachedClient.Get(ctx, client.ObjectKey{
-			Name:      secretName,
-			Namespace: namespace,
-		}, secret); err != nil {
-			if errors.IsNotFound(err) {
-				// Secret doesn't exist yet, skip
-				continue
-			}
-			return err
-		}
-
-		// Check if secret has the db-credentials label (ESO-managed)
-		if labels := secret.GetLabels(); labels == nil || labels["ops.nutgraf.in/db-credentials"] != "true" {
-			// Not an ESO-managed secret, skip
-			continue
-		}
-
-		// Extract username and password
-		username, ok := secret.Data["username"]
-		if !ok {
-			logger.Info("Secret missing username field", "secret", secretName)
-			continue
-		}
-
-		password, ok := secret.Data["password"]
-		if !ok {
-			logger.Info("Secret missing password field", "secret", secretName)
-			continue
-		}
-
-		// Requirement 23.15: Execute ALTER ROLE to update PostgreSQL password
-		// The cluster this ROLE lives on, which after ADR-112 is not necessarily the
-		// box's shared one. Rotating a password against the wrong cluster either fails
-		// on a role that is not there or, if a role of the same name happens to exist,
-		// changes a credential nothing is using while the real one goes stale.
-		roleManager, err := database.NewRoleManager(ctx, r.UncachedClient, database.Endpoint{
-			Cluster:   hubEnv.Spec.ClusterFor(roleSpec),
-			Namespace: namespace,
-		})
-		if err != nil {
-			logger.Error(err, "Failed to create role manager for password rotation",
-				"cluster", hubEnv.Spec.ClusterFor(roleSpec), "role", roleSpec.Name)
-			continue
-		}
-
-		// Check if password needs update (drift detection)
-		needsUpdate, err := roleManager.PasswordNeedsUpdate(ctx, string(username), string(password))
-		if err != nil {
-			roleManager.Close()
-			logger.Error(err, "Failed to check password drift", "role", string(username))
-			continue
-		}
-
-		if !needsUpdate {
-			roleManager.Close()
-			// Password hasn't changed, skip
-			continue
-		}
-
-		logger.Info("Password rotation detected, updating role", "role", string(username))
-
-		// Execute ALTER ROLE
-		if err := roleManager.UpdateRolePassword(ctx, string(username), string(password)); err != nil {
-			roleManager.Close()
-			logger.Error(err, "Failed to update role password", "role", string(username))
-			continue
-		}
-
-		roleManager.Close()
-		logger.Info("Updated role password in PostgreSQL", "role", string(username))
-
-		// Requirement 23.16: Restart consuming Deployment/StatefulSet
-		// Extract service name from role name (e.g., "infisical" from "infisical-db-credentials")
-		serviceName := roleSpec.Name
-
-		// Map role names to service deployments/statefulsets
-		serviceMap := map[string]struct {
-			kind      string
-			name      string
-			namespace string
-		}{
-			"infisical":  {"Deployment", infisical.InfisicalServiceName, infisical.InfisicalServiceNamespace},
-			"redis":      {"StatefulSet", "redis", namespace},
-			"zitadel":    {"Deployment", "zitadel", infisical.NamespaceIdentity},
-			"mcp_server": {"Deployment", "mcp-server", infisical.NamespaceOps},
-		}
-
-		if svc, ok := serviceMap[serviceName]; ok {
-			if svc.kind == "Deployment" {
-				if err := r.restartDeployment(ctx, svc.name, svc.namespace); err != nil {
-					logger.Error(err, "Failed to restart deployment after password rotation", "name", svc.name)
-				} else {
-					logger.Info("Restarted deployment after password rotation", "name", svc.name)
-				}
-			} else if svc.kind == "StatefulSet" {
-				if err := r.restartStatefulSet(ctx, svc.name, svc.namespace); err != nil {
-					logger.Error(err, "Failed to restart statefulset after password rotation", "name", svc.name)
-				} else {
-					logger.Info("Restarted statefulset after password rotation", "name", svc.name)
-				}
-			}
-		}
-	}
-
-	return nil
-}
 
 // restartDeployment patches a Deployment with restartedAt annotation
 // Requirement 23.5: Implement restartDeployment() helper

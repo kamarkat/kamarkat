@@ -509,3 +509,12 @@ CloudNativePG operand image taxonomy differentiates between minimal/standard ima
 - The use of `-standard-bookworm` images caused WAL archiving to fail with `exec: "barman-cloud-check-wal-archive": executable file not found in $PATH`.
 - Rather than downgrading PostgreSQL majors or using out-of-tree plugins during stabilization, clusters retaining native `barmanObjectStore` pin same-major `system` images (`ghcr.io/cloudnative-pg/postgresql:17.11-system-bookworm`).
 - The custom billing image (`images/postgres-partman`) builds from `ghcr.io/cloudnative-pg/postgresql:18-system-bookworm`, retaining both pg_partman extensions and barman cloud archiving tooling.
+
+*Amended by: ADR-023 amendment (2026-11-24) — one password authority per role. The
+2026-11-18 amendment above states "Role reconciliation stays with the authority the
+cluster declares — RoleManager for the three roles". That is superseded:
+CloudNativePG is the sole PostgreSQL password writer for every hub database role,
+and each Cluster names its authoritative credential in bootstrap.initdb.secret. The
+decision to omit that field was taken when the credential was believed to arrive at
+boundary 04; this amendment itself moved it to boundary 02, which removes the
+deadlock that justified omitting it.*

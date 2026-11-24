@@ -111,6 +111,25 @@ spec:
     initdb:
       database: zitadel
       owner: hub_zitadel
+      # THE AUTHORITATIVE CREDENTIAL, so CNPG has one password source for this role.
+      #
+      # GetApplicationSecretName() returns this name instead of the generated
+      # zitadel-db-app, and CNPG reconciles the owner's password to it on every
+      # instance reconcile (refreshCredentialsFromSecret -> reconcileUser ->
+      # SetUserPassword), not only at initialisation. So CNPG is the sole SQL
+      # writer for this role and hub-operator no longer issues ALTER ROLE for it
+      # (ADR-023/ADR-112 amendment 2026-11-24).
+      #
+      # This field was deliberately omitted while the credential was believed to
+      # arrive at boundary 04 -- blocking initdb on it would have deadlocked
+      # against DatabaseRolesProvisioned. ADR-112's 2026-11-18 amendment moved the
+      # credential into boundary 02, beside this Cluster, so that objection no
+      # longer holds and the field is safe.
+      #
+      # username in zitadel-db-owner is `hub_zitadel`, matching owner above. CNPG takes the
+      # role name from the Secret when one is given, so the two must agree.
+      secret:
+        name: zitadel-db-owner
 
   # This cluster's own archive identity (ADR-014 add.2, ADR-111 §2). destinationPath is
   # rendered per box by templated-fields.yaml; serverName carries THIS database and its

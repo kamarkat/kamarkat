@@ -155,6 +155,50 @@ func NewRoleManager(ctx context.Context, k8sClient client.Client, ep Endpoint) (
 // Role names are resolved the same way CreateOrUpdateRoles resolves them —
 // through the credential secret rather than from the spec directly — so the two
 // cannot disagree about what a role is called.
+// RolesDisagreeingWithSecret names the roles whose password in PostgreSQL does not
+// match the Secret that is authoritative for them.
+//
+// EXISTENCE IS NOT AGREEMENT, and conflating the two is what produced a false
+// green. MissingRoles asks whether a role is there; a role that is there with the
+// wrong password satisfies it, DatabaseRolesProvisioned stays True, and the
+// condition reports a working database while the application cannot log in. That
+// is what nutgraf-mgmt-1794929668 reported throughout the hub_zitadel outage.
+//
+// Read-only: it compares the stored hash through passwordNeedsUpdate and writes
+// nothing. hub-operator no longer sets passwords (CloudNativePG does), so a
+// disagreement here is not something this operator repairs -- it is something
+// readiness must REPORT, so that "CNPG has not converged yet" and "the roles are
+// provisioned" stop being the same answer.
+func (rm *RoleManager) RolesDisagreeingWithSecret(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) ([]string, error) {
+	namespace := hubEnv.Spec.Database.Namespace
+
+	var disagreeing []string
+	for _, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
+		secret := &corev1.Secret{}
+		if err := rm.client.Get(ctx, client.ObjectKey{
+			Name:      RoleSecretName(roleSpec.Name),
+			Namespace: RoleSecretNamespace(roleSpec.Name, namespace),
+		}, secret); err != nil {
+			// A credential that has not been delivered is not a disagreement. The
+			// ExternalSecret's own status says why, and MissingRoles covers absence.
+			continue
+		}
+		username := string(secret.Data["username"])
+		password := string(secret.Data["password"])
+		if username == "" || password == "" {
+			continue
+		}
+		differs, err := rm.passwordNeedsUpdate(ctx, username, password)
+		if err != nil {
+			return nil, fmt.Errorf("compare role %s against its Secret: %w", roleSpec.Name, err)
+		}
+		if differs {
+			disagreeing = append(disagreeing, roleSpec.Name)
+		}
+	}
+	return disagreeing, nil
+}
+
 func (rm *RoleManager) MissingRoles(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) ([]string, error) {
 	namespace := hubEnv.Spec.Database.Namespace
 
@@ -334,54 +378,52 @@ func (rm *RoleManager) createOrUpdateRole(ctx context.Context, username, passwor
 		return fmt.Errorf("failed to update role comment: %w", err)
 	}
 
-	// Role exists - check if password needs update
-	// Requirement 6.10-6.11: Detect password drift and execute ALTER ROLE
-	needsUpdate, err := rm.passwordNeedsUpdate(ctx, username, password)
-	if err != nil {
-		return fmt.Errorf("failed to check password drift: %w", err)
-	}
-
-	if needsUpdate {
-		// Update password
-		escapedPassword := strings.ReplaceAll(password, "'", "''")
-		alterSQL := fmt.Sprintf("ALTER ROLE \"%s\" WITH PASSWORD '%s'", username, escapedPassword)
-		if _, err := rm.db.ExecContext(ctx, alterSQL); err != nil {
-			logger.Error(err, "ALTER ROLE failed; this role cannot authenticate", "username", username)
-			return fmt.Errorf("failed to update role password: %w", err)
-		}
-		// The SQL is never logged — it carries the password in cleartext. The
-		// fingerprint is the first eight hex of its SHA-256, which is enough to
-		// tell "the Secret changed" from "the same value was reapplied" across
-		// reconciles without disclosing it.
-		logger.Info("Updated role password (ALTER ROLE)",
-			"username", username,
-			"secretPasswordFingerprint", fmt.Sprintf("%x", sha256.Sum256([]byte(password)))[:8])
-	}
+	// THE PASSWORD OF AN EXISTING ROLE IS NOT THIS OPERATOR'S TO SET.
+	//
+	// An `ALTER ROLE ... WITH PASSWORD` stood here, guarded by a drift check
+	// against pg_authid. It was the second password authority for every role whose
+	// Cluster already declares one, and CloudNativePG is the first: it reconciles
+	// the application owner from the Secret GetApplicationSecretName() resolves on
+	// every instance reconcile -- refreshCredentialsFromSecret() -> reconcileUser()
+	// -> SetUserPassword() (v1.30.1 internal/management/controller) -- so the two
+	// wrote the same field from different sources and whichever ran last won.
+	//
+	// On nutgraf-mgmt-1794929668 that left hub_zitadel holding CloudNativePG's
+	// generated bootstrap password while Zitadel presented Infisical's. Proven by
+	// testing both values against the role directly: Infisical's was refused with
+	// `password authentication failed`, CloudNativePG's was accepted. The pooler
+	// was never implicated -- it relayed a password the role did not have.
+	//
+	// The ownership is now single and declarative (ADR-023/ADR-112 amendment
+	// 2026-11-24): hub-operator generates the credential and ESO delivers it, each
+	// Cluster's bootstrap.initdb.secret names that Secret, and CloudNativePG is the
+	// only thing that writes it into PostgreSQL. This function still CREATES a role
+	// that does not exist -- a role with no password cannot log in, and nothing else
+	// creates one -- and still owns the comment and the grants. It no longer
+	// competes for the password of a role that is already there.
+	//
+	// Not kept as a fallback: a second writer that runs only sometimes is the defect,
+	// not a mitigation for it.
 
 	return nil
 }
 
-// PasswordNeedsUpdate checks if the role password differs from the secret
-// Requirement 6.11: Compare secret hash with pg_authid to detect drift
-// Exported for password rotation handler
-func (rm *RoleManager) PasswordNeedsUpdate(ctx context.Context, username, password string) (bool, error) {
-	return rm.passwordNeedsUpdate(ctx, username, password)
-}
-
-// UpdateRolePassword executes ALTER ROLE to update the password
-// Requirement 23.15: Execute ALTER ROLE for password rotation
-func (rm *RoleManager) UpdateRolePassword(ctx context.Context, username, password string) error {
-	logger := log.FromContext(ctx)
-
-	escapedPassword := strings.ReplaceAll(password, "'", "''")
-	alterSQL := fmt.Sprintf("ALTER ROLE \"%s\" WITH PASSWORD '%s'", username, escapedPassword)
-	if _, err := rm.db.ExecContext(ctx, alterSQL); err != nil {
-		return fmt.Errorf("failed to update role password: %w", err)
-	}
-
-	logger.Info("Updated role password", "username", username)
-	return nil
-}
+// NOTHING HERE WRITES A PASSWORD ANY MORE.
+//
+// PasswordNeedsUpdate and UpdateRolePassword stood here: a drift check against
+// pg_authid and the ALTER ROLE that closed it, called by the HubEnvironment
+// controller's password-rotation handler. Together they were a second password
+// authority beside CloudNativePG, which reconciles the application owner from the
+// Secret its Cluster declares on every instance reconcile. Both are removed, with
+// the handler that called them (ADR-023/ADR-112 amendment 2026-11-24).
+//
+// A rotation now reaches PostgreSQL one way: hub-operator writes the new value to
+// Infisical, ESO delivers it to the Secret each Cluster names in
+// bootstrap.initdb.secret, and CloudNativePG applies it. One generator, one writer.
+//
+// passwordNeedsUpdate below is kept and unexported -- it reads pg_authid and writes
+// nothing, which is what readiness needs to say whether the role and its Secret
+// currently agree instead of reporting a historical success.
 
 // passwordNeedsUpdate checks if the role password differs from the secret
 // Requirement 6.11: Compare secret hash with pg_authid to detect drift

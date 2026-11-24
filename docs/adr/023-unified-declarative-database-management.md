@@ -145,3 +145,91 @@ migration an owner — each application, at its own cluster — and removes the 
 migrator this ADR designated for deletion. What remains in `internal/database/` is role
 DCL only, which is this ADR's second leg and still outstanding as described.
 
+
+## Amendment (2026-11-24): one password authority per role — **Accepted**
+
+Approved by the architecture review of 2026-11-24. Supersedes ADR-112's
+2026-11-18 amendment where it reads *"Role reconciliation stays with the authority
+the cluster declares — RoleManager for the three roles"*.
+
+### The ownership, stated once
+
+| Responsibility | Owner |
+| :- | :- |
+| Credential generation and lifecycle | hub-operator |
+| Credential storage | the box's self-hosted Infisical |
+| Credential delivery | External Secrets Operator |
+| **PostgreSQL password reconciliation** | **CloudNativePG, alone** |
+| Credential consumption | the application |
+
+Two namespace-local Secrets carrying one authoritative value are fine. Two password
+generators, or two things writing the password into PostgreSQL, are not.
+
+### What was wrong
+
+Two mechanisms wrote the same field from different sources:
+
+- CloudNativePG reconciles the application owner from the Secret
+  `GetApplicationSecretName()` resolves — `refreshCredentialsFromSecret()` →
+  `reconcileUser()` → `SetUserPassword()`, on **every instance reconcile**, not only
+  at bootstrap (v1.30.1, `internal/management/controller`). Chart pin `0.29.1`
+  packages that operator.
+- hub-operator's `RoleManager` issued `ALTER ROLE … WITH PASSWORD` from the
+  Infisical value, from two places: `createOrUpdateRole` and the HubEnvironment
+  controller's `handlePasswordRotation`.
+
+Whichever ran last won. On `nutgraf-mgmt-1794929668` the role `hub_zitadel` ended up
+holding CloudNativePG's generated bootstrap password while Zitadel presented
+Infisical's. Proven by testing each value against the role directly: Infisical's was
+refused with `password authentication failed`, CloudNativePG's was accepted. The
+PgBouncer pooler was never implicated — it relayed a password the role did not have,
+which surfaced as `SASL authentication failed` and sent the first investigation at
+the pooler.
+
+`credits-db` and `grafana-db` carried the identical exposure and had not yet failed.
+
+### The correction
+
+Each `Cluster` names its authoritative credential in `bootstrap.initdb.secret`.
+`GetApplicationSecretName()` then returns that Secret instead of the generated
+`<cluster>-app`, so CloudNativePG reconciles the owner to the delivered value
+continuously — on a running cluster, not only at creation. That is the smallest
+valid pattern: one source inside CNPG, and no `managed.roles` needed for an owner.
+
+The Secret must satisfy CNPG's contract or it is ignored and CNPG silently keeps its
+own password: `kubernetes.io/basic-auth`, `username` equal to the Cluster's `owner`,
+and `cnpg.io/reload: "true"`. The username is written **literally**, not from the
+remote value, because CNPG takes the role name from the Secret and a renamed
+Infisical key would otherwise repoint it at a different role.
+
+`zitadel-db`, `credits-db` and `grafana-db` each gained a dedicated
+`<db>-db-owner` Secret in the cluster's namespace. Separate from the consumer's
+Secret deliberately: a Secret's `type` is immutable, so converting the existing one
+would mean deleting it and interrupting the application, and the consumer wants a
+DSN while CNPG wants exactly two keys. `infisical-db` keeps its Day-0 bootstrap
+contract (ADR-112 §7) and `billing-db` keeps its existing owner Secret, both now
+satisfying the same three requirements.
+
+hub-operator no longer writes passwords. `RoleManager` still creates a role that
+does not exist — nothing else does, and a role with no password cannot log in — and
+still owns the comment and the grants. `handlePasswordRotation`,
+`UpdateRolePassword` and `PasswordNeedsUpdate` are removed, not disabled: a writer
+that runs only sometimes is the defect, not a safeguard.
+
+### Readiness
+
+`DatabaseRolesProvisioned` reported `True` throughout the outage. It re-verified that
+each declared role **exists**, which a role with the wrong password satisfies.
+Existence is not agreement, and reporting one as the other is how a credential
+failure presented as a healthy box.
+
+It now also compares each role's stored hash against its authoritative Secret
+(`RolesDisagreeingWithSecret`, read-only) and reports `False` with reason
+`CredentialNotConverged` when they differ. Reported, not repaired: CloudNativePG
+owns the password, so a disagreement means it has not converged yet, and readiness
+says that instead of claiming the roles are provisioned.
+
+`preflight/023-one-password-owner-per-role` asserts all of it: every Cluster names an
+owner Secret, each satisfies the three contract requirements, hub-operator issues no
+password-changing SQL, and readiness compares rather than counts. Five mutations,
+all caught.
