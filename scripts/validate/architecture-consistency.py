@@ -59,6 +59,7 @@ design was still moving.
 Usage: architecture-consistency.py [repo-root]
 Exit 0 consistent, 1 inconsistent.
 """
+import fnmatch
 import os
 import re
 import sys
@@ -97,6 +98,14 @@ def literal_prefix(path):
     return path[:cut] if cut != -1 else path
 
 
+PREFIXES = set()
+# A recursive Application's directoryInclude: it applies only files matching it.
+INCLUDE = {}
+# Templated prefixes only: they resolve to the overlays beneath them at render time.
+TEMPLATED = set()
+ROOT = "."
+
+
 def declared_paths(root):
     """Every path the repository can apply, from both places they are declared.
 
@@ -106,6 +115,13 @@ def declared_paths(root):
     Applications in v0.1.1 name charts nothing packaged.
     """
     paths = set()
+    # Paths that reach BELOW themselves: a templated path's fixed prefix, and a
+    # directory an Application applies with directoryRecurse. Any other plain
+    # directory applies only its own files -- Argo CD's directory source does not
+    # descend, and kustomize applies only what its kustomization lists.
+    PREFIXES.clear()
+    INCLUDE.clear()
+    TEMPLATED.clear()
 
     base = os.path.join(root, DESCRIPTORS)
     for boundary in sorted(os.listdir(base)) if os.path.isdir(base) else []:
@@ -116,12 +132,23 @@ def declared_paths(root):
             if not name.endswith(".yaml"):
                 continue
             with open(os.path.join(d, name)) as fh:
-                for line in fh:
-                    m = re.match(r"\s*(?:path|extraManifestsPath):\s*(.+)", line)
-                    if m:
-                        p = m.group(1).strip().strip("'\"")
-                        if p:
-                            paths.add(literal_prefix(p).rstrip("/"))
+                text = fh.read()
+            recurse = re.search(r"^\s*directoryRecurse:\s*'?true'?\s*$", text, re.M) is not None
+            inc = re.search(r"^\s*directoryInclude:\s*'?([^'\n]*)'?\s*$", text, re.M)
+            include = inc.group(1).strip() if inc else ""
+            for line in text.splitlines():
+                m = re.match(r"\s*(?:path|extraManifestsPath):\s*(.+)", line)
+                if m:
+                    p = m.group(1).strip().strip("'\"")
+                    if p:
+                        lp = literal_prefix(p).rstrip("/")
+                        paths.add(lp)
+                        if lp != p.rstrip("/"):
+                            TEMPLATED.add(lp)
+                        if lp != p.rstrip("/") or recurse:
+                            PREFIXES.add(lp)
+                            if recurse and include:
+                                INCLUDE[lp] = include
 
     tmpl = os.path.join(root, APPSETS)
     for name in sorted(os.listdir(tmpl)) if os.path.isdir(tmpl) else []:
@@ -132,6 +159,9 @@ def declared_paths(root):
                     p = literal_prefix(m.group(1)).strip().rstrip("/")
                     if p:
                         paths.add(p)
+                        if p != m.group(1).strip().rstrip("/"):
+                            PREFIXES.add(p)
+                            TEMPLATED.add(p)
     return paths
 
 
@@ -152,7 +182,7 @@ def expand_kustomize(root, paths):
     seeds = set()
     for cur in paths:
         d = os.path.join(root, cur)
-        if os.path.isdir(d) and not os.path.exists(os.path.join(d, "kustomization.yaml")):
+        if cur in TEMPLATED and os.path.isdir(d) and not os.path.exists(os.path.join(d, "kustomization.yaml")):
             for sub, _, files in os.walk(d):
                 if "kustomization.yaml" in files:
                     seeds.add(os.path.relpath(sub, root))
@@ -187,12 +217,25 @@ def expand_kustomize(root, paths):
     return seen
 
 
+def includes_any(target, pattern):
+    """Whether target holds a file a directoryInclude pattern ({a,b} allowed) selects."""
+    m = re.fullmatch(r"\{(.*)\}", pattern)
+    globs = m.group(1).split(",") if m else [pattern]
+    for _, _, files in os.walk(os.path.join(ROOT, target)):
+        if any(fnmatch.fnmatch(f, g.strip()) for f in files for g in globs):
+            return True
+    return False
+
+
 def reachable(target, paths):
     """A directory is reachable if something applies it, something inside it, or
     a templated path whose fixed prefix lands on it."""
     for p in paths:
-        if p == target or p.startswith(target + "/") or target.startswith(p + "/"):
+        if p == target or p.startswith(target + "/"):
             return True
+        if p in PREFIXES and target.startswith(p + "/"):
+            if p not in INCLUDE or includes_any(target, INCLUDE[p]):
+                return True
     return False
 
 
@@ -301,7 +344,9 @@ def load_adrs(root):
 
 
 def main():
+    global ROOT
     root = sys.argv[1] if len(sys.argv) > 1 else "."
+    ROOT = root
     failures = []
 
     reg_path = os.path.join(root, REGISTRY)
