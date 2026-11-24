@@ -247,7 +247,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	ccmLoadBalancerIPs := o.drainLoadBalancerServices(ctx)
 
 	// Read while the CAPI objects still exist: everything after this deletes them.
-	o.resolveInfraNames(ctx, append([]string{o.ClusterName}, o.Scope...))
+	if err := o.resolveInfraNames(ctx, append([]string{o.ClusterName}, o.Scope...)); err != nil {
+		return err
+	}
 
 	// Step 2: Strip Kubernetes finalizers & delete CAPI CRs fast (non-blocking)
 	o.stripKubernetesFinalizers(ctx)
@@ -265,6 +267,26 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		// indistinguishable from success to anything reading the status, and this
 		// is the step that stops the servers billing.
 		o.recordOutstanding("provider infrastructure cleanup", err)
+		return o.result()
+	}
+
+	// CONFIRMED GONE BEFORE ANYTHING LOCAL GOES. The steps below release the box's
+	// DNS records and delete its kubeconfig and its record (.state/<cluster>.json),
+	// and a box whose servers still run needs all three -- the record is what tells
+	// the next teardown which infrastructure is this cluster's. A sweep that
+	// "succeeded" by deleting nothing is not evidence: box7's first teardown
+	// excluded all five of its resources, deleted none, and then removed its state.
+	if left, err := o.remainingOwned(ctx); err != nil || len(left) > 0 {
+		if err == nil {
+			var b strings.Builder
+			for _, a := range byKind(left) {
+				fmt.Fprintf(&b, "\n  %-16s %-40s id=%d", a.Kind, a.Name, a.ID)
+			}
+			err = fmt.Errorf("%d resource(s) of this box are still in the provider:%s", len(left), b.String())
+		}
+		o.recordOutstanding("provider infrastructure cleanup", fmt.Errorf("%w\n\nDNS records, kubeconfig "+
+			"and the box's state were kept; re-run teardown once they are gone", err))
+		return o.result()
 	}
 
 	// Step 4: Release the DNS records this box published, now that nothing is

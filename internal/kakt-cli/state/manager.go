@@ -198,6 +198,10 @@ func NewTenantStateManager(gitopsDir, clusterName string) *StateManager {
 // under --debug -- which is what makes staging this directory by name safe.
 const TenantStateDir = ".state"
 
+// MetadataInfrastructureName is the management cluster's generated
+// HetznerCluster name, the key CAPH labels its resources with; teardown reads it.
+const MetadataInfrastructureName = "infrastructureName"
+
 // Save persists the bootstrap state to disk using atomic write
 func (m *StateManager) Save(state *BootstrapState) error {
 	// Timestamp used to be written only by the recovery paths, so a state file

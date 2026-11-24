@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/state"
 )
 
 // ownershipKeys returns, for each logical cluster, the names CAPH may have put in
@@ -30,26 +34,62 @@ func (o *Orchestrator) ownershipKeys(_ context.Context, clusters []string) []str
 	return keys
 }
 
-// resolveInfraNames reads the CAPI Clusters once, before anything is deleted.
-func (o *Orchestrator) resolveInfraNames(ctx context.Context, clusters []string) {
+// recordedInfraName reads the name Day-0 recorded in the box's own state,
+// .state/<cluster>.json metadata.infrastructureName. A missing record is an
+// error. The value can only be THIS cluster's generated name,
+// <cluster>-<letters and digits>, so a wrong record cannot name another
+// cluster's resources.
+func (o *Orchestrator) recordedInfraName() (string, error) {
+	path := filepath.Join(o.GitopsDir, state.TenantStateDir, o.ClusterName+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read the box's record %s: %w", path, err)
+	}
+	var bs state.BootstrapState
+	if err := json.Unmarshal(raw, &bs); err != nil {
+		return "", fmt.Errorf("the box's record %s is not readable: %w", path, err)
+	}
+	return validInfraName(o.ClusterName, bs.Metadata[state.MetadataInfrastructureName])
+}
+
+func validInfraName(cluster, recorded string) (string, error) {
+	recorded = strings.TrimSpace(recorded)
+	if recorded == "" {
+		return "", nil
+	}
+	suffix, ok := strings.CutPrefix(recorded, cluster+"-")
+	if !ok || suffix == "" || strings.ContainsFunc(suffix, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	}) {
+		return "", fmt.Errorf("the box's record names infrastructure %q, which is not %s's generated name "+
+			"(%s-<letters and digits>)", recorded, cluster, cluster)
+	}
+	return recorded, nil
+}
+
+// resolveInfraNames resolves each cluster's HetznerCluster name once, before
+// anything is deleted. The cluster's own answer wins; the box's record stands in
+// when the API cannot answer and must agree with it when it can. With neither,
+// teardown stops and deletes nothing.
+func (o *Orchestrator) resolveInfraNames(ctx context.Context, clusters []string) error {
 	o.infraName = map[string]string{}
-	baseArgs, ok := o.resolveKubectlBaseArgs()
-	if !ok {
-		return
-	}
-	kctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(kctx, "kubectl", append(append([]string(nil), baseArgs...),
-		"get", "clusters.cluster.x-k8s.io", "-A", "-o", "json")...).Output()
+	recorded, err := o.recordedInfraName()
 	if err != nil {
-		fmt.Printf("[teardown] could not read CAPI Clusters to resolve infrastructure names (%v); "+
-			"matching on cluster names only\n", err)
-		return
+		return err
 	}
-	resolved, err := infraNames(out, clusters)
-	if err != nil {
-		fmt.Printf("[teardown] could not parse CAPI Clusters (%v); matching on cluster names only\n", err)
-		return
+	resolved, rerr := o.readInfraNames(ctx, clusters)
+	if rerr != nil {
+		if recorded == "" {
+			return fmt.Errorf("the cluster's API cannot be read (%v) and the box's record holds no "+
+				"metadata.%s, so its resources cannot be attributed; nothing was deleted",
+				rerr, state.MetadataInfrastructureName)
+		}
+		fmt.Printf("[teardown] the cluster's API cannot be read (%v); using the infrastructure name the box recorded, %s\n", rerr, recorded)
+		o.infraName[o.ClusterName] = recorded
+		return nil
+	}
+	if have := resolved[o.ClusterName]; recorded != "" && have != "" && have != recorded {
+		return fmt.Errorf("the box records infrastructure %s but the cluster says %s; nothing was deleted", recorded, have)
 	}
 	for c, n := range resolved {
 		if n != c {
@@ -57,6 +97,25 @@ func (o *Orchestrator) resolveInfraNames(ctx context.Context, clusters []string)
 		}
 		o.infraName[c] = n
 	}
+	if o.infraName[o.ClusterName] == "" && recorded != "" {
+		o.infraName[o.ClusterName] = recorded
+	}
+	return nil
+}
+
+func (o *Orchestrator) readInfraNames(ctx context.Context, clusters []string) (map[string]string, error) {
+	baseArgs, ok := o.resolveKubectlBaseArgs()
+	if !ok {
+		return nil, fmt.Errorf("no kubeconfig")
+	}
+	kctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(kctx, "kubectl", append(append([]string(nil), baseArgs...),
+		"get", "clusters.cluster.x-k8s.io", "-A", "-o", "json")...).Output()
+	if err != nil {
+		return nil, err
+	}
+	return infraNames(out, clusters)
 }
 
 // infraNames maps each wanted CAPI Cluster name to its Hetzner infrastructureRef.
@@ -89,4 +148,18 @@ func infraNames(clusterListJSON []byte, wanted []string) (map[string]string, err
 		}
 	}
 	return out, nil
+}
+
+// remainingOwned re-reads the provider after the sweeps: every resource still
+// owned by this run's clusters, under any of their ownership keys.
+func (o *Orchestrator) remainingOwned(ctx context.Context) ([]Attribution, error) {
+	token := strings.TrimSpace(o.ProviderToken)
+	if token == "" {
+		return nil, fmt.Errorf("no provider token to confirm the infrastructure is gone")
+	}
+	inv, err := ProviderInventory(ctx, token, o.ownershipKeys(ctx, append([]string{o.ClusterName}, o.Scope...)))
+	if err != nil {
+		return nil, fmt.Errorf("re-read the provider to confirm the infrastructure is gone: %w", err)
+	}
+	return inv.Eligible(), nil
 }

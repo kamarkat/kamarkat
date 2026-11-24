@@ -461,6 +461,9 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	); err != nil {
 		return err
 	}
+	if err := o.recordInfrastructureName(ctx, stateMgr, bs, mgmtKubeconfig); err != nil {
+		return err
+	}
 
 	// ── Phase 8: Cleanup bootstrap cluster ────────────────────────────
 	if !o.KeepBootstrap {
