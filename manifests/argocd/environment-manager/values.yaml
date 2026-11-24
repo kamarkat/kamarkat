@@ -51,7 +51,7 @@ instanceRepoURL: ""
 # The base domain this box publishes on: dev.acme.example, acme.example, etc.
 #
 # ADR-051 makes this the authority every public host derives from -- id., api.,
-# infisical., argocd. Required, and deliberately without a default, for the same
+# openbao., argocd. Required, and deliberately without a default, for the same
 # reason as instanceRepoURL above: every box has its own, and a default would
 # travel to every cluster installing the published bundle. It travelled as the
 # platform's own literal inside agentgateway's config until this existed, which
@@ -74,8 +74,8 @@ previewDomain: ""
 # The audience is the identifier the box's own issuer mints when its
 # observability client is registered, which the hub-operator does on the
 # release that introduces the capability. It is therefore EMPTY on a box that
-# has not reached that point, and declared here afterwards from Infisical's
-# hub-observability-project-id.
+# has not reached that point, and declared here afterwards from the box's
+# hub-observability-project-id (OpenBao hub scope).
 #
 # Empty means the spoke's viewer query endpoint is not rendered at all. That is
 # deliberate: an endpoint whose token audience matched nothing would admit every
@@ -299,31 +299,6 @@ hubIngressAddress: ""
 # each declare their own, and the hub's secret scope is `management` below.
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Management plane (ADR-111 Revision 7)
-# ──────────────────────────────────────────────────────────────────────────────
-# The hub's own configuration. Management identity, management secret scope,
-# management availability and workload environment are four separate concerns:
-# `boxId` is the first, this block the second, the hub's declared sizing the
-# third, and the fourth belongs to the managed clusters, which each declare
-# their own environmentSlug and provider.
-#
-# No default, for the reason the hub-operator already gives for the same value:
-# the only possible default is a guess at which environment someone else's
-# secrets are in, and guessing wrong is silent.
-management:
-  # The Infisical environment holding THIS HUB's credentials. Set per box.
-  #
-  # Reaches components as `global.management.infisicalEnvironmentSlug`, and the
-  # hub-operator reads the same value from hub-bootstrap-config's
-  # SECRET_STORE_ENVIRONMENT_SLUG, so reader and writer cannot disagree.
-  #
-  # NOT a workload environment: nothing is promoted into or out of it, and no
-  # managed cluster reads it -- a managed cluster's store resolves from that
-  # cluster's own `environment` label, because reading the hub's would give it
-  # the environment of whatever provisioned it.
-  infisicalEnvironmentSlug: ""
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Boundary content is complete at all times (ADR-055)
 # ──────────────────────────────────────────────────────────────────────────────
 # The per-boundary deploy toggles that used to live here are gone. They existed
@@ -413,30 +388,6 @@ oidcScopes:
   # claim exists only for this scope, and its absence means no roles rather than
   # an error -- so every requireRole() check denies and nothing says why.
   - urn:zitadel:iam:org:project:roles
-
-# Coordinates of this cluster's Infisical instance, consumed by the Hub's PKI
-# ClusterIssuers (ADR-035).
-#
-# These are per-cluster facts. They reached the cluster until now as a Kustomize
-# patch that Day-0 wrote into manifests/hub-core-services/security/generated/ and
-# committed -- per-cluster instance data inside the types repository, which
-# ADR-062 forbids and which made the component impossible to publish as a chart
-# without handing every cluster one cluster's PKI project.
-#
-# They are supplied at render time instead, by the same Day-0 parameter path that
-# already carries hubIngressAddress and oidcIssuer. Empty here because the chart
-# that consumes them requires them through values.schema.json: a cluster that
-# does not supply them fails to render, rather than rendering an issuer pointed
-# at nothing.
-infisical:
-  fleet:
-    projectId: ""
-    clientId: ""
-  # Empty signing values inherit the fleet identity, which is what the Kustomize
-  # replacements this replaces did.
-  signing:
-    projectId: ""
-    clientId: ""
 
 # The spoke pool each supported combination provisions, and therefore the one the
 # burst-capacity autoscaler watches.

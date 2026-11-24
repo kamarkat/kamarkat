@@ -242,22 +242,44 @@ metadata:
     external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
     external-dns.kubernetes.io/target: {{ $target | quote }}
   {{- end }}
-  name: infisical
-  namespace: platform-security
+  name: openbao
+  namespace: platform-data
 spec:
   parentRefs:
     - name: hub-gateway
       namespace: platform-ops
-      sectionName: infisical
-  hostnames: ["infisical.{{ .Values.global.hubDomain }}"]
+      sectionName: openbao
+  hostnames: ["openbao.{{ .Values.global.hubDomain }}"]
   rules:
     - matches:
         - path:
             type: PathPrefix
-            value: /
+            value: /v1/
       backendRefs:
-        - name: infisical-standalone-infisical
-          port: 8080
+        # The active node only: a standby does not serve requests (disable_standby_reads).
+        - name: openbao-active
+          port: 8200
+---
+# The Gateway's connection to OpenBao is TLS too, and it checks the server name
+# as well as the chain: the listener certificate must be issued by the box's
+# listener CA (openbao-listener-trust, written by Day-0) for
+# openbao.platform-data.svc. A backend presenting anything else is refused.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: openbao
+  namespace: platform-data
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: openbao-active
+  validation:
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: openbao-listener-trust
+    hostname: openbao.platform-data.svc
 {{- if .Values.creditAuthority.enabled }}
 ---
 # The Credit Authority (ADR-109): its gateway, and nothing else of its pod. The
@@ -375,7 +397,7 @@ spec:
           port: 80
 ---
 # Plaintext redirect. The Ingress objects were inconsistent here — argocd,
-# infisical and agentgateway forced HTTPS while auth and console did not — and the
+# the secret store and agentgateway forced HTTPS while auth and console did not — and the
 # inconsistency was not deliberate. Every one of these hostnames is reached over
 # HTTPS in practice, the OIDC flow addresses them that way, so all five redirect.
 # A path-specific ACME challenge route will out-match this "/" prefix when the

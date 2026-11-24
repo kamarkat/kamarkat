@@ -147,22 +147,7 @@ spec:
               {{- if $released }}
               platform-security-infra:
                 enabled: true
-                infisical:
-                  fleet:
-                    projectId: {{ .Values.infisical.fleet.projectId | quote }}
-                    clientId: {{ .Values.infisical.fleet.clientId | quote }}
-                  signing:
-                    projectId: {{ .Values.infisical.signing.projectId | quote }}
-                    clientId: {{ .Values.infisical.signing.clientId | quote }}
               {{- include "environment-manager.globalValues" $ | nindent 14 }}
-              {{- else }}
-              infisical:
-                fleet:
-                  projectId: {{ .Values.infisical.fleet.projectId | quote }}
-                  clientId: {{ .Values.infisical.fleet.clientId | quote }}
-                signing:
-                  projectId: {{ .Values.infisical.signing.projectId | quote }}
-                  clientId: {{ .Values.infisical.signing.clientId | quote }}
               {{- end }}
             helmReleaseName: ''
 
@@ -359,10 +344,9 @@ spec:
                 #   leadership lost, stopped leading
                 #
                 # Kyverno exits 0 and restarts, roughly every two minutes. Any
-                # write landing in that window fails closed, and one did:
-                # bootstrap-infisical-api died after 13m39s on
-                # "dial tcp 10.100.166.35:443: connect: connection refused"
-                # creating infisical-auth.
+                # write landing in that window fails closed, and one did: a Day-0
+                # phase died after 13m39s on
+                # "dial tcp 10.100.166.35:443: connect: connection refused".
                 #
                 # CAPI, cert-manager and external-secrets already serve
                 # failurePolicy=Fail webhooks from this worker. What makes Kyverno
@@ -591,25 +575,6 @@ spec:
     {{"{{-"}} if ne .directoryInclude "" {{"}}"}}
           include: '{{"{{"}} .directoryInclude {{"}}"}}'
     {{"{{-"}} end {{"}}"}}
-    {{"{{-"}} end {{"}}"}}
-{{- end }}
-{{- if not $released }}
-    {{"{{-"}} if eq .appName "platform-cluster-secret-store" {{"}}"}}
-    spec:
-      source:
-        kustomize:
-          patches:
-            # The HUB's own store, so this is the MANAGEMENT scope (ADR-111
-            # Revision 7 §2) -- not an environment. It read
-            # .Values.environmentSlug, which is what made the hub's own
-            # credentials live in a workload environment.
-            - target:
-                kind: ClusterSecretStore
-                name: infisical-backend
-              patch: |
-                - op: replace
-                  path: /spec/provider/infisical/secretsScope/environmentSlug
-                  value: '{{ .Values.management.infisicalEnvironmentSlug }}'
     {{"{{-"}} end {{"}}"}}
 {{- end }}
 ---

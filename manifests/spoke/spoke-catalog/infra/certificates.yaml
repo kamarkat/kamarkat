@@ -11,9 +11,9 @@ spec:
   renewBefore: 8h
   commonName: argocd-agent:{{ .Values.spokeName }}
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # FIX: Added document separator here
 apiVersion: cert-manager.io/v1
@@ -27,9 +27,9 @@ spec:
   renewBefore: 8h
   commonName: alloy:{{ .Values.spokeName }}
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # The Support Agent's identity on THIS spoke.
 #
@@ -52,9 +52,9 @@ spec:
   renewBefore: 8h
   commonName: support-agent:{{ .Values.spokeName }}
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # Public tenant TLS is NOT defined here anymore.
 #
@@ -67,4 +67,4 @@ spec:
 # Replacement: per-tenant public Certificates in platform-ops, rendered by the
 # tenant-public-tls ApplicationSet from fleet-registry public.hosts declarations
 # (manifests/tenants/charts/tenant-public-tls). Internal fleet / mTLS certificates
-# remain above on infisical-fleet-issuer (ADR-035 audience split, ADR-051).
+# remain above on openbao-fleet (ADR-035 audience split, ADR-051).

@@ -122,7 +122,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-platform
     kind: ClusterSecretStore
   target:
     name: alertmanager-credentials
@@ -133,11 +133,12 @@ spec:
     # per cell. The cell path is substituted by templated-fields.yaml.
     - secretKey: smtp_password
       remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/ALERT_SMTP_PASSWORD
+        key: spokes/PLACEHOLDER/platform
+        property: ALERT_SMTP_PASSWORD
     # ONE KEY. The two Grafana IRM entries that were here are the hub's.
     #
     # irm_alertmanager_url and irm_heartbeat_url read
-    # /spoke-pool/<cluster>/shared/GRAFANA_IRM_* -- the box owner's own incident
+    # spokes/<cluster>/platform GRAFANA_IRM_* -- the box owner's own incident
     # integration, copied into every cluster's project. Removed with the receivers
     # that read them (ADR-078 add.10 §4): a spoke delivers its alerts by email and
     # pages nobody through a third-party tool.

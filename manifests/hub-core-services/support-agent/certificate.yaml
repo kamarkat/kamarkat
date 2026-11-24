@@ -75,6 +75,6 @@ spec:
   # on, which is the failure ADR-063's portability gate exists to catch.
   commonName: support-agent:PLACEHOLDER_HUB_DOMAIN
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io

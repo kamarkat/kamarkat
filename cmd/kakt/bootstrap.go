@@ -453,17 +453,10 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// The management secret scope, READ from the box's own declaration (ADR-111
-	// Revision 7 §2). There is no --environment flag and no default.
-	//
-	// It was `envSlug := environment; if envSlug == "" { envSlug = "prod" }`: a
-	// hub with no environment given silently became a production one, which is
-	// why hub-bootstrap.sh had to make its own --environment mandatory to defend
-	// against this coercion. Reading the declaration removes the flag, the
-	// default and the guard together, and makes activating a new scope an edit to
-	// clusters/<mgmt>/values.yaml rather than a code change.
-	box, err := bootstrap.ReadBoxValues(gitopsDir, clusterName)
-	if err != nil {
+	// The box's own declarations (registry/clusters/<mgmt>/values.yaml) must be
+	// readable and complete before any cluster work: Day-0 reads them later, and
+	// failing there would leave a half-built cluster.
+	if _, err := bootstrap.ReadBoxValues(gitopsDir, clusterName); err != nil {
 		return err
 	}
 
@@ -486,7 +479,6 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		KeepBootstrap:          keepBootstrap,
 		MergeKubeconfig:        mergeKubeconfig,
 		Debug:                  debug,
-		ManagementScope:        box.ManagementScope(),
 		Topology:               topology,
 		Gating:                 gatingMode,
 		GitopsDir:              gitopsDir,

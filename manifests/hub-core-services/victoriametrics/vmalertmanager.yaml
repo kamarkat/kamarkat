@@ -104,7 +104,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: alertmanager-credentials
@@ -114,11 +114,14 @@ spec:
     # the owner's SMTP URL (the same credential the issuer sends with).
     - secretKey: smtp_password
       remoteRef:
-        key: ALERT_SMTP_PASSWORD
+        key: hub
+        property: ALERT_SMTP_PASSWORD
     - secretKey: irm_alertmanager_url
       remoteRef:
-        key: GRAFANA_IRM_ALERTMANAGER_URL
+        key: hub
+        property: GRAFANA_IRM_ALERTMANAGER_URL
     # This cluster's own heartbeat: one IRM heartbeat per cluster.
     - secretKey: irm_heartbeat_url
       remoteRef:
-        key: GRAFANA_IRM_HEARTBEAT_URL
+        key: hub
+        property: GRAFANA_IRM_HEARTBEAT_URL

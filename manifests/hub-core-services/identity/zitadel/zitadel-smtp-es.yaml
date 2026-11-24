@@ -10,47 +10,6 @@
 # external sending service reached over SMTP, owning no ports on a home node and
 # issuing no certificate. The rejection was of OPERATING a mail server.
 ---
-# A second store, because the first one cannot see this key.
-#
-# infisical-backend is scoped `secretsPath: "/"` with recursive false, so it reads
-# root keys only -- `hub-zitadel-masterkey` and its neighbours. The SMTP
-# credential lives one level down, under the tenant's own management folder, and a
-# non-recursive store at "/" does not descend into it. Turning recursion on there
-# instead would widen EVERY ExternalSecret bound to that store to the whole
-# project and make a key name collide across folders, so the narrower store is the
-# smaller change.
-#
-# The path is templated, not literal: `global.tenantId` is what the
-# environment-manager already emits to every component, so a second box renders
-# its own folder rather than reaching into nutgraf's.
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: infisical-tenant-mgmt
-spec:
-  provider:
-    infisical:
-      # Keep base host only; ESO Infisical client appends API path segments.
-      hostAPI: "http://infisical-standalone-infisical.platform-security.svc:8080"
-      secretsScope:
-        projectSlug: "hub-secrets"
-        # The MANAGEMENT scope, not a workload environment: the folder below holds
-        # what hub-operator writes for the box's owner, and hub-operator writes
-        # through the box's declared management.infisicalEnvironmentSlug. Templated
-        # per box beside the folder name (templated-fields.yaml).
-        environmentSlug: "management"
-        secretsPath: "/nutgraf-mgmt"
-      auth:
-        universalAuthCredentials:
-          clientId:
-            name: infisical-auth
-            key: client-id
-            namespace: platform-ops
-          clientSecret:
-            name: infisical-auth
-            key: client-secret
-            namespace: platform-ops
----
 # The SMTP PASSWORD, and nothing else.
 #
 # Everything else about the sender -- host, user, TLS, from, from-name -- is
@@ -82,7 +41,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-tenant-mgmt
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: zitadel-smtp-config
@@ -103,4 +62,5 @@ spec:
   data:
     - secretKey: smtpPassword
       remoteRef:
-        key: zitadel_smtp_password
+        key: hub
+        property: zitadel_smtp_password

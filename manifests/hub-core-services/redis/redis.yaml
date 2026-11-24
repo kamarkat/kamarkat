@@ -61,18 +61,10 @@ spec:
         # under disk pressure. Redis refuses to start on a corrupt tail, so a
         # crashed pod could never come back on its own.
         #
-        # WHY IT MATTERED FAR MORE THAN A CACHE OUTAGE. Nothing degraded a little;
-        # the platform's whole credential path stopped:
-        #
-        #   redis-0 crashlooping -> platform-redis Service has no endpoint
-        #     -> Infisical: connect EPERM 10.103.84.45:6379, CrashLoopBackOff, 503
-        #       -> ESO stores infisical-backend and tenant-secret-store:
-        #          "unable to create client"
-        #         -> every Infisical-backed ExternalSecret failing, hub AND spoke,
-        #            including every tenant database credential
-        #
-        # (EPERM rather than a hang is Cilium's socket LB reporting no backend for
-        # the Service, not a network policy denial.)
+        # A crashlooping redis-0 leaves the platform-redis Service with no
+        # endpoint, and every consumer (billing engine, kube-sbt, the Argo CD
+        # principal) fails with it. (EPERM rather than a hang is Cilium's socket
+        # LB reporting no backend for the Service, not a network policy denial.)
         #
         # WHAT THIS DOES. Redis loads an AOF whose corrupt tail is at most this
         # many bytes, discards the tail, logs it, and starts. Anything larger still

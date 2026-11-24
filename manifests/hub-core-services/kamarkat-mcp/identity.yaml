@@ -13,7 +13,7 @@ metadata:
 spec:
   refreshInterval: 5m
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: kamarkat-mcp-identity
@@ -21,10 +21,12 @@ spec:
   data:
     - secretKey: projectId
       remoteRef:
-        key: hub-kamarkat-mcp-project-id
+        key: hub
+        property: hub-kamarkat-mcp-project-id
     - secretKey: kaktCliClientId
       remoteRef:
-        key: hub-kamarkat-mcp-kakt-cli-client-id
+        key: hub
+        property: hub-kamarkat-mcp-kakt-cli-client-id
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -36,7 +38,7 @@ metadata:
 spec:
   refreshInterval: 5m
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: kamarkat-mcp-kakt-client
@@ -44,7 +46,8 @@ spec:
   data:
     - secretKey: clientId
       remoteRef:
-        key: hub-kamarkat-mcp-kakt-client-id
+        key: hub
+        property: hub-kamarkat-mcp-kakt-client-id
 ---
 # The kakt-agent machine user and its key id (ADR-116 §3), once the box
 # declares kakt's public key. Not credentials: the private key is kakt's alone.
@@ -58,7 +61,7 @@ metadata:
 spec:
   refreshInterval: 5m
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: kamarkat-mcp-agent
@@ -66,7 +69,9 @@ spec:
   data:
     - secretKey: userId
       remoteRef:
-        key: hub-kamarkat-mcp-agent-user-id
+        key: hub
+        property: hub-kamarkat-mcp-agent-user-id
     - secretKey: keyId
       remoteRef:
-        key: hub-kamarkat-mcp-agent-key-id
+        key: hub
+        property: hub-kamarkat-mcp-agent-key-id

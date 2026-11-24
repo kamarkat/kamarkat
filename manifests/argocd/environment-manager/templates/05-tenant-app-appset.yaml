@@ -194,7 +194,7 @@ spec:
                 value: "true"
               # THE CLUSTER IS THE PLATFORM'S TO NAME, and this is where it is
               # named. universal-tenant builds each application's Infisical path
-              # from it (/spoke-pool/<cluster>/tenants/<app>, six templates), so
+              # from it (spokes/<cluster>/tenants/<app>, six templates), so
               # it is required and has no default.
               #
               # It used to come from the application's own values.yaml, written
@@ -389,7 +389,7 @@ spec:
                 value: "false"
               # THE CLUSTER IS THE PLATFORM'S TO NAME, and this is where it is
               # named. universal-tenant builds each application's Infisical path
-              # from it (/spoke-pool/<cluster>/tenants/<app>, six templates), so
+              # from it (spokes/<cluster>/tenants/<app>, six templates), so
               # it is required and has no default.
               #
               # It used to come from the application's own values.yaml, written

@@ -15,7 +15,7 @@ spec:
   refreshInterval: 1h
 
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
 
   target:
@@ -30,7 +30,9 @@ spec:
   data:
     - secretKey: authkey
       remoteRef:
-        key: tailscale-authkey
+        key: hub
+        property: tailscale-authkey
     - secretKey: hostname
       remoteRef:
-        key: tailscale-hostname
+        key: hub
+        property: tailscale-hostname

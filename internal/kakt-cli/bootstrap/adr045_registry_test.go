@@ -75,30 +75,3 @@ func TestADR045RegistryResolvesTheOverlayPlaceholder(t *testing.T) {
 			HubOverlayDir)
 	}
 }
-
-// The scope and the directory are both the word "management" and are different
-// things: one is an Infisical environment, the other a path in this repository.
-// Deriving the path from the scope would mean activating a new scope silently
-// moved the artifacts, so the resolution must not read it.
-func TestADR045RegistryIgnoresTheManagementScope(t *testing.T) {
-	fromRepoRoot(t)
-
-	bare, err := (&Orchestrator{}).readADR045Registry()
-	if err != nil {
-		t.Fatalf("reading the registry: %v", err)
-	}
-	scoped, err := (&Orchestrator{ManagementScope: "somewhere-else"}).readADR045Registry()
-	if err != nil {
-		t.Fatalf("reading the registry with a scope set: %v", err)
-	}
-	if len(bare.Artifacts) != len(scoped.Artifacts) {
-		t.Fatalf("artifact count changed with the scope set: %d then %d",
-			len(bare.Artifacts), len(scoped.Artifacts))
-	}
-	for i := range bare.Artifacts {
-		if bare.Artifacts[i].File != scoped.Artifacts[i].File {
-			t.Errorf("the management scope moved an artifact path: %q became %q",
-				bare.Artifacts[i].File, scoped.Artifacts[i].File)
-		}
-	}
-}

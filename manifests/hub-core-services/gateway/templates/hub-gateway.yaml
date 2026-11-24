@@ -55,7 +55,7 @@ spec:
         namespaces:
           from: All
     # RESTORED. 776c5743 removed these six listeners while automating certificate
-    # issuance, which left the Gateway serving only http and infisical: every hub
+    # issuance, which left the Gateway serving only http and the secret store: every hub
     # hostname answered with no certificate, and agentgateway on the SPOKE
     # crash-looped because it fetches auth.dev.nutgraf.in's OIDC discovery
     # document at startup.
@@ -160,9 +160,12 @@ spec:
               - key: kubernetes.io/metadata.name
                 operator: In
                 values: [platform-edge, platform-identity, platform-ops, platform-security]
-    # HTTPS listener for infisical.
-    - name: infisical
-      hostname: infisical.{{ .Values.global.hubDomain }}
+    # The box's OpenBao (ADR-117 §2), for workload clusters' secret stores and
+    # issuers. Public TLS terminates here with the wildcard certificate; the
+    # route re-originates TLS to OpenBao, verified against its listener CA
+    # (BackendTLSPolicy in httproutes.yaml). Only OpenBao's namespace may attach.
+    - name: openbao
+      hostname: openbao.{{ .Values.global.hubDomain }}
       port: 443
       protocol: HTTPS
       tls:
@@ -177,7 +180,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-data]
     {{- if .Values.creditAuthority.enabled }}
     # The Credit Authority (ADR-109), only while capabilities.credits.enabled.
     # Its own namespace is the only one whose routes it admits.

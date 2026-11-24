@@ -2,7 +2,7 @@
 {{- $t := include "universal-tenant.tenantId" . }}
 {{- $a := include "universal-tenant.appId" . }}
 {{- $ns := include "universal-tenant.namespace" . }}
-{{- $base := printf "/spoke-pool/%s/tenants/%s" (required "clusterName must be supplied" .Values.clusterName) $a }}
+{{- $base := printf "spokes/%s/tenants/%s" (required "clusterName must be supplied" .Values.clusterName) $a }}
 {{- $consumers := (.Values.identity).allowedConsumers | default list }}
 {{- $deps := (.Values.identity).backendDependencies | default list }}
 {{- /* The Credit Authority, when this application declares it (ADR-109): its
@@ -73,17 +73,20 @@ spec:
     # path and what a workload validating an id token checks.
     - secretKey: OIDC_CLIENT_ID
       remoteRef:
-        key: {{ $base }}/OIDC_CLIENT_ID
+        key: {{ $base }}
+        property: OIDC_CLIENT_ID
     # The organisation that owns this application's identities. A receiver
     # compares the token's tenant claim against it (ADR-094 invariant 3).
     - secretKey: OIDC_ORG_ID
       remoteRef:
-        key: {{ $base }}/OIDC_ORG_ID
+        key: {{ $base }}
+        property: OIDC_ORG_ID
     # The identity project. A MINTED token is audienced to projects, not to
     # client ids, so this is what a receiver checks `aud` against.
     - secretKey: OIDC_PROJECT_ID
       remoteRef:
-        key: {{ $base }}/OIDC_PROJECT_ID
+        key: {{ $base }}
+        property: OIDC_PROJECT_ID
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -108,13 +111,15 @@ spec:
     # operator makes.
     - secretKey: {{ $key }}_INTERNAL_TOKEN
       remoteRef:
-        key: {{ $base }}/{{ $key }}_INTERNAL_TOKEN
+        key: {{ $base }}
+        property: {{ $key }}_INTERNAL_TOKEN
     # The client the gateway mints as, and therefore the `azp` a receiver on the
     # browser path admits. Not secret -- a client id -- but issuer-allocated, so
     # it travels this path rather than a values file.
     - secretKey: OIDC_EXCHANGE_CLIENT_ID
       remoteRef:
-        key: {{ $base }}/OAUTH_{{ $key }}_GATEWAY_EXCHANGE_CLIENT_ID
+        key: {{ $base }}
+        property: OAUTH_{{ $key }}_GATEWAY_EXCHANGE_CLIENT_ID
 {{- if $consumers }}
 ---
 # The applications this one admits, as `<clientId>=<appId>` entries.
@@ -147,7 +152,8 @@ spec:
   data:
     - secretKey: OIDC_ALLOWED_AZP
       remoteRef:
-        key: {{ $base }}/OIDC_ALLOWED_AZP
+        key: {{ $base }}
+        property: OIDC_ALLOWED_AZP
 {{- end }}
 {{- if $deps }}
 ---
@@ -191,10 +197,12 @@ spec:
   data:
     - secretKey: OIDC_SERVICE_CLIENT_ID
       remoteRef:
-        key: {{ $base }}/OIDC_SERVICE_CLIENT_ID
+        key: {{ $base }}
+        property: OIDC_SERVICE_CLIENT_ID
     - secretKey: OIDC_SERVICE_CLIENT_SECRET
       remoteRef:
-        key: {{ $base }}/OIDC_SERVICE_CLIENT_SECRET
+        key: {{ $base }}
+        property: OIDC_SERVICE_CLIENT_SECRET
 {{- range $deps }}
     # The TARGET's project id, one key per declared dependency.
     #
@@ -216,7 +224,8 @@ spec:
     # to disagree.
     - secretKey: OIDC_BACKEND_PROJECT_ID_{{ . | upper | replace "-" "_" }}
       remoteRef:
-        key: {{ $base }}/OIDC_BACKEND_PROJECT_ID_{{ . | upper | replace "-" "_" }}
+        key: {{ $base }}
+        property: OIDC_BACKEND_PROJECT_ID_{{ . | upper | replace "-" "_" }}
 {{- end }}
 {{- end }}
 {{- end }}

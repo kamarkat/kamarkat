@@ -30,7 +30,7 @@ func TestIssuerReferencedProfilesArePresent(t *testing.T) {
 // short enough that a stolen key is not trusted for a quarter, given the platform
 // implements no CRL or OCSP.
 //
-// Every Certificate issued through infisical-fleet-issuer must therefore request
+// Every Certificate issued through openbao-fleet must therefore request
 // 168h or less. The 24h spoke client certificates sit well under it.
 func TestInfrastructureServicesCeilingMatchesPolicy(t *testing.T) {
 	const wantDays = 7

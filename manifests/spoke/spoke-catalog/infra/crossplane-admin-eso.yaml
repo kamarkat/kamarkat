@@ -10,7 +10,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-platform
     kind: ClusterSecretStore
   target:
     name: crossplane-admin-credentials
@@ -31,6 +31,7 @@ spec:
   data:
   - secretKey: password
     remoteRef:
-      # Key MUST match SpokePool CR name pattern
-      # This will be injected by ApplicationSet: {{.name}}-crossplane-admin-password
-      key: PLACEHOLDER-crossplane-admin-password
+      # This cluster's platform scope; the cluster name is injected per spoke
+      # (templated-fields.yaml, and the ApplicationSet on the unreleased path).
+      key: spokes/PLACEHOLDER/platform
+      property: crossplane-admin-password

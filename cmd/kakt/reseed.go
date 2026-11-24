@@ -63,20 +63,19 @@ version it replaces.`,
 func runReseed(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	managementScope, provider, topology, err := bootstrap.ReadSeedIdentity(ctx, reseedKubeconfig)
+	provider, topology, err := bootstrap.ReadSeedIdentity(ctx, reseedKubeconfig)
 	if err != nil {
 		return err
 	}
 
 	o := &bootstrap.Orchestrator{
-		ManagementScope:       managementScope,
 		Topology:              topology,
 		ProviderName:          provider,
 		BundleVersionOverride: reseedBundleVersion,
 	}
 
-	fmt.Printf("[reseed] Applying the seed Application (management scope=%s provider=%s topology=%q)\n",
-		managementScope, provider, topology)
+	fmt.Printf("[reseed] Applying the seed Application (provider=%s topology=%q)\n",
+		provider, topology)
 
 	if err := o.ReapplySeed(ctx, reseedKubeconfig); err != nil {
 		return fmt.Errorf("reseed failed: %w", err)

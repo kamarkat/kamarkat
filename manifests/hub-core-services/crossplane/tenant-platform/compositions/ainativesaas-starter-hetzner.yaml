@@ -161,28 +161,15 @@ spec:
                       data:
                         - secretKey: password
                           remoteRef:
-                            key: CACHE_PASSWORD
+                            key: ""  # Patched: the application's scope
+                            property: CACHE_PASSWORD
                 providerConfigRef:
                   name: ""
             patches:
-            # The Infisical key, as an ABSOLUTE path.
-            #
-            # The base leaves it as the bare name CACHE_PASSWORD, and the tenant
-            # SecretStore is scoped with secretsPath "/", so a bare key is looked up at
-            # the Infisical ROOT. hub-operator writes this credential to
-            # /spoke-pool/<cell>/tenants/<tenant>/CACHE_PASSWORD, so the ExternalSecret
-            # was asking a place the value has never been.
-            #
-            # It failed as "could not get secret data from provider", which reads like a
-            # store or auth problem — and the store was fine: waypoint-app-secrets and
-            # hub-ory-jwt-secret sync through the same SecretStore. The tell is that
-            # every working ExternalSecret here names an absolute path and this one did
-            # not.
-            #
-            # Cost of the omission on 2026-09-02: waypoint-cache-auth never resolved, so
-            # bff-workload could not start (CreateContainerConfigError), its Service had
-            # no endpoints, and /api/v1/auth/me returned 503 behind an EPERM from Cilium
-            # socket-LB. waypoint-cache sat ContainerCreating for five hours.
+            # The application's OpenBao scope, spokes/<cluster>/tenants/<app>, where
+            # hub-operator writes CACHE_PASSWORD. The base leaves the key empty so a
+            # composition that forgot this patch fails visibly rather than reading
+            # some other scope.
             - type: CombineFromComposite
               combine:
                 variables:
@@ -190,7 +177,7 @@ spec:
                   - fromFieldPath: spec.appId
                 strategy: string
                 string:
-                  fmt: "/spoke-pool/%s/tenants/%s/CACHE_PASSWORD"
+                  fmt: "spokes/%s/tenants/%s"
               toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
             - type: FromCompositeFieldPath
               fromFieldPath: spec.clusterName
@@ -245,9 +232,9 @@ spec:
                       # ADR-035: cert-manager is the only issuer of X.509 material.
                       secretName: ""
                       issuerRef:
-                        name: infisical-fleet-issuer
+                        name: openbao-fleet
                         kind: ClusterIssuer
-                        group: infisical-issuer.infisical.com
+                        group: cert-manager.io
                       commonName: ""
                       duration: 168h
                       renewBefore: 48h

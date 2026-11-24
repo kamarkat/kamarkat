@@ -11,7 +11,7 @@ import (
 // what moved it (ADR-064). Moving it is allowed, but only when asked for.
 func TestBundleVersionOverrideIsExplicit(t *testing.T) {
 	render := func(version string) string {
-		return renderSeedApplication("main", "dev", "hybrid", "", "1.2.3.4",
+		return renderSeedApplication("main", "hybrid", "", "1.2.3.4",
 			"letsencrypt-prod", "https://id.dev", "https://id.dev/jwks",
 			version, "https://github.com/example-org/example-gitops", "dev.example.test", nil)
 	}

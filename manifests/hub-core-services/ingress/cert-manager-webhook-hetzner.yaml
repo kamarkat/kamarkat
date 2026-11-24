@@ -413,7 +413,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: hetzner-dns
@@ -425,4 +425,5 @@ spec:
   data:
     - secretKey: apikey
       remoteRef:
-        key: hcloud-token
+        key: hub
+        property: hcloud-token

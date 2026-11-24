@@ -27,7 +27,7 @@ resources:
   # other manifest in the catalog.
   #
   # Re-enable these three lines once HCLOUD_TOKEN and EPHEMERAL_JOBS_DATABASE_URL
-  # are produced into /spoke-pool/<cell>/shared/. The manifests stay in the tree
+  # are produced into spokes/<cell>/platform . The manifests stay in the tree
   # so that is a one-line change.
   # - ephemeral-vm-provisioner.yaml
   # - ephemeral-vm-provisioner-config.yaml

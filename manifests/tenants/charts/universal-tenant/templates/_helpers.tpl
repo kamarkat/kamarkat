@@ -45,7 +45,7 @@ app-id: {{ include "universal-tenant.appId" . }}
 {{/*
 Where this app's secret material lives (ADR-031 cell scoping, ADR-087 layout).
 
-  /spoke-pool/<cell>/tenants/<app>/KEY
+  spokes/<cell>/tenants/<app>/KEY
 
 The segment is the APP, and always has been: before ADR-088 the field feeding it
 was called tenantId but held a product. So the CONTENT of this path was already
@@ -62,7 +62,7 @@ Deferred deliberately. The path is corrected on its own, when moving it is the
 only thing that can go wrong, rather than on the day the namespaces change too.
 */}}
 {{- define "universal-tenant.secretPrefix" -}}
-/spoke-pool/{{ required "clusterName must be supplied" .Values.clusterName }}/tenants/{{ include "universal-tenant.appId" . }}
+spokes/{{ required "clusterName must be supplied" .Values.clusterName }}/tenants/{{ include "universal-tenant.appId" . }}
 {{- end -}}
 
 {{/*

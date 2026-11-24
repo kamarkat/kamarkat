@@ -13,7 +13,7 @@ import (
 // render fails, no ApplicationSet is created, and the boundary reports that it
 // was activated but never rendered.
 func TestSeedSourceFollowsBuildMode(t *testing.T) {
-	unreleased := renderSeedApplication("main", "dev", "hybrid", "", "1.2.3.4",
+	unreleased := renderSeedApplication("main", "hybrid", "", "1.2.3.4",
 		"letsencrypt-prod", "https://auth.example", "https://auth.example/jwks",
 		versions.DevelopmentBundle, "https://github.com/example-org/example-gitops", "dev.example.test", nil)
 
@@ -24,7 +24,7 @@ func TestSeedSourceFollowsBuildMode(t *testing.T) {
 		t.Error("an unreleased seed must not name a published chart")
 	}
 
-	released := renderSeedApplication("main", "dev", "hybrid", "", "1.2.3.4",
+	released := renderSeedApplication("main", "hybrid", "", "1.2.3.4",
 		"letsencrypt-prod", "https://auth.example", "https://auth.example/jwks",
 		"0.1.3", "https://github.com/example-org/example-gitops", "dev.example.test", nil)
 

@@ -1,0 +1,58 @@
+# This cluster's private-PKI issuer (ADR-035, ADR-117 §8): cert-manager's own
+# Vault issuer against its hub's OpenBao, signing through the
+# infrastructure-services profile (pki_int role, 7-day cap).
+#
+# cert-manager logs in through the cluster's own auth mount, spoke-<cluster>,
+# with a token for the openbao-issuer ServiceAccount signed by THIS cluster's API
+# server; the mount's cert-manager role may only sign, and only for this cluster.
+# No credential is stored on the spoke.
+#
+# Mount name and hub domain are per cluster (templated-fields.yaml, and the
+# ApplicationSet on the unreleased path).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-fleet
+spec:
+  vault:
+    server: "https://openbao.dev.nutgraf.in"
+    path: pki_int/sign/infrastructure-services
+    auth:
+      kubernetes:
+        mountPath: /v1/auth/spoke-PLACEHOLDER
+        role: cert-manager
+        serviceAccountRef:
+          name: openbao-issuer
+          audiences: [openbao]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-issuer
+  namespace: cert-manager
+---
+# cert-manager mints this ServiceAccount's tokens to log in to OpenBao.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-issuer-token
+  namespace: cert-manager
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    resourceNames: [openbao-issuer]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-issuer-token
+  namespace: cert-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-issuer-token
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager
+    namespace: cert-manager

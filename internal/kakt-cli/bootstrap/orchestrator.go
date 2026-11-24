@@ -104,20 +104,7 @@ type Orchestrator struct {
 	KeepBootstrap    bool
 	MergeKubeconfig  bool
 	Debug            bool
-	// ManagementScope is the Infisical environment holding THIS HUB's own
-	// credentials (ADR-111 Revision 7 §2). Read from the box's own declaration,
-	// `management.infisicalEnvironmentSlug`, never from a flag.
-	//
-	// It was EnvironmentSlug, set from `--environment`, and it was doing three
-	// unrelated jobs: this scope, the overlay directory ADR-045 artifacts are
-	// written to, and the TLS issuer mapping. The first two are now separate
-	// values and the third reads the box's declaration, because a hub has no
-	// workload environment to derive any of them from.
-	//
-	// It is ONLY the secret scope. Nothing about sizing, topology validation or
-	// DNS may be derived from it.
-	ManagementScope string
-	Topology        string
+	Topology         string
 	// Gating selects how the cluster is created (ADR-055). Empty means
 	// sequenced: converged creation is requested by name or it does not occur.
 	Gating GatingMode

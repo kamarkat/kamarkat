@@ -35,14 +35,22 @@ const (
 	TenantServiceAccount = "openbao-secrets"
 	// SpokePlatformRole is the role name on each spoke mount.
 	SpokePlatformRole = "platform"
+	// SpokeIssuerRole, SpokeIssuerNamespace, SpokeIssuerServiceAccount: the spoke's
+	// cert-manager Vault ClusterIssuer (openbao-fleet) logs in as this identity.
+	SpokeIssuerRole           = "cert-manager"
+	SpokeIssuerNamespace      = "cert-manager"
+	SpokeIssuerServiceAccount = "openbao-issuer"
+	// SpokeIssuerProfile is the pki_int role spoke certificates are signed through.
+	SpokeIssuerProfile = "infrastructure-services"
 )
 
 // SpokeMount is the auth mount for one workload cluster.
 func SpokeMount(cluster string) string { return "spoke-" + cluster }
 
-// SpokePolicyName and TenantPolicyName are UID-scoped.
-func SpokePolicyName(uid string) string  { return "spoke-" + uid }
-func TenantPolicyName(uid string) string { return "tenant-" + uid }
+// SpokePolicyName, SpokePKIPolicyName and TenantPolicyName are UID-scoped.
+func SpokePolicyName(uid string) string    { return "spoke-" + uid }
+func SpokePKIPolicyName(uid string) string { return "spoke-pki-" + uid }
+func TenantPolicyName(uid string) string   { return "tenant-" + uid }
 
 // TenantRole is the role on the cluster's mount for one application.
 func TenantRole(app string) string { return "tenant-" + app }
@@ -72,8 +80,19 @@ func (c *Client) EnsureSpokeAuth(ctx context.Context, cluster, uid, signingKeyPE
 		"path \"kv/data/%s\" { capabilities = [\"read\"] }\n", SpokePlatformScope(cluster))); err != nil {
 		return fmt.Errorf("write policy %s: %w", policy, err)
 	}
-	return c.putJWTRole(ctx, mount, SpokePlatformRole,
-		subject(SpokePlatformNamespace, SpokePlatformServiceAccount), policy)
+	if err := c.putJWTRole(ctx, mount, SpokePlatformRole,
+		subject(SpokePlatformNamespace, SpokePlatformServiceAccount), policy); err != nil {
+		return err
+	}
+	// The spoke's certificate issuer: signing only, a separate identity and
+	// policy so the secret reader cannot sign and the signer cannot read secrets.
+	pkiPolicy := SpokePKIPolicyName(uid)
+	if err := c.PutPolicy(ctx, pkiPolicy, fmt.Sprintf(
+		"path \"pki_int/sign/%s\" { capabilities = [\"create\", \"update\"] }\n", SpokeIssuerProfile)); err != nil {
+		return fmt.Errorf("write policy %s: %w", pkiPolicy, err)
+	}
+	return c.putJWTRole(ctx, mount, SpokeIssuerRole,
+		subject(SpokeIssuerNamespace, SpokeIssuerServiceAccount), pkiPolicy)
 }
 
 // EnsureTenantAuth converges one application's role and policy on its cluster's mount.
@@ -117,8 +136,10 @@ func (c *Client) RemoveTenantAuth(ctx context.Context, cluster, app, uid string)
 // RemoveSpoke withdraws a cluster entirely: its policy, its mount (which revokes
 // every token the mount issued) and its KV tree.
 func (c *Client) RemoveSpoke(ctx context.Context, cluster, uid string) error {
-	if err := c.DeletePolicy(ctx, SpokePolicyName(uid)); err != nil {
-		return err
+	for _, p := range []string{SpokePolicyName(uid), SpokePKIPolicyName(uid)} {
+		if err := c.DeletePolicy(ctx, p); err != nil {
+			return err
+		}
 	}
 	if err := c.DisableMount(ctx, SpokeMount(cluster)); err != nil {
 		return err

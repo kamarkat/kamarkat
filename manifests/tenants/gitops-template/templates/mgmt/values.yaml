@@ -15,7 +15,7 @@ tenantId: <TENANT_ID>
 # environmentSlug is NOT declared here. The hub has no workload environment
 # (ADR-111 Revision 7): workload environments belong to the managed clusters, each
 # of which declares its own in registry/clusters/<name>/values.yaml. The hub's own
-# secret scope is management.infisicalEnvironmentSlug below.
+# secrets are in its OpenBao, which has no environments.
 provider: <CLOUD_PROVIDER>
 
 # The cloud region this cluster's nodes are created in.
@@ -72,22 +72,12 @@ escrow:
 # also has to hold membership of the escrow project, which no commit can grant.
 platformAdminIdentity: <PLATFORM_ADMIN_IDENTITY>
 
-management:
-  # The Infisical environment holding THIS HUB's credentials.
-  #
-  # Not a workload environment: nothing is promoted into or out of it, and no
-  # managed cluster reads it. A managed cluster's secret scope resolves from that
-  # cluster's own environment label -- reading the hub's would give it the
-  # environment of whatever provisioned it (ADR-037 clause 2).
-  infisicalEnvironmentSlug: management
-
 # The logical hub (ADR-111 ss1): this box, stable for as long as it exists.
 #
 # Keyed on by everything that must survive a cluster being replaced -- the escrow
-# path holding this box's Infisical master keys and its identity provider's
-# encryption key, and the DNS records this box owns, which is why dns.ownerId
-# below is this value and not the cluster's. Two boxes sharing it overwrite each
-# other's master keys, and a restore hands one box the other's encryption key.
+# paths holding this box's kubeconfigs, Cluster API trust roots and backup key,
+# and the DNS records this box owns, which is why dns.ownerId below is this value
+# and not the cluster's. Two boxes sharing it overwrite each other's escrow.
 #
 # Written once at scaffolding and NEVER changed afterwards: changing it orphans
 # everything already written under the old name.
@@ -121,7 +111,7 @@ environmentRevision: <BUNDLE_VERSION>
 publicTlsIssuer: <PUBLIC_TLS_ISSUER>
 
 # The base domain this box publishes on, and the authority every public host
-# derives from (ADR-051): id., api., infisical., argocd.
+# derives from (ADR-051): id., api., openbao., argocd.
 #
 # Environment-prefixed except in production, which uses the apex. Written by
 # scaffolding rather than defaulted by the chart: every box has its own, and the

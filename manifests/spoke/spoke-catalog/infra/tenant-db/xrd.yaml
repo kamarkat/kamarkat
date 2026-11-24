@@ -72,7 +72,7 @@ spec:
                 maxLength: 63
               clusterName:
                 type: string
-                description: "The managed cluster whose Infisical path holds this database's credentials"
+                description: "The managed cluster whose OpenBao scope holds this database's credentials"
                 pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
                 maxLength: 63
               dbRoleName:
@@ -189,4 +189,4 @@ spec:
                 description: "True when all Grant CRs are Ready"
               credentialsBackedUp:
                 type: boolean
-                description: "True when credentials are mirrored to Infisical"
+                description: "True when credentials are held in OpenBao"

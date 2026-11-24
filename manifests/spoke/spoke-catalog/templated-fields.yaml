@@ -30,7 +30,7 @@
       #
       # The cluster's name is gone from the key. The project is the cluster now, so
       # naming it again said nothing and made this path depend on it twice.
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/crossplane-admin-password'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
 
 - kind: Cluster
   name: shared-cnpg
@@ -63,14 +63,14 @@
 
 - kind: ExternalSecret
   name: s3-credentials
-  # ADR-014: per-spoke S3 keys at /spoke-pool/<spoke>/shared/. The hcloud-token
+  # ADR-014: per-spoke S3 keys at spokes/<spoke>/platform . The hcloud-token
   # is an HCloud API token, NOT a Hetzner Object Storage key -- it fails with
   # InvalidAccessKeyId (verified live 2026-08-18).
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/S3_ACCESS_KEY_ID'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
     - path: [spec, data, 1, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/S3_SECRET_ACCESS_KEY'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
 
 - kind: Deployment
   name: preview-access
@@ -141,36 +141,30 @@
       value: '--domain-filter={{ .Values.global.previewDomain | default (.Values.global.hubDomain) }}'
 
 - kind: ClusterSecretStore
-  name: infisical-backend
-  # Environment isolation (ADR-037). The catalogue's own manifest hardcodes
-  # environmentSlug to "dev", so a stg or prod spoke would read DEV secrets out
-  # of Infisical. The hub's environmentSlug is the authority.
+  name: openbao-platform
+  # THE CLUSTER'S OWN AUTH MOUNT (ADR-117 §4): spoke-<cluster> trusts only this
+  # cluster's ServiceAccount signing key. spokeName, not global.clusterName:
+  # globalValues carries the name of the cluster that PROVISIONED this spoke, and
+  # the mount belongs to the spoke.
+  #
+  # Both render paths must set it: the ApplicationSet's kustomize patches apply
+  # only to the unreleased branch.
   fields:
-    - path: [spec, provider, infisical, secretsScope, environmentSlug]
-      value: '{{ .Values.global.environmentSlug }}'
-    # THE CLUSTER'S OWN PROJECT (ADR-031). The catalogue hardcodes hub-secrets,
-    # which every cluster shared while one project held them all. Under one
-    # project per cluster the spoke's identity is a viewer of its own project
-    # alone, so a store still naming hub-secrets cannot validate -- the identity
-    # is not a member of it -- and every ExternalSecret on the spoke fails with
-    # the store, not with anything about the secret.
-    #
-    # This rule is why the released path needs one at all: the ApplicationSet's
-    # kustomize patches apply ONLY to the unreleased branch, because an ArgoCD
-    # source naming a Helm chart cannot also carry patches. Patching there and
-    # stopping left the packaged chart -- which is what a released box runs --
-    # pointing at hub-secrets, and that is what 0.3.45-rc.2 hit on
-    # nutgraf-stg-01. Changing a per-spoke field means changing BOTH paths.
-    #
-    # spokeName, not global.clusterName: globalValues carries the name of the
-    # cluster that PROVISIONED this spoke, and the project belongs to the spoke.
-    - path: [spec, provider, infisical, secretsScope, projectSlug]
-      value: 'spoke-{{ .Values.spokeName }}-secrets'
+    - path: [spec, provider, vault, auth, jwt, path]
+      value: 'spoke-{{ .Values.spokeName }}'
+
+- kind: ClusterIssuer
+  name: openbao-fleet
+  # The same per-cluster mount, for cert-manager's login (ADR-117 §8).
+  fields:
+    - path: [spec, vault, auth, kubernetes, mountPath]
+      value: '/v1/auth/spoke-{{ .Values.spokeName }}'
+    - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
 
 # ── The hub this spoke belongs to (ADR-051) ────────────────────────────────
 #
 # A spoke reaches its own hub, and every address below was the PLATFORM's: the
-# secret store read the platform's Infisical, and the ACME issuer requested
+# secret store read the platform's secret store, and the ACME issuer requested
 # certificates in the platform's zone with the platform's account. ADR-065 and
 # ADR-066 make that a
 # boundary violation rather than a misconfiguration -- a tenant's spoke must not
@@ -181,8 +175,8 @@
 # cluster.x-k8s.io, and are the same on every box by design.
 
 - kind: ClusterSecretStore
-  name: infisical-backend
-  # The spoke's credentials live in ITS hub's Infisical.
+  name: openbao-platform
+  # The spoke's credentials live in ITS hub's OpenBao.
   fields:
     - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
 
@@ -197,7 +191,7 @@
   # deliver this object, and only one of them is what a released box runs.
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
 
 - kind: ExternalSecret
   name: hetzner-dns-cert-manager
@@ -213,7 +207,7 @@
   # not resolve at all. One unmigrated key, four symptoms, none of them naming it.
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/hcloud-token'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
 
 - kind: ClusterIssuer
   name: letsencrypt-prod
@@ -452,7 +446,7 @@
   name: alertmanager-credentials
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/ALERT_SMTP_PASSWORD'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
     # Indices 1 and 2 are gone with the two Grafana IRM entries they rewrote: a
     # spoke holds no third-party incident credential (ADR-078 add.10 §4). Removing
     # the manifest entries without these would have left both delivery paths
@@ -487,7 +481,7 @@
   name: loki-object-storage
   fields:
     - path: [spec, data, 0, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/S3_ACCESS_KEY_ID'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
     - path: [spec, data, 1, remoteRef, key]
-      value: '/spoke-pool/{{ .Values.spokeName }}/shared/S3_SECRET_ACCESS_KEY'
+      value: 'spokes/{{ .Values.spokeName }}/platform'
 

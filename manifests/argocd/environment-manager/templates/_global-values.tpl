@@ -112,8 +112,7 @@ global:
 
     It used to fall back to $root.Values.environmentSlug -- the HUB's -- which is
     the borrowing this separation removes. Nothing on the hub reads this key now:
-    the hub's secret scope is global.management.infisicalEnvironmentSlug, and its
-    sizing is declared outright.
+    the hub's secrets are in its OpenBao, and its sizing is declared outright.
   */}}
   {{- if .environmentSlug }}
   environmentSlug: {{ .environmentSlug }}
@@ -146,31 +145,19 @@ global:
   alerting:
     emailTo: {{ $root.Values.alerting.emailTo | toJson }}
   {{- /*
-    ADR-111 §1: the logical hub. Keys the escrow path holding this box's Infisical
-    master keys and its identity provider's encryption key, and the DNS records
-    this box owns -- everything that must survive the CLUSTER below being
+    ADR-111 §1: the logical hub. Keys the escrow paths holding what outlives a
+    cluster (kubeconfigs, Cluster API trust roots, the backup key) and the DNS
+    records this box owns -- everything that must survive the CLUSTER below being
     replaced.
 
     `required` rather than defaulted from clusterName. A default would make the
     first successor inherit its predecessor's cluster name as the box id on one
-    box and not another, so the master keys would be looked for under a name
-    nothing wrote them under -- the secret store unrecoverable at exactly the
-    moment the escrow exists to serve. Failing to render is the loud end of that
+    box and not another, so escrowed material would be looked for under a name
+    nothing wrote it under -- unrecoverable at exactly the moment the escrow
+    exists to serve. Failing to render is the loud end of that
     choice; hub-operator refuses the same value for the same reason.
   */}}
   boxId: {{ required "boxId is required (ADR-111): it keys everything in the escrow that outlives a cluster, and there is no safe value to assume for it" $root.Values.boxId | quote }}
-  {{- /*
-    The management plane's own configuration (ADR-111 Revision 7). Propagated so a
-    hub component can read the hub's secret scope WITHOUT reading an environment:
-    `global.management.infisicalEnvironmentSlug`, never `global.environmentSlug`.
-
-    Not overridable per cluster, unlike environmentSlug and provider above. A
-    managed cluster has no management scope -- it has its own environment label --
-    so there is no per-cluster value this could take, and emitting one would
-    re-create the borrowing this separation removes.
-  */}}
-  management:
-    infisicalEnvironmentSlug: {{ required "management.infisicalEnvironmentSlug is required (ADR-111 Revision 7): it is the Infisical environment holding THIS HUB's own credentials, set per box in clusters/<mgmt>/values.yaml. There is no safe default -- the only possible one is a guess at which environment someone else's secrets are in, and guessing wrong is silent: the secrets resolve, from the wrong scope." (($root.Values.management).infisicalEnvironmentSlug) | quote }}
   clusterName: {{ include "environment-manager.clusterName" $root | quote }}
   {{- /*
     The box's own tenant id, for ADR-078 add.1 §7: Alloy stamps `cluster` AND
@@ -239,47 +226,6 @@ global:
          alternative was the component carrying one box's spoke name as a
          literal. */}}
   burstSpokePool: {{ include "environment-manager.burstSpokePool" $root | quote }}
-  {{- /* The box's own Infisical organisation and projects.
-
-         A global for the same reason as hubDomain: it is a fact about the box,
-         and the component that needs it (hub-environment, which renders
-         hub-bootstrap-config) is reached through this helper rather than through
-         the tenant's own values.
-
-         That indirection is the whole bug this closes. The identity arrived in
-         the tenant's repository, was passed to environment-manager as $values,
-         and stopped here -- every child Application got a `global:` block this
-         helper wrote, and this helper did not know about it. hub-environment
-         therefore rendered the ConfigMap with empty ids while the correct ones
-         sat one chart away, and hub-operator answered every SpokePool reconcile
-         with "Project  not found" against the empty string.
-
-         `default dict` because a box that has not bootstrapped Infisical yet has
-         no identity to declare, and a nil map here fails the render of every
-         boundary rather than of the one component that cares. */}}
-  {{- /* BOTH levels guarded. environment-manager declares no `global` in its own
-         values.yaml, so `$root.Values.global` is nil unless a box supplies one, and
-         `$root.Values.global.infisical` on a nil map fails every boundary's render --
-         not just this component's. */}}
-  {{- $infisical := ($root.Values.global | default dict).infisical | default dict }}
-  infisical:
-    organizationId: {{ $infisical.organizationId | default "" | quote }}
-    projectId: {{ $infisical.projectId | default "" | quote }}
-    secretsProjectId: {{ $infisical.secretsProjectId | default "" | quote }}
-    {{- /* The FLEET PKI project and the machine identity that signs against it.
-           A different project from the two above -- this is where the issuer that
-           signs spoke certificates lives -- and it arrives from the ADR-045
-           artifact platform-pki-values.yaml, NOT under .global.
-
-           Passed on because the SPOKE needs it. Its infisical-fleet-issuer shipped
-           the platform's url, clientId and projectId as literals, so every spoke
-           asked the PLATFORM's Infisical to sign its certificates, got EOF, and
-           left every certificate naming that issuer pending forever -- the
-           argocd-agent, alloy and support-agent client certs among them. */}}
-    {{- $fleet := ($root.Values.infisical | default dict).fleet | default dict }}
-    fleet:
-      projectId: {{ $fleet.projectId | default "" | quote }}
-      clientId: {{ $fleet.clientId | default "" | quote }}
 {{- end -}}
 
 {{/*

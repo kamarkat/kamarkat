@@ -27,9 +27,9 @@ spec:
     algorithm: RSA
     size: 2048
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # Resource Proxy certificate
 apiVersion: cert-manager.io/v1
@@ -54,9 +54,9 @@ spec:
     algorithm: RSA
     size: 2048
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # JWT signing key certificate (RSA private key for JWT signing)
 # Correction 1 (ADR-035): Long-lived asymmetric signing key.
@@ -82,9 +82,9 @@ spec:
     size: 4096
     encoding: PKCS8
   issuerRef:
-    name: infisical-signing-issuer
+    name: openbao-signing
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io
 ---
 # Principal internal certificate for spoke agent mTLS
 apiVersion: cert-manager.io/v1
@@ -107,6 +107,6 @@ spec:
     algorithm: RSA
     size: 2048
   issuerRef:
-    name: infisical-fleet-issuer
+    name: openbao-fleet
     kind: ClusterIssuer
-    group: infisical-issuer.infisical.com
+    group: cert-manager.io

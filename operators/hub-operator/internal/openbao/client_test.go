@@ -22,10 +22,11 @@ type fakeBao struct {
 	version  map[string]int
 	logins   int
 	casFails int // the next N writes lose their check-and-set race
+	writes   map[string]map[string]any
 }
 
 func newFake() *fakeBao {
-	return &fakeBao{kv: map[string]map[string]any{}, version: map[string]int{}}
+	return &fakeBao{kv: map[string]map[string]any{}, version: map[string]int{}, writes: map[string]map[string]any{}}
 }
 
 func (f *fakeBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +43,8 @@ func (f *fakeBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case p == "sys/auth" && r.Method == http.MethodGet:
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
 	case strings.HasPrefix(p, "sys/policies/password/") && strings.HasSuffix(p, "/generate"):
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"password": "generated-by-openbao"}})
 	case strings.HasPrefix(p, "kv/data/") && r.Method == http.MethodGet:
@@ -71,6 +74,11 @@ func (f *fakeBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.kv[k] = body.Data
 		f.version[k]++
+		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodPost:
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.writes[p] = body
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.NotFound(w, r)
@@ -172,5 +180,42 @@ func TestStaticRoleNamesAndConnection(t *testing.T) {
 	}
 	if strings.Contains(u, "password") {
 		t.Errorf("connection URL carries a password: %q", u)
+	}
+}
+
+// A spoke's mount trusts only its own key; its secret reader and its certificate
+// signer are separate identities with separate, UID-named policies.
+func TestSpokeAuthSeparatesReaderAndSigner(t *testing.T) {
+	f := newFake()
+	c := testClient(t, f)
+	if err := c.EnsureSpokeAuth(context.Background(), "c1", "uid-1", "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----"); err != nil {
+		t.Fatal(err)
+	}
+	if f.writes["sys/auth/spoke-c1"]["type"] != "jwt" {
+		t.Fatalf("mount not a JWT mount: %v", f.writes["sys/auth/spoke-c1"])
+	}
+	keys, _ := f.writes["auth/spoke-c1/config"]["jwt_validation_pubkeys"].([]any)
+	if len(keys) != 1 {
+		t.Fatalf("mount trusts %d keys, want exactly the cluster's own", len(keys))
+	}
+	reader := f.writes["sys/policies/acl/spoke-uid-1"]["policy"].(string)
+	signer := f.writes["sys/policies/acl/spoke-pki-uid-1"]["policy"].(string)
+	if !strings.Contains(reader, "kv/data/spokes/c1/platform") || strings.Contains(reader, "pki_int") {
+		t.Errorf("reader policy = %q", reader)
+	}
+	if !strings.Contains(signer, "pki_int/sign/infrastructure-services") || strings.Contains(signer, "kv/") {
+		t.Errorf("signer policy = %q", signer)
+	}
+	for role, sub := range map[string]string{
+		"platform":     "system:serviceaccount:external-secrets:openbao-platform-reader",
+		"cert-manager": "system:serviceaccount:cert-manager:openbao-issuer",
+	} {
+		r := f.writes["auth/spoke-c1/role/"+role]
+		if r["bound_subject"] != sub {
+			t.Errorf("role %s bound to %v, want %s", role, r["bound_subject"], sub)
+		}
+		if r["token_explicit_max_ttl"] != SpokeTokenTTL {
+			t.Errorf("role %s token outlives %s: %v", role, SpokeTokenTTL, r["token_explicit_max_ttl"])
+		}
 	}
 }

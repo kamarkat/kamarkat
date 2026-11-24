@@ -227,6 +227,17 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 	// must not record "seeded" for a credential nobody asked for.
 	cacheOutcome := EnsureSkipped
 
+	// The box's registry credential, copied into the tenant's own scope so the
+	// application never needs the cluster's platform store. Centrally rotated:
+	// a changed hub value converges here.
+	if pull, err := c.GetSecret(ctx, HubScope, RegistryPullSecretKey); err == nil {
+		if err := c.UpdateSecret(ctx, tenantPath, RegistryPullSecretKey, pull); err != nil {
+			return nil, fmt.Errorf("copy %s into tenant %s: %w", RegistryPullSecretKey, tenantId, err)
+		}
+	} else if !errors.Is(err, openbao.ErrNotFound) {
+		return nil, fmt.Errorf("read %s: %w", RegistryPullSecretKey, err)
+	}
+
 	dbSecretName := TenantDBPasswordKey
 	dbExists, err := c.SecretExists(ctx, tenantPath, dbSecretName)
 	if err != nil {
@@ -461,6 +472,10 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 // ExternalSecret templates both the ACL file and the connection URL from this one
 // value, so nothing downstream stores a second copy of it.
 const CachePasswordKey = "CACHE_PASSWORD"
+
+// RegistryPullSecretKey is the box's image registry credential (hub scope),
+// copied into every tenant scope.
+const RegistryPullSecretKey = "ghcr-pull-secret"
 
 // TenantDBPasswordKey is the tenant database role's password in the tenant
 // scope, read by the spoke's tenant-db composition (property db-password).

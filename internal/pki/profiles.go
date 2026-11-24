@@ -43,8 +43,8 @@ type Profile struct {
 // issuer cannot be issued at all.
 //
 // Currently consumed by an issuer:
-//   - infrastructure-services  infisical-fleet-issuer   (hub + spoke)
-//   - signing-keys             infisical-signing-issuer (argocd-agent-jwt)
+//   - infrastructure-services  openbao-fleet   (hub + spoke)
+//   - signing-keys             openbao-signing (argocd-agent-jwt)
 //
 // The remainder are mandated by ADR-035's profile table and are provisioned ahead
 // of the issuers that will use them.

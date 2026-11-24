@@ -343,7 +343,7 @@ func (r *SpokePoolReconciler) updateStatusCondition(ctx context.Context, spokePo
 }
 
 // ensureBootstrapCertificate creates a 72-hour Certificate CR for ArgoCD Agent mTLS bootstrap.
-// cert-manager + infisical-fleet-issuer fulfills this Certificate declaratively per ADR-035.
+// cert-manager + openbao-fleet fulfills this Certificate declaratively per ADR-035.
 // The resulting TLS Secret is read by ensureBootstrapCertCRSWrapper for ClusterResourceSet delivery.
 // Domain: platform-capi (ADR-015), Certificate declares intent only — PKI is cert-manager's domain (ADR-035).
 func (r *SpokePoolReconciler) ensureBootstrapCertificate(ctx context.Context, spokePool *unstructured.Unstructured) error {

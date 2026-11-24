@@ -31,7 +31,7 @@ data:
   # Degraded with it.
   #
   # The CA it wants is already present: every certificate here is issued by the
-  # infisical-fleet-issuer, and cert-manager writes the issuing CA into ca.crt
+  # openbao-fleet, and cert-manager writes the issuing CA into ca.crt
   # of each TLS secret it creates. Pointing at the real secret uses the CA that
   # actually signs the agent certificates and inherits cert-manager renewal,
   # rather than adding a job to copy a CA into a third secret that then has to

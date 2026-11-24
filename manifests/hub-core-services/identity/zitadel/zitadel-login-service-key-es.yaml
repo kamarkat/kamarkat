@@ -40,7 +40,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-hub
     kind: ClusterSecretStore
   target:
     name: zitadel-login-service-key-managed
@@ -62,7 +62,9 @@ spec:
   data:
     - secretKey: crt
       remoteRef:
-        key: hub-zitadel-login-service-cert
+        key: hub
+        property: hub-zitadel-login-service-cert
     - secretKey: key
       remoteRef:
-        key: hub-zitadel-login-service-key
+        key: hub
+        property: hub-zitadel-login-service-key

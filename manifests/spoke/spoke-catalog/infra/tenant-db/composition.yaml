@@ -30,8 +30,8 @@ spec:
                 toFieldPath: metadata.labels[cluster-name]
 
         resources:
-          # Resource 1: ESO ExternalSecret (restore credentials from Infisical on cluster rebuild)
-          # Aligns with ADR-003: Infisical as the single source of truth.
+          # Resource 1: ESO ExternalSecret (restore credentials from OpenBao on cluster rebuild)
+          # Aligns with ADR-003: the secret store (OpenBao) is the single source of truth.
           - name: db-credentials-restore
             base:
               apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -78,13 +78,14 @@ spec:
                             port: "5432"
                             sslmode: "require"  # HARDENING (ADR-030): Explicit TLS enforcement
                       data:
-                        # ONE ENTRY. Infisical holds the password and nothing else
-                        # about this identity; username is patched into the
-                        # template above from spec.dbRoleName.
+                        # ONE ENTRY. OpenBao holds the password (hub-operator draws
+                        # it once from a password policy) and nothing else about
+                        # this identity; username is patched into the template
+                        # above from spec.dbRoleName.
                         - secretKey: password
                           remoteRef:
-                            key: ""  # Patched
-                            property: password
+                            key: ""  # Patched: the application's scope
+                            property: db-password
             readinessChecks:
               - type: MatchCondition
                 matchCondition:
@@ -130,7 +131,7 @@ spec:
               - type: FromCompositeFieldPath
                 fromFieldPath: spec.dbRoleName
                 toFieldPath: spec.forProvider.manifest.spec.target.template.data.username
-              # EXACT KEY PATH MATCHING FOR JSON COMPOSITE OBJECT
+              # The application's OpenBao scope: spokes/<cluster>/tenants/<app>
               - type: CombineFromComposite
                 combine:
                   variables:
@@ -138,7 +139,7 @@ spec:
                     - fromFieldPath: spec.appId
                   strategy: string
                   string:
-                    fmt: "/spoke-pool/%s/tenants/%s/db-credentials"
+                    fmt: "spokes/%s/tenants/%s"
                 toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
 
           # Resource 2: CNPG Database CR
@@ -194,7 +195,7 @@ spec:
                 toFieldPath: spec.forProvider.manifest.spec.owner
 
           # Resource 3b: Pooler App Secret (for Workloads)
-          # Follows ADR-003: Infisical as single source of truth (Pattern B: Application Secrets)
+          # Follows ADR-003: OpenBao as single source of truth (Pattern B: Application Secrets)
           # Follows ADR-030: Discrete keys + urlquery-encoded DSN + readiness gate
           - name: pooler-app-secret
             base:
@@ -245,13 +246,14 @@ spec:
                             sslmode: "require"
                             url: ""        # Patched dynamically with urlquery-encoded DSN
                       data:
-                        # ONE ENTRY. Infisical holds the password and nothing else
-                        # about this identity; username is patched into the
-                        # template above from spec.dbRoleName.
+                        # ONE ENTRY. OpenBao holds the password (hub-operator draws
+                        # it once from a password policy) and nothing else about
+                        # this identity; username is patched into the template
+                        # above from spec.dbRoleName.
                         - secretKey: password
                           remoteRef:
-                            key: ""  # Patched
-                            property: password
+                            key: ""  # Patched: the application's scope
+                            property: db-password
             readinessChecks:
               - type: MatchCondition
                 matchCondition:
@@ -290,7 +292,7 @@ spec:
                     string:
                       type: Format
                       fmt: "%s-pooler-app"
-              # EXACT KEY PATH MATCHING FOR JSON COMPOSITE OBJECT
+              # The application's OpenBao scope: spokes/<cluster>/tenants/<app>
               - type: CombineFromComposite
                 combine:
                   variables:
@@ -298,7 +300,7 @@ spec:
                     - fromFieldPath: spec.appId
                   strategy: string
                   string:
-                    fmt: "/spoke-pool/%s/tenants/%s/db-credentials"
+                    fmt: "spokes/%s/tenants/%s"
                 toFieldPath: spec.forProvider.manifest.spec.data[0].remoteRef.key
               # Dynamic configuration values (not secrets)
               - type: FromCompositeFieldPath

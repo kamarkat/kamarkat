@@ -1,6 +1,5 @@
-# Runtime-known fields (SECRET_STORE_PROJECT_ID, SECRET_STORE_ORGANIZATION_ID,
-# SECRET_STORE_BOOTSTRAP_PROFILE_SLUG) are supplied via ADR-045
-# Bootstrap-Generated GitOps Artifact: manifests/generated/hub-bootstrap-config-patch.yaml
+# Cluster facts hub-operator reads at start. The box's secret store needs none:
+# hub-operator reaches OpenBao by service name with its own ServiceAccount.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,21 +11,3 @@ data:
   # no reader — it was wired into the operator as an env var nothing consumed.
   CLUSTER_ID: ""
   CLUSTER_REGION: ""
-  SECRET_STORE_ENVIRONMENT_SLUG: ""
-  SECRET_STORE_BOOTSTRAP_PROFILE_SLUG: "argocd-bootstrap"
-  # The box's own Infisical identity. Declared here, empty, so this ConfigMap
-  # holds every key it will ever hold and ONE Application renders all of them.
-  #
-  # These arrived through a kustomize patch instead, and that is what allowed two
-  # owners: the tenant's generated artifact applied a ConfigMap carrying the
-  # identity and not CLUSTER_ID, hub-environment applied one carrying CLUSTER_ID
-  # and not the identity, and each apply replaced the other's data wholesale. The
-  # box alternated between an operator that could not start and an operator
-  # authenticating against the wrong Infisical.
-  #
-  # Values, not a patch: templated-fields.yaml turns these into Helm expressions
-  # at packaging time, so a box supplies them the way it supplies its domain, and
-  # nothing competes with the object it was patching.
-  SECRET_STORE_ORGANIZATION_ID: ""
-  SECRET_STORE_PROJECT_ID: ""
-  SECRET_STORE_SECRETS_PROJECT_ID: ""

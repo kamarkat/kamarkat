@@ -31,7 +31,7 @@ spec:
   # reaches the workload promptly, and a deleted projection is restored promptly.
   refreshInterval: 5m
   secretStoreRef:
-    name: infisical-backend
+    name: openbao-platform
     kind: ClusterSecretStore
   target:
     name: ephemeral-vm-provisioner
@@ -46,7 +46,9 @@ spec:
     # patch); PLACEHOLDER is the unreachable default, matching s3-credentials-es.
     - secretKey: hcloudToken
       remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/hcloud-token
+        key: spokes/PLACEHOLDER/platform
+        property: hcloud-token
     - secretKey: databaseUrl
       remoteRef:
-        key: /spoke-pool/PLACEHOLDER/shared/EPHEMERAL_JOBS_DATABASE_URL
+        key: spokes/PLACEHOLDER/platform
+        property: EPHEMERAL_JOBS_DATABASE_URL

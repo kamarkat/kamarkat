@@ -6,7 +6,7 @@
 # intermediate was not even included in the served chain (depth 0).
 #
 # Division of responsibility — complementary, not alternatives:
-#   infisical-fleet-issuer  → internal fleet / mTLS certs (ADR-035, ADR-048).
+#   openbao-fleet  → internal fleet / mTLS certs (ADR-035, ADR-048).
 #                             A private CA is CORRECT there.
 #   letsencrypt-*           → public browser-facing Gateway listeners ONLY.
 #

@@ -4,8 +4,6 @@ kind: Kustomization
 resources:
   # ADR-035: cert-manager CRDs for spoke-side certificate management
   - crds/cert-manager-crds.yaml
-  # ADR-035: infisical-issuer CRDs (InfisicalClusterIssuer, InfisicalIssuer)
-  - crds/infisical-issuer-crd.yaml
   # Standard Kubernetes Gateway API CRDs (GatewayClass, Gateway, HTTPRoute, ReferenceGrant)
   - crds/gateway-api-crds.yaml
   - gatewayclass.yaml
@@ -80,12 +78,11 @@ resources:
   - s3-credentials-es.yaml
   # ADR-035: Spoke-side cert-manager for certificate lifecycle management
   - cert-manager.yaml
-  # ADR-035: approval RBAC for the Infisical external issuer (external issuer
-  # groups require explicit signer approval RBAC; mirrors hub precedent)
-  - cert-manager-approve-infisical-issuer.yaml
-  - infisical-issuer.yaml
+  # ADR-117 §8: the cluster's private-PKI issuer, cert-manager's Vault issuer
+  # against its hub's OpenBao.
+  - openbao-issuer.yaml
   # WS0.3: public ACME issuers (letsencrypt-staging / -prod) for browser-facing
-  # Gateway hostnames. Complements infisical-fleet-issuer, which stays the
+  # Gateway hostnames. Complements openbao-fleet, which stays the
   # issuer for internal fleet/mTLS certs (ADR-046 addendum 18).
   - acme-cluster-issuer.yaml
   # The Hetzner DNS-01 webhook that solves for this issuer is provider-bound, so
@@ -99,10 +96,6 @@ resources:
   # workloads it protects; the Gateway and the hostname route are platform-owned
   # so a tenant cannot author a route that bypasses it.
   - tenant-gateway.yaml
-  # ADR-048: The completed ClusterIssuer (infisical-fleet-issuer) is delivered by
-  # ClusterResourceSet lifecycle injection (spoke-identity-operator -> {spoke}-cluster-issuer
-  # CRS wrapper -> CAPI). It is intentionally NOT tracked here so ArgoCD never
-  # prunes or empties the CRS-delivered object.
   - certificates.yaml
   # ADR-077: one Support Agent per cluster, and this is the spoke's own. It
   # reports about this spoke under this spoke's identity; a single hub-side

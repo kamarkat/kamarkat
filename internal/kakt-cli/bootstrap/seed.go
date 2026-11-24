@@ -188,7 +188,7 @@ const bundleRegistry = "ghcr.io/kamarkat/charts"
 // is read from that same Secret by the controller itself. Nothing per-cluster
 // is left to carry, which is why the values file Day-0 used to generate for
 // them is gone too.
-func renderSeedApplication(envRevision, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
+func renderSeedApplication(envRevision, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, bundleVersion, instanceRepoURL, hubDomain string, oidcScopes []string) string {
 	scopes := ""
 	for _, sc := range oidcScopes {
 		scopes += fmt.Sprintf("\n        - %q", sc)
@@ -232,8 +232,6 @@ spec:
           value: %q
         - name: hubDomain
           value: %q
-        - name: management.infisicalEnvironmentSlug
-          value: %q
         - name: provider
           value: %q
         - name: topology
@@ -257,7 +255,7 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
-`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, managementScope, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, scopes)
+`, seedAppName, source, envRevision, bundleVersion, bundleRegistry, instanceRepoURL, hubDomain, provider, topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL, scopes)
 }
 
 // applySeed establishes the Day-0 seed: the six boundary AppProjects and the
@@ -429,7 +427,7 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 	// platform's own box takes it from there; a tenant box takes it from the
 	// values file its repository holds, which is why this path is the only one
 	// that has to name it.
-	seed := renderSeedApplication(envRevision, o.ManagementScope, o.providerName(),
+	seed := renderSeedApplication(envRevision, o.providerName(),
 		o.Topology, hubIngressAddress, publicTlsIssuer, oidcIssuer, oidcJwksURL,
 		bundleVersion, instanceRepo, zone, oidcScopes)
 	if err := kubectlApplyStdin(ctx, kubeconfig, seed); err != nil {
@@ -537,7 +535,7 @@ func (o *Orchestrator) ReapplySeed(ctx context.Context, kubeconfig string) error
 // pool ApplicationSet at a directory that does not exist, and the Applications
 // generated from it go missing rather than erroring. Reading them back from the
 // cluster removes the opportunity.
-func ReadSeedIdentity(ctx context.Context, kubeconfig string) (managementScope, provider, topology string, err error) {
+func ReadSeedIdentity(ctx context.Context, kubeconfig string) (provider, topology string, err error) {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
 		"-n", "platform-ops", "get", "application", seedAppName,
 		"-o", `jsonpath={range .spec.source.helm.parameters[*]}{.name}={.value}{"\n"}{end}`)
@@ -545,7 +543,7 @@ func ReadSeedIdentity(ctx context.Context, kubeconfig string) (managementScope, 
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to read the seed Application %q: %w: %s",
+		return "", "", fmt.Errorf("failed to read the seed Application %q: %w: %s",
 			seedAppName, err, strings.TrimSpace(stderr.String()))
 	}
 
@@ -557,17 +555,15 @@ func ReadSeedIdentity(ctx context.Context, kubeconfig string) (managementScope, 
 		}
 	}
 
-	// management.infisicalEnvironmentSlug, not environmentSlug (ADR-111 Revision
-	// 7). The seed carries the hub's own secret scope; the hub declares no
-	// environment, so there is no environmentSlug parameter to read back.
-	managementScope, provider = values["management.infisicalEnvironmentSlug"], values["provider"]
-	if managementScope == "" || provider == "" {
-		return "", "", "", fmt.Errorf(
-			"the seed Application %q records no management.infisicalEnvironmentSlug or provider — refusing to guess the cluster's identity", seedAppName)
+	// The hub declares no environment, so there is no environmentSlug to read back.
+	provider = values["provider"]
+	if provider == "" {
+		return "", "", fmt.Errorf(
+			"the seed Application %q records no provider — refusing to guess the cluster's identity", seedAppName)
 	}
 	// topology is legitimately empty on a single-topology cluster, so its
 	// absence is not an error and must not be defaulted.
-	return managementScope, provider, values["topology"], nil
+	return provider, values["topology"], nil
 }
 
 // activateBoundary opens boundary n by removing its deny sync window.
