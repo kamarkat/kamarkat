@@ -13,5 +13,5 @@ resources:
 # Pinned by digest, not by tag -- the mcp-server workflow rewrites this with
 # `kustomize edit set image` after each build.
 images:
-- digest: sha256:990bfec09d9e6e89ac6e375f8137d014ce870ad19cec61b40bbfb464838928e0
+- digest: sha256:a888fe077872451700c1b7fd35294c5eae6f5396c211a9949ea7afc42a3ae2ca
   name: ghcr.io/kamarkat/kamarkat/mcp-server
