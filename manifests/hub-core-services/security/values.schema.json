@@ -2,63 +2,10 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "required": [
-    "infisical",
+    "openbao",
     "certificateProfile"
   ],
   "properties": {
-    "infisical": {
-      "type": "object",
-      "required": [
-        "url",
-        "application",
-        "auth"
-      ],
-      "properties": {
-        "url": {
-          "type": "string",
-          "pattern": "^https?://.+"
-        },
-        "application": {
-          "type": "string",
-          "minLength": 1
-        },
-        "signing": {
-          "type": "object",
-          "properties": {
-            "application": {
-              "type": "string"
-            }
-          }
-        },
-        "auth": {
-          "type": "object",
-          "required": [
-            "secretName",
-            "secretNamespace",
-            "clientIdKey",
-            "clientSecretKey"
-          ],
-          "properties": {
-            "secretName": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretNamespace": {
-              "type": "string",
-              "minLength": 1
-            },
-            "clientIdKey": {
-              "type": "string",
-              "minLength": 1
-            },
-            "clientSecretKey": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        }
-      }
-    },
     "certificateProfile": {
       "type": "object",
       "required": [
@@ -73,6 +20,18 @@
         "signing": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "openbao": {
+      "type": "object",
+      "required": [
+        "server"
+      ],
+      "properties": {
+        "server": {
+          "type": "string",
+          "pattern": "^https://.+"
         }
       }
     }

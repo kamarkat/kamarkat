@@ -102,7 +102,7 @@ func (r *PlatformMcpReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Once per project, recorded by project id, for the reason the observability
 	// viewer gives: a grant restored on every reconcile would undo a revocation.
-	bootstrapped, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, platformMcpBootstrapKey)
+	bootstrapped, err := r.Store.GetSecret(ctx, hubSecretPath, platformMcpBootstrapKey)
 	if err != nil || bootstrapped != projectID {
 		if err := r.IdentityClient.EnsurePlatformProjectRoles(ctx, orgID, projectID, platformMcpRoles); err != nil {
 			return ctrl.Result{}, fmt.Errorf("admit the platform organisation's owners to the kamarkat-mcp project: %w", err)
@@ -147,7 +147,7 @@ func (r *PlatformMcpReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		sum := sha256.Sum256([]byte(pem))
 		hash := hex.EncodeToString(sum[:])
 		var known, revoke string
-		if prev, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, platformMcpAgentKeyRecord); err == nil {
+		if prev, err := r.Store.GetSecret(ctx, hubSecretPath, platformMcpAgentKeyRecord); err == nil {
 			if h, id, ok := strings.Cut(prev, ":"); ok {
 				if h == hash {
 					known = id

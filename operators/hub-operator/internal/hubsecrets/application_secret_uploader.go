@@ -4,14 +4,13 @@
 // compatibility only and MUST be removed once all application secrets are migrated to
 // Infisical UI → ESO delivery.
 
-package infisical
+package hubsecrets
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -25,7 +24,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
-	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
@@ -33,6 +32,7 @@ import (
 // Separation of Concerns: This class generates passwords and uploads to Infisical only
 // It does NOT create K8s secrets - ESO creates them by syncing from Infisical
 type ApplicationSecretUploader struct {
+	store             *secrets.Store
 	k8sClient         client.Client
 	uncachedK8sClient client.Client
 
@@ -47,10 +47,11 @@ type ApplicationSecretUploader struct {
 
 // NewApplicationSecretUploader creates a new application secret uploader
 func NewApplicationSecretUploader(
-	k8sClient, uncachedK8sClient client.Client,
+	store *secrets.Store, k8sClient, uncachedK8sClient client.Client,
 	escrowClient escrow.EscrowClient, escrowID escrow.Identity,
 ) *ApplicationSecretUploader {
 	return &ApplicationSecretUploader{
+		store:             store,
 		k8sClient:         k8sClient,
 		uncachedK8sClient: uncachedK8sClient,
 		escrowClient:      escrowClient,
@@ -68,31 +69,11 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 	logger := log.FromContext(ctx)
 
 	// Create Infisical client
-	infisicalClient, err := infisicalclient.NewInfisicalClient(ctx, u.uncachedK8sClient, "")
-	if err != nil {
-		return fmt.Errorf("failed to create Infisical client: %w", err)
-	}
-
-	// Get project slug from environment variable (set via configmap hub-bootstrap-config)
-	// Use secrets project for application secrets (hub-secrets is type "secret-manager")
-	// No fallback to SECRET_STORE_PROJECT_SLUG: that names the cert-manager
-	// project, which holds no secrets and cannot hold an environment to read them
-	// in. It is set for every box, so its absence is a broken deployment.
-	projectSlug := os.Getenv("SECRET_STORE_SECRETS_PROJECT_SLUG")
-	if projectSlug == "" {
-		return fmt.Errorf("SECRET_STORE_SECRETS_PROJECT_SLUG is not set")
-	}
-
-	environmentSlug, err := managementEnvironmentSlug()
-	if err != nil {
-		return err
-	}
-	secretPath := "/"
+	secretPath := secrets.HubScope
 
 	logger.Info("Uploading application secrets to Infisical", "count", len(ApplicationSecretMappings))
 
 	// RFC 3986 unreserved characters - safe for URLs without encoding
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 
 	successCount := 0
 	skippedCount := 0
@@ -128,14 +109,14 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		//   public only    → ERROR (do not mutate — indicates corruption)
 		//   mismatch       → ERROR (do not mutate — indicates corruption)
 		if secretDef.KeyType == "ed25519" {
-			privExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+			privExists, err := u.store.SecretExists(ctx, secretPath, secretDef.PrivateKeyKey)
 			if err != nil {
 				logger.Error(err, "Failed to check if private key exists in Infisical", "key", secretDef.PrivateKeyKey)
 				failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 				continue
 			}
 
-			pubExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+			pubExists, err := u.store.SecretExists(ctx, secretPath, secretDef.PublicKeyKey)
 			if err != nil {
 				logger.Error(err, "Failed to check if public key exists in Infisical", "key", secretDef.PublicKeyKey)
 				failedKeys = append(failedKeys, secretDef.PublicKeyKey)
@@ -145,13 +126,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 			switch {
 			case privExists && pubExists:
 				// Both exist — validate consistency
-				privVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				privVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PrivateKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read existing private key for validation", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				pubVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+				pubVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PublicKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read existing public key for validation", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
@@ -170,7 +151,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 
 			case privExists && !pubExists:
 				// Private exists, public missing — derive public from private (repair)
-				privVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				privVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PrivateKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read private key for public key derivation", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
@@ -182,7 +163,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, pubB64); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PublicKeyKey, pubB64); err != nil {
 					logger.Error(err, "Failed to upload derived public key to Infisical", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
 					continue
@@ -207,12 +188,12 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey, privPEM); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PrivateKeyKey, privPEM); err != nil {
 					logger.Error(err, "Failed to upload private key to Infisical", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, pubB64); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PublicKeyKey, pubB64); err != nil {
 					logger.Error(err, "Failed to upload public key to Infisical", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
 					continue
@@ -233,13 +214,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		// a certificate carrying the same public key, which a running issuer
 		// already trusts. A certificate without its key cannot be repaired at all.
 		if secretDef.KeyType == "x509" {
-			keyExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+			keyExists, err := u.store.SecretExists(ctx, secretPath, secretDef.PrivateKeyKey)
 			if err != nil {
 				logger.Error(err, "Failed to check if the private key exists in Infisical", "key", secretDef.PrivateKeyKey)
 				failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 				continue
 			}
-			certExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+			certExists, err := u.store.SecretExists(ctx, secretPath, secretDef.PublicKeyKey)
 			if err != nil {
 				logger.Error(err, "Failed to check if the certificate exists in Infisical", "key", secretDef.PublicKeyKey)
 				failedKeys = append(failedKeys, secretDef.PublicKeyKey)
@@ -248,13 +229,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 
 			switch {
 			case keyExists && certExists:
-				keyVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				keyVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PrivateKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read the stored private key for validation", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				certVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey)
+				certVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PublicKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read the stored certificate for validation", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
@@ -277,7 +258,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 				continue
 
 			case keyExists && !certExists:
-				keyVal, _, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey)
+				keyVal, _, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PrivateKeyKey)
 				if err != nil {
 					logger.Error(err, "Failed to read the private key to re-issue its certificate", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
@@ -289,7 +270,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
 					logger.Error(err, "Failed to upload the re-issued certificate to Infisical", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
 					continue
@@ -343,12 +324,12 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PrivateKeyKey, keyPEM); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PrivateKeyKey, keyPEM); err != nil {
 					logger.Error(err, "Failed to upload the private key to Infisical", "key", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PublicKeyKey, certPEM); err != nil {
 					logger.Error(err, "Failed to upload the certificate to Infisical", "key", secretDef.PublicKeyKey)
 					failedKeys = append(failedKeys, secretDef.PublicKeyKey)
 					continue
@@ -366,7 +347,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		// Upload username if this is a database credential (UsernameKey is not empty)
 		if secretDef.UsernameKey != "" {
 			// Check if username already exists in Infisical
-			usernameExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.UsernameKey)
+			usernameExists, err := u.store.SecretExists(ctx, secretPath, secretDef.UsernameKey)
 			if err != nil {
 				logger.Error(err, "Failed to check if username exists in Infisical", "key", secretDef.UsernameKey)
 				failedKeys = append(failedKeys, secretDef.UsernameKey)
@@ -375,7 +356,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 
 			if !usernameExists {
 				// Username doesn't exist, create it
-				if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.UsernameKey, secretDef.Username); err != nil {
+				if err := u.store.UpdateSecret(ctx, secretPath, secretDef.UsernameKey, secretDef.Username); err != nil {
 					logger.Error(err, "Failed to upload username to Infisical", "key", secretDef.UsernameKey)
 					failedKeys = append(failedKeys, secretDef.UsernameKey)
 					continue
@@ -387,7 +368,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		}
 
 		// Check if password already exists in Infisical (IDEMPOTENCY)
-		passwordExists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, secretPath, secretDef.PasswordKey)
+		passwordExists, err := u.store.SecretExists(ctx, secretPath, secretDef.PasswordKey)
 		if err != nil {
 			logger.Error(err, "Failed to check if password exists in Infisical", "key", secretDef.PasswordKey)
 			failedKeys = append(failedKeys, secretDef.PasswordKey)
@@ -397,7 +378,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		if passwordExists && secretDef.HexBytes > 0 {
 			// Present is not the same as usable. Re-check the stored form so a value
 			// written before HexBytes existed is repaired rather than preserved.
-			if current, found, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, secretDef.PasswordKey); err != nil {
+			if current, found, err := u.store.GetSecretValue(ctx, secretPath, secretDef.PasswordKey); err != nil {
 				logger.Error(err, "Failed to read existing secret for validation; leaving it untouched", "key", secretDef.PasswordKey)
 			} else if found && !hexValueIsWellFormed(current, secretDef.HexBytes) {
 				if secretDef.EscrowArtifact != "" {
@@ -438,8 +419,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 			// escrow -- regenerating an unrotatable key to make a backup of it is the
 			// loss the backup exists to prevent.
 			if secretDef.EscrowArtifact != "" {
-				if err := u.escrowExistingValue(ctx, logger, infisicalClient,
-					projectSlug, environmentSlug, secretPath, secretDef); err != nil {
+				if err := u.escrowExistingValue(ctx, logger, secretPath, secretDef); err != nil {
 					logger.Error(err, "Escrowed secret exists but could not be confirmed in the escrow",
 						"key", secretDef.PasswordKey, "artifact", secretDef.EscrowArtifact)
 					failedKeys = append(failedKeys, secretDef.PasswordKey)
@@ -507,13 +487,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 		if restored != "" {
 			password = restored
 		} else if secretDef.HexBytes > 0 {
-			password, err = secrets.GenerateHexKey(secretDef.HexBytes)
+			password, err = u.store.HexKey(ctx, secretDef.HexBytes)
 		} else {
 			length := 32
 			if secretDef.UsernameKey == "" {
 				length = 64
 			}
-			password, err = secrets.GenerateSecurePasswordWithCharset(length, charset)
+			password, err = u.store.URLSafe(ctx, length)
 		}
 		if err != nil {
 			logger.Error(err, "Failed to generate password", "key", secretDef.PasswordKey)
@@ -521,7 +501,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 			continue
 		}
 
-		if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, secretDef.PasswordKey, password); err != nil {
+		if err := u.store.UpdateSecret(ctx, secretPath, secretDef.PasswordKey, password); err != nil {
 			logger.Error(err, "Failed to upload password to Infisical", "key", secretDef.PasswordKey)
 			failedKeys = append(failedKeys, secretDef.PasswordKey)
 			continue
@@ -559,7 +539,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 				failedKeys = append(failedKeys, "openmeter-svix-jwt")
 				continue
 			}
-			if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, "openmeter-svix-jwt", jwtToken); err != nil {
+			if err := u.store.UpdateSecret(ctx, secretPath, "openmeter-svix-jwt", jwtToken); err != nil {
 				logger.Error(err, "Failed to upload Svix JWT to Infisical", "key", "openmeter-svix-jwt")
 				failedKeys = append(failedKeys, "openmeter-svix-jwt")
 				continue
@@ -577,7 +557,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 	// only read its own prefix (ADR-031). The cell folder is created by the SpokePool
 	// reconciler (EnsureInfisicalCredentials); if it does not exist yet the write
 	// fails and the next HubEnvironment reconcile retries, so ordering self-resolves.
-	if err := u.uploadClusterScopedSecrets(ctx, infisicalClient, projectSlug, environmentSlug); err != nil {
+	if err := u.uploadClusterScopedSecrets(ctx); err != nil {
 		logger.Error(err, "Cell-scoped application secrets could not be uploaded")
 	}
 
@@ -613,15 +593,14 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 // destroys exactly what the escrow exists to protect -- so it stops and names both
 // sides by fingerprint, never by value.
 func (u *ApplicationSecretUploader) escrowExistingValue(
-	ctx context.Context, logger logr.Logger, client *infisicalclient.InfisicalClient,
-	projectSlug, environmentSlug, secretPath string, def ApplicationSecretDefinition,
+	ctx context.Context, logger logr.Logger, secretPath string, def ApplicationSecretDefinition,
 ) error {
 	if u.escrowClient == nil || u.escrowID.BoxID == "" {
 		return fmt.Errorf("no escrow configured, so an unrotatable value that already exists " +
 			"cannot be confirmed as recoverable (ADR-076)")
 	}
 
-	current, found, err := client.GetSecretValue(ctx, projectSlug, environmentSlug, secretPath, def.PasswordKey)
+	current, found, err := u.store.GetSecretValue(ctx, secretPath, def.PasswordKey)
 	if err != nil {
 		return fmt.Errorf("reading the existing value: %w", err)
 	}
@@ -688,8 +667,7 @@ func generateSvixJWT(signingSecret string) (string, error) {
 // Existing values are left alone: this key signs live browser sessions, so
 // regenerating it on a reconcile would invalidate every session on that spoke.
 func (u *ApplicationSecretUploader) uploadClusterScopedSecrets(
-	ctx context.Context, infisicalClient *infisicalclient.InfisicalClient,
-	projectSlug, environmentSlug string,
+	ctx context.Context,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -713,15 +691,15 @@ func (u *ApplicationSecretUploader) uploadClusterScopedSecrets(
 
 	for _, sp := range spokes.Items {
 		clusterName := sp.GetName()
-		sharedPath := fmt.Sprintf(secrets.InfisicalSharedPathFormat, clusterName)
+		sharedPath := openbao.SpokePlatformScope(clusterName)
 		for _, def := range cellScoped {
-			exists, err := infisicalClient.SecretExists(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey)
+			exists, err := u.store.SecretExists(ctx, sharedPath, def.ClusterScopedKey)
 			if err != nil {
 				logger.Error(err, "Failed to check cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey)
 				continue
 			}
 			if exists && def.HexBytes > 0 {
-				if current, found, err := infisicalClient.GetSecretValue(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey); err != nil {
+				if current, found, err := u.store.GetSecretValue(ctx, sharedPath, def.ClusterScopedKey); err != nil {
 					logger.Error(err, "Failed to read existing cell secret for validation; leaving it untouched",
 						"cluster", clusterName, "key", def.ClusterScopedKey)
 				} else if found && !hexValueIsWellFormed(current, def.HexBytes) {
@@ -740,16 +718,16 @@ func (u *ApplicationSecretUploader) uploadClusterScopedSecrets(
 
 			var value string
 			if def.HexBytes > 0 {
-				value, err = secrets.GenerateHexKey(def.HexBytes)
+				value, err = u.store.HexKey(ctx, def.HexBytes)
 			} else {
-				value, err = secrets.GenerateSecurePassword()
+				value, err = u.store.Password(ctx)
 			}
 			if err != nil {
 				logger.Error(err, "Failed to generate cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey)
 				continue
 			}
 
-			if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, sharedPath, def.ClusterScopedKey, value); err != nil {
+			if err := u.store.UpdateSecret(ctx, sharedPath, def.ClusterScopedKey, value); err != nil {
 				logger.Error(err, "Failed to upload cell-scoped secret", "cluster", clusterName, "key", def.ClusterScopedKey, "path", sharedPath)
 				continue
 			}

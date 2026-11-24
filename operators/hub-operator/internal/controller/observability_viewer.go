@@ -150,7 +150,7 @@ func (r *ObservabilityViewerReconciler) Reconcile(ctx context.Context, req ctrl.
 	// box records the project it bootstrapped and, having done it, stops looking
 	// at the grants entirely. Anyone added afterwards is granted the role
 	// explicitly, in the issuer, by one of the owners this pass admitted.
-	bootstrapped, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, observabilityBootstrapKey)
+	bootstrapped, err := r.Store.GetSecret(ctx, hubSecretPath, observabilityBootstrapKey)
 	if err != nil || bootstrapped != projectID {
 		if err := r.IdentityClient.EnsurePlatformProjectAccess(
 			ctx, orgID, projectID, observabilityViewerRole, observabilityViewerRoleDisplay); err != nil {

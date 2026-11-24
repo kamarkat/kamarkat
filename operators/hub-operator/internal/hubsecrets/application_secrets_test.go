@@ -1,4 +1,4 @@
-package infisical
+package hubsecrets
 
 import (
 	"encoding/hex"
@@ -53,7 +53,7 @@ func TestNoDuplicateInfisicalKeys(t *testing.T) {
 		claim(d.PasswordKey, "ApplicationSecretMappings:"+d.Description)
 	}
 	for _, m := range CLISecretMappings {
-		claim(m.InfisicalKey, "CLISecretMappings:"+m.Description)
+		claim(m.Key, "CLISecretMappings:"+m.Description)
 	}
 }
 

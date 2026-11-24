@@ -9,6 +9,7 @@ import (
 	"github.com/go-logr/logr"
 
 	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
@@ -70,6 +71,14 @@ func (f *fakeSecretStore) DeleteSecret(_ context.Context, path, name string) err
 	return nil
 }
 
+func (f *fakeSecretStore) EnsureTenantAuth(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (f *fakeSecretStore) HexKey(_ context.Context, n int) (string, error) {
+	return strings.Repeat("ab", n), nil
+}
+
 func (f *fakeSecretStore) EnsureTenantFolderAndCredentials(
 	_ context.Context, _, _, _ string, _ bool, _ []secrets.OAuthClient, _, _, _ bool,
 ) (*secrets.EnsureTenantCredentialsResult, error) {
@@ -77,7 +86,7 @@ func (f *fakeSecretStore) EnsureTenantFolderAndCredentials(
 }
 
 func tenantPath(clusterName, appId string) string {
-	return fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
+	return openbao.TenantScope(clusterName, appId)
 }
 
 // orangerCallsWaypoint is the fixture the chain describes: oranger declares
@@ -85,7 +94,7 @@ func tenantPath(clusterName, appId string) string {
 // users, and the clients have been minted.
 func orangerCallsWaypoint() (*AINativeSaaSReconciler, *fakeSecretStore, []resolvedDependency, []client2.DeclaredClient) {
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
+	r := &AINativeSaaSReconciler{Store: store}
 	deps := []resolvedDependency{{AppID: "waypoint", ProjectID: waypointProjectID}}
 	clients := []client2.DeclaredClient{
 		{Name: "bff", ClientID: orangerBffClientID},
@@ -152,7 +161,7 @@ func TestAPendingUserActingClientPublishesNoAllowlist(t *testing.T) {
 	// Pending writes nothing. Publishing the service entry alone would REPLACE
 	// this caller's set and drop a user entry a previous reconcile published.
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
+	r := &AINativeSaaSReconciler{Store: store}
 	deps := []resolvedDependency{{AppID: "waypoint", ProjectID: waypointProjectID}}
 
 	r.publishCrossApplicationTrust(context.Background(), logr.Discard(),
@@ -167,8 +176,8 @@ func TestTheUserActingClientIsReadFromInfisicalOnLaterReconciles(t *testing.T) {
 	// The issuer discloses a generated secret once, so a reconcile after the mint
 	// carries no Clients entry. The id published at mint time is the source then.
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
-	store.data[k(tenantPath("nutgraf-01", "oranger"), secrets.InfisicalOAuthClientIDKey("bff"))] = orangerBffClientID
+	r := &AINativeSaaSReconciler{Store: store}
+	store.data[k(tenantPath("nutgraf-01", "oranger"), secrets.OAuthClientIDKey("bff"))] = orangerBffClientID
 	deps := []resolvedDependency{{AppID: "waypoint", ProjectID: waypointProjectID}}
 
 	r.publishCrossApplicationTrust(context.Background(), logr.Discard(),
@@ -183,7 +192,7 @@ func TestASecondCallerIsAddedNotSubstituted(t *testing.T) {
 	// Several applications may depend on one target, each reconciled separately.
 	// A write that replaced the whole list would revoke the other callers.
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
+	r := &AINativeSaaSReconciler{Store: store}
 	deps := []resolvedDependency{{AppID: "waypoint", ProjectID: waypointProjectID}}
 
 	for _, app := range []string{"oranger", "atlas"} {
@@ -238,7 +247,7 @@ func TestAPendingServiceIdentityLeavesTheUserEntryAlone(t *testing.T) {
 // keeping them apart is what lets one be revoked without the other.
 func TestTheServiceCredentialIsPublishedToTheCaller(t *testing.T) {
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
+	r := &AINativeSaaSReconciler{Store: store}
 
 	r.publishServiceIdentity(context.Background(), logr.Discard(), "nutgraf-01", "nutgraf", "oranger",
 		&client2.ServiceClient{ClientID: orangerServiceClientID, ClientSecret: "svc-secret"})
@@ -262,7 +271,7 @@ func TestTheServiceCredentialIsPublishedToTheCaller(t *testing.T) {
 // holding, and the failure lands on its next call rather than on this reconcile.
 func TestALaterReconcileDoesNotBlankTheServiceSecret(t *testing.T) {
 	store := newFakeSecretStore()
-	r := &AINativeSaaSReconciler{InfisicalClient: store}
+	r := &AINativeSaaSReconciler{Store: store}
 
 	r.publishServiceIdentity(context.Background(), logr.Discard(), "nutgraf-01", "nutgraf", "oranger",
 		&client2.ServiceClient{ClientID: orangerServiceClientID, ClientSecret: "svc-secret"})

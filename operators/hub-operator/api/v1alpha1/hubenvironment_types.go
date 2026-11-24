@@ -120,10 +120,6 @@ type HubEnvironmentSpec struct {
 	// OAuth configuration for Hydra clients
 	// +optional
 	OAuth *OAuthConfig `json:"oauth,omitempty"`
-
-	// Secrets configuration for Infisical backup
-	// +optional
-	Secrets *SecretsConfig `json:"secrets,omitempty"`
 }
 
 // TLSConfig defines TLS certificate configuration
@@ -165,24 +161,15 @@ type GrafanaAlloyConfig struct {
 	ScrapeInterval string `json:"scrapeInterval,omitempty"`
 }
 
-// DatabaseConfig defines CNPG cluster and role configuration
+// DatabaseConfig declares the hub application login roles. CloudNativePG creates
+// each role; hub-operator gives each one an OpenBao static role, which owns its
+// password (ADR-117 §7.3).
 type DatabaseConfig struct {
-	// ClusterRef is the box's BOOTSTRAP cluster: the one Infisical's own database
-	// lives on (e.g., infisical-db).
-	//
-	// It is not a default for roles. Each application owns its own cluster (ADR-112)
-	// and declares it on the role, so the only thing a box-level name can mean is the
-	// cluster the operator itself depends on: Day-0 waits for it, the generated
-	// bootstrap secrets address it, and its CA is the one Infisical is handed.
-	//
-	// +kubebuilder:validation:Required
-	ClusterRef string `json:"clusterRef"`
-
 	// Namespace of the CNPG Cluster
 	// +kubebuilder:validation:Required
 	Namespace string `json:"namespace"`
 
-	// Roles to be created in the database
+	// Roles are the login roles whose passwords OpenBao generates and rotates
 	// +optional
 	Roles []DatabaseRole `json:"roles,omitempty"`
 }
@@ -212,10 +199,6 @@ type DatabaseRole struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	ClusterRef string `json:"clusterRef"`
-
-	// Permissions granted to the role (e.g., SELECT, INSERT, UPDATE, DELETE)
-	// +optional
-	Permissions []string `json:"permissions,omitempty"`
 }
 
 // OAuthConfig defines OAuth client configuration
@@ -248,44 +231,6 @@ type OAuthClient struct {
 	ResponseTypes []string `json:"responseTypes,omitempty"`
 }
 
-// SecretsConfig defines secret management configuration
-type SecretsConfig struct {
-	// Infisical configuration for secret backup
-	// +optional
-	Infisical *InfisicalConfig `json:"infisical,omitempty"`
-}
-
-// InfisicalConfig defines Infisical project configuration
-type InfisicalConfig struct {
-	// ProjectSlug is the Infisical project identifier
-	// +kubebuilder:default="hub-platform"
-	// +optional
-	ProjectSlug string `json:"projectSlug,omitempty"`
-
-	// EnvironmentSlug is the Infisical environment holding THIS HUB's credentials
-	// -- the management secret scope (ADR-111 Revision 7).
-	//
-	// Rendered from the box's declared `management.infisicalEnvironmentSlug`. This
-	// field is the operator-facing representation of that one input, not a second
-	// source of truth, and the hub-operator reads the same value from
-	// hub-bootstrap-config's SECRET_STORE_ENVIRONMENT_SLUG so reader and writer
-	// cannot disagree.
-	//
-	// Required and non-empty, with NO DEFAULT. It defaulted to "prod" while a
-	// cross-field rule simultaneously pinned it equal to spec.environment, so the
-	// default was unreachable wherever it mattered and misleading everywhere else.
-	// The only possible default is a guess at which environment someone else's
-	// secrets are in, and guessing wrong is silent: the secrets resolve, from the
-	// wrong scope.
-	//
-	// Not constrained to an environment set. A management scope is not a workload
-	// environment -- nothing is promoted into or out of it, and no managed cluster
-	// reads it.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	EnvironmentSlug string `json:"environmentSlug"`
-}
-
 // HubEnvironmentStatus defines the observed state of HubEnvironment.
 type HubEnvironmentStatus struct {
 	// Phase represents the high-level lifecycle phase of the HubEnvironment
@@ -300,9 +245,9 @@ type HubEnvironmentStatus struct {
 
 	// Conditions represent the current state of the HubEnvironment resource.
 	// Standard condition types:
-	// - SecretZeroGenerated: Secret Zero bootstrap secrets have been created
-	// - SecretsBackedUp: Secrets have been uploaded to Infisical
-	// - OAuthClientsRegistered: OAuth clients have been registered with Hydra
+	// - PlatformSecretsWritten: Day-0 and application secrets are in OpenBao
+	// - DatabaseRolesProvisioned: every login role has a rotated OpenBao static role
+	// - ApplicationSecretsReady: ESO delivered every application database credential
 	// - Ready: All phases complete successfully
 	// +listType=map
 	// +listMapKey=type
@@ -312,11 +257,6 @@ type HubEnvironmentStatus struct {
 	// ObservedGeneration reflects the generation of the most recently observed HubEnvironment
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// UploadedSecrets tracks which secrets have been uploaded to Infisical
-	// This prevents re-uploading secrets that already exist
-	// +optional
-	UploadedSecrets []string `json:"uploadedSecrets,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -374,20 +314,11 @@ func (s HubEnvironmentSpec) RolesFor(cluster string) []DatabaseRole {
 	return out
 }
 
-// DatabaseClusters lists every cluster the box runs, in declaration order, without
-// duplicates: the bootstrap cluster first, then the cluster each declared role lives on.
-//
-// The bootstrap cluster is included although no declared role names it. The only role on
-// it is Infisical's, and CNPG owns that one through spec.managed.roles (ADR-023 addendum),
-// so a list built from roles alone would leave out the cluster the box cannot start
-// without.
+// DatabaseClusters lists the cluster each declared role lives on, in declaration
+// order, without duplicates.
 func (s HubEnvironmentSpec) DatabaseClusters() []string {
 	seen := map[string]bool{}
 	var out []string
-	if s.Database.ClusterRef != "" {
-		seen[s.Database.ClusterRef] = true
-		out = append(out, s.Database.ClusterRef)
-	}
 	for _, r := range s.Database.Roles {
 		c := s.ClusterFor(r)
 		if c != "" && !seen[c] {

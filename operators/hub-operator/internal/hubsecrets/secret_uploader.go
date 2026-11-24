@@ -1,30 +1,30 @@
-package infisical
+package hubsecrets
 
 import (
 	"context"
 	"fmt"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 	"net/url"
-	"os"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	infisicalclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 )
 
 // SecretUploader handles uploading secrets to Infisical
 // Separation of Concerns: This class only uploads to Infisical, does not create K8s secrets
 type SecretUploader struct {
+	store             *secrets.Store
 	k8sClient         client.Client
 	uncachedK8sClient client.Client
 }
 
 // NewSecretUploader creates a new secret uploader
-func NewSecretUploader(k8sClient, uncachedK8sClient client.Client) *SecretUploader {
+func NewSecretUploader(store *secrets.Store, k8sClient, uncachedK8sClient client.Client) *SecretUploader {
 	return &SecretUploader{
+		store:             store,
 		k8sClient:         k8sClient,
 		uncachedK8sClient: uncachedK8sClient,
 	}
@@ -37,28 +37,8 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 
 	// Create Infisical client using the infisical-auth secret
 	// Use uncached client to read secret data (cached client strips data)
-	infisicalClient, err := infisicalclient.NewInfisicalClient(ctx, su.uncachedK8sClient, "")
-	if err != nil {
-		return fmt.Errorf("failed to create Infisical client: %w", err)
-	}
 
-	// Get project slug from environment variable (set via configmap hub-bootstrap-config)
-	// Use secrets project for secret operations (hub-secrets is type "secret-manager")
-	// No fallback to SECRET_STORE_PROJECT_SLUG: that names the cert-manager
-	// project, which holds no secrets and cannot hold an environment to read them
-	// in. It is set for every box, so its absence is a broken deployment.
-	projectSlug := os.Getenv("SECRET_STORE_SECRETS_PROJECT_SLUG")
-	if projectSlug == "" {
-		return fmt.Errorf("SECRET_STORE_SECRETS_PROJECT_SLUG is not set")
-	}
-
-	environmentSlug, err := managementEnvironmentSlug()
-	if err != nil {
-		return err
-	}
-	tenantID := os.Getenv("TENANT_ID")
-
-	logger.Info("Uploading CLI secrets to Infisical", "project", projectSlug, "environment", environmentSlug)
+	logger.Info("Writing Day-0 secrets into OpenBao", "scope", secrets.HubScope)
 
 	// Upload all configured secrets from the registry
 	// See secret_mappings.go for the complete list
@@ -67,24 +47,18 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 	var failedKeys []string
 
 	for _, mapping := range mappings {
-		secretPath, err := resolveInfisicalPath(mapping.InfisicalPath, tenantID)
-		if err == nil && secretPath != "/" {
-			err = infisicalClient.EnsureFolderRaw(ctx, projectSlug, environmentSlug, secretPath)
-		}
-		if err == nil {
-			err = su.uploadSecret(ctx, infisicalClient, projectSlug, environmentSlug, secretPath, mapping)
-		}
+		err := su.uploadSecret(ctx, secrets.HubScope, mapping)
 		if err != nil {
 			logger.Error(err, "Failed to upload secret",
 				"description", mapping.Description,
 				"source", fmt.Sprintf("%s/%s", mapping.SourceNamespace, mapping.SourceName),
-				"infisicalKey", mapping.InfisicalKey)
-			failedKeys = append(failedKeys, mapping.InfisicalKey)
+				"infisicalKey", mapping.Key)
+			failedKeys = append(failedKeys, mapping.Key)
 		} else {
 			successCount++
 			logger.Info("Uploaded secret to Infisical",
 				"description", mapping.Description,
-				"infisicalKey", mapping.InfisicalKey)
+				"infisicalKey", mapping.Key)
 		}
 	}
 
@@ -120,7 +94,7 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 }
 
 // uploadSecret uploads a single secret to Infisical based on the mapping configuration
-func (su *SecretUploader) uploadSecret(ctx context.Context, infisicalClient *infisicalclient.InfisicalClient, projectSlug, environmentSlug, secretPath string, mapping SecretMapping) error {
+func (su *SecretUploader) uploadSecret(ctx context.Context, scope string, mapping SecretMapping) error {
 	logger := log.FromContext(ctx)
 
 	// Read source secret from K8s
@@ -160,55 +134,11 @@ func (su *SecretUploader) uploadSecret(ctx context.Context, infisicalClient *inf
 	}
 
 	// Upload to Infisical
-	if err := infisicalClient.CreateOrUpdateSecretRaw(ctx, projectSlug, environmentSlug, secretPath, mapping.InfisicalKey, string(value)); err != nil {
-		return fmt.Errorf("failed to upload to Infisical: %w", err)
+	if err := su.store.UpdateSecret(ctx, scope, mapping.Key, string(value)); err != nil {
+		return fmt.Errorf("failed to write to OpenBao: %w", err)
 	}
 
 	return nil
-}
-
-// resolveInfisicalPath returns the folder a mapping writes to: "/" when unset,
-// with TenantPlaceholder replaced by the box's tenant id. A path that needs the
-// tenant id when none is configured is an error, not a fallback to "/": writing
-// the owner's credential to the project root would put it where its consumer
-// never reads it, and the mail would fail silently.
-func resolveInfisicalPath(p, tenantID string) (string, error) {
-	if p == "" {
-		return "/", nil
-	}
-	if strings.Contains(p, TenantPlaceholder) {
-		if tenantID == "" {
-			return "", fmt.Errorf("path %s needs the tenant id, and TENANT_ID is not set (hub-bootstrap-config)", p)
-		}
-		p = strings.ReplaceAll(p, TenantPlaceholder, tenantID)
-	}
-	return p, nil
-}
-
-// managementEnvironmentSlug is the Infisical environment the HUB's own secrets
-// live in -- every mapping in CLISecretMappings and ApplicationSecretMappings,
-// all of which are read from a hub namespace and consumed by a hub component.
-//
-// Read from the same variable the readers use, so writer and reader cannot
-// disagree: hub-bootstrap-config carries SECRET_STORE_ENVIRONMENT_SLUG, rendered from
-// the box's declared `management.infisicalEnvironmentSlug`. It is required, with no default,
-// because the only possible default is a guess at which environment someone
-// else's secrets are in -- and guessing wrong is silent, as the comment in
-// constants.go records.
-//
-// This is deliberately NOT the environment of a workload cluster or of an
-// application. Those have their own authorities -- a spoke's own `environment`
-// label, and the slug the tenant names in `kakt fleet secrets set <env> …` --
-// and nothing here may stand in for either.
-func managementEnvironmentSlug() (string, error) {
-	slug := strings.TrimSpace(os.Getenv("SECRET_STORE_ENVIRONMENT_SLUG"))
-	if slug == "" {
-		return "", fmt.Errorf("SECRET_STORE_ENVIRONMENT_SLUG is not set: the hub's own " +
-			"secrets have no environment to be written to, and defaulting would write them " +
-			"where their ExternalSecrets do not read (hub-bootstrap-config's " +
-			"SECRET_STORE_ENVIRONMENT_SLUG, rendered from management.infisicalEnvironmentSlug)")
-	}
-	return slug, nil
 }
 
 // applyTransform derives the uploaded value. Errors never include the value.

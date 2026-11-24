@@ -27,9 +27,11 @@ const (
 )
 
 // ListenerTrustNamespaces are where in-cluster OpenBao clients read the listener CA
-// certificate: OpenBao's own namespace (hub-operator's client and the Gateway's
-// backend policy read it there), ESO's, and cert-manager's.
-var ListenerTrustNamespaces = []string{Namespace, "platform-ops", certManagerNS}
+// certificate: OpenBao's own namespace (hub-operator's client, the Gateway's
+// backend policy read it there), ESO's, cert-manager's, and each namespace holding
+// a hub application's database-credential generator (ADR-117 §7.4).
+var ListenerTrustNamespaces = []string{Namespace, "platform-ops", certManagerNS,
+	"platform-identity", "platform-credits", "platform-observability"}
 
 // EnsureListenerCA creates the listener CA if absent and (re)writes its public
 // certificate into ListenerTrustNamespaces (ADR-117 §2).

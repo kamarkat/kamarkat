@@ -17,14 +17,9 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
-	"time"
-
-	"github.com/go-logr/logr"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -48,6 +43,7 @@ import (
 	opsv1alpha1 "github.com/kamarkat/kamarkat/operators/hub-operator/api/v1alpha1"
 	hubclient "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/controller"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 	hubwebhook "github.com/kamarkat/kamarkat/operators/hub-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
@@ -69,34 +65,6 @@ func init() {
 }
 
 // nolint:gocyclo
-// waitForInfisicalConfig blocks until SECRET_STORE_PROJECT_ID is present.
-//
-// The value arrives from the hub-bootstrap-config ConfigMap, which the ADR-045
-// bootstrap phase fills two phases after this operator is reconciled. Env vars
-// sourced from a ConfigMap do not update in a running container, so the restart
-// that picks the value up is performed by the reloader watching that ConfigMap;
-// this wait exists so the pod stays alive and Ready-less until then instead of
-// crash-looping, which is what exiting produced.
-func waitForInfisicalConfig(ctx context.Context, log logr.Logger) {
-	const every = 15 * time.Second
-	for attempt := 1; ; attempt++ {
-		select {
-		case <-ctx.Done():
-			log.Info("Shutting down while waiting for SECRET_STORE_PROJECT_ID")
-			os.Exit(0)
-		case <-time.After(every):
-		}
-		if v := os.Getenv("SECRET_STORE_PROJECT_ID"); v != "" && v != "PLACEHOLDER_PROJECT_ID" {
-			log.Info("SECRET_STORE_PROJECT_ID now present", "attempts", attempt)
-			return
-		}
-		if attempt%20 == 0 {
-			log.Info("Still waiting for SECRET_STORE_PROJECT_ID from hub-bootstrap-config",
-				"waited", time.Duration(attempt)*every)
-		}
-	}
-}
-
 func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -246,117 +214,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The box's OpenBao (ADR-117). The client reads the listener CA from the
+	// mounted openbao-listener-trust ConfigMap and logs in lazily with the
+	// projected ServiceAccount token, so a store that is not up yet is waited for
+	// by the reconcilers rather than crash-looped on here.
+	baoClient, err := openbao.NewFromEnv()
+	if err != nil {
+		setupLog.Error(err, "operator misconfigured: cannot build the OpenBao client")
+		os.Exit(1)
+	}
+	store := secrets.NewStore(baoClient)
+
 	if err := (&controller.HubEnvironmentReconciler{
 		Client:         mgr.GetClient(),
 		UncachedClient: uncachedClient,
 		Scheme:         mgr.GetScheme(),
+		Store:          store,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HubEnvironment")
 		os.Exit(1)
 	}
 
-	// Established here rather than below because the Infisical configuration may
-	// have to be waited for, and a wait that ignores SIGTERM outlives a delete.
 	ctx := ctrl.SetupSignalHandler()
 
-	// Initialize the Infisical Client for ADR-031 topology management
-	// These env vars are injected by your hub-operator Deployment manifest
-	projectID := os.Getenv("SECRET_STORE_PROJECT_ID")
-	secretsProjectID := os.Getenv("SECRET_STORE_SECRETS_PROJECT_ID")
-	orgID := os.Getenv("SECRET_STORE_ORGANIZATION_ID")
-	clientID := os.Getenv("SECRET_STORE_CLIENT_ID")
-	clientSecret := os.Getenv("SECRET_STORE_CLIENT_SECRET")
-	baseURL := os.Getenv("SECRET_STORE_BASE_URL")
-
-	// An absent project id and a wrong one are different states, and only the
-	// second is misconfiguration.
-	//
-	// This operator is reconciled in boundary 03, and Infisical is bootstrapped
-	// two phases later: on a cluster being built for the first time there is a
-	// window in which the id genuinely does not exist yet. Exiting through it
-	// turns that window into a crash loop.
-	//
-	// Until now the window was hidden rather than handled. The ADR-045 patch that
-	// supplies the id is committed to the repository, so a rebuilt cluster
-	// reconciled the PREVIOUS cluster's project until Day-0 overwrote it: the
-	// operator started against a live-looking id that pointed at someone else's
-	// project, which is worse than starting against none.
-	//
-	// So: a placeholder is still refused, because that is a manifest that was
-	// never rendered. An empty value waits.
-	if projectID == "PLACEHOLDER_PROJECT_ID" {
-		setupLog.Error(fmt.Errorf("project id is the unrendered placeholder"),
-			"operator misconfigured: SECRET_STORE_PROJECT_ID was never substituted")
-		os.Exit(1)
-	}
-	if projectID == "" {
-		setupLog.Info("SECRET_STORE_PROJECT_ID is not set yet; Infisical-backed controllers stay idle " +
-			"until the bootstrap config carries it. This is expected before the Infisical " +
-			"bootstrap phase and is not an error.")
-		waitForInfisicalConfig(ctx, setupLog)
-		projectID = os.Getenv("SECRET_STORE_PROJECT_ID")
-		secretsProjectID = os.Getenv("SECRET_STORE_SECRETS_PROJECT_ID")
-		orgID = os.Getenv("SECRET_STORE_ORGANIZATION_ID")
-	}
-	if secretsProjectID == "" {
-		// No fallback to SECRET_STORE_PROJECT_ID. That names the cert-manager
-		// project, which holds no secrets, so the fallback produced an operator that
-		// started healthy and failed at every secret it tried to write. The id is
-		// rendered for every box (environments/management/templated-fields), which
-		// makes its absence a broken deployment, reported here rather than survived.
-		setupLog.Error(fmt.Errorf("missing secrets project id"),
-			"operator misconfigured: SECRET_STORE_SECRETS_PROJECT_ID is missing")
-		os.Exit(1)
-	}
-
-	setupLog.Info("Loaded Infisical configuration", "projectID", projectID)
-
-	if clientSecret == "" {
-		setupLog.Error(fmt.Errorf("missing client secret"), "operator misconfigured: SECRET_STORE_CLIENT_SECRET is missing")
-		os.Exit(1)
-	}
-
-	pkiInfisicalClient := secrets.NewInfisicalClient(
-		baseURL,
-		clientID,
-		clientSecret,
-		projectID,
-		orgID,
-	)
-	// The management scope: the environment the HUB's own secrets live in.
-	//
-	// Assigned unconditionally. The guard here was `if envSlug != ""`, which left
-	// the client on its old built-in "dev" whenever hub-bootstrap-config had not
-	// been patched -- so a stg hub wrote its secrets into dev and read them from
-	// stg. There is no default now, and an empty value fails on the first call
-	// naming the key rather than succeeding against the wrong environment.
-	//
-	// Not fatal at startup: this operator also reconciles paths that need no
-	// Infisical at all (the hybrid home-worker join runs before the Infisical
-	// gate for exactly that reason), and SECRET_STORE_PROJECT_ID above already
-	// establishes that Infisical configuration can arrive after the operator does.
-	mgmtEnvironmentSlug := os.Getenv("SECRET_STORE_ENVIRONMENT_SLUG")
-	if mgmtEnvironmentSlug == "" {
-		setupLog.Error(fmt.Errorf("SECRET_STORE_ENVIRONMENT_SLUG is empty"),
-			"the hub's own secrets have no environment; every Infisical write will be "+
-				"refused until hub-bootstrap-config carries it (rendered from the box's "+
-				"declared management.infisicalEnvironmentSlug)")
-	}
-	pkiInfisicalClient.EnvironmentSlug = mgmtEnvironmentSlug
-
-	secretsInfisicalClient := secrets.NewInfisicalClient(
-		baseURL,
-		clientID,
-		clientSecret,
-		secretsProjectID,
-		orgID,
-	)
-	secretsInfisicalClient.EnvironmentSlug = mgmtEnvironmentSlug
-
 	if err := (&controller.SpokePoolReconciler{
-		Client:          mgr.GetClient(),
-		UncachedClient:  uncachedClient,
-		InfisicalClient: secretsInfisicalClient,
+		Client:         mgr.GetClient(),
+		UncachedClient: uncachedClient,
+		Store:          store,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SpokePool")
 		os.Exit(1)
@@ -368,9 +252,9 @@ func main() {
 	identityClient := hubclient.NewIdentityClient(os.Getenv("IDENTITY_SERVICE_URL"))
 
 	tenantResources := &controller.AINativeSaaSReconciler{
-		Client:          mgr.GetClient(),
-		InfisicalClient: secretsInfisicalClient,
-		IdentityClient:  identityClient,
+		Client:         mgr.GetClient(),
+		Store:          store,
+		IdentityClient: identityClient,
 	}
 	if err := tenantResources.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "AINativeSaaS")

@@ -74,16 +74,14 @@ var _ = Describe("HubEnvironment Controller", func() {
 						Domain: "dev.example.com",
 						// The cluster this box is, which is what keys the escrow. Not
 						// metadata.name: that is the singleton "hub-environment" on every
-						// box, and using it put the master keys at one constant escrow
-						// path and looked for the admin kubeconfig at a secret CAPI never
+						// box, and using it looked for the admin kubeconfig at a secret CAPI never
 						// creates.
 						ClusterName: "test-hub",
 						// database is a required struct; omitting it leaves the reconciler
 						// addressing objects with an empty namespace, which the API server
 						// rejects on create.
 						Database: opsv1alpha1.DatabaseConfig{
-							ClusterRef: "infisical-db",
-							Namespace:  "default",
+							Namespace: "default",
 						},
 					},
 				}
@@ -105,9 +103,8 @@ var _ = Describe("HubEnvironment Controller", func() {
 		// It read "should successfully reconcile the resource" and asserted only
 		// that Reconcile returned no error -- which it did, on a box with no
 		// escrow, by logging that fact at Info and continuing with a nil client.
-		// So the test passed for exactly the configuration in which the Infisical
-		// master keys are generated, used, and kept nowhere but inside the cluster
-		// they decrypt. envtest configures no escrow, so the refusal is what this
+		// So the test passed for exactly the configuration in which the box's
+		// irreplaceable material is kept nowhere but inside the cluster. envtest configures no escrow, so the refusal is what this
 		// environment must produce.
 		It("refuses to generate master keys when there is no escrow", func() {
 			// ISOLATED FROM THE CHECKOUT, and this is load-bearing.

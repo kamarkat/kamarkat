@@ -104,32 +104,8 @@ spec:
           value: hel1.your-objectstorage.com
         - name: OBJECT_STORAGE_REGION
           value: hel1
-        - name: SECRET_STORE_PROJECT_SLUG
-          valueFrom:
-            configMapKeyRef:
-              name: hub-bootstrap-config
-              key: SECRET_STORE_PROJECT_SLUG
-        - name: SECRET_STORE_SECRETS_PROJECT_SLUG
-          valueFrom:
-            configMapKeyRef:
-              name: hub-bootstrap-config
-              key: SECRET_STORE_SECRETS_PROJECT_SLUG
-        # The box's tenant id, for credentials that belong to the box owner and
-        # live in their /<tenant>-mgmt Infisical folder (the Zitadel SMTP
-        # password). Optional: a box without it uploads everything else, and
-        # each such credential fails by name in the operator log.
-        - name: TENANT_ID
-          valueFrom:
-            configMapKeyRef:
-              name: hub-bootstrap-config
-              key: TENANT_ID
-              optional: true
-        - name: SECRET_STORE_ENVIRONMENT_SLUG
-          valueFrom:
-            configMapKeyRef:
-              name: hub-bootstrap-config
-              key: SECRET_STORE_ENVIRONMENT_SLUG
-        # The escrow holding this box's Infisical master keys, outside the box
+        # The box's escrow (Infisical Cloud), outside the box: kubeconfigs, Cluster
+        # API trust roots and the management-state backup key
         # (ADR-076). optional throughout: a box may be built without one, and the
         # operator reports that rather than crash-looping on a missing Secret.
         - name: ESCROW_PROVIDER_URL
@@ -156,7 +132,26 @@ spec:
               name: hub-operator-escrow-credentials
               key: ESCROW_PROVIDER_CLIENT_SECRET
               optional: true
-        volumeMounts: []
-      volumes: []
+        # The box's OpenBao (ADR-117): the listener CA it is verified against, and
+        # a ServiceAccount token for audience "openbao", rotated by the kubelet and
+        # re-read on every login.
+        volumeMounts:
+          - name: openbao-trust
+            mountPath: /etc/openbao/trust
+            readOnly: true
+          - name: openbao-token
+            mountPath: /var/run/secrets/openbao
+            readOnly: true
+      volumes:
+        - name: openbao-trust
+          configMap:
+            name: openbao-listener-trust
+        - name: openbao-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: openbao
+                  expirationSeconds: 3600
+                  path: token
       serviceAccountName: hub-operator
       terminationGracePeriodSeconds: 10

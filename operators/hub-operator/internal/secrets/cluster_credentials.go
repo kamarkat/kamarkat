@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 )
 
 // Cluster-scoped credential materialisation (ADR-031 Cell-Based Identity
@@ -119,10 +121,6 @@ var FleetCredentials = []FleetCredential{
 	// crossplane-admin role: regenerating or converging it desyncs a live database
 	// role, and EnsureCrossplaneAdminPassword treats absence as first-time and
 	// GENERATES. Copying the existing value is what keeps that from happening.
-	{Key: "crossplane-admin-password", Lifecycle: CopiedOnce,
-		SourceKey: "%s-crossplane-admin-password",
-		Why: "this cluster's CNPG crossplane-admin role, generated per cluster at the " +
-			"authority and copied here because the cluster may read only its own project"},
 }
 
 // NOTHING IS SEEDED PER CLUSTER. There used to be a list here.
@@ -170,18 +168,11 @@ type MaterialiseFleetCredentialsResult struct {
 // Existing cell values are left alone. Overwriting on every reconcile would make
 // the operator fight any deliberate per-cell override, and rotation at the root is
 // a fleet-wide operation that should propagate explicitly, not as a side effect.
-func (c *InfisicalClient) MaterialiseFleetCredentialsInto(ctx context.Context, clusterName string, dest *InfisicalClient) (*MaterialiseFleetCredentialsResult, error) {
-	if dest == nil {
-		return nil, fmt.Errorf("no destination project for %s's credentials: writing them into "+
-			"the hub's own project is what the per-cluster boundary exists to stop", clusterName)
-	}
+func (c *Store) MaterialiseFleetCredentials(ctx context.Context, clusterName string) (*MaterialiseFleetCredentialsResult, error) {
+	dest := c
 	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
-	sharedPath := fmt.Sprintf(InfisicalSharedPathFormat, clusterName)
+	sharedPath := openbao.SpokePlatformScope(clusterName)
 	out := &MaterialiseFleetCredentialsResult{}
-
-	if err := dest.EnsureFolder(ctx, sharedPath); err != nil {
-		return nil, fmt.Errorf("failed to ensure shared folder %s: %w", sharedPath, err)
-	}
 
 	for _, cred := range FleetCredentials {
 		key := cred.Key
@@ -192,7 +183,7 @@ func (c *InfisicalClient) MaterialiseFleetCredentialsInto(ctx context.Context, c
 
 		// The authority first: a cell's copy is only as good as the value it came
 		// from, and a credential absent at the source cannot be converged to.
-		value, err := c.GetSecret(ctx, "/", sourceKey)
+		value, err := c.GetSecret(ctx, HubScope, sourceKey)
 		if err != nil || value == "" {
 			out.MissingAtRoot = append(out.MissingAtRoot, sourceKey)
 			continue
@@ -234,7 +225,7 @@ func (c *InfisicalClient) MaterialiseFleetCredentialsInto(ctx context.Context, c
 		out.Converged = append(out.Converged, key)
 	}
 
-	logger.Info("Fleet credentials materialised into the cluster's own project",
+	logger.Info("Fleet credentials materialised into the cluster's own scope",
 		"path", sharedPath,
 		"created", out.Created,
 		"converged", out.Converged,

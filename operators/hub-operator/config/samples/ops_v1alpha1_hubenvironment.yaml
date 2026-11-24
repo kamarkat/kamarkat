@@ -13,27 +13,13 @@ spec:
     grafanaAlloy:
       scrapeInterval: 15s
   database:
-    # The bootstrap cluster: Infisical's own, which the operator itself depends on.
-    clusterRef: infisical-db
     namespace: platform-data
+    # Login roles whose passwords OpenBao generates and rotates (ADR-117 §7.3).
     roles:
     - name: hub_zitadel
       database: zitadel
-      # The application's own cluster (ADR-112). Required: a role provisioned on
-      # another application's cluster is one this application cannot use.
+      # The application's own cluster (ADR-112).
       clusterRef: zitadel-db
-      permissions:
-      - SELECT
-      - INSERT
-      - UPDATE
-      - DELETE
-    - name: openmeter
-      database: openmeter
-      permissions:
-      - SELECT
-      - INSERT
-      - UPDATE
-      - DELETE
   oauth:
     clients:
     - clientId: mcp-server
@@ -45,9 +31,3 @@ spec:
       - refresh_token
       responseTypes:
       - code
-  secrets:
-    infisical:
-      projectSlug: hub-platform
-      # The management secret scope (ADR-111 Revision 7 §2), not a workload
-      # environment: this is where the hub's OWN credentials live.
-      environmentSlug: management

@@ -9,8 +9,7 @@ import "testing"
 func TestRoleClusterResolution(t *testing.T) {
 	spec := HubEnvironmentSpec{
 		Database: DatabaseConfig{
-			ClusterRef: "infisical-db",
-			Namespace:  "platform-data",
+			Namespace: "platform-data",
 			Roles: []DatabaseRole{
 				{Name: "hub_grafana", Database: "grafana", ClusterRef: "grafana-db"},
 				{Name: "hub_zitadel", Database: "zitadel", ClusterRef: "zitadel-db"},
@@ -23,22 +22,20 @@ func TestRoleClusterResolution(t *testing.T) {
 		t.Errorf("a role naming its cluster resolved to %q", got)
 	}
 
-	// A role naming no cluster resolves to NOTHING, and must not inherit the box's
-	// bootstrap cluster. Inheriting it is the failure this grain exists to prevent:
+	// A role naming no cluster resolves to NOTHING, and must not inherit any
+	// default cluster. Inheriting one is the failure this grain exists to prevent:
 	// the role is created on a cluster its application never connects to, and the
 	// provisioning reports success.
 	if got := spec.ClusterFor(DatabaseRole{Name: "orphan", Database: "postgres"}); got != "" {
 		t.Errorf("a role naming no cluster resolved to %q, want no cluster at all", got)
 	}
 
-	// Each cluster sees only its own roles, and the bootstrap cluster sees none: the
-	// one role on it is Infisical's, which CNPG owns through spec.managed.roles.
+	// Each cluster sees only its own roles.
 	for cluster, want := range map[string][]string{
-		"grafana-db":   {"hub_grafana"},
-		"zitadel-db":   {"hub_zitadel"},
-		"credits-db":   {"hub_credits"},
-		"infisical-db": nil,
-		"absent-db":    nil,
+		"grafana-db": {"hub_grafana"},
+		"zitadel-db": {"hub_zitadel"},
+		"credits-db": {"hub_credits"},
+		"absent-db":  nil,
 	} {
 		got := spec.RolesFor(cluster)
 		if len(got) != len(want) {
@@ -52,9 +49,9 @@ func TestRoleClusterResolution(t *testing.T) {
 		}
 	}
 
-	// Every cluster once, the bootstrap cluster first, in declaration order after it.
+	// Every cluster once, in declaration order.
 	clusters := spec.DatabaseClusters()
-	want := []string{"infisical-db", "grafana-db", "zitadel-db", "credits-db"}
+	want := []string{"grafana-db", "zitadel-db", "credits-db"}
 	if len(clusters) != len(want) {
 		t.Fatalf("DatabaseClusters() = %v, want %v", clusters, want)
 	}
@@ -64,24 +61,20 @@ func TestRoleClusterResolution(t *testing.T) {
 		}
 	}
 
-	// A box with no declared roles still reports its bootstrap cluster: Infisical's
-	// database is there, so the operator has somewhere to connect before any
-	// application exists.
-	bare := HubEnvironmentSpec{Database: DatabaseConfig{ClusterRef: "infisical-db"}}
-	if c := bare.DatabaseClusters(); len(c) != 1 || c[0] != "infisical-db" {
+	// A box with no declared roles has no clusters to watch.
+	if c := (HubEnvironmentSpec{}).DatabaseClusters(); len(c) != 0 {
 		t.Errorf("a box with no declared roles reported %v", c)
 	}
 
 	// Duplicates collapse, and a role naming no cluster adds none.
 	dup := HubEnvironmentSpec{Database: DatabaseConfig{
-		ClusterRef: "infisical-db",
 		Roles: []DatabaseRole{
 			{Name: "a", ClusterRef: "grafana-db"},
 			{Name: "b", ClusterRef: "grafana-db"},
 			{Name: "c"},
 		},
 	}}
-	if c := dup.DatabaseClusters(); len(c) != 2 {
+	if c := dup.DatabaseClusters(); len(c) != 1 {
 		t.Errorf("duplicate or empty cluster references did not collapse: %v", c)
 	}
 }

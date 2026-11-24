@@ -15,8 +15,8 @@ func TestInternalTokenKeyMatchesWhatTheChartsRead(t *testing.T) {
 		// Hyphens become underscores, as everywhere else an appId becomes a key.
 		"code-builder": "CODE_BUILDER_INTERNAL_TOKEN",
 	} {
-		if got := InfisicalInternalTokenKey(appId); got != want {
-			t.Errorf("InfisicalInternalTokenKey(%q) = %q; the chart reads %q", appId, got, want)
+		if got := InternalTokenKey(appId); got != want {
+			t.Errorf("InternalTokenKey(%q) = %q; the chart reads %q", appId, got, want)
 		}
 	}
 }
@@ -25,7 +25,7 @@ func TestInternalTokenKeyMatchesWhatTheChartsRead(t *testing.T) {
 // separate folders, so the same key name is correct -- but each must still name
 // its own application, because a workload's env is read by people.
 func TestEachApplicationGetsItsOwnKeyName(t *testing.T) {
-	if a, b := InfisicalInternalTokenKey("oranger"), InfisicalInternalTokenKey("waypoint"); a == b {
+	if a, b := InternalTokenKey("oranger"), InternalTokenKey("waypoint"); a == b {
 		t.Fatalf("both applications resolve to %q", a)
 	}
 }

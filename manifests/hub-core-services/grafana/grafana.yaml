@@ -29,6 +29,35 @@
 # cluster behind a service route, and a spoke's sit behind a public endpoint that
 # admits a viewer by their own `aud` (ADR-078 add.5 §7).
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-db-creds-grafana
+  namespace: platform-observability
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: hub-grafana-db
+  namespace: platform-observability
+spec:
+  method: GET
+  path: database/static-creds/hub-grafana
+  resultType: Data
+  provider:
+    server: https://openbao.platform-data.svc:8200
+    caProvider:
+      type: ConfigMap
+      name: openbao-listener-trust
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: kubernetes
+        role: hub-grafana-db
+        serviceAccountRef:
+          name: openbao-db-creds-grafana
+          audiences: [openbao]
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -38,19 +67,22 @@ metadata:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   refreshInterval: 5m
-  secretStoreRef:
-    name: infisical-backend
-    kind: ClusterSecretStore
   target:
     name: grafana-db
     creationPolicy: Owner
-  data:
-    - secretKey: username
-      remoteRef:
-        key: hub-grafana-db-username
-    - secretKey: password
-      remoteRef:
-        key: hub-grafana-db-password
+    template:
+      type: Opaque
+      engineVersion: v2
+      mergePolicy: Replace
+      data:
+        username: "{{ .username }}"
+        password: "{{ .password }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: VaultDynamicSecret
+          name: hub-grafana-db
 ---
 # The viewer client's credentials (§7), minted by hub-operator when it registers
 # the `grafana` application in this box's observability project and published to

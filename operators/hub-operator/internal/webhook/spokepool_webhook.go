@@ -15,12 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/infisical"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/hubsecrets"
 )
 
 const (
 	providerRegistryConfigMap = "hub-operator-provider-registry"
-	providerRegistryNamespace = infisical.NamespaceOps
+	providerRegistryNamespace = hubsecrets.NamespaceOps
 
 	// compositionGroup identifies the Crossplane Composition the registry names.
 	// Read as unstructured so this operator does not take a dependency on

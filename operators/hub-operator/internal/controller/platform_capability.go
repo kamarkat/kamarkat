@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
@@ -77,7 +78,7 @@ type platformCapability struct {
 var platformCapabilities = []*platformCapability{&creditAuthority, &billingEngine}
 
 // hubSecretPath is the folder of the capabilities' hub keys.
-const hubSecretPath = "/"
+const hubSecretPath = secrets.HubScope
 
 // capabilityPendingRequeue is how soon to look again while a caller or an
 // audience waits on something another reconcile writes to Infisical (the
@@ -153,17 +154,17 @@ func (r *AINativeSaaSReconciler) applications(ctx context.Context) ([]unstructur
 
 // publishHubSecret writes one of a capability's hub keys.
 func (r *AINativeSaaSReconciler) publishHubSecret(ctx context.Context, key, value string) error {
-	if current, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, key); err == nil && current == value {
+	if current, err := r.Store.GetSecret(ctx, hubSecretPath, key); err == nil && current == value {
 		return nil
 	}
-	exists, err := r.InfisicalClient.SecretExists(ctx, hubSecretPath, key)
+	exists, err := r.Store.SecretExists(ctx, hubSecretPath, key)
 	if err != nil {
 		return fmt.Errorf("check %s: %w", key, err)
 	}
 	if exists {
-		return r.InfisicalClient.UpdateSecret(ctx, hubSecretPath, key, value)
+		return r.Store.UpdateSecret(ctx, hubSecretPath, key, value)
 	}
-	return r.InfisicalClient.CreateSecret(ctx, hubSecretPath, key, value)
+	return r.Store.CreateSecret(ctx, hubSecretPath, key, value)
 }
 
 // ownedCapabilities are the capabilities this application owns the declaration
@@ -214,7 +215,7 @@ func (r *AINativeSaaSReconciler) ownedCapabilities(ctx context.Context, logger l
 // dependency is the capability as its owner's backend audience, or nil while
 // it has no project -- it is not enabled, or not provisioned yet.
 func (r *AINativeSaaSReconciler) capabilityDependency(ctx context.Context, c *platformCapability) *resolvedDependency {
-	pid, err := r.InfisicalClient.GetSecret(ctx, hubSecretPath, c.projectIDKey)
+	pid, err := r.Store.GetSecret(ctx, hubSecretPath, c.projectIDKey)
 	if err != nil || pid == "" {
 		return nil
 	}
@@ -334,7 +335,7 @@ func (r *PlatformCapabilityReconciler) publishCaller(ctx context.Context, logger
 	ownerApp, _, _ := unstructured.NestedString(owner.Object, "spec", "appId")
 	ownerCell, _, _ := unstructured.NestedString(owner.Object, "spec", "clusterName")
 	ownerOrg, _, _ := unstructured.NestedString(owner.Object, "status", "identity", "zitadelOrgId")
-	callerID, err := r.InfisicalClient.GetSecret(ctx, fmt.Sprintf(secrets.InfisicalTenantPathFormat, ownerCell, ownerApp), serviceClientIDKey)
+	callerID, err := r.Store.GetSecret(ctx, openbao.TenantScope(ownerCell, ownerApp), serviceClientIDKey)
 	if err != nil || callerID == "" || ownerOrg == "" {
 		logger.Info("The capability waits on its owner's service identity; it admits nobody until then",
 			"owner", owner.GetName(), "expected", serviceUserName(ownerApp))
@@ -353,7 +354,7 @@ func (r *PlatformCapabilityReconciler) publishCaller(ctx context.Context, logger
 func (r *PlatformCapabilityReconciler) revokeCaller(ctx context.Context) error {
 	c := r.capability
 	for _, key := range []string{c.callerClientIDKey, c.callerOrgIDKey} {
-		if err := r.InfisicalClient.DeleteSecret(ctx, hubSecretPath, key); err != nil {
+		if err := r.Store.DeleteSecret(ctx, hubSecretPath, key); err != nil {
 			return fmt.Errorf("revoke %s's caller (%s): %w", c.title, key, err)
 		}
 	}

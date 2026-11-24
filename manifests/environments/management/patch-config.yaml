@@ -5,10 +5,4 @@ metadata:
   namespace: platform-ops
 data:
   CLUSTER_ID: "hub-dev"
-  # The management secret scope (ADR-111 Revision 7 §2), the same value the
-  # HubEnvironment beside this file declares. Overwritten at render from
-  # `management.infisicalEnvironmentSlug` so one input reaches both.
-  SECRET_STORE_ENVIRONMENT_SLUG: "management"
-  SECRET_STORE_PROJECT_SLUG: "hub-platform"
-  SECRET_STORE_SECRETS_PROJECT_SLUG: "hub-secrets"
   CLUSTER_REGION: ""

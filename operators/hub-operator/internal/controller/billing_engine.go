@@ -8,8 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-
-	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
 // The billing engine is a selectable platform capability of the box (ADR-113),
@@ -39,7 +37,7 @@ var billingEngine = platformCapability{
 // ever rotated: a key that exists is left exactly as it is.
 var billingEngineKeys = []struct {
 	key      string
-	generate func() (string, error)
+	generate func(context.Context, TenantSecretStore) (string, error)
 }{
 	{"billing-engine-secret-key-base", hexKey(64)},
 	{"billing-engine-encryption-primary-key", hexKey(32)},
@@ -52,13 +50,13 @@ var billingEngineKeys = []struct {
 	{"billing-engine-rsa-private-key", rsaPrivateKey},
 }
 
-func hexKey(nbytes int) func() (string, error) {
-	return func() (string, error) { return secrets.GenerateHexKey(nbytes) }
+func hexKey(nbytes int) func(context.Context, TenantSecretStore) (string, error) {
+	return func(ctx context.Context, s TenantSecretStore) (string, error) { return s.HexKey(ctx, nbytes) }
 }
 
 // rsaPrivateKey is a 2048-bit RSA key as the engine reads it: base64 of its
 // PKCS#1 PEM.
-func rsaPrivateKey() (string, error) {
+func rsaPrivateKey(context.Context, TenantSecretStore) (string, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", err
@@ -70,18 +68,18 @@ func rsaPrivateKey() (string, error) {
 // ensureBillingEngineKeys creates each of the engine's keys that does not exist.
 func ensureBillingEngineKeys(ctx context.Context, r *AINativeSaaSReconciler) error {
 	for _, k := range billingEngineKeys {
-		exists, err := r.InfisicalClient.SecretExists(ctx, hubSecretPath, k.key)
+		exists, err := r.Store.SecretExists(ctx, hubSecretPath, k.key)
 		if err != nil {
 			return fmt.Errorf("check %s: %w", k.key, err)
 		}
 		if exists {
 			continue
 		}
-		value, err := k.generate()
+		value, err := k.generate(ctx, r.Store)
 		if err != nil {
 			return fmt.Errorf("generate %s: %w", k.key, err)
 		}
-		if err := r.InfisicalClient.CreateSecret(ctx, hubSecretPath, k.key, value); err != nil {
+		if err := r.Store.CreateSecret(ctx, hubSecretPath, k.key, value); err != nil {
 			return fmt.Errorf("create %s: %w", k.key, err)
 		}
 	}

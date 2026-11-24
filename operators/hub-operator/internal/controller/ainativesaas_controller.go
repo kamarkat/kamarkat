@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	client2 "github.com/kamarkat/kamarkat/operators/hub-operator/internal/client"
+	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/secrets"
 )
 
@@ -38,7 +39,7 @@ import (
 //     workload. ADR-003, ADR-019: scoped identity for runtime plugin resolution.
 //
 // Mirrors SpokePoolReconciler (ADR-003 Pattern A2b) for consistency.
-// TenantSecretStore is the part of the Infisical client this controller uses.
+// TenantSecretStore is the part of the OpenBao store this controller uses.
 //
 // An INTERFACE so the provisioning path can be tested. It was
 // `*secrets.InfisicalClient`, and the consequence was not abstract: the caller
@@ -47,10 +48,8 @@ import (
 // reaching it meant a network. The resolver could be tested and was; the WIRING
 // could not, so the one line that held the defect was the one line uncovered.
 //
-// Narrow on purpose -- these five methods, not everything the concrete client can
-// do. A fake implements what the controller needs and nothing else, so the
-// interface does not become a second definition of the Infisical client that
-// drifts from the first.
+// Narrow on purpose -- these methods, not everything the concrete store can do. A
+// fake implements what the controller needs and nothing else.
 type TenantSecretStore interface {
 	GetSecret(ctx context.Context, secretPath, secretName string) (string, error)
 	SecretExists(ctx context.Context, secretPath, secretName string) (bool, error)
@@ -60,11 +59,18 @@ type TenantSecretStore interface {
 	EnsureTenantFolderAndCredentials(ctx context.Context, clusterName, tenantId, appId string,
 		isFirstTime bool, oauthClients []secrets.OAuthClient,
 		cacheEnabled, cacheIsFirstTime, gatewayEnabled bool) (*secrets.EnsureTenantCredentialsResult, error)
+	// EnsureTenantAuth lets this application's namespace read its own scope and
+	// nothing else (ADR-117 §4): a JWT role on its cluster's mount, bound to the
+	// namespace's openbao-secrets ServiceAccount, holding a policy named by uid.
+	EnsureTenantAuth(ctx context.Context, cluster, tenantID, app, uid string) error
+	// HexKey draws a hex key from an OpenBao password policy: OpenBao, not this
+	// operator, generates the value.
+	HexKey(ctx context.Context, nbytes int) (string, error)
 }
 
 type AINativeSaaSReconciler struct {
 	client.Client
-	InfisicalClient TenantSecretStore
+	Store TenantSecretStore
 
 	// IdentityClient asks the Tenant Identity Service to provision this tenant's
 	// identity resources. Nil when the environment does not provision them, which
@@ -162,9 +168,14 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// credential is not evidence of loss.
 	cacheIsFirstTime := !r.isConditionTrue(ainativesaas, conditionTypeCacheSeeded)
 
-	result, err := r.InfisicalClient.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
+	if err := r.Store.EnsureTenantAuth(ctx, clusterName, tenantId, appId, string(ainativesaas.GetUID())); err != nil {
+		logger.Error(err, "Failed to authorize the tenant's secret store", "tenant", tenantId, "cluster", clusterName)
+		return ctrl.Result{}, err
+	}
+
+	result, err := r.Store.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
 	if err != nil {
-		logger.Error(err, "Failed to ensure tenant credentials in Infisical", "tenant", tenantId, "cluster", clusterName)
+		logger.Error(err, "Failed to ensure tenant credentials in OpenBao", "tenant", tenantId, "cluster", clusterName)
 		if result != nil && result.Result == secrets.EnsureMissing {
 			_ = r.setCondition(ctx, ainativesaas, tenantId, conditionMissing)
 		}
@@ -322,7 +333,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				for _, dc := range identity.Clients {
 					if dc.ClientID != "" {
 						if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
-							secrets.InfisicalOAuthClientIDKey(dc.Name), dc.ClientID); err != nil {
+							secrets.OAuthClientIDKey(dc.Name), dc.ClientID); err != nil {
 							logger.Error(err, "Failed to publish OAuth client id",
 								"tenant", tenantId, "client", dc.Name)
 						}
@@ -332,7 +343,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					// overwriting it with "" would destroy a working credential.
 					if dc.ClientSecret != "" {
 						if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
-							secrets.InfisicalOAuthClientSecretKey(dc.Name), dc.ClientSecret); err != nil {
+							secrets.OAuthClientSecretKey(dc.Name), dc.ClientSecret); err != nil {
 							logger.Error(err, "Failed to publish OAuth client secret",
 								"tenant", tenantId, "client", dc.Name)
 						}
@@ -352,8 +363,8 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// for the same reason: absent once minted, it cannot be re-read, and
 				// regenerating a credential is never a reconcile's decision.
 				if serviceClient != "" {
-					servicePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
-					if _, err := r.InfisicalClient.GetSecret(ctx, servicePath, serviceClientSecretKey); err != nil {
+					servicePath := openbao.TenantScope(clusterName, appId)
+					if _, err := r.Store.GetSecret(ctx, servicePath, serviceClientSecretKey); err != nil {
 						logger.Error(err, "CRITICAL: the service identity's credential is absent. "+
 							"The issuer discloses a generated secret once, so it cannot be re-read: the "+
 							"machine user's secret must be regenerated at the issuer. Until it is, this "+
@@ -378,9 +389,9 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// reports a missing key rather than a client that was never
 				// regenerated. Checked here, once, where the recovery can be
 				// named.
-				exchangeKey := secrets.InfisicalOAuthClientSecretKey(gatewayExchangeClientName(appId))
-				exchangePath := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
-				if _, err := r.InfisicalClient.GetSecret(ctx, exchangePath, exchangeKey); err != nil {
+				exchangeKey := secrets.OAuthClientSecretKey(gatewayExchangeClientName(appId))
+				exchangePath := openbao.TenantScope(clusterName, appId)
+				if _, err := r.Store.GetSecret(ctx, exchangePath, exchangeKey); err != nil {
 					logger.Error(err, "CRITICAL: the gateway exchange client credential is absent. "+
 						"The issuer discloses a generated secret once, so it cannot be re-read: the client "+
 						"must be regenerated at the issuer. Until it is, this application's gateway cannot "+
@@ -696,9 +707,9 @@ func (r *AINativeSaaSReconciler) publishAllowedCallers(ctx context.Context, clus
 			return fmt.Errorf("caller %q has an entry with no client id", callerAppID)
 		}
 	}
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, target.AppID)
+	path := openbao.TenantScope(clusterName, target.AppID)
 	existing := ""
-	if got, err := r.InfisicalClient.GetSecret(ctx, path, allowedAzpKey); err == nil {
+	if got, err := r.Store.GetSecret(ctx, path, allowedAzpKey); err == nil {
 		existing = got
 	}
 	out := make([]string, 0, len(entries))
@@ -870,8 +881,8 @@ func (r *AINativeSaaSReconciler) serviceClientID(ctx context.Context, clusterNam
 	if service != nil && service.ClientID != "" {
 		return service.ClientID
 	}
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
-	if got, err := r.InfisicalClient.GetSecret(ctx, path, serviceClientIDKey); err == nil {
+	path := openbao.TenantScope(clusterName, appId)
+	if got, err := r.Store.GetSecret(ctx, path, serviceClientIDKey); err == nil {
 		return got
 	}
 	return ""
@@ -948,8 +959,8 @@ func (r *AINativeSaaSReconciler) declaredClientID(
 	// fallback: a confidential client's credentials live under the OAUTH_ key
 	// grammar, derived from the client's own name, like every other declared
 	// client's.
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
-	if got, err := r.InfisicalClient.GetSecret(ctx, path, secrets.InfisicalOAuthClientIDKey(name)); err == nil {
+	path := openbao.TenantScope(clusterName, appId)
+	if got, err := r.Store.GetSecret(ctx, path, secrets.OAuthClientIDKey(name)); err == nil {
 		return got
 	}
 	return ""
@@ -1395,14 +1406,14 @@ func (r *AINativeSaaSReconciler) publishTenantClientID(ctx context.Context, clus
 // so "already exists" must be success rather than a conflict the caller has to
 // interpret.
 func (r *AINativeSaaSReconciler) publishTenantSecret(ctx context.Context, clusterName, tenantId, appId, key, value string) error {
-	path := fmt.Sprintf(secrets.InfisicalTenantPathFormat, clusterName, appId)
+	path := openbao.TenantScope(clusterName, appId)
 
-	exists, err := r.InfisicalClient.SecretExists(ctx, path, key)
+	exists, err := r.Store.SecretExists(ctx, path, key)
 	if err != nil {
 		return fmt.Errorf("check %s/%s: %w", path, key, err)
 	}
 	if exists {
-		return r.InfisicalClient.UpdateSecret(ctx, path, key, value)
+		return r.Store.UpdateSecret(ctx, path, key, value)
 	}
-	return r.InfisicalClient.CreateSecret(ctx, path, key, value)
+	return r.Store.CreateSecret(ctx, path, key, value)
 }

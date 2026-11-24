@@ -213,4 +213,6 @@ resources:
 }
 
 func (m *mockEscrowStore) BackupProjectArtifact(context.Context, string, string) error { return nil }
-func (m *mockEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) { return "", nil }
+func (m *mockEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) {
+	return "", nil
+}

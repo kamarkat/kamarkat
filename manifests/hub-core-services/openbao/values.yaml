@@ -237,6 +237,72 @@ server:
         }
       }
 
+      # Password policies: OpenBao generates every charset-based value the platform
+      # stores (ADR-117 §7.4). hub-operator decides a value is needed, asks
+      # sys/policies/password/<name>/generate, and writes the answer once into KV.
+      # Hex policies serve consumers that hex-decode a key of exact size.
+      initialize "password-policies" {
+        request "password-policy-hex-32" {
+          operation = "update"
+          path      = "sys/policies/password/hex-32"
+          data = {
+            policy = <<-EOP
+              length = 32
+              rule "charset" {
+                charset = "0123456789abcdef"
+              }
+            EOP
+          }
+        }
+        request "password-policy-hex-64" {
+          operation = "update"
+          path      = "sys/policies/password/hex-64"
+          data = {
+            policy = <<-EOP
+              length = 64
+              rule "charset" {
+                charset = "0123456789abcdef"
+              }
+            EOP
+          }
+        }
+        request "password-policy-hex-128" {
+          operation = "update"
+          path      = "sys/policies/password/hex-128"
+          data = {
+            policy = <<-EOP
+              length = 128
+              rule "charset" {
+                charset = "0123456789abcdef"
+              }
+            EOP
+          }
+        }
+        request "password-policy-urlsafe-32" {
+          operation = "update"
+          path      = "sys/policies/password/urlsafe-32"
+          data = {
+            policy = <<-EOP
+              length = 32
+              rule "charset" {
+                charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+              }
+            EOP
+          }
+        }
+        request "password-policy-urlsafe-64" {
+          operation = "update"
+          path      = "sys/policies/password/urlsafe-64"
+          data = {
+            policy = <<-EOP
+              length = 64
+              rule "charset" {
+                charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+              }
+            EOP
+          }
+        }
+      }
       initialize "policies" {
         # hub-operator: reconciles desired authorization, KV generation, PKI and static
         # roles. It never holds recovery-key, root or token-sweep rights.
@@ -260,18 +326,59 @@ server:
               path "pki_int/issuer/*"          { capabilities = ["read"] }
               path "database/config/*"         { capabilities = ["create", "read", "update", "delete", "list"] }
               path "database/static-roles/*"   { capabilities = ["create", "read", "update", "delete", "list"] }
+              path "sys/policies/password/+/generate" { capabilities = ["read"] }
             EOP
           }
         }
-        # ESO on the hub: platform secrets and hub static credentials only.
+        # ESO on the hub: platform secrets only.
+        # cert-manager's hub Vault ClusterIssuers (openbao-fleet, openbao-signing):
+        # sign through the two hub profiles, nothing else (ADR-035, ADR-117 §8).
+        request "cert-manager-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/cert-manager"
+          data = {
+            policy = <<-EOP
+              path "pki_int/sign/infrastructure-services" { capabilities = ["create", "update"] }
+              path "pki_int/sign/signing-keys"            { capabilities = ["create", "update"] }
+            EOP
+          }
+        }
         request "eso-hub-policy" {
           operation = "update"
           path      = "sys/policies/acl/eso-hub"
           data = {
             policy = <<-EOP
-              path "kv/data/hub/*"              { capabilities = ["read"] }
-              path "kv/metadata/hub/*"          { capabilities = ["read", "list"] }
-              path "database/static-creds/hub-*" { capabilities = ["read"] }
+              path "kv/data/hub"                { capabilities = ["read"] }
+              path "kv/metadata/hub"            { capabilities = ["read"] }
+            EOP
+          }
+        }
+        # Each hub application login password, readable only by that application's
+        # own VaultDynamicSecret identity (ADR-117 §7.4).
+        request "hub-zitadel-db-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/hub-zitadel-db"
+          data = {
+            policy = <<-EOP
+              path "database/static-creds/hub-zitadel" { capabilities = ["read"] }
+            EOP
+          }
+        }
+        request "hub-credits-db-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/hub-credits-db"
+          data = {
+            policy = <<-EOP
+              path "database/static-creds/hub-credits" { capabilities = ["read"] }
+            EOP
+          }
+        }
+        request "hub-grafana-db-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/hub-grafana-db"
+          data = {
+            policy = <<-EOP
+              path "database/static-creds/hub-grafana" { capabilities = ["read"] }
             EOP
           }
         }
@@ -348,6 +455,65 @@ server:
             bound_service_account_namespaces = ["platform-ops"]
             audience                         = "openbao"
             token_policies                   = ["hub-operator"]
+            token_type                       = "service"
+            token_ttl                        = "10m"
+            token_max_ttl                    = "10m"
+            token_explicit_max_ttl           = "10m"
+          }
+        }
+        # hub_zitadel's current password, for the VaultDynamicSecret beside its consumer.
+        request "hub-zitadel-db-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/hub-zitadel-db"
+          data = {
+            bound_service_account_names      = ["openbao-db-creds-zitadel"]
+            bound_service_account_namespaces = ["platform-identity"]
+            audience                         = "openbao"
+            token_policies                   = ["hub-zitadel-db"]
+            token_type                       = "service"
+            token_ttl                        = "10m"
+            token_max_ttl                    = "10m"
+            token_explicit_max_ttl           = "10m"
+          }
+        }
+        # hub_credits's current password, for the VaultDynamicSecret beside its consumer.
+        request "hub-credits-db-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/hub-credits-db"
+          data = {
+            bound_service_account_names      = ["openbao-db-creds-credits"]
+            bound_service_account_namespaces = ["platform-credits"]
+            audience                         = "openbao"
+            token_policies                   = ["hub-credits-db"]
+            token_type                       = "service"
+            token_ttl                        = "10m"
+            token_max_ttl                    = "10m"
+            token_explicit_max_ttl           = "10m"
+          }
+        }
+        # hub_grafana's current password, for the VaultDynamicSecret beside its consumer.
+        request "hub-grafana-db-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/hub-grafana-db"
+          data = {
+            bound_service_account_names      = ["openbao-db-creds-grafana"]
+            bound_service_account_namespaces = ["platform-observability"]
+            audience                         = "openbao"
+            token_policies                   = ["hub-grafana-db"]
+            token_type                       = "service"
+            token_ttl                        = "10m"
+            token_max_ttl                    = "10m"
+            token_explicit_max_ttl           = "10m"
+          }
+        }
+        request "cert-manager-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/cert-manager"
+          data = {
+            bound_service_account_names      = ["openbao-issuer"]
+            bound_service_account_namespaces = ["cert-manager"]
+            audience                         = "openbao"
+            token_policies                   = ["cert-manager"]
             token_type                       = "service"
             token_ttl                        = "10m"
             token_max_ttl                    = "10m"
