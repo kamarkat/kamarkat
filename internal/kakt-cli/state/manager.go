@@ -56,11 +56,11 @@ const (
 	// These are the platform-level state machine states that parallel
 	// the CAPI provisioning phases. The CLI gates transitions between
 	// these states to ensure deterministic bootstrap.
-	PlatformStateNew            BootstrapPhase = "platform-new"
-	PlatformStatePKIReady       BootstrapPhase = "platform-pki-ready"
-	PlatformStateSecretsReady   BootstrapPhase = "platform-secrets-ready"
-	PlatformStateGitOpsReady    BootstrapPhase = "platform-gitops-ready"
-	PlatformStatePlatformReady  BootstrapPhase = "platform-ready"
+	PlatformStateNew           BootstrapPhase = "platform-new"
+	PlatformStatePKIReady      BootstrapPhase = "platform-pki-ready"
+	PlatformStateSecretsReady  BootstrapPhase = "platform-secrets-ready"
+	PlatformStateGitOpsReady   BootstrapPhase = "platform-gitops-ready"
+	PlatformStatePlatformReady BootstrapPhase = "platform-ready"
 )
 
 // BootstrapState tracks the state of the bootstrap process

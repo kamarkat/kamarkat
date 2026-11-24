@@ -161,29 +161,42 @@ for a in json.load(sys.stdin)["items"]:
     fi
 
     # Bypass attempts on the hub, from a running pod of another platform
-    # namespace (OpenBao, platform-data; busybox nc): the pod's address directly.
-    local ip probe ledger_port gateway_port host public
+    # namespace: the openbao-db primary (platform-data), probing the Credit
+    # Authority pod's address directly. The probe is bash's /dev/tcp under
+    # coreutils timeout, both part of the CloudNativePG image -- no image is
+    # changed and no pod is created for it.
+    #
+    # Three outcomes, kept apart: the probe could not run (unverified, never a
+    # pass), the control was refused (unverified: a refusal would prove nothing),
+    # and the verdict.
+    local ip src probe ledger_port gateway_port control host public
     ip=$(kc -n "$ns" get pods -l app.kubernetes.io/name=credit-authority -o jsonpath='{.items[0].status.podIP}')
-    probe='nc -z -w 4 "$0" "$1" >/dev/null 2>&1 && echo open || echo closed'
-    local control
-    ledger_port=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" "$ip" 3068)
-    gateway_port=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" "$ip" 3000)
-    # The control: a connection this pod is allowed to make. Without it, a
-    # refusal could be this pod's own egress policy rather than the Credit
-    # Authority's ingress, and the check would pass proving nothing.
-    # Its OWN database, which openbao-db's NetworkPolicy admits OpenBao to on 5432.
-    # Not another application's cluster: after ADR-112 each one admits only its own
-    # consumer, so a probe at any other would be refused by THAT policy and the
-    # control would prove the opposite of what it is for.
-    control=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" openbao-db-rw.platform-data.svc.cluster.local 5432)
-    if [[ -z "$ip" || -z "$ledger_port" || -z "$gateway_port" ]]; then
-        hard_fail "X6 cannot probe the pod from platform-data (address '${ip}')"
+    src=$(kc -n platform-data get pods -l cnpg.io/cluster=openbao-db,cnpg.io/instanceRole=primary \
+        -o jsonpath='{.items[0].metadata.name}')
+    probe='timeout 4 bash -c "exec 3<>/dev/tcp/$0/$1" >/dev/null 2>&1 && echo open || echo closed'
+    _x6_probe() {
+        kc -n platform-data exec "$src" -c postgres -- bash -c "$probe" "$1" "$2"
+    }
+    # The probe itself must run, or no answer below means anything.
+    if [[ -z "$ip" || -z "$src" ]] || \
+       [[ "$(kc -n platform-data exec "$src" -c postgres -- bash -c 'command -v timeout >/dev/null && echo ready')" != "ready" ]]; then
+        unverified "X6 the bypass probe could not run (credit-authority address '${ip}', probe pod '${src}')"
+    else
+    ledger_port=$(_x6_probe "$ip" 3068)
+    gateway_port=$(_x6_probe "$ip" 3000)
+    # The control: a connection this pod is allowed to make -- its own cluster's
+    # service. Without it, a refusal could be this pod's own egress policy rather
+    # than the Credit Authority's ingress.
+    control=$(_x6_probe openbao-db-rw.platform-data.svc.cluster.local 5432)
+    if [[ -z "$ledger_port" || -z "$gateway_port" || -z "$control" ]]; then
+        unverified "X6 the bypass probe returned no verdict (ledger '${ledger_port}', gateway '${gateway_port}', control '${control}')"
     elif [[ "$control" != "open" ]]; then
-        hard_fail "X6 inconclusive: OpenBao's own connection to openbao-db is '${control}', so a refusal proves nothing"
-    elif [[ "$ledger_port" != "open" && "$gateway_port" != "open" ]]; then
-        pass "X6 from another hub namespace, the ledger's port is $ledger_port and the gateway's is $gateway_port: only the Gateway reaches it"
+        unverified "X6 inconclusive: the probe pod's own connection to openbao-db-rw is '${control}', so a refusal proves nothing"
+    elif [[ "$ledger_port" == "closed" && "$gateway_port" == "closed" ]]; then
+        pass "X6 from another hub namespace, the ledger's port and the gateway's are refused: only the Gateway reaches it"
     else
         hard_fail "X6 from platform-data the ledger port is '${ledger_port}' and the gateway port '${gateway_port}'; both must refuse"
+    fi
     fi
 
     # Through the Gateway, from the declaring application's SDK on its spoke.

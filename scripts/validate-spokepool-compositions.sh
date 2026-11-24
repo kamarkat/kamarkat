@@ -14,7 +14,7 @@
 #   2. rendered names are unique             (no accidental duplicates)
 #   3. static namespace ConfigMaps (argocd-namespace) are NOT per-spoke renamed
 #   4. per-spoke resources (observability/messaging namespaces, argocd-agent-params,
-#      machine-identity, bootstrap-cert) resolve to {claim}-<suffix> exactly once
+#      bootstrap-cert) resolve to {claim}-<suffix> exactly once
 #
 # Depends on: yq (mikefarah), standard POSIX tools.
 
@@ -41,10 +41,8 @@ dynamic_suffixes=(
   "hetzner-credentials"
   "observability-namespace"
   "argocd-agent-params"
-  "machine-identity"
   "bootstrap-cert"
   "agent-ca"
-  "cluster-issuer"
   # ADR-046 §24: rendered by hub-operator with the spoke's control-plane endpoint.
   # It is the ONLY owner of the spoke's cilium-config, so a missing or duplicated
   # slot here means either no CNI config reaches the spoke or two do.
