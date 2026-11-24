@@ -363,7 +363,8 @@ Each cluster's issuer may use only its own roles. **A spoke issuer can never req
 **Hub reconstruction.** The order is: escrow material; `openbao-db` restored; authorization reconciled and tokens revoked; application databases restored; each application's credential reconciled; admission. This preserves the trust domain and spoke authentication: the restored intermediate and the unchanged spoke keys carry them, and the root never left custody.
 
 **OpenBao version changes.**
-- Each change of OpenBao version is preceded by a CloudNativePG backup of `openbao-db`, declared as part of the component and identified by the target and running versions. It must be complete before the new version starts.
+- Each change of OpenBao version is preceded by a CloudNativePG backup of `openbao-db`, declared as part of the component. It must be complete before the new version starts.
+- The backup's identity is unique to the upgrade operation: the target OpenBao version, the bundle version, and the archive identity of the `openbao-db` incarnation, which changes whenever a restore recreates the cluster. So a backup completed for an earlier operation, including one before a rollback, never satisfies a later upgrade.
 - Routine synchronization, configuration changes and self-healing never create a backup. A backup is created only when the declared version changes.
 - Rolling back means restoring that backup, with the recorded version and the seal configuration in force at the backup. Reverting the chart alone does not revert storage. Changes made after the recovery point are lost.
 
