@@ -322,7 +322,6 @@ var boxScoped = map[string]bool{
 	// One Infisical per box, administered by one account. Keyed to the box
 	// because a successor hub inherits that instance's database, and with it the
 	// user row this credential logs in as.
-	ArtifactInfisicalAdmin: true,
 }
 
 // Scope is which identity an artefact is keyed to.

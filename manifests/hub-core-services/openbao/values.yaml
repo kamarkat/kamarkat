@@ -308,6 +308,17 @@ server:
             EOP
           }
         }
+        # `kakt app secrets` (administrator): tenant application secrets only.
+        request "app-secrets-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/openbao-app-secrets"
+          data = {
+            policy = <<-EOP
+              path "kv/data/spokes/+/tenants/*"     { capabilities = ["create", "read", "update"] }
+              path "kv/metadata/spokes/+/tenants/*" { capabilities = ["read", "list"] }
+            EOP
+          }
+        }
         # Recovery (ADR-092 recovery mode, driven by kakt): token sweep, static-password
         # re-establishment and durable records. Never authorization changes.
         request "recovery-policy" {
@@ -381,6 +392,20 @@ server:
             bound_service_account_namespaces = ["platform-data"]
             audience                         = "openbao"
             token_policies                   = ["openbao-pki-signing"]
+            token_type                       = "service"
+            token_ttl                        = "15m"
+            token_max_ttl                    = "15m"
+            token_explicit_max_ttl           = "15m"
+          }
+        }
+        request "app-secrets-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/openbao-app-secrets"
+          data = {
+            bound_service_account_names      = ["openbao-app-secrets"]
+            bound_service_account_namespaces = ["platform-data"]
+            audience                         = "openbao"
+            token_policies                   = ["openbao-app-secrets"]
             token_type                       = "service"
             token_ttl                        = "15m"
             token_max_ttl                    = "15m"

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/session"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
@@ -327,6 +330,14 @@ the box it belongs to keeps running from its own CI.`, msg, escrowProjectName)
 		fmt.Println("  the identity you supplied was added to this project")
 	}
 	fmt.Printf("  written to %s/\n", out)
+
+	// CUSTODY (ADR-117 §3, §6): the box's root CA and recovery PGP key, private halves
+	// in an administrator-only project. Established here, before any cluster or CI
+	// exists, under this session -- never by an automation identity.
+	if err := establishCustody(ctx, escrowURL, s.Token, s.OrgID, projectID, escrowProjectName); err != nil {
+		return err
+	}
+
 	if strings.TrimSpace(clientSecret) == "" {
 		// Only reachable when an identity was supplied with --client-id and its
 		// secret was not: the operator is managing that identity themselves, so
@@ -366,4 +377,50 @@ func declaredEscrow(gitopsDir, cluster string) (hubaccess.Coordinates, string) {
 		return none, ""
 	}
 	return coords, name
+}
+
+// establishCustody finds or creates the box's custody project and makes sure its
+// root CA and recovery PGP key exist (internal/kakt-cli/openbao.EstablishCustody).
+// The custody project's id is recorded in the box project, where any later
+// administrator command finds it.
+func establishCustody(ctx context.Context, url, token, orgID, boxProjectID, boxProjectName string) error {
+	box, err := escrow.NewEscrowClientForToken(ctx, url, boxProjectID, token)
+	if err != nil {
+		return fmt.Errorf("open the box escrow project %s as you: %w", boxProjectID, err)
+	}
+	custodyID, err := box.RestoreProjectArtifact(ctx, openbao.ArtifactCustodyProjectID)
+	if err != nil {
+		return fmt.Errorf("read the custody project record: %w", err)
+	}
+	custodyID = strings.TrimSpace(custodyID)
+	if custodyID == "" {
+		custodyID, err = escrow.CreateAdministratorProject(ctx, url, token, orgID, boxProjectName+"-custody")
+		if err != nil {
+			return fmt.Errorf("create the custody project: %w", err)
+		}
+		if err := box.BackupProjectArtifact(ctx, openbao.ArtifactCustodyProjectID, custodyID); err != nil {
+			return fmt.Errorf("record the custody project %s in the box escrow: %w", custodyID, err)
+		}
+	}
+	custody, err := escrow.NewEscrowClientForToken(ctx, url, custodyID, token)
+	if err != nil {
+		return fmt.Errorf("open the custody project %s as you: %w", custodyID, err)
+	}
+	rep, err := openbao.EstablishCustody(ctx, box, custody, boxProjectID, time.Now())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("✓ custody project %s (administrator only; no automation identity is a member)\n", custodyID)
+	switch {
+	case rep.RootCreated:
+		fmt.Println("  root CA created: key in custody, certificate in the box escrow")
+	default:
+		fmt.Println("  root CA already in custody, kept")
+	}
+	if rep.PGPCreated {
+		fmt.Printf("  recovery PGP key created (fingerprint %s): private key in custody\n", rep.Fingerprint)
+	} else {
+		fmt.Printf("  recovery PGP key already in custody, kept (fingerprint %s)\n", rep.Fingerprint)
+	}
+	return nil
 }

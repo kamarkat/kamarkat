@@ -64,9 +64,9 @@ func (i *Installer) InstallEscrowCredentials(ctx context.Context) error {
 		// last point at which the absence is still cheap to fix, so it is the
 		// point that refuses.
 		return fmt.Errorf("no escrow is configured for this box.\n\n"+
-			"hub-operator copies this box's Infisical master keys -- the root secret\n"+
-			"without which its secret store cannot be decrypted -- to an Infisical you\n"+
-			"control. Without it, losing this cluster loses every secret the platform\n"+
+			"The escrow holds OpenBao's seal keys and encrypted recovery key, without\n"+
+			"which this box's secret store cannot be unsealed or recovered. Without it,\n"+
+			"losing this cluster loses every secret the platform\n"+
 			"manages for it, and the escrow cannot be added after the fact (ADR-076).\n\n"+
 			"Set these in the environment Day-0 runs in:\n  %s",
 			strings.Join(escrowEnv, "\n  "))

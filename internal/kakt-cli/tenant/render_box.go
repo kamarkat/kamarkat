@@ -9,6 +9,7 @@
 package tenant
 
 import (
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/opstore"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/versions"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
@@ -237,9 +238,9 @@ func (s Secrets) RequireEscrow() error {
 		return nil
 	}
 	return fmt.Errorf("this box has no escrow, and will not be dispatched without one.\n\n"+
-		"hub-operator copies its Infisical master keys -- the root secret without\n"+
-		"which its secret store cannot be decrypted -- to an Infisical you control.\n"+
-		"The box's own cannot hold them: they are the keys that decrypt it.\n\n"+
+		"The escrow holds what this box cannot be rebuilt without -- OpenBao's seal\n"+
+		"keys, its encrypted recovery key and, in an administrator-only custody\n"+
+		"project, its root CA. The box cannot hold them: they unlock it.\n\n"+
 		"Infisical Cloud is the usual answer: https://app.infisical.com\n\n"+
 		"Create one and these settings are recorded for you, so `box init` finds\n"+
 		"them without any being passed:\n\n"+
@@ -297,23 +298,11 @@ func (s Secrets) VerifyEscrow() error {
 	return nil
 }
 
-// WithAdminCredential fills the administrator of this box's OWN Infisical from
-// the box's escrow, generating it the first time. It reports whether this call
-// generated it.
-//
-// Not prompted, and the reasoning is in ADR-065 rather than in convenience. The
-// value has to exist in three places -- the escrow, the tenant's repository, and
-// eventually the cluster -- and in none of them is a human the source: Day-0
-// creates the account with it, re-enters Infisical with it on a re-run, and a
-// successor box restores a database whose user row already holds its hash. What a
-// prompt added was a password chosen under pressure and remembered nowhere.
-//
-// The escrow is read BEFORE anything is generated. A repository secret cannot be
-// read back, so a second `box init` run has no way to discover what the first one
-// chose; without this, re-running would mint a new password and push it over the
-// one the live Infisical was bootstrapped with, locking Day-0 out of the secret
-// store it is meant to administer.
-func (s Secrets) WithAdminCredential(ctx context.Context, boxID, clusterName, sessionEmail string) (Secrets, bool, error) {
+// WithSealRecord makes sure this box's escrow holds its OpenBao seal record,
+// creating seal-key generation 1 the first time (ADR-117 §3). It reports whether
+// this call created it. The escrow is read first: a second run must never mint a
+// new key over the one the store was initialized with.
+func (s Secrets) WithSealRecord(ctx context.Context) (bool, error) {
 	for k, v := range map[string]string{
 		"ESCROW_PROVIDER_URL":           s.EscrowURL,
 		"ESCROW_PROVIDER_PROJECT_ID":    s.EscrowProjectID,
@@ -322,30 +311,15 @@ func (s Secrets) WithAdminCredential(ctx context.Context, boxID, clusterName, se
 	} {
 		restore, err := setEnvFor(k, v)
 		if err != nil {
-			return s, false, err
+			return false, err
 		}
 		defer restore()
 	}
 	store, err := escrow.NewEscrowClient(ctx, "")
 	if err != nil {
-		return s, false, err
+		return false, err
 	}
-
-	// The environment's address wins over the session's, so an operator
-	// rendering a box somebody else administers can say so.
-	email := strings.TrimSpace(s.InfisicalAdminEmail)
-	if email == "" {
-		email = strings.TrimSpace(sessionEmail)
-	}
-
-	cred, generated, err := escrow.ResolveAdminCredential(ctx,
-		store, escrow.ForCluster(boxID, clusterName), email)
-	if err != nil {
-		return s, false, err
-	}
-	s.InfisicalAdminEmail = cred.Email
-	s.InfisicalAdminPassword = cred.Password
-	return s, generated, nil
+	return openbao.EnsureSealRecord(ctx, store, time.Now())
 }
 
 // setEnvFor sets one variable and returns a function restoring what was there.
@@ -676,18 +650,13 @@ func (s Spec) chartSource() string {
         # The generated values file does not exist until Day-0 writes it, and
         # helm EXITS on a values file it cannot open -- so without this the seed
         # Application cannot render at all and boundary 01 never appears. That
-        # is not a race that ordering fixes: the file is written by
-        # bootstrap-infisical-api, which runs after the boundaries it would
-        # unblock.
+        # is not a race that ordering fixes: the file is written by a Day-0
+        # phase that runs after the boundaries it would unblock.
         ignoreMissingValueFiles: true
         valueFiles:
           # Generated first, this cluster's own values second: Helm lets the
           # later file win, so a fact Day-0 recorded never silently beats
           # something the tenant wrote here deliberately.
-          #
-          # The box's own Infisical organisation and projects. hub-environment
-          # renders hub-bootstrap-config from these, and is its only writer.
-          - $values/registry/clusters/` + s.ClusterName + `/generated/values/infisical-identity.yaml
           # The address every public hostname on this box resolves to -- the CAPH
           # control-plane load balancer, which exists only once the cluster does.
           # Day-0 records it here; the hub Gateway and its routes take their
@@ -723,18 +692,13 @@ func (s Spec) chartSource() string {
         # The generated values file does not exist until Day-0 writes it, and
         # helm EXITS on a values file it cannot open -- so without this the seed
         # Application cannot render at all and boundary 01 never appears. That
-        # is not a race that ordering fixes: the file is written by
-        # bootstrap-infisical-api, which runs after the boundaries it would
-        # unblock.
+        # is not a race that ordering fixes: the file is written by a Day-0
+        # phase that runs after the boundaries it would unblock.
         ignoreMissingValueFiles: true
         valueFiles:
           # Generated first, this cluster's own values second: Helm lets the
           # later file win, so a fact Day-0 recorded never silently beats
           # something the tenant wrote here deliberately.
-          #
-          # The box's own Infisical organisation and projects. hub-environment
-          # renders hub-bootstrap-config from these, and is its only writer.
-          - $values/registry/clusters/` + s.ClusterName + `/generated/values/infisical-identity.yaml
           # The address every public hostname on this box resolves to -- the CAPH
           # control-plane load balancer, which exists only once the cluster does.
           # Day-0 records it here; the hub Gateway and its routes take their

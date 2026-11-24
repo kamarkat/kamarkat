@@ -816,3 +816,16 @@ func newProvisioner(baseURL, sessionToken, orgID string) (*provisioner, error) {
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
+
+// CreateAdministratorProject creates a project as the signed-in administrator and
+// adds NO automation identity to it (ADR-117 §3). It is how the custody project is
+// made: Infisical enforces access per project, so a project the automation
+// identity is not a member of is one no runtime or CI credential can read.
+func CreateAdministratorProject(ctx context.Context, baseURL, sessionToken, orgID, name string) (string, error) {
+	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" || strings.TrimSpace(sessionToken) == "" || strings.TrimSpace(orgID) == "" || strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("creating an administrator-only project needs the escrow URL, a session, the organisation and a name")
+	}
+	c := &provisioner{baseURL: baseURL, token: strings.TrimSpace(sessionToken), http: &http.Client{Timeout: 30 * time.Second}}
+	return c.createProject(ctx, name, orgID)
+}

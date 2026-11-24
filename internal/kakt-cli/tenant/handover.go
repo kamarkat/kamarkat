@@ -71,13 +71,6 @@ type Secrets struct {
 	EscrowClientSecret string
 	EscrowProjectID    string
 
-	// The box's own Infisical administrator. Collected with the rest rather than
-	// defaulted: the defaults these replace were a personal email address and the
-	// literal "Password@123", identical on every box, on the account that can read
-	// every secret the platform manages for this tenant.
-	InfisicalAdminEmail    string
-	InfisicalAdminPassword string
-
 	// What the hub needs to come up healthy, rather than merely up. Defined as
 	// a list in platform_credentials.go so prompting, validation and writing
 	// them into the repository cannot disagree about the set.
@@ -638,10 +631,10 @@ func HandoverInstructions(spec Spec, s Secrets, w *bufio.Writer) {
 	// matters is the moment it cannot be added.
 	if !s.hasEscrow() {
 		fmt.Fprintf(w, "This box has no escrow.\n\n")
-		fmt.Fprintf(w, "hub-operator copies this box's Infisical master keys -- the root secret\n")
-		fmt.Fprintf(w, "without which its secret store cannot be decrypted -- to an Infisical you\n")
-		fmt.Fprintf(w, "control. The box's own Infisical cannot hold them: they are the keys that\n")
-		fmt.Fprintf(w, "decrypt it, and it is unreachable exactly when they are needed.\n\n")
+		fmt.Fprintf(w, "The escrow holds what this box cannot be rebuilt without: OpenBao's seal\n")
+		fmt.Fprintf(w, "keys and encrypted recovery key, and -- in an administrator-only custody\n")
+		fmt.Fprintf(w, "project -- its root CA. The box cannot hold them: they unlock it, and it\n")
+		fmt.Fprintf(w, "is unreachable exactly when they are needed.\n\n")
 		fmt.Fprintf(w, "Without it, losing this cluster loses every secret the platform manages\n")
 		fmt.Fprintf(w, "for it, and the escrow cannot be added after the fact.\n\n")
 		for _, name := range []string{

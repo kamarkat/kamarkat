@@ -68,7 +68,7 @@ func TestDerivationCoversEveryHubHostnameLiteral(t *testing.T) {
 	}
 	for _, z := range []string{zone, "nutgraf.in"} {
 		e := DeriveHubEndpoints(z)
-		for _, h := range []string{e.API, e.Auth, e.ID, e.Console, e.ArgoCD, e.Infisical,
+		for _, h := range []string{e.API, e.Auth, e.ID, e.Console, e.ArgoCD, e.OpenBao,
 			e.MCP, e.Dashboard, e.ZitadelOrg, e.Zone} {
 			derived[h] = true
 		}

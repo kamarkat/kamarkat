@@ -533,56 +533,31 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		return err
 	}
 
-	// ── Phase 11b: Generate local secrets ─────────────────────────────
-	// Generates cryptographic keys (ENCRYPTION_KEY, AUTH_SECRET, REDIS_URL),
-	// creates infisical-secrets, infisical-redis-credentials, and
-	// infisical-db-credentials. The latter MUST exist before CNPG's initdb runs
-	// in B02, so this phase runs between B01 and B02.
-	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseGenerateLocalSecrets, "generate-local-secrets",
-		"Generating local bootstrap secrets...",
+	// ── Phase 11b: OpenBao prerequisites (ADR-117) ───────────────────
+	// What OpenBao's first start needs that GitOps does not declare: the
+	// listener CA and its public trust ConfigMaps, the seal configuration in
+	// force (Secret openbao-seal, from the escrow, never ESO), and the
+	// escrow-delivered platform credentials. Before boundary 02, because
+	// openbao-db archives with s3-credentials-escrowed from its first start.
+	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseOpenBaoPrerequisites, "openbao-prerequisites",
+		"Delivering OpenBao's seal, listener CA and platform credentials...",
 		func() error {
 			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
-			if err := ci.GenerateLocalSecrets(ctx); err != nil {
-				return err
-			}
-			// The optional credentials, here rather than later: the hub-operator
-			// uploads them to Infisical on its first reconcile, and a Secret that
-			// appears afterwards waits for the next one. Nothing created these at
-			// all until now, so the mappings that consume them retried forever --
-			// five ExternalSecrets on every box, and grafana-alloy never starting.
-			return ci.InstallPlatformCredentials(ctx)
+			return ci.PrepareOpenBao(ctx)
 		},
-		func() { fmt.Println("[generate-local-secrets] ✓ Local secrets generated") },
+		func() { fmt.Println("[openbao-prerequisites] ✓ OpenBao prerequisites delivered") },
 	); err != nil {
 		return err
 	}
 
 	// ── Phase 11c: Boundary 02 — platform data workloads ─────────────
-	// Deploys the CNPG Cluster and Redis. The CNPG Cluster
-	// CR triggers the operator (installed in B01). infisical-db-credentials was
-	// created in the previous phase (generate-local-secrets), so CNPG's
-	// initdb has the credentials it needs immediately.
+	// Deploys the application CNPG clusters (openbao-db among them) and Redis.
+	// openbao-db needs no credential input: its owner's password is CNPG's own
+	// and OpenBao authenticates by certificate (ADR-117 §2).
 	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseBoundary02, "boundary02",
 		"Deploying platform data (boundary 02)...",
 		func() error { return o.deployBoundaryN(ctx, mgmtKubeconfig, 2) },
 		func() { fmt.Println("[boundary02] ✓ Platform data deployed") },
-	); err != nil {
-		return err
-	}
-
-	// ── Phase 11d: Inject CNPG CA certificate ────────────────────────
-	// Waits for CNPG Cluster to be Ready, reads infisical-db-ca, and
-	// injects DB_ROOT_CERT into infisical-secrets. This MUST run after
-	// B02 (CNPG Cluster applied) and before B03 (Infisical deployed)
-	// so that Infisical Helm chart renders with DB_ROOT_CERT present,
-	// enabling TLS connectivity on first boot.
-	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseInjectCACert, "inject-ca-cert",
-		"Injecting CNPG CA certificate into infisical-secrets...",
-		func() error {
-			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
-			return ci.UpdateInfisicalSecretsWithCNPGCert(ctx)
-		},
-		func() { fmt.Println("[inject-ca-cert] ✓ CNPG CA certificate injected") },
 	); err != nil {
 		return err
 	}
@@ -602,58 +577,59 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 		return err
 	}
 
-	// ── Phase 11f: Bootstrap Infisical API ───────────────────────────
-	// Waits for Infisical to be healthy, then bootstraps the Infisical
-	// REST API (Org, Project, Machine Identity), creates the infisical-auth
-	// Secret, and stores Layer 1+2 credentials in Infisical vault.
-	// This MUST run after B03 when Infisical pods are Running.
-	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseBootstrapInfisicalAPI, "bootstrap-infisical-api",
-		"Bootstrapping Infisical API...",
+	// ── Phase 11f: OpenBao trust bootstrap (ADR-117 §3) ─────────────
+	// OpenBao self-initialized in boundary 03. This enrols its recovery key,
+	// PGP-encrypted to the custody key, escrows the ciphertext, verifies it, and
+	// retires the one-shot bootstrap identity. Crash-safe and re-entrant.
+	if err := o.runPhase(ctx, stateMgr, bs, state.PhaseOpenBaoTrustBootstrap, "openbao-trust-bootstrap",
+		"Enrolling OpenBao's recovery key...",
 		func() error {
 			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
-			if err := ci.BootstrapInfisicalAPI(ctx); err != nil {
-				return err
-			}
-			// The repair is only half of it. Certificates that were refused
-			// while the application, enrollment or policy were wrong are in
-			// cert-manager's backoff, and it does not retry for an hour after
-			// the second failure -- long enough for this bootstrap to time out
-			// waiting for a certificate its own previous step has just made
-			// issuable. Clearing the CertificateRequests alone is not enough:
-			// failedIssuanceAttempts lives on the Certificate, not the request,
-			// and when the next CR is nil cert-manager skips the spec-change
-			// comparison and falls through to the backoff delay. So the
-			// function also deletes the Certificate and its Secret for any
-			// stuck certificate, letting ArgoCD (selfHeal) recreate it from
-			// Git with zero failure history.
-			return o.clearFailedInfisicalCertificateRequests(ctx, mgmtKubeconfig)
+			return ci.OpenBaoTrustBootstrap(ctx)
 		},
-		func() { fmt.Println("[bootstrap-infisical-api] ✓ Infisical API bootstrapped") },
+		func() { fmt.Println("[openbao-trust-bootstrap] ✓ recovery key enrolled") },
 		withPostcondition(func() error {
-			return o.phasePostconditions(mgmtKubeconfig)[state.PhaseBootstrapInfisicalAPI](ctx)
+			return o.phasePostconditions(mgmtKubeconfig)[state.PhaseOpenBaoTrustBootstrap](ctx)
 		}),
 	); err != nil {
 		return err
 	}
 
-	// The seed is re-applied here, and no longer because of the PKI.
-	//
-	// It used to carry this box's Infisical project and machine-identity client
-	// id as chart values, knowable only after the phase above created them, so
-	// the seed applied before boundary 01 had them empty and the security
-	// component rendered without its ClusterIssuers. pki-issuer v1.x removed both
-	// parameters -- an Issuer names an application and a profile, the project is
-	// the organisation's active Certificate Manager project, and the controller
-	// reads the client id from the infisical-auth Secret itself -- so there is
-	// nothing left here for the issuers to wait for.
-	//
-	// The re-apply stays. This phase is also where the generated artifacts the
-	// seed reads are written (ADR-045), and applying the same manifest twice is
-	// what ReapplySeed exists for.
-	if err := o.ReapplySeed(ctx, mgmtKubeconfig); err != nil {
-		return fmt.Errorf("re-apply seed after the Infisical API bootstrap: %w", err)
+	// ── Phase 11g: Intermediate signed (ADR-117 §6) ──────────────────
+	// The root never enters CI or the cluster: the box's administrator signs
+	// OpenBao's intermediate CSR with `kakt pki sign-intermediate`. This phase
+	// waits for that, BOUNDED; if the wait expires it FAILS with the specific
+	// reason "administrator signing pending" -- never a success over a platform
+	// whose certificates cannot issue. A re-run after signing resumes here.
+	if err := o.runPhase(ctx, stateMgr, bs, state.PhasePKISigned, "pki-signed",
+		"Waiting for the administrator to sign the issuing intermediate...",
+		func() error {
+			ci := &components.Installer{Kubeconfig: mgmtKubeconfig, OverlayDir: HubOverlayDir, GitopsDir: o.GitopsDir, ClusterName: o.ClusterName}
+			if err := ci.WaitIntermediateSigned(ctx, signingWait()); err != nil {
+				return err
+			}
+			// Certificates requested before the signature were refused and are in
+			// cert-manager's backoff, which does not retry for an hour after the
+			// second failure. failedIssuanceAttempts lives on the Certificate, so
+			// stuck ones are deleted with their Secret and Argo CD (selfHeal)
+			// recreates them from Git with no failure history.
+			return o.clearFailedCertificateRequests(ctx, mgmtKubeconfig)
+		},
+		func() { fmt.Println("[pki-signed] ✓ issuing intermediate signed") },
+		withPostcondition(func() error {
+			return o.phasePostconditions(mgmtKubeconfig)[state.PhasePKISigned](ctx)
+		}),
+	); err != nil {
+		return err
 	}
-	fmt.Println("[bootstrap-infisical-api] ✓ seed re-applied")
+
+	// The seed is re-applied here, after every Day-0 artifact the seed reads has
+	// been written (ADR-045). Applying the same manifest twice is what
+	// ReapplySeed exists for.
+	if err := o.ReapplySeed(ctx, mgmtKubeconfig); err != nil {
+		return fmt.Errorf("re-apply seed after the OpenBao trust bootstrap: %w", err)
+	}
+	fmt.Println("[pki-signed] ✓ seed re-applied")
 
 	// ── Commit the generated artifacts ────────────────────────────────
 	//
@@ -2885,7 +2861,7 @@ func (o *Orchestrator) validateADR045Artifacts(ctx context.Context) error {
 		// Check file exists
 		data, err := os.ReadFile(absPath)
 		if err != nil {
-			return fmt.Errorf("artifact %s: file not found — ensure BootstrapInfisicalAPI completed successfully", a.File)
+			return fmt.Errorf("artifact %s: file not found — the Day-0 phase that writes it has not completed", a.File)
 		}
 
 		// Parse the patch YAML
@@ -3194,16 +3170,15 @@ func (o *Orchestrator) waitForArgoCDAppsHealthy(ctx context.Context, kubeconfig 
 // the record for a box that declined a capability, which is a box with nothing
 // wrong.
 func (o *Orchestrator) platformCredentialsEscrowedAndInstalled(ctx context.Context, kubeconfig string) error {
-	// BOTH destinations of the one escrowed credential. The first feeds every
-	// database through Infisical; the second feeds the box's own secret store
-	// directly, and is the one nothing ever created. Checking only the first
-	// would leave infisical-db archiving nothing on a box this postcondition
-	// had just declared satisfied.
+	// BOTH destinations of the one escrowed credential. The first is what
+	// hub-operator writes into OpenBao for the other databases; the second feeds
+	// openbao-db directly, which cannot take its archive credential from the
+	// store it backs up.
 	for _, s := range []struct{ ns, name, consequence string }{
 		{"platform-ops", "s3-object-storage",
-			"the hub-operator has nothing to upload, so no database reading its archive credential from Infisical can archive WAL"},
+			"hub-operator has nothing to write into OpenBao, so no database reading its archive credential through ESO can archive WAL"},
 		{"platform-data", "s3-credentials-escrowed",
-			"the box's own secret store has no archive credential, and it cannot take one from Infisical without depending on itself"},
+			"openbao-db has no archive credential, and it cannot take one from OpenBao without depending on itself"},
 	} {
 		if err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig,
 			"get", "secret", s.name, "-n", s.ns).Run(); err != nil {
@@ -3211,4 +3186,15 @@ func (o *Orchestrator) platformCredentialsEscrowedAndInstalled(ctx context.Conte
 		}
 	}
 	return nil
+}
+
+// signingWait is the pki-signed phase's bound (ADR-117 §6): the default, or
+// KAKT_PKI_SIGNING_WAIT as a Go duration.
+func signingWait() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("KAKT_PKI_SIGNING_WAIT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return components.DefaultSigningWait
 }

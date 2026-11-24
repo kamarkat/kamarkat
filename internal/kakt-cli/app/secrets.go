@@ -65,7 +65,9 @@ type App struct {
 // The `/spoke-pool/<name>/` segment keeps its spelling: renaming it would orphan
 // every secret already written, on every box.
 func (f App) SecretPathOn(clusterName string) string {
-	return fmt.Sprintf("/spoke-pool/%s/tenants/%s", clusterName, f.AppID)
+	// The KV v2 secret this deployment's tenant SecretStore reads (ADR-117 §4):
+	// one secret per application per cluster, each declared key a property.
+	return fmt.Sprintf("spokes/%s/tenants/%s", clusterName, f.AppID)
 }
 
 // ClustersServing is every workload cluster this environment's applications are

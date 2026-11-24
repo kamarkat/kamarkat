@@ -92,43 +92,6 @@ func (d *DataLayerReadiness) Checkers() []HealthChecker {
 	return checkers
 }
 
-// InfisicalReadiness is the readiness profile for the Infisical
-// platform service. It depends on the data layer being ready first —
-// this is the contract that closes the CNPG boot race observed during
-// Day-0 choreography (see RCA: Infisical pods crash-looped on
-// ENOTFOUND platform-db-pooler because the Pooler service didn't
-// exist when Infisical started).
-//
-// Callers (Cobra commands, orchestrators) compose phases:
-//
-//	health.HealthWaiter{}.Wait(ctx, kubeconfig)  // for the data layer
-//	health.HealthWaiter{}.Wait(ctx, kubeconfig)  // for Infisical
-type InfisicalReadiness struct {
-	// Namespace where Infisical is deployed. Default: platform-security.
-	Namespace string
-	// WorkloadName is the StatefulSet/Deployment name.
-	// Default: "infisical-standalone-infisical".
-	WorkloadName string
-}
-
-// PhaseName returns the phase identifier.
-func (i *InfisicalReadiness) PhaseName() string { return "Infisical Platform" }
-
-// Checkers returns the ordered list of HealthChecker instances.
-func (i *InfisicalReadiness) Checkers() []HealthChecker {
-	ns := i.Namespace
-	if ns == "" {
-		ns = constants.NamespaceSecurity
-	}
-	name := i.WorkloadName
-	if name == "" {
-		name = "infisical-standalone-infisical"
-	}
-	return []HealthChecker{
-		NewWorkloadHealth(name, ns),
-	}
-}
-
 // CAPIProvidersReadiness is the readiness profile for the CAPI core
 // providers on a bootstrap cluster. Used by the pivot orchestrator
 // after the move to verify providers came up cleanly on the

@@ -963,13 +963,11 @@ func (o *Orchestrator) stateArtifacts() []string {
 			// The name those two replaced. Still removed, because teardown deleting
 			// a stale file is cleanup rather than acting on it.
 			filepath.Join(root, ".state", "bootstrap-state.json"),
-			filepath.Join(root, ".state", "infisical-bootstrap.json"),
 			filepath.Join(root, ".state", "kind", "kind-config-generated.yaml"),
 
 			// The layout these replaced.
 			filepath.Join(root, ".zero-ops", "state", o.ClusterName+".json"),
 			filepath.Join(root, ".zero-ops", "bootstrap-state.json"),
-			filepath.Join(root, ".zero-ops", "infisical-bootstrap.json"),
 			filepath.Join(root, ".zero-ops", "kind", "kind-config-generated.yaml"),
 		)
 	}

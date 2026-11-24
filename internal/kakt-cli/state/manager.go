@@ -25,15 +25,14 @@ const (
 	PhasePlatformPreReqs       BootstrapPhase = "platform-pre-reqs"
 	PhaseOnPremJoin            BootstrapPhase = "on-prem-join"
 	PhaseBoundary01            BootstrapPhase = "boundary-01"
-	PhaseGenerateLocalSecrets  BootstrapPhase = "generate-local-secrets"
+	PhaseOpenBaoPrerequisites  BootstrapPhase = "openbao-prerequisites"
 	PhaseBoundary02            BootstrapPhase = "boundary-02"
-	PhaseInjectCACert          BootstrapPhase = "inject-ca-cert"
 	PhaseBoundary03            BootstrapPhase = "boundary-03"
-	PhaseBootstrapInfisicalAPI BootstrapPhase = "bootstrap-infisical-api"
+	PhaseOpenBaoTrustBootstrap BootstrapPhase = "openbao-trust-bootstrap"
+	PhasePKISigned             BootstrapPhase = "pki-signed"
 	PhaseBoundary04            BootstrapPhase = "boundary-04"
 	PhaseBoundary05            BootstrapPhase = "boundary-05"
 	PhaseBoundary06            BootstrapPhase = "boundary-06"
-	PhaseInitSecrets           BootstrapPhase = "init-secrets"    // DEPRECATED: replaced by GenerateLocalSecrets + InjectCACert + BootstrapInfisicalAPI
 	PhasePlatformDeploy        BootstrapPhase = "platform-deploy" // DEPRECATED: replaced by B01/B02/B03
 	PhaseFinalize              BootstrapPhase = "finalize"
 
@@ -58,7 +57,6 @@ const (
 	// the CAPI provisioning phases. The CLI gates transitions between
 	// these states to ensure deterministic bootstrap.
 	PlatformStateNew            BootstrapPhase = "platform-new"
-	PlatformStateInfisicalReady BootstrapPhase = "platform-infisical-ready"
 	PlatformStatePKIReady       BootstrapPhase = "platform-pki-ready"
 	PlatformStateSecretsReady   BootstrapPhase = "platform-secrets-ready"
 	PlatformStateGitOpsReady    BootstrapPhase = "platform-gitops-ready"

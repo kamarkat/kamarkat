@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"os"
 	"strings"
 
@@ -97,14 +98,12 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 	required := []requirement{
 		{escrow.ArtifactKubeconfig, "the cluster's administrative recovery credential", false},
 		{escrow.ArtifactSecretEncryptionKey, "the API server's at-rest encryption key", false},
-		{"infisical-master-keys", "the secret store's encryption key and auth secret", true},
 		{escrow.ArtifactZitadelMasterkey, "the identity provider's key-encryption key", true},
-		// The administrator of the box's own Infisical. Management-cluster only
-		// because there is one Infisical per box and it runs there. A box whose
-		// escrow lacks this cannot be re-entered by a second Day-0 run and has no
-		// break-glass account for its secret store -- the account exists, and
-		// nothing anywhere knows its password.
-		{escrow.ArtifactInfisicalAdmin, "the box Infisical's administrator credential", true},
+		// OpenBao's seal record (every retained key generation and the delivery
+		// history), keyed by the escrow project rather than the box id: written
+		// before the box id exists (ADR-117 §3). Required, because without it the
+		// store cannot be unsealed and no backup of it can be decrypted.
+		// Checked below with the other project-keyed artefacts.
 		// ADR-111 §10: the tenant's half of the management-state backups'
 		// encryption. One per box, so the management cluster's row.
 		{escrow.ArtifactBackupSSECKey, "the management-state backups' encryption key", true},
@@ -208,6 +207,31 @@ func runEscrowVerify(cmd *cobra.Command, _ []string) error {
 			// so the two never matched and the comparison this command tells you to make
 			// could not be made.
 			fmt.Printf("  present  %-24s %s  (%d bytes)\n", r.artifact, keyFingerprint([]byte(v)), len(v))
+		}
+	}
+
+	// OPENBAO'S PROJECT-KEYED ARTEFACTS (ADR-117 §3, §6). Written before the box id
+	// exists, so keyed by the escrow project. The box's management cluster only.
+	if isHub {
+		for _, r := range []requirement{
+			{openbao.ArtifactSeal, "OpenBao's seal-key generations and delivery history", true},
+			{openbao.ArtifactRecoveryPGPPublic, "the public key OpenBao's recovery shares are encrypted to", true},
+			{openbao.ArtifactRecoveryKeyEncrypted, "OpenBao's PGP-encrypted recovery key (break-glass)", true},
+			{openbao.ArtifactRootCertificate, "the box's root CA certificate (trust anchor)", true},
+			{openbao.ArtifactCustodyProjectID, "which project holds custody (root key, recovery PGP key)", true},
+		} {
+			checked++
+			v, err := store.RestoreProjectArtifact(ctx, r.artifact)
+			switch {
+			case err != nil:
+				fmt.Printf("  ERROR    %-24s %v\n", r.artifact, err)
+				missing++
+			case v == "":
+				fmt.Printf("  MISSING  %-24s %s\n", r.artifact, r.what)
+				missing++
+			default:
+				fmt.Printf("  present  %-24s %s  (%d bytes)\n", r.artifact, keyFingerprint([]byte(v)), len(v))
+			}
 		}
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/session"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 	"github.com/spf13/cobra"
 )
@@ -97,13 +96,9 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	}
 
 	if first {
-		// THE BOX'S OWN INFISICAL ADMINISTRATOR, generated here rather than at
-		// box creation, because its escrow artefact is keyed by box AND cluster
-		// -- and until this moment the box has no cluster to key it by. It is
-		// never asked for: the address comes from the session that created the
-		// box, the password is generated, and the escrow is where it is
-		// recovered from on a re-run.
-		if err := escrowAdminCredential(ctx, box, name); err != nil {
+		// THE BOX'S OPENBAO SEAL KEY (ADR-117 §3), generated before Day-0 needs it
+		// and kept on every re-run: a new key would leave the store sealed.
+		if err := escrowSealRecord(ctx, box); err != nil {
 			return err
 		}
 	} else {
@@ -178,34 +173,19 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	return nil
 }
 
-// escrowAdminCredential generates this box's own Infisical administrator and
-// writes it to the box's escrow, which is the only place it is kept.
-//
-// Neither half is asked for: the address is the account that created the box,
-// the password is generated. It was also set on the repository as two Actions
-// secrets, and that copy is gone -- Day-0 reads the escrowed artefact, so a
-// second durable copy bought nothing and could not be verified against this one.
-//
-// A re-run reads back the credential the instance was created with rather than
-// minting a second over the live one.
-func escrowAdminCredential(ctx context.Context, box tenant.Box, cluster string) error {
-	var email string
-	if sess, err := session.Current(ctx, box.Decl.Escrow.URL); err == nil {
-		email = sess.Email
-	}
-
+// escrowSealRecord makes sure the box escrow holds the OpenBao seal record
+// (ADR-117 §3) before Day-0 needs it. Generated once; a re-run keeps it.
+func escrowSealRecord(ctx context.Context, box tenant.Box) error {
 	secrets := tenant.Secrets{}
 	secrets.Resolve(tenant.Spec{Provider: box.Decl.Provider})
-	secrets, generated, err := secrets.WithAdminCredential(ctx, box.ID, cluster, email)
+	created, err := secrets.WithSealRecord(ctx)
 	if err != nil {
 		return err
 	}
-	if generated {
-		fmt.Printf("\n[box] generated this box's Infisical administrator (%s) and escrowed it\n",
-			secrets.InfisicalAdminEmail)
+	if created {
+		fmt.Println("\n[box] generated this box's OpenBao seal key (generation 1) and escrowed it")
 	} else {
-		fmt.Printf("\n[box] reusing the escrowed Infisical administrator (%s)\n",
-			secrets.InfisicalAdminEmail)
+		fmt.Println("\n[box] the escrow already holds this box's OpenBao seal record; kept")
 	}
 	return nil
 }

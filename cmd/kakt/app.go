@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
-	"github.com/kamarkat/kamarkat/internal/kakt-cli/infisical"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
 
@@ -105,7 +105,7 @@ secrets are still absent without any value being disclosed.`,
 	set, importCmd := newAppSecretsSetCmd(), newAppSecretsImportCmd()
 
 	// --kubeconfig goes only where the box is actually reached. These three read
-	// this box's own Infisical through withInfisical, which refuses without it.
+	// this box's OpenBao through withOpenBao, which refuses without it.
 	//
 	// `template` renders from the repository and `hosts aggregate` reads files;
 	// neither needs a cluster. As a persistent flag on `app` it was accepted by
@@ -120,16 +120,14 @@ secrets are still absent without any value being disclosed.`,
 	return cmd
 }
 
-// withInfisical runs fn against this box's own Infisical.
-//
-// The port-forward is how the CLI reaches an instance that is not published,
-// and SECRET_STORE_API_URL is set by EnsureAPIAccess rather than defaulted: a
-// default pointed every box at the platform's own instance, which is a
-// different tenant's secret store (ADR-065).
-func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Config) error) error {
+// withOpenBao runs fn against this box's OpenBao, as the app-secrets identity
+// (ADR-117 §4): it can read and write tenant application secrets and nothing else.
+// Reached through a port-forward over verified TLS; the administrator's kubeconfig
+// is what authorizes minting that identity's token.
+func withOpenBao(ctx context.Context, fn func(*openbao.Client) error) error {
 	if appKubeconfig == "" {
-		return fmt.Errorf("--kubeconfig is required: the credential for this box's Infisical " +
-			"is held in the box, and is the same one ESO uses")
+		return fmt.Errorf("--kubeconfig is required: this box's secret store is reached " +
+			"through its management cluster")
 	}
 	cfg, err := clientcmd.BuildConfigFromFlags("", appKubeconfig)
 	if err != nil {
@@ -139,21 +137,12 @@ func withInfisical(ctx context.Context, fn func(*infisical.Client, *infisical.Co
 	if err != nil {
 		return fmt.Errorf("build kubernetes client: %w", err)
 	}
-
-	return infisical.RunWithPortForward(ctx,
-		"platform-security", "infisical-standalone-infisical", "8081", "8080",
-		appKubeconfig, 1,
-		func() error {
-			client, err := infisical.NewClient(ctx, clientset)
-			if err != nil {
-				return fmt.Errorf("connect to this box's Infisical: %w", err)
-			}
-			icfg, err := infisical.GetInfisicalConfig(ctx, clientset)
-			if err != nil {
-				return fmt.Errorf("read this box's Infisical configuration: %w", err)
-			}
-			return fn(client, icfg)
-		})
+	c, err := openbao.ConnectForAppSecrets(ctx, clientset, appKubeconfig)
+	if err != nil {
+		return fmt.Errorf("connect to this box's OpenBao: %w", err)
+	}
+	defer c.Close()
+	return fn(c)
 }
 
 func newAppSecretsStatusCmd() *cobra.Command {
@@ -182,7 +171,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 			}
 
 			var statuses []app.Status
-			err = withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
+			err = withOpenBao(cmd.Context(), func(c *openbao.Client) error {
 				// args[0], not icfg.EnvironmentSlug: an application's secrets live in
 				// the environment the application runs in, and icfg carries the
 				// HUB's. A hub manages clusters whose environments differ from its
@@ -204,7 +193,7 @@ Exits non-zero when anything declared is absent, so a pipeline can gate on it.`,
 						"Add one: kakt tenant add-cluster --environment %s", args[0], args[0])
 				}
 				for _, cluster := range clusters {
-					present, lErr := c.ListSecretNames(cmd.Context(), icfg.ProjectSlug, args[0], f.SecretPathOn(cluster))
+					present, lErr := openbao.KVKeys(cmd.Context(), c, f.SecretPathOn(cluster))
 					if lErr != nil {
 						return lErr
 					}
@@ -343,12 +332,10 @@ within its refresh interval, and the workload's reloader restarts on the change.
 					"nowhere for this value to be read from.\n\n"+
 					"Add one: kakt tenant add-cluster --environment %s", environment, environment)
 			}
-			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
+			if err := withOpenBao(cmd.Context(), func(c *openbao.Client) error {
 				for _, cluster := range clusters {
-					// The environment named on the command line, not the hub's: see
-					// the note in `app secrets status`.
-					if wErr := c.CreateOrUpdateSecret(cmd.Context(),
-						icfg.ProjectSlug, environment, f.SecretPathOn(cluster), key, value); wErr != nil {
+					if wErr := openbao.KVMerge(cmd.Context(), c, f.SecretPathOn(cluster),
+						map[string]string{key: value}); wErr != nil {
 						return fmt.Errorf("write %s for %s: %w", key, cluster, wErr)
 					}
 				}
@@ -489,14 +476,13 @@ Without --confirm it lists the key names it would write and writes nothing.`,
 				return nil
 			}
 
-			if err := withInfisical(cmd.Context(), func(c *infisical.Client, icfg *infisical.Config) error {
+			if err := withOpenBao(cmd.Context(), func(c *openbao.Client) error {
 				for _, k := range willWrite {
-					// Once per deployment: each cluster's store reads only its own
-					// /spoke-pool/<cluster>/ folder.
+					// Once per deployment: each cluster's tenant store reads only its
+					// own spokes/<cluster>/ path.
 					for _, cluster := range importClusters {
-						// The named environment, not the hub's: see `app secrets status`.
-						if err := c.CreateOrUpdateSecret(cmd.Context(),
-							icfg.ProjectSlug, environment, f.SecretPathOn(cluster), k, values[k]); err != nil {
+						if err := openbao.KVMerge(cmd.Context(), c, f.SecretPathOn(cluster),
+							map[string]string{k: values[k]}); err != nil {
 							return fmt.Errorf("write %s for %s: %w", k, cluster, err)
 						}
 					}

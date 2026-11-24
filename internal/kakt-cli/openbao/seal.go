@@ -229,3 +229,31 @@ func ValidateKeyID(id string) error {
 	}
 	return nil
 }
+
+// EnsureSealRecord makes sure the box escrow holds the seal record, creating
+// generation 1 the first time (ADR-117 §3). An existing record is validated and
+// kept, never regenerated: a new key would leave the store sealed.
+func EnsureSealRecord(ctx context.Context, box ProjectStore, now time.Time) (bool, error) {
+	raw, err := box.RestoreProjectArtifact(ctx, ArtifactSeal)
+	if err != nil {
+		return false, fmt.Errorf("read the escrowed seal record: %w", err)
+	}
+	if strings.TrimSpace(raw) != "" {
+		if _, err := ParseSealRecord(raw); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	r, err := NewSealRecord(now)
+	if err != nil {
+		return false, err
+	}
+	payload, err := r.Marshal()
+	if err != nil {
+		return false, err
+	}
+	if err := box.BackupProjectArtifact(ctx, ArtifactSeal, payload); err != nil {
+		return false, fmt.Errorf("escrow the seal record: %w", err)
+	}
+	return true, nil
+}

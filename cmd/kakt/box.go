@@ -83,10 +83,9 @@ management cluster is a separate step:
 
   kakt tenant add-management --name <cluster>
 
-Two credentials are never asked for. The administrator of the box's own Infisical
-takes its address from your session, and its password is generated and escrowed
-when the management cluster is declared -- there is nothing to invent or
-remember.
+Nothing secret is invented or remembered by hand: OpenBao's seal key is generated
+and escrowed when the management cluster is declared, and its root CA and recovery
+key were placed in custody by ` + "`kakt escrow init`" + `.
 
 --dry-run renders to a local directory and creates nothing, which is how to see
 what a tenant would receive before any repository exists.`,

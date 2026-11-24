@@ -29,12 +29,12 @@ func TestSecretPathIsPerDeployment(t *testing.T) {
 	// content was right and only the label was wrong. Correcting the label
 	// means moving live key material, which is deferred to its own change.
 	// One folder per cluster serving the environment: each deployment's store
-	// reads only its own /spoke-pool/<cluster>/, so a single path would supply
+	// reads only its own spokes/<cluster>/ path, so a single path would supply
 	// the secret to exactly one of them.
-	if got, want := fleetFixture().SecretPathOn("nutgraf-01"), "/spoke-pool/nutgraf-01/tenants/storefront"; got != want {
+	if got, want := fleetFixture().SecretPathOn("nutgraf-01"), "spokes/nutgraf-01/tenants/storefront"; got != want {
 		t.Fatalf("SecretPathOn(nutgraf-01) = %q, want %q", got, want)
 	}
-	if got, want := fleetFixture().SecretPathOn("nutgraf-02"), "/spoke-pool/nutgraf-02/tenants/storefront"; got != want {
+	if got, want := fleetFixture().SecretPathOn("nutgraf-02"), "spokes/nutgraf-02/tenants/storefront"; got != want {
 		t.Fatalf("SecretPathOn(nutgraf-02) = %q, want %q", got, want)
 	}
 }

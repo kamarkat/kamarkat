@@ -138,7 +138,7 @@ func TestRender_BundleReadsValuesFromTheValuesDirectory(t *testing.T) {
 	dst := render(t, spec)
 	body := read(t, filepath.Join(dst, "registry", "clusters", spec.ClusterName, "bundle.yaml"))
 
-	for _, f := range []string{"infisical-identity.yaml", "gateway-dns-target.yaml"} {
+	for _, f := range []string{"gateway-dns-target.yaml"} {
 		want := "/generated/values/" + f
 		if !strings.Contains(body, want) {
 			t.Errorf("bundle.yaml does not read %s from generated/values/", f)

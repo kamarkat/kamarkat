@@ -39,7 +39,7 @@ type HubEndpoints struct {
 	ID        string // Zitadel issuer, hosted login and console
 	Console   string // Kratos self-service UI
 	ArgoCD    string // ArgoCD server
-	Infisical string // Infisical public endpoint
+	OpenBao   string // OpenBao, reached by spokes through the hub Gateway (ADR-117)
 	MCP       string // OAuth redirect target (C7)
 	Dashboard string // Headlamp
 
@@ -71,7 +71,7 @@ func DeriveHubEndpoints(zone string) HubEndpoints {
 		ID:         host("id"),
 		Console:    host("console"),
 		ArgoCD:     host("argocd"),
-		Infisical:  host("infisical"),
+		OpenBao:    host("openbao"),
 		MCP:        host("mcp"),
 		Dashboard:  host("dashboard"),
 		ZitadelOrg: host("zitadel.id"),
