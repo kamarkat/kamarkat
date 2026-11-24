@@ -7,16 +7,19 @@
 # is not the moment to change capacity. Raising them is a capacity decision made on
 # measurements -- an unsatisfiable constraint does not fail loudly, it pends, and
 # the service it governs silently never returns.
-# Per-box values for the secret store's PostgreSQL cluster (ADR-112 §§2-3).
+# Per-box values for the secret store's PostgreSQL cluster (ADR-112 §§2-3, ADR-117 §2).
 #
 # Read only when this directory is packaged as a component, so it is inert until a
 # boundary-02 descriptor exists for it -- unlike a declaration left in the shared
 # database overlay, which packaging refuses when the object it names is not rendered.
 - kind: Cluster
-  name: infisical-db
+  name: openbao-db
   fields:
     - path: [spec, backup, barmanObjectStore, destinationPath]
       value: 's3://{{ .Values.global.boxId }}/{{ .Values.global.clusterName }}/'
+    # Management-plane availability (ADR-111 Revision 7 §3). Raising it is a capacity
+    # decision, made together with `postgresql.synchronous` (ladder in openbao-db.yaml)
+    # and OpenBao's replica count.
     - path: [spec, instances]
       type: int
       value: '1'
@@ -28,10 +31,3 @@
       value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
     - path: [spec, storage, storageClass]
       value: '{{ if eq .Values.global.provider "hybrid" }}local-path{{ else }}hcloud-volumes{{ end }}'
-- kind: Pooler
-  name: infisical-db-pooler
-  fields:
-    # The placement class (ADR-046 §11), as for the Cluster above: ADR-014 keeps
-    # Poolers on worker nodes, and which workers depends on the box's provider.
-    - path: [spec, template, spec, nodeSelector, workload-location]
-      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'

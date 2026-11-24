@@ -1,0 +1,10 @@
+# The secret store's PostgreSQL cluster as its own component (ADR-112 §1, ADR-117 §2).
+#
+# A kustomization rather than a bare directory of manifests, so the recovery overlay in
+# ../database-recovery can reference this DIRECTORY (kustomize refuses a resource file
+# outside the kustomization reading it).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - openbao-db.yaml

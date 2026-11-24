@@ -8,7 +8,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - credits-db-owner-es.yaml
   - credits-db.yaml
   - credits-db-pooler.yaml
   # The role credential RoleManager derives by name, not by reference.

@@ -106,11 +106,11 @@ data:
     # Each cluster's instance exporter is reached through a Service declared beside
     # the cluster itself, in <application>/database/, so an application that ships
     # its database ships the thing that watches it.
-    - collector: backup-health-infisical
+    - collector: backup-health-openbao
       source:
         kind: metrics
         namespace: platform-data
-        service: infisical-db-metrics
+        service: openbao-db-metrics
         port: 9187
         query: cnpg_collector_last_available_backup_timestamp
       # `value` is the sample's own number: the timestamp is the series' value and

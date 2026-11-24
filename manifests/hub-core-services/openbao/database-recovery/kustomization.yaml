@@ -13,8 +13,8 @@
 #
 # WHY IT EXISTS. Under the base manifest's `bootstrap: initdb` a replacement comes up
 # EMPTY and Healthy, which is the worst available outcome because nothing reports an
-# error. For infisical-db specifically that means every credential the platform manages. Its archive credential comes from
-# escrow rather than from Infisical (ADR-112 §4), so this recovery does not depend on the
+# error. For openbao-db specifically that means every credential the platform manages. Its archive credential comes from
+# escrow rather than from OpenBao (ADR-112 §4, ADR-117 §2), so this recovery does not depend on the
 # service being recovered.
 #
 # WHAT IT DOES NOT GIVE YOU. Recovery reaches the last archived WAL, not the moment of
@@ -51,22 +51,22 @@ resources:
 patches:
   - target:
       kind: Cluster
-      name: infisical-db
+      name: openbao-db
     patch: |-
       - op: remove
         path: /spec/bootstrap/initdb
       - op: add
         path: /spec/bootstrap/recovery
         value:
-          source: infisical-db-archive
+          source: openbao-db-archive
       - op: add
         path: /spec/externalClusters
         value:
-          - name: infisical-db-archive
+          - name: openbao-db-archive
             barmanObjectStore:
               destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
               # The incarnation being RESTORED FROM: what the lost cluster wrote.
-              serverName: infisical-db-v1
+              serverName: openbao-db-v1
               endpointURL: https://hel1.your-objectstorage.com
               s3Credentials:
                 accessKeyId:
@@ -84,4 +84,4 @@ patches:
       # The incarnation the REPLACEMENT writes. Must not equal the one above.
       - op: replace
         path: /spec/backup/barmanObjectStore/serverName
-        value: infisical-db-v2
+        value: openbao-db-v2

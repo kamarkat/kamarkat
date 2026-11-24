@@ -83,6 +83,15 @@ spec:
       work_mem: "2MB"
       maintenance_work_mem: "32MB"
       max_connections: "50"
+    # First match wins (ADR-117 §5):
+    #   * the owner can never log in, so its CloudNativePG-held password is inert;
+    #   * `hub_grafana` may reach ONLY the `postgres` maintenance database, and only with its
+    #     certificate -- that is OpenBao rotating the role's own password;
+    #   * `hub_grafana`'s password works only for `grafana`, through the default rules below.
+    pg_hba:
+      - host all grafana_owner all reject
+      - hostssl postgres hub_grafana all cert
+      - host postgres hub_grafana all reject
   storage:
     size: 2Gi
     # Rendered per box by templated-fields.yaml (ADR-046 §11).
@@ -108,26 +117,11 @@ spec:
   bootstrap:
     initdb:
       database: grafana
-      owner: hub_grafana
-      # THE AUTHORITATIVE CREDENTIAL, so CNPG has one password source for this role.
-      #
-      # GetApplicationSecretName() returns this name instead of the generated
-      # grafana-db-app, and CNPG reconciles the owner's password to it on every
-      # instance reconcile (refreshCredentialsFromSecret -> reconcileUser ->
-      # SetUserPassword), not only at initialisation. So CNPG is the sole SQL
-      # writer for this role and hub-operator no longer issues ALTER ROLE for it
-      # (ADR-023/ADR-112 amendment 2026-11-24).
-      #
-      # This field was deliberately omitted while the credential was believed to
-      # arrive at boundary 04 -- blocking initdb on it would have deadlocked
-      # against DatabaseRolesProvisioned. ADR-112's 2026-11-18 amendment moved the
-      # credential into boundary 02, beside this Cluster, so that objection no
-      # longer holds and the field is safe.
-      #
-      # username in grafana-db-owner is `hub_grafana`, matching owner above. CNPG takes the
-      # role name from the Secret when one is given, so the two must agree.
-      secret:
-        name: grafana-db-owner
+      # The DATABASE OWNER is CloudNativePG's own role (ADR-117 §5). Its password lives in
+      # grafana-db-app, reconciled by CloudNativePG's instance controller, and is INERT: pg_hba
+      # rejects every login as grafana_owner. The application logs in as `hub_grafana`, which
+      # inherits this role's ownership rights and whose password OpenBao owns.
+      owner: grafana_owner
 
   # This cluster's own archive identity (ADR-014 add.2, ADR-111 §2). destinationPath is
   # rendered per box by templated-fields.yaml; serverName carries THIS database and its
@@ -167,7 +161,7 @@ spec:
   cluster:
     name: grafana-db
   name: grafana
-  owner: hub_grafana
+  owner: grafana_owner
   ensure: present
 ---
 # Daily, immediately on creation. `immediate: true` matters: until a base backup
@@ -294,3 +288,29 @@ spec:
       protocol: TCP
       port: 9187
       targetPort: 9187
+---
+# The application's login role (ADR-117 §5). CloudNativePG owns its existence, its
+# membership in grafana_owner and its client certificate; it has NO passwordSecret, so
+# CloudNativePG never sets its password. OpenBao's static role `hub-grafana` owns the
+# password, rotating it by authenticating as this role with the certificate in
+# `grafana-db-hub-grafana-client-cert` (mounted only into OpenBao) to the `postgres` database.
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: grafana-db-hub-grafana
+  namespace: platform-data
+spec:
+  cluster:
+    name: grafana-db
+  name: hub_grafana
+  ensure: present
+  login: true
+  superuser: false
+  createdb: false
+  createrole: false
+  inherit: true
+  inRoles:
+    - grafana_owner
+  clientCertificate:
+    enabled: true
+  databaseRoleReclaimPolicy: retain

@@ -1,6 +1,7 @@
 # The secret store's PostgreSQL cluster (ADR-112 §1).
 #
-# Every credential the platform manages; its archive credential comes from escrow.
+# OpenBao's storage (ADR-117 §2): every credential the platform manages. Its archive
+# credential comes from escrow.
 #
 # BOUNDARY 02, while the application that owns it is boundary 03 or 04. The data layer is
 # its own boundary so that a database exists before its consumer reconciles; declaring the
@@ -21,12 +22,12 @@
 # providers/<class>/ overlay, because this is its own component and not an overlay of one.
 ---
 boundary: '02'
-appName: platform-infisical-db
+appName: platform-openbao-db
 destinationNamespace: platform-data
 isPlatformOwned: 'true'
 repoURL: ''
 targetRevision: ''
-path: manifests/hub-core-services/infisical/database
+path: manifests/hub-core-services/openbao/database
 chart: ''
 directoryRecurse: ''
 directoryInclude: ''
