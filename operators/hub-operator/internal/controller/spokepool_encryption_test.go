@@ -211,3 +211,6 @@ resources:
 		t.Errorf("expected does not correspond to escrowed key error, got: %v", err)
 	}
 }
+
+func (m *mockEscrowStore) BackupProjectArtifact(context.Context, string, string) error { return nil }
+func (m *mockEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) { return "", nil }

@@ -284,7 +284,6 @@ server:
             policy = <<-EOP
               path "sys/rotate/recovery/init"   { capabilities = ["create", "update", "read"] }
               path "sys/rotate/recovery/backup" { capabilities = ["read", "delete"] }
-              path "pki_int/intermediate/generate/internal" { capabilities = ["read"] }
               path "sys/policies/acl/openbao-trust-bootstrap"   { capabilities = ["delete"] }
               path "auth/kubernetes/role/openbao-trust-bootstrap" { capabilities = ["delete"] }
             EOP
@@ -298,7 +297,10 @@ server:
           path      = "sys/policies/acl/openbao-pki-signing"
           data = {
             policy = <<-EOP
-              path "pki_int/intermediate/generate/internal" { capabilities = ["update"] }
+              path "pki_int/keys"                           { capabilities = ["list"] }
+              path "pki_int/key/*"                          { capabilities = ["read"] }
+              path "pki_int/keys/generate/internal"         { capabilities = ["update"] }
+              path "pki_int/intermediate/generate/existing" { capabilities = ["update"] }
               path "pki_int/intermediate/set-signed"        { capabilities = ["update"] }
               path "pki_int/issuers"                        { capabilities = ["list"] }
               path "pki_int/issuer/*"                       { capabilities = ["read", "update"] }
@@ -401,17 +403,19 @@ server:
         }
       }
 
-      # The intermediate's key is generated HERE, inside OpenBao, and never leaves it.
-      # Only the CSR is exposed; `kakt pki sign-intermediate` signs it with the
-      # custody-held root and posts back the chain (ADR-117 §6).
+      # The intermediate's KEY is generated here, inside OpenBao, named, and never
+      # leaves it (ADR-117 §6). Self-init discards responses, so no CSR is produced here:
+      # `kakt pki sign-intermediate` asks for one over this existing key
+      # (intermediate/generate/existing, key_ref = issuing-1), signs it with the
+      # custody-held root, and posts back only the chain.
       initialize "pki" {
-        request "intermediate-csr" {
+        request "intermediate-key" {
           operation = "update"
-          path      = "pki_int/intermediate/generate/internal"
+          path      = "pki_int/keys/generate/internal"
           data = {
-            common_name = "Kamarkat Issuing Intermediate"
-            key_type    = "rsa"
-            key_bits    = 4096
+            key_name = "issuing-1"
+            key_type = "rsa"
+            key_bits = 4096
           }
         }
       }

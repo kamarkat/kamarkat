@@ -269,3 +269,6 @@ func TestEnsureClusterEncryptionUnreadableEscrowFailsClosed(t *testing.T) {
 		t.Errorf("expected reading the escrow error, got: %v", err)
 	}
 }
+
+func (f *fakeEscrowStore) BackupProjectArtifact(context.Context, string, string) error { return nil }
+func (f *fakeEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) { return "", nil }

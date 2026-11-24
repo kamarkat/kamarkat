@@ -43,7 +43,17 @@ type EscrowClient interface {
 	// path reads field by field, where an artefact is opaque bytes.
 	BackupArtifact(ctx context.Context, id Identity, name, payload string) error
 	RestoreArtifact(ctx context.Context, id Identity, name string) (string, error)
+
+	// BackupProjectArtifact and RestoreProjectArtifact hold material keyed by the
+	// escrow PROJECT rather than by a box id, under ProjectArtifactFolder (ADR-117
+	// §3). `kakt escrow init` writes them before `kakt box init` mints the box id;
+	// each box has its own escrow project, so they are still per box.
+	BackupProjectArtifact(ctx context.Context, name, payload string) error
+	RestoreProjectArtifact(ctx context.Context, name string) (string, error)
 }
+
+// ProjectArtifactFolder is where project-keyed artefacts live.
+const ProjectArtifactFolder = "/openbao"
 
 // ArtifactKubeconfig is the cluster's admin kubeconfig.
 //
@@ -583,7 +593,12 @@ func (e *infisicalEscrow) secretURLAt(secretPath, name string) string {
 // Already-exists is the normal case -- every backup after the first -- and Infisical
 // reports it as a 400, so it is success here.
 func (e *infisicalEscrow) ensurePath(ctx context.Context, id Identity, artifact string) error {
-	parent, name := path.Split(escrowPath(id, artifact))
+	return e.ensureFolder(ctx, escrowPath(id, artifact))
+}
+
+// ensureFolder creates the folder an artefact path names, tolerating "exists".
+func (e *infisicalEscrow) ensureFolder(ctx context.Context, folder string) error {
+	parent, name := path.Split(folder)
 	body, _ := json.Marshal(map[string]string{
 		"workspaceId": e.projectID,
 		"environment": environmentSlug,
@@ -613,7 +628,7 @@ func (e *infisicalEscrow) ensurePath(ctx context.Context, id Identity, artifact 
 		return nil
 	default:
 		return fmt.Errorf("the escrow refused to create %s (%d): %s",
-			escrowPath(id, artifact), resp.StatusCode, strings.TrimSpace(string(b)))
+			folder, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 }
 
@@ -628,15 +643,31 @@ func (e *infisicalEscrow) BackupArtifact(ctx context.Context, id Identity, name,
 	if err := e.ensurePath(ctx, id, name); err != nil {
 		return err
 	}
+	return e.writeAt(ctx, escrowPath(id, name), name, payload)
+}
 
+// BackupProjectArtifact writes a project-keyed artefact (ADR-117 §3).
+func (e *infisicalEscrow) BackupProjectArtifact(ctx context.Context, name, payload string) error {
+	if err := e.ensureFolder(ctx, ProjectArtifactFolder); err != nil {
+		return err
+	}
+	return e.writeAt(ctx, ProjectArtifactFolder, name, payload)
+}
+
+// RestoreProjectArtifact reads a project-keyed artefact; empty means absent.
+func (e *infisicalEscrow) RestoreProjectArtifact(ctx context.Context, name string) (string, error) {
+	return e.readAt(ctx, ProjectArtifactFolder, name)
+}
+
+// writeAt creates or updates one artefact at an explicit path.
+func (e *infisicalEscrow) writeAt(ctx context.Context, secretPath, name, payload string) error {
 	body, _ := json.Marshal(map[string]string{
 		"workspaceId": e.projectID,
 		"environment": environmentSlug,
-		"secretPath":  escrowPath(id, name),
+		"secretPath":  secretPath,
 		"secretValue": payload,
 		"type":        "shared",
 	})
-
 	for _, method := range []string{http.MethodPost, http.MethodPatch} {
 		req, err := http.NewRequestWithContext(ctx, method,
 			e.baseURL+fmt.Sprintf(pathSecretsRaw, name), bytes.NewReader(body))
