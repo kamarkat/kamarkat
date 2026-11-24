@@ -341,7 +341,7 @@ Each cluster's issuer may use only its own roles. **A spoke issuer can never req
 - Recovery runs under a dedicated recovery identity: a Kubernetes-auth role bound to a recovery ServiceAccount, whose tokens only cluster administrators can create.
 - It authenticates **freshly** after the restore. Its policy covers only recovery: listing and revoking token accessors, re-establishing static passwords, and writing recovery records.
 - Revoking restored tokens excludes only that fresh session. hub-operator, like every other client, logs in again.
-- Recovery is driven within ADR-092's administrator-entered recovery mode. No new recovery controller or workflow engine exists.
+- Recovery is driven within ADR-092's administrator-entered recovery mode by `kakt openbao recover` (authorized 2026-11-24, the second CLI addition beside `kakt pki sign-intermediate`). No new recovery controller or workflow engine exists. Operational seal-key rotation is not exposed in this landing; restores select from the escrowed seal-configuration history.
 
 **Records represent effects.** A step is recorded complete only after its effect is verified:
 - desired authorization is applied;

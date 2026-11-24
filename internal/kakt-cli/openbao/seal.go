@@ -33,10 +33,9 @@ const (
 
 // SealGeneration is one 32-byte static-seal key with its permanent identifier.
 type SealGeneration struct {
-	ID          string     `json:"id"`
-	Key         string     `json:"key"` // hex, 32 bytes
-	ActivatedAt time.Time  `json:"activatedAt"`
-	RetiredAt   *time.Time `json:"retiredAt,omitempty"`
+	ID          string    `json:"id"`
+	Key         string    `json:"key"` // hex, 32 bytes
+	ActivatedAt time.Time `json:"activatedAt"`
 }
 
 // SealDelivery records one seal configuration delivered to the box: which
@@ -197,37 +196,6 @@ func Deliver(ctx context.Context, cs kubernetes.Interface, r SealRecord, cfg Sea
 		return r, fmt.Errorf("deliver %s/%s: %w", Namespace, SealSecretName, err)
 	}
 	return r, nil
-}
-
-// Rotate adds a new generation and returns the overlap configuration to deliver
-// (current = new, previous = old). Dropping the previous key from a later delivery
-// is a separate step, taken only after OpenBao has re-wrapped; the generation itself
-// stays in the escrow while any retained backup may need it.
-func (r SealRecord) Rotate(now time.Time) (SealRecord, SealDelivery, error) {
-	old := r.Current()
-	g, err := newGeneration(now)
-	if err != nil {
-		return r, SealDelivery{}, err
-	}
-	if g.ID == old.ID {
-		return r, SealDelivery{}, errors.New("a seal rotation needs a new generation id; rotate again later")
-	}
-	for i := range r.Generations {
-		if r.Generations[i].ID == old.ID {
-			t := now.UTC()
-			r.Generations[i].RetiredAt = &t
-		}
-	}
-	r.Generations = append(r.Generations, g)
-	return r, SealDelivery{Current: g.ID, Previous: old.ID}, nil
-}
-
-// ValidateKeyID guards the identifier format the static wrapper persists.
-func ValidateKeyID(id string) error {
-	if strings.TrimSpace(id) == "" {
-		return errors.New("a seal generation needs a permanent identifier")
-	}
-	return nil
 }
 
 // EnsureSealRecord makes sure the box escrow holds the seal record, creating

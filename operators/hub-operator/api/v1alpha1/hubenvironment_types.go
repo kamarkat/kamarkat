@@ -257,6 +257,16 @@ type HubEnvironmentStatus struct {
 	// ObservedGeneration reflects the generation of the most recently observed HubEnvironment
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// OpenBaoIncarnation is the UID of the openbao-db Cluster that hub-operator
+	// last re-applied the box's complete desired authorization against (PKI roles,
+	// every spoke's mount and verification key, every application's role and
+	// policy). A restored openbao-db is a new Cluster with a new UID, so a value
+	// differing from the live UID means a restored store has not yet been brought
+	// back to desired state; `kakt openbao recover` waits for them to match
+	// (ADR-117 §7, recovery step "authorization").
+	// +optional
+	OpenBaoIncarnation string `json:"openBaoIncarnation,omitempty"`
 }
 
 // +kubebuilder:object:root=true

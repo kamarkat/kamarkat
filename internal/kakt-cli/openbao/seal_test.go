@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestSealDeliveryRotationAndRestoreSelection(t *testing.T) {
+func TestSealDeliveryAndRestoreSelection(t *testing.T) {
 	ctx := context.Background()
 	cs := fake.NewSimpleClientset()
 	t0 := now
@@ -31,44 +31,47 @@ func TestSealDeliveryRotationAndRestoreSelection(t *testing.T) {
 		t.Fatalf("first delivery must carry only the current generation: %v", sec.StringData)
 	}
 
-	// Rotation: overlap configuration carries both.
+	// A record carrying a later generation and an overlap delivery, as escrow
+	// history may hold for a box restored across a key change.
 	t1 := t0.Add(24 * time.Hour)
-	r, overlap, err := r.Rotate(t1)
+	g2, err := newGeneration(t1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err = Deliver(ctx, cs, r, overlap, t1); err != nil {
+	r.Generations = append(r.Generations, g2)
+	if r, err = Deliver(ctx, cs, r, SealDelivery{Current: g2.ID, Previous: g1}, t1); err != nil {
 		t.Fatal(err)
 	}
 	sec, _ = cs.CoreV1().Secrets(Namespace).Get(ctx, SealSecretName, metav1.GetOptions{})
-	if sec.StringData[envPreviousID] != g1 || sec.StringData[envCurrentKeyID] == g1 {
+	if sec.StringData[envPreviousID] != g1 || sec.StringData[envCurrentKeyID] != g2.ID {
 		t.Fatalf("overlap delivery must carry new current and old previous: %v", sec.StringData)
 	}
 
-	// After re-wrap: previous dropped from the Secret, but kept in the escrow record.
-	t2 := t1.Add(time.Hour)
-	if r, err = Deliver(ctx, cs, r, SealDelivery{Current: overlap.Current}, t2); err != nil {
-		t.Fatal(err)
+	// Restore selection: a recovery point before the change selects generation 1
+	// alone; one after it selects the overlap.
+	if cfg, ok := r.ConfigAt(t0.Add(time.Hour)); !ok || cfg.Current != g1 || cfg.Previous != "" {
+		t.Fatalf("restore selection before the change: %+v", cfg)
 	}
-	sec, _ = cs.CoreV1().Secrets(Namespace).Get(ctx, SealSecretName, metav1.GetOptions{})
-	if _, present := sec.StringData[envPreviousKey]; present {
-		t.Fatal("a previous key no longer configured must disappear from the Secret")
-	}
-	if _, ok := r.generation(g1); !ok {
-		t.Fatal("the retired generation must stay in the escrow record")
-	}
-
-	// A restore to a point inside the rotation selects the overlap configuration.
-	cfg, ok := r.ConfigAt(t1.Add(30 * time.Minute))
-	if !ok || cfg.Previous != g1 || cfg.Current != overlap.Current {
-		t.Fatalf("restore selection inside the rotation: %+v", cfg)
+	if cfg, ok := r.ConfigAt(t1.Add(time.Hour)); !ok || cfg.Current != g2.ID || cfg.Previous != g1 {
+		t.Fatalf("restore selection after the change: %+v", cfg)
 	}
 	// Before the first delivery there is no configuration in force.
 	if _, ok := r.ConfigAt(t0.Add(-time.Hour)); ok {
 		t.Fatal("no configuration was in force before the first delivery")
 	}
-	if len(r.History) != 3 {
-		t.Fatalf("each distinct delivery is recorded once: %d", len(r.History))
+
+	// Delivering an OLDER configuration (a restore) records it as in force now,
+	// and drops the previous key from the Secret.
+	t2 := t1.Add(time.Hour)
+	if r, err = Deliver(ctx, cs, r, SealDelivery{Current: g1}, t2); err != nil {
+		t.Fatal(err)
+	}
+	sec, _ = cs.CoreV1().Secrets(Namespace).Get(ctx, SealSecretName, metav1.GetOptions{})
+	if _, present := sec.StringData[envPreviousKey]; present || sec.StringData[envCurrentKeyID] != g1 {
+		t.Fatalf("restored configuration not delivered exactly: %v", sec.StringData)
+	}
+	if len(r.History) != 3 || r.InForce().Current != g1 {
+		t.Fatalf("each distinct delivery is recorded once and the last is in force: %+v", r.History)
 	}
 	// Re-delivering what is in force records nothing new.
 	if r, err = Deliver(ctx, cs, r, r.InForce(), t2.Add(time.Minute)); err != nil || len(r.History) != 3 {

@@ -161,6 +161,15 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// A restored store (a new openbao-db incarnation) is brought back to the box's
+	// complete desired authorization in one pass, and the pass is recorded against
+	// the incarnation it covered (ADR-117 §7). On an ordinary box this runs once.
+	if err := r.reconcileOpenBaoIncarnation(ctx, hubEnv); err != nil {
+		logger.Error(err, "Failed to re-apply authorization to the current OpenBao incarnation")
+		r.setCondition(ctx, hubEnv, "OpenBaoAuthorizationReconciled", metav1.ConditionFalse, "ReconcileFailed", err.Error())
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	// Hub application login roles: OpenBao generates and rotates each password
 	// (ADR-117 §7.3). A role counts as provisioned only once OpenBao has rotated
 	// it, i.e. holds a password it set itself.
@@ -210,6 +219,31 @@ func (r *HubEnvironmentReconciler) setCondition(ctx context.Context, hubEnv *ops
 	if err := r.Status().Update(ctx, hubEnv); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to update HubEnvironment status", "condition", condType)
 	}
+}
+
+// openBaoDatabase is the CloudNativePG Cluster holding OpenBao's storage.
+const openBaoDatabase = "openbao-db"
+
+// reconcileOpenBaoIncarnation re-applies every authorization object hub-operator
+// owns -- pki_int roles, each spoke's auth mount, verification key, roles and
+// policies, each application's role and policy -- when the live openbao-db
+// Cluster is not the incarnation last recorded, then records it.
+func (r *HubEnvironmentReconciler) reconcileOpenBaoIncarnation(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) error {
+	var db cnpgv1.Cluster
+	if err := r.Get(ctx, types.NamespacedName{Namespace: hubEnv.Spec.Database.Namespace, Name: openBaoDatabase}, &db); err != nil {
+		return fmt.Errorf("read %s: %w", openBaoDatabase, err)
+	}
+	uid := string(db.UID)
+	if hubEnv.Status.OpenBaoIncarnation == uid {
+		return nil
+	}
+	if err := reconcileOpenBaoAuthorization(ctx, r.Client, r.UncachedClient, r.Store.Bao); err != nil {
+		return err
+	}
+	hubEnv.Status.OpenBaoIncarnation = uid
+	r.setCondition(ctx, hubEnv, "OpenBaoAuthorizationReconciled", metav1.ConditionTrue, "Reconciled",
+		"desired authorization re-applied to openbao-db incarnation "+uid)
+	return nil
 }
 
 // reconcileStaticRoles converges one static role per declared login role and
@@ -479,6 +513,11 @@ func (r *HubEnvironmentReconciler) findHubEnvironmentForCNPG(ctx context.Context
 	var requests []reconcile.Request
 	for _, hubEnv := range hubEnvList.Items {
 		if hubEnv.Spec.Database.Namespace != cluster.Namespace {
+			continue
+		}
+		if cluster.Name == openBaoDatabase {
+			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{
+				Name: hubEnv.Name, Namespace: hubEnv.Namespace}})
 			continue
 		}
 		for _, declared := range hubEnv.Spec.DatabaseClusters() {

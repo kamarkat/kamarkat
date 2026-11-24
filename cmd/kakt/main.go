@@ -54,6 +54,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newBundleVersionCmd())
 	rootCmd.AddCommand(newEscrowCmd())
 	rootCmd.AddCommand(newPKICmd())
+	rootCmd.AddCommand(newOpenBaoCmd())
 	rootCmd.AddCommand(newEncryptionCmd())
 	rootCmd.AddCommand(newProposalCmd())
 	rootCmd.AddCommand(newSupportCmd())

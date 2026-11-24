@@ -1,6 +1,0 @@
-resources:
-# The generator's own filename, <group>_<plural>.yaml. It was
-# bases/_spokemachineidentities.yaml -- the shape controller-gen writes when it
-# cannot resolve the group -- so the tracked CRD and the generated one were
-# different files and `make manifests` updated neither.
-- bases/identity.kamarkat.io_spokemachineidentities.yaml

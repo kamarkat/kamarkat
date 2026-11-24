@@ -51,20 +51,9 @@ func Connect(ctx context.Context, cs kubernetes.Interface, kubeconfig string) (*
 	if !pool.AppendCertsFromPEM([]byte(cm.Data["ca.crt"])) {
 		return nil, fmt.Errorf("%s/%s holds no certificate", Namespace, ListenerTrustConfig)
 	}
-	port, err := freePort()
+	port, stop, err := PortForward(ctx, kubeconfig, Namespace, "svc/"+activeSvc, 8200)
 	if err != nil {
 		return nil, err
-	}
-	pfCtx, cancel := context.WithCancel(context.Background())
-	args := []string{"port-forward", "-n", Namespace, "svc/" + activeSvc, strconv.Itoa(port) + ":8200"}
-	if kubeconfig != "" {
-		args = append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	cmd := exec.CommandContext(pfCtx, "kubectl", args...)
-	cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("start port-forward to %s/%s: %w", Namespace, activeSvc, err)
 	}
 	c := &Client{
 		addr: "https://127.0.0.1:" + strconv.Itoa(port),
@@ -74,22 +63,44 @@ func Connect(ctx context.Context, cs kubernetes.Interface, kubeconfig string) (*
 				RootCAs: pool, ServerName: ServerName, MinVersion: tls.VersionTLS12,
 			}},
 		},
-		stop: func() { cancel(); _ = cmd.Wait() },
+		stop: stop,
 	}
+	return c, nil
+}
+
+// PortForward forwards a free local port to target's remotePort in namespace and
+// waits until it accepts connections. stop ends it.
+func PortForward(ctx context.Context, kubeconfig, namespace, target string, remotePort int) (int, func(), error) {
+	port, err := freePort()
+	if err != nil {
+		return 0, nil, err
+	}
+	pfCtx, cancel := context.WithCancel(context.Background())
+	args := []string{"port-forward", "-n", namespace, target, strconv.Itoa(port) + ":" + strconv.Itoa(remotePort)}
+	if kubeconfig != "" {
+		args = append([]string{"--kubeconfig", kubeconfig}, args...)
+	}
+	cmd := exec.CommandContext(pfCtx, "kubectl", args...)
+	cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return 0, nil, fmt.Errorf("start port-forward to %s/%s: %w", namespace, target, err)
+	}
+	stop := func() { cancel(); _ = cmd.Wait() }
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if conn, derr := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 500*time.Millisecond); derr == nil {
 			conn.Close()
-			return c, nil
+			return port, stop, nil
 		}
 		if time.Now().After(deadline) {
-			c.Close()
-			return nil, fmt.Errorf("port-forward to %s/%s did not become ready", Namespace, activeSvc)
+			stop()
+			return 0, nil, fmt.Errorf("port-forward to %s/%s did not become ready", namespace, target)
 		}
 		select {
 		case <-ctx.Done():
-			c.Close()
-			return nil, ctx.Err()
+			stop()
+			return 0, nil, ctx.Err()
 		case <-time.After(300 * time.Millisecond):
 		}
 	}

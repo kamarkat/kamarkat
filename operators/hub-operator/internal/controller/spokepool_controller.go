@@ -18,8 +18,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -311,21 +311,21 @@ func (r *SpokePoolReconciler) updateStatusCondition(ctx context.Context, spokePo
 				Type:    "CrossplaneAdminPasswordGenerated",
 				Status:  metav1.ConditionTrue,
 				Reason:  "Generated",
-				Message: fmt.Sprintf("Crossplane-admin password generated and uploaded to Infisical at %s-crossplane-admin-password", spokeName),
+				Message: fmt.Sprintf("Crossplane-admin password generated and written to OpenBao at %s-crossplane-admin-password", spokeName),
 			}
 		case secrets.EnsureAlreadyExists:
 			crossplaneCondition = metav1.Condition{
 				Type:    "CrossplaneAdminPasswordGenerated",
 				Status:  metav1.ConditionTrue,
 				Reason:  "AlreadyExists",
-				Message: fmt.Sprintf("Crossplane-admin password already exists in Infisical at %s-crossplane-admin-password", spokeName),
+				Message: fmt.Sprintf("Crossplane-admin password already exists in OpenBao at %s-crossplane-admin-password", spokeName),
 			}
 		default:
 			crossplaneCondition = metav1.Condition{
 				Type:    "CrossplaneAdminPasswordGenerated",
 				Status:  metav1.ConditionFalse,
 				Reason:  "PasswordMissing",
-				Message: "CRITICAL: Crossplane-admin password missing from Infisical for already-provisioned SpokePool. Manual recovery required.",
+				Message: "CRITICAL: Crossplane-admin password missing from OpenBao for already-provisioned SpokePool. Manual recovery required.",
 			}
 		}
 		meta.SetStatusCondition(&metaConditions, crossplaneCondition)
@@ -937,8 +937,12 @@ const openBaoFinalizer = "ops.nutgraf.in/openbao-authority"
 // signing key: Cluster API's <cluster>-sa Secret, tls.crt. Only the public key is
 // read; the private half never leaves that Secret.
 func (r *SpokePoolReconciler) spokeSigningKey(ctx context.Context, cluster string) (string, error) {
+	return spokeSigningKey(ctx, r.UncachedClient, cluster)
+}
+
+func spokeSigningKey(ctx context.Context, c client.Client, cluster string) (string, error) {
 	var sec corev1.Secret
-	if err := r.UncachedClient.Get(ctx, types.NamespacedName{Namespace: "platform-capi", Name: cluster + "-sa"}, &sec); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "platform-capi", Name: cluster + "-sa"}, &sec); err != nil {
 		return "", err
 	}
 	pub := strings.TrimSpace(string(sec.Data["tls.crt"]))

@@ -72,7 +72,13 @@ func (i *Installer) PrepareOpenBao(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	updated, err := openbao.Deliver(ctx, cs, rec, rec.InForce(), time.Now())
+	// A reconstructed hub declares openbao-db in recovery mode from the start, so
+	// the configuration in force at its recovery point is delivered, not the latest.
+	cfg, _, err := openbao.SealConfigForStore(ctx, openbao.ClusterLive{CS: cs, Kubeconfig: i.Kubeconfig}, rec)
+	if err != nil {
+		return err
+	}
+	updated, err := openbao.Deliver(ctx, cs, rec, cfg, time.Now())
 	if err != nil {
 		return err
 	}
