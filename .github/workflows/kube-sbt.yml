@@ -3,7 +3,7 @@ name: kube-sbt
 on:
   push:
     # feat/** as well as main, matching every other operator image this platform
-    # deploys (hub-operator, spoke-identity-operator, ephemeral-job-operator,
+    # deploys (hub-operator, ephemeral-job-operator,
     # ephemeral-vm-provisioner, workspace-sync, support-agent). Those were moved
     # one at a time from 2026-06-04 onward; kube-sbt was not among them.
     #

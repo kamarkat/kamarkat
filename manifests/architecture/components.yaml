@@ -169,8 +169,17 @@ unreferenced:
   - path: manifests/hub-core-services/credit-authority/database-recovery
     reason: *database-recovery
 
-  - path: manifests/hub-core-services/infisical/database-recovery
+  - path: manifests/hub-core-services/openbao/database-recovery
     reason: *database-recovery
+
+  - path: manifests/hub-core-services/openbao-recovery
+    reason: >-
+      Break-glass (ADR-117 §7, ADR-092). Restored-store recovery: the descriptor
+      points here only while the administrator has entered recovery, and the
+      overlay withholds consumer network admission (ESO, cert-manager, the
+      Gateway) while the recovery identity sweeps restored tokens and
+      re-establishes static passwords. Settled back to ../openbao when the
+      recovery record is complete.
 
 # ── The bundle's capability declaration (ADR-066) ────────────────────────────
 #

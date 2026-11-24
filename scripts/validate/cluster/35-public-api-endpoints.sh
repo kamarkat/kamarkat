@@ -8,7 +8,7 @@ PUBLIC_ENDPOINTS=(
   "auth.{zone}           | /.well-known/oauth-authorization-server | 200      | yes       | auth metadata"
   "auth.{zone}           | /.well-known/openid-configuration | 200           | no        | auth discovery passthrough"
   "api.{zone}            | /                           | 200 401 403 404     | yes       | api gateway"
-  "infisical.{zone}      | /api/status                 | 200                 | yes       | infisical api"
+  "openbao.{zone}        | /v1/sys/health              | 200 429 473         | yes       | openbao api (through the Gateway)"
   "console.{zone}        | /                           | 200 302 303 404     | yes       | console"
   "argocd.{zone}         | /healthz                    | 200                 | yes       | argocd"
   "dashboard.{zone}      | /                           | 200 302 401         | yes       | headlamp"

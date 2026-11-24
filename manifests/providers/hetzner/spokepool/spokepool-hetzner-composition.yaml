@@ -137,9 +137,10 @@ spec:
                 fromFieldPath: spec.nodePool.instanceType
                 toFieldPath: spec.forProvider.manifest.spec.topology.variables[1].value
 
-          # Bootstrap PKI Secrets created by hub-operator and spoke-identity-operator
-          # hub-operator: Certificate CR + bootstrap-cert CRS wrapper
-          # spoke-identity-operator: SpokeMachineIdentity CR + machine-identity CRS wrapper
+          # Bootstrap PKI Secrets created by hub-operator: Certificate CR +
+          # bootstrap-cert CRS wrapper. The spoke's secret store and issuer need no
+          # delivered credential: they log in with the cluster's own ServiceAccount
+          # tokens (ADR-117 §4).
 
           # ClusterResourceSet for CNI, CCM, and ArgoCD Agent Bootstrap
           # Wrapped in provider-kubernetes Object
@@ -195,19 +196,11 @@ spec:
                           kind: ConfigMap
                         - name: argocd-agent-rbac
                           kind: ConfigMap
-                        # Bootstrap PKI (hub-operator/spoke-identity-operator, strategy: Once)
-                        # Machine Identity credentials for ESO ClusterSecretStore on Spoke
-                        - name: ""
-                          kind: Secret
+                        # Bootstrap PKI (hub-operator)
                         # 72-hour bootstrap certificate for ArgoCD Agent mTLS
                         - name: ""
                           kind: Secret
                         # Principal root CA for ArgoCD Agent mTLS (argocd-agent-ca)
-                        - name: ""
-                          kind: Secret
-                        # ADR-048 second-stage: completed ClusterIssuer rendered by
-                        # spoke-identity-operator into the {spoke}-cluster-issuer CRS
-                        # wrapper Secret.
                         - name: ""
                           kind: Secret
                         # ADR-046 §24 / ADR-048 second-stage: the spoke's cilium-config,
@@ -289,7 +282,7 @@ spec:
                   - type: string
                     string:
                       type: Format
-                      fmt: "%s-machine-identity"
+                      fmt: "%s-bootstrap-cert"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
                 toFieldPath: spec.forProvider.manifest.spec.resources[13].name
@@ -297,26 +290,10 @@ spec:
                   - type: string
                     string:
                       type: Format
-                      fmt: "%s-bootstrap-cert"
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
                       fmt: "%s-agent-ca"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[15].name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
-                      fmt: "%s-cluster-issuer"
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[16].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
                 transforms:
                   - type: string
                     string:
@@ -626,7 +603,6 @@ spec:
                       fmt: "%s-kubeconfig"
 
 # ========================================================================
-# PKI Distribution via CRS (hub-operator + spoke-identity-operator create per-spoke CRS Secrets)
-# hub-operator: bootstrap-cert wrapper; spoke-identity-operator: machine-identity wrapper
+# PKI Distribution via CRS (hub-operator creates the per-spoke bootstrap-cert wrapper)
 # ADR-035: hub-operator declares Certificate intent, spoke cert-manager handles Day-2
 # ========================================================================

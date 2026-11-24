@@ -161,29 +161,29 @@ for a in json.load(sys.stdin)["items"]:
     fi
 
     # Bypass attempts on the hub, from a running pod of another platform
-    # namespace with a Node runtime (Infisical): the pod's address directly.
+    # namespace (OpenBao, platform-data; busybox nc): the pod's address directly.
     local ip probe ledger_port gateway_port host public
     ip=$(kc -n "$ns" get pods -l app.kubernetes.io/name=credit-authority -o jsonpath='{.items[0].status.podIP}')
-    probe='const n=require("net");const s=n.connect({host:process.argv[1],port:+process.argv[2]});s.on("connect",()=>{console.log("open");process.exit(0)});s.on("error",()=>{console.log("closed");process.exit(0)});setTimeout(()=>{console.log("timeout");process.exit(0)},4000)'
+    probe='nc -z -w 4 "$0" "$1" >/dev/null 2>&1 && echo open || echo closed'
     local control
-    ledger_port=$(kc -n platform-security exec deploy/infisical-standalone-infisical -- node -e "$probe" "$ip" 3068)
-    gateway_port=$(kc -n platform-security exec deploy/infisical-standalone-infisical -- node -e "$probe" "$ip" 3000)
+    ledger_port=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" "$ip" 3068)
+    gateway_port=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" "$ip" 3000)
     # The control: a connection this pod is allowed to make. Without it, a
     # refusal could be this pod's own egress policy rather than the Credit
     # Authority's ingress, and the check would pass proving nothing.
-    # Its OWN database, which infisical-db-access admits platform-security to on 5432.
+    # Its OWN database, which openbao-db's NetworkPolicy admits OpenBao to on 5432.
     # Not another application's cluster: after ADR-112 each one admits only its own
     # consumer, so a probe at any other would be refused by THAT policy and the
     # control would prove the opposite of what it is for.
-    control=$(kc -n platform-security exec deploy/infisical-standalone-infisical -- node -e "$probe" infisical-db-rw.platform-data.svc.cluster.local 5432)
+    control=$(kc -n platform-data exec openbao-0 -c openbao -- sh -c "$probe" openbao-db-rw.platform-data.svc.cluster.local 5432)
     if [[ -z "$ip" || -z "$ledger_port" || -z "$gateway_port" ]]; then
-        hard_fail "X6 cannot probe the pod from platform-security (address '${ip}')"
+        hard_fail "X6 cannot probe the pod from platform-data (address '${ip}')"
     elif [[ "$control" != "open" ]]; then
-        hard_fail "X6 inconclusive: platform-security's own connection to infisical-db is '${control}', so a refusal proves nothing"
+        hard_fail "X6 inconclusive: OpenBao's own connection to openbao-db is '${control}', so a refusal proves nothing"
     elif [[ "$ledger_port" != "open" && "$gateway_port" != "open" ]]; then
         pass "X6 from another hub namespace, the ledger's port is $ledger_port and the gateway's is $gateway_port: only the Gateway reaches it"
     else
-        hard_fail "X6 from platform-security the ledger port is '${ledger_port}' and the gateway port '${gateway_port}'; both must refuse"
+        hard_fail "X6 from platform-data the ledger port is '${ledger_port}' and the gateway port '${gateway_port}'; both must refuse"
     fi
 
     # Through the Gateway, from the declaring application's SDK on its spoke.

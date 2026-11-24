@@ -30,7 +30,6 @@ PACKAGES=(
   "mcp-server|kamarkat/kamarkat/mcp-server|$PKG/kamarkat%2Fmcp-server/settings"
   "ephemeral-job-operator|kamarkat/kamarkat/ephemeral-job-operator|$PKG/kamarkat%2Fephemeral-job-operator/settings"
   "ephemeral-vm-provisioner|kamarkat/kamarkat/ephemeral-vm-provisioner|$PKG/kamarkat%2Fephemeral-vm-provisioner/settings"
-  "spoke-identity-operator|kamarkat/kamarkat/spoke-identity-operator|$PKG/kamarkat%2Fspoke-identity-operator/settings"
   "workspace-sync|kamarkat/kamarkat/workspace-sync|$PKG/kamarkat%2Fworkspace-sync/settings"
   # Pulled with no imagePullSecret -- support-agent by the hub and every spoke,
   # postgres-partman by the billing cluster (CNPG pulls it on each node), so

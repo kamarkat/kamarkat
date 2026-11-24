@@ -56,14 +56,13 @@ type App struct {
 // ONE PATH PER CLUSTER, because a deployment's secrets are the cluster's.
 //
 // An application runs on every cluster serving its environment, and each of
-// those deployments reads from its own cluster's folder -- the store on a
-// managed cluster is scoped to /spoke-pool/<that cluster>/ and can reach no
-// other. So supplying a value means writing it once per cluster, which is what
+// those deployments reads from its own cluster's scope -- the store on a
+// managed cluster logs in through that cluster's own auth mount and can read
+// spokes/<that cluster>/tenants/<app> and nothing else (ADR-117 §4). So supplying a value means writing it once per cluster, which is what
 // the callers loop over; a single path would have written it where exactly one
 // deployment could read it.
 //
-// The `/spoke-pool/<name>/` segment keeps its spelling: renaming it would orphan
-// every secret already written, on every box.
+// tenant_chart_test.go proves the tenant chart reads exactly this path.
 func (f App) SecretPathOn(clusterName string) string {
 	// The KV v2 secret this deployment's tenant SecretStore reads (ADR-117 §4):
 	// one secret per application per cluster, each declared key a property.

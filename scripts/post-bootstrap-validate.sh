@@ -284,7 +284,7 @@ check_argocd_app() {
 # bounded at ~7 minutes and closes without intervention.
 #
 # Reporting that window as a critical failure is how a healthy platform reads as
-# broken: on 2026-08-23 Infisical returned at 10:53, validation ran mid-backoff and
+# broken: on 2026-08-23 the secret store returned at 10:53, validation ran mid-backoff and
 # flagged 21 ExternalSecrets, and all of them were SecretSynced by 11:04 untouched.
 # So the age of the failing condition is the discriminator — a condition younger than
 # the backoff cap is a wait, an older one is a real failure.
@@ -382,7 +382,6 @@ check_namespaces() {
         platform-billing
         platform-credits
         platform-observability
-        platform-security
         platform-edge
         platform-controlplane
         cert-manager
@@ -443,34 +442,44 @@ check_eso() {
 
     # ClusterSecretStore
     local css_ready
-    css_ready=$(kc get clustersecretstore infisical-backend -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+    css_ready=$(kc get clustersecretstore openbao-hub -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
     if [[ "$css_ready" == "True" ]]; then
-        log_pass "ClusterSecretStore infisical-backend: Ready"
+        log_pass "ClusterSecretStore openbao-hub: Ready"
     else
-        log_fail "ClusterSecretStore infisical-backend: Not ready (status=$css_ready)"
+        log_fail "ClusterSecretStore openbao-hub: Not ready (status=$css_ready)"
     fi
 }
 
-# ─── 5. INFISICAL ─────────────────────────────────────────────────────────────
-check_infisical() {
-    log_section "5. INFISICAL"
-    check_namespace_pods "platform-security"
+# ─── 5. OPENBAO ───────────────────────────────────────────────────────────────
+check_openbao() {
+    log_section "5. OPENBAO (secret store, ADR-117)"
+    check_namespace_pods "platform-data" "app.kubernetes.io/name=openbao"
 
-    # The role credentials ESO delivers, which the hub-operator blocks on before it
-    # provisions any role (hubenvironment_controller.go, requiredSecrets). One per
-    # declared role, derived from the same names RoleSecretName builds.
+    # Every application database credential, delivered by ESO from OpenBao static
+    # roles (VaultDynamicSecret beside each consumer), and billing's owner Secret.
     local key_secrets=(
-        "platform-data:hub-grafana-db-credentials"
-        "platform-data:hub-credits-db-credentials"
-        # Not a declared role: billing-db's initdb owner (ADR-113), which the
+        "platform-identity:zitadel-db-credentials"
+        "platform-credits:credit-authority-db"
+        "platform-observability:grafana-db"
+        # Not a static role: billing-db's initdb owner (ADR-113), which the
         # cluster cannot initialise without.
         "platform-data:hub-billing-db-credentials"
-        "platform-identity:zitadel-db-credentials"
     )
     for entry in "${key_secrets[@]}"; do
         local ns="${entry%%:*}"
         local name="${entry##*:}"
         check_external_secret "$ns" "$name"
+    done
+
+    # The private-PKI issuers: Ready only once the intermediate is signed.
+    local issuer ready
+    for issuer in openbao-fleet openbao-signing; do
+        ready=$(kc get clusterissuer "$issuer" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+        if [[ "$ready" == "True" ]]; then
+            log_pass "ClusterIssuer $issuer: Ready"
+        else
+            log_fail "ClusterIssuer $issuer: Not ready (status=$ready) — is the intermediate signed? (kakt pki sign-intermediate)"
+        fi
     done
 }
 
@@ -658,15 +667,7 @@ check_spoke() {
         -n platform-capi --timeout=5s >/dev/null 2>&1; then
         log_pass "Bootstrap certificate: Ready"
     else
-        log_fail "Bootstrap certificate: Not Ready — check cert-manager and infisical-issuer"
-    fi
-
-    # SpokeMachineIdentity Ready condition (provisioned by spoke-identity-operator)
-    if kc wait --for=condition=Ready spokemachineidentity "${SPOKEPOOL_NAME}" \
-        -n platform-capi --timeout=5s >/dev/null 2>&1; then
-        log_pass "SpokeMachineIdentity: Ready"
-    else
-        log_fail "SpokeMachineIdentity: Not Ready — check spoke-identity-operator logs"
+        log_fail "Bootstrap certificate: Not Ready — check cert-manager and the openbao-fleet issuer"
     fi
 
     check_spoke_platform
@@ -841,7 +842,6 @@ check_spoke_platform() {
     # cert-manager had been 1/1 for hours.
     check_spoke_deployment "cert-manager" "cm-cert-manager"
     check_spoke_deployment "cert-manager" "cm-cert-manager-webhook"
-    check_spoke_deployment "cert-manager" "infisical-issuer"
     check_spoke_deployment "agent-sandbox-system" "agent-sandbox-controller"
 
     # Storage driver — required for CNPG PVs (tenant databases)
@@ -946,7 +946,8 @@ check_platform_argocd_apps() {
         "platform-crossplane-providers"
         "platform-cluster-secret-store"
         "platform-cloudnative-pg"
-        "platform-infisical-db"
+        "platform-openbao-db"
+        "platform-openbao"
         "platform-zitadel-db"
         "platform-credits-db"
         "platform-grafana-db"
@@ -963,7 +964,6 @@ check_platform_argocd_apps() {
     local warn_apps=(
         "platform-kyverno"
         "zitadel"
-        "platform-infisical"
     )
     for app in "${warn_apps[@]}"; do
         check_argocd_app "$app" "WARN"
@@ -1067,7 +1067,7 @@ main() {
     check_argocd
     check_crossplane
     check_eso
-    check_infisical
+    check_openbao
     check_databases
     check_ory
     check_hub_operator

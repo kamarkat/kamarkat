@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Resolve every spoke ExternalSecret's effective remoteRef.key and assert it lands
-inside the cell's ADR-031 prefix.
+inside the cluster's own OpenBao scope (ADR-117 §4): spokes/<cluster>/platform, or
+an application scope spokes/<cluster>/tenants/<app>. The cluster's policy reads
+nothing else, so a key outside it is a secret that can never sync.
 
 Kept as a real file rather than a heredoc: the logic parses YAML that itself contains
 quotes and Go-template braces, and embedding it in `$(... <<'PY' ...)` has already
@@ -19,7 +21,9 @@ from pathlib import Path
 import yaml
 
 CELL = "test-cell"  # stand-in for the ArgoCD {{.name}} substitution
-ALLOWED = (f"/spoke-pool/{CELL}/shared/", f"/spoke-pool/{CELL}/tenants/")
+PLATFORM = f"spokes/{CELL}/platform"
+TENANTS = f"spokes/{CELL}/tenants/"
+STORES = {"openbao-platform", "tenant-secret-store"}
 # THE REAL RENDER ROOTS, not the provider-neutral base.
 #
 # This built .../infra alone, which is what providers/<prov>/kustomization.yaml
@@ -37,29 +41,6 @@ CATALOG_ROOTS = sorted(
     if (d / "kustomization.yaml").is_file()
 )
 
-# Known root-path consumers, recorded so the rule is enforceable TODAY while the
-# debt stays visible — the same pattern 99-tenant-identifiers.sh uses.
-#
-# These are real ADR-031 violations: the cell Machine Identity cannot read a root
-# path, so they will fail even after the spoke store is healthy. They are NOT fixed
-# here because the fix is a producer change — something must write the value to
-# /spoke-pool/<cell>/shared/ — and the ownership/generation contract for that is a
-# deliberate architecture decision, not a path rewrite.
-#
-#   crossplane-admin-credentials  <cell>-crossplane-admin-password
-#       already per-cell BY NAME, at the root. hub-operator generates it
-#       (EnsureCrossplaneAdminPassword); moving it under the cell prefix is a
-#       producer-side change.
-#   hetzner-dns-credentials       hcloud-token
-#       fleet-constant. Per the Grafana Cloud precedent it should be materialised
-#       into each cell path rather than read from a shared root.
-#
-# Remove an entry the moment its producer writes the cell-scoped path. The list
-# only shrinks.
-BASELINE = {
-    "crossplane-admin-credentials",
-    "hetzner-dns-credentials",
-}
 CHART = "manifests/argocd/environment-manager"
 APPSET = "platform-spoke-catalog"
 
@@ -87,6 +68,10 @@ for doc in rendered:
     if not doc or doc.get("kind") != "ExternalSecret":
         continue
     name = doc["metadata"]["name"]
+    store = (doc["spec"].get("secretStoreRef") or {}).get("name", "")
+    # A generator-only ExternalSecret reads no store.
+    if (doc["spec"].get("data") or []) and store not in STORES and name not in secrets:
+        print(f"BAD\t{name}\treads store {store!r}, not the cluster's own OpenBao store")
     for df in (doc["spec"].get("dataFrom") or []):
         if not (df.get("sourceRef") or {}).get("generatorRef"):
             # dataFrom without a generator has no /spec/data/N index for a JSON6902 patch to target,
@@ -197,25 +182,16 @@ for p in patches:
 
 # ── 3. every resolved key must land inside the cell prefix ───────────────────
 clean = True
-baselined = []
 for name, keys in sorted(secrets.items()):
     for i, key in enumerate(keys):
-        if not key or key.startswith(ALLOWED):
-            continue
-        if name in BASELINE:
-            baselined.append(f"{name} data[{i}] -> {key}")
+        if not key or key == PLATFORM or key.startswith(TENANTS):
             continue
         clean = False
         if "PLACEHOLDER" in key:
             print(f"BAD\t{name}\tdata[{i}] still resolves to {key!r} — "
-                  f"no ApplicationSet patch substitutes the cell id")
+                  f"no ApplicationSet patch substitutes the cluster name")
         else:
             print(f"BAD\t{name}\tdata[{i}] resolves to {key!r}, outside "
-                  f"/spoke-pool/<cell>/{{shared,tenants}}/ (ADR-031)")
-
+                  f"spokes/<cluster>/{{platform,tenants/<app>}} (ADR-117 §4)")
 if clean:
-    n = len(secrets) - len(BASELINE)
-    print(f"OK\t{n} spoke ExternalSecret(s) resolve inside the cell prefix; "
-          f"no new root-path consumers")
-for b in baselined:
-    print(f"NOTE\t  root-path (ADR-031 debt, pending producer decision): {b}")
+    print(f"OK\t{len(secrets)} spoke ExternalSecret(s) resolve inside the cluster's own OpenBao scope")

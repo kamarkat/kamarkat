@@ -318,7 +318,7 @@ func TestScopeIsDeclaredForSecurityCriticalArtefacts(t *testing.T) {
 		}
 	}
 
-	box := []string{escrowSecretName, ArtifactZitadelMasterkey, ArtifactBackupSSECKey}
+	box := []string{ArtifactZitadelMasterkey, ArtifactBackupSSECKey}
 	for _, a := range box {
 		scope, declared := DeclaredScope(a)
 		if scope != ScopeBox {
@@ -383,12 +383,12 @@ func TestClusterScopedArtefactsDoNotCollide(t *testing.T) {
 	}
 
 	// The box's own material is deliberately one copy, reached from either
-	// incarnation: that is what lets a successor decrypt the restored secret store.
-	if err := e.BackupArtifact(ctx, first, escrowSecretName, "master"); err != nil {
-		t.Fatalf("BackupArtifact(master keys): %v", err)
+	// incarnation: that is what lets a successor decrypt its predecessor's backups.
+	if err := e.BackupArtifact(ctx, first, ArtifactBackupSSECKey, "ssec"); err != nil {
+		t.Fatalf("BackupArtifact(backup key): %v", err)
 	}
-	if got, _ := e.RestoreArtifact(ctx, second, escrowSecretName); got != "master" {
-		t.Errorf("the successor read the box's master keys as %q; it must find its "+
+	if got, _ := e.RestoreArtifact(ctx, second, ArtifactBackupSSECKey); got != "ssec" {
+		t.Errorf("the successor read the box's backup key as %q; it must find its "+
 			"predecessor's", got)
 	}
 }

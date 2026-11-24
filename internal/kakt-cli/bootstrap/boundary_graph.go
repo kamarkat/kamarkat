@@ -11,7 +11,6 @@ import (
 // shape -- A needs something from B, and B is gated behind a gate that waits on
 // A -- and each was found only as a fifteen-minute timeout on a live cluster:
 //
-//	03 hub-operator ── needs SpokeMachineIdentity CRD ──> 04 spoke-identity-operator
 //	04              ── needs the database roles       ──> 03 hub-operator
 //
 // A comparison of boundary numbers catches the two-node case and misses every
@@ -20,8 +19,8 @@ import (
 // any length and keeps working as boundaries are added.
 //
 // The limit is worth stating: this checks DECLARED dependencies. A component
-// that needs something at runtime without the boundary declaring it -- which is
-// exactly how the CRD deadlock above escaped -- is invisible here. That is an
+// that needs something at runtime without the boundary declaring it is
+// invisible here. That is an
 // argument for declaring such dependencies, not for trusting the check to find
 // what nobody wrote down.
 

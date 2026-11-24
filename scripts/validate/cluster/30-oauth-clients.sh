@@ -11,18 +11,18 @@
 #
 # So the assertion is deliberately end-to-end and against the issuer itself:
 #
-#   Infisical holds a client id for the tenant   (the platform published it)
+#   OpenBao holds a client id for the tenant     (the platform published it)
 #     ∧ Zitadel holds an application with that exact client id
 #     ∧ it lives in the tenant's own organisation
 #
-# Credentials come from the Infisical API rather than from the projected Secret,
+# Credentials come from OpenBao rather than from the projected Secret,
 # and that is the point: reading the Secret would only prove ESO copied
 # something. Reading the source of truth proves the value the platform published
 # is the value the issuer knows, which is what a login actually depends on.
 #
-# Infisical connection details come from the ADR-045 bootstrap-generated
-# artifacts committed in Git — the same values the platform itself runs on, so
-# this cannot drift from what it is validating.
+# OpenBao is read as the identities the platform itself reads it with (eso-hub
+# for the hub scope, openbao-app-secrets for tenant scopes), so this cannot pass
+# with access the platform does not have.
 
 # Local port for a port-forward, echoed on stdout. Ports are chosen by the
 # kernel (":0") because a fixed one collides with whatever else the operator is
@@ -53,56 +53,19 @@ validate_oauth_clients() {
     # to check against, and the platform's own zone is not a substitute.
     require_zone || return 0
 
-    # Infisical's coordinates, read from the ConfigMap the platform itself reads.
-    #
-    # This read two Kustomize patch files --
-    # hub-core-services/security/generated/infisical-fleet-issuer-patch.yaml and
-    # environments/base/generated/hub-bootstrap-config-patch.yaml -- and neither
-    # has existed for some time. manifests/generated/artifacts.yaml records why:
-    # the PKI coordinates "were generated here as a Kustomize patch ... they now
-    # reach the security component as chart values read from the infisical-auth
-    # Secret at seed time. Nothing is written to the tree, so there is no artifact
-    # to register or validate." So this gated on artifacts the design had removed,
-    # reported "bootstrap has not published Infisical's coordinates yet" on a box
-    # where it had, and could never once have passed.
-    #
-    # It is the argument the comment below already makes about the machine
-    # identity, applied to the coordinates as well: a validator that reads a
-    # different source than the platform can pass while the platform is broken, or
-    # fail while it works. hub-bootstrap-config is what hub-operator is wired to,
-    # so it is what this asks.
-    local secrets_project_id env_slug
-    secrets_project_id=$(kc get configmap hub-bootstrap-config -n platform-ops \
-        -o jsonpath='{.data.SECRET_STORE_SECRETS_PROJECT_ID}' 2>/dev/null)
-    env_slug=$(kc get configmap hub-bootstrap-config -n platform-ops \
-        -o jsonpath='{.data.SECRET_STORE_ENVIRONMENT_SLUG}' 2>/dev/null)
-
-    if [[ -z "$secrets_project_id" ]]; then
-        soft_fail "hub-bootstrap-config carries no SECRET_STORE_SECRETS_PROJECT_ID — bootstrap has not reached the Infisical API phase, or its generated values are not committed"
+    # The two read identities, exactly as the platform has them (ADR-117 §4):
+    # eso-hub reads the hub scope (the service token), openbao-app-secrets reads
+    # tenant scopes. Tokens are minted for audience "openbao" for ten minutes;
+    # minting needs cluster-admin, which is who runs this gate.
+    local hub_jwt app_jwt
+    hub_jwt=$(kc create token eso-hub-reader -n platform-ops --audience openbao --duration 10m 2>/dev/null)
+    app_jwt=$(kc create token openbao-app-secrets -n platform-data --audience openbao --duration 10m 2>/dev/null)
+    if [[ -z "$hub_jwt" || -z "$app_jwt" ]]; then
+        soft_fail "cannot mint OpenBao login tokens (eso-hub-reader / openbao-app-secrets ServiceAccounts absent) — the secret store is not deployed yet"
         return 0
     fi
 
-    # The machine identity, read from where the platform itself reads it.
-    #
-    # platform-ops/infisical-auth, keys client-id and client-secret, is what the
-    # infisical-backend ClusterSecretStore authenticates with
-    # (spec.provider.infisical.auth.universalAuthCredentials) and what the CLI
-    # creates (constants.NamespaceOps in components/secrets_database_impl.go).
-    # Both id and secret come from the Secret rather than the id from the
-    # ADR-045 artifact: the artifact is the issuer's copy, and a validator that
-    # reads a different source than the platform can pass while the platform
-    # cannot authenticate, or fail while it can.
-    local infisical_client_id infisical_client_secret
-    infisical_client_id=$(kc get secret infisical-auth -n platform-ops \
-        -o jsonpath='{.data.client-id}' 2>/dev/null | base64 -d 2>/dev/null)
-    infisical_client_secret=$(kc get secret infisical-auth -n platform-ops \
-        -o jsonpath='{.data.client-secret}' 2>/dev/null | base64 -d 2>/dev/null)
-    if [[ -z "$infisical_client_secret" || -z "$infisical_client_id" ]]; then
-        soft_fail "Secret platform-ops/infisical-auth absent or incomplete — the machine identity that reads Infisical does not exist yet"
-        return 0
-    fi
-
-    # Tenants, and the cell whose Infisical folder holds their secrets.
+    # Applications, and the cluster whose OpenBao scope holds their secrets.
     local tenants
     tenants=$(kc get ainativesaas -A -o json 2>/dev/null | python3 -c "
 import json,sys
@@ -110,7 +73,7 @@ try: d=json.load(sys.stdin)
 except Exception: sys.exit(0)
 for x in d.get('items',[]):
     spec=x.get('spec',{})
-    t=spec.get('tenantId') or x['metadata']['name']
+    t=spec.get('appId') or x['metadata']['name']
     c=spec.get('clusterName') or ''
     if t and c: print(t, c)
 " 2>/dev/null)
@@ -123,33 +86,38 @@ for x in d.get('items',[]):
 
     # Both services are in-cluster only; the public names are not up until DNS
     # and ACME have completed, which is later than this gate runs.
-    local pf_infisical pf_zitadel infisical_pid infisical_port zitadel_pid zitadel_port
-    if ! pf_infisical=$(_oauth_pf_start platform-security infisical-standalone-infisical 8080); then
-        soft_fail "cannot reach Infisical (port-forward failed) — the service is not serving yet"
+    local pf_bao pf_zitadel bao_pid bao_port zitadel_pid zitadel_port
+    if ! pf_bao=$(_oauth_pf_start platform-data openbao-active 8200); then
+        soft_fail "cannot reach OpenBao (port-forward failed) — the active node is not serving yet"
         return 0
     fi
-    read -r infisical_pid infisical_port <<< "$pf_infisical"
+    read -r bao_pid bao_port <<< "$pf_bao"
+
+    local ca_file; ca_file="$(mktemp)"
+    kc get configmap openbao-listener-trust -n platform-ops -o jsonpath='{.data.ca\.crt}' >"$ca_file" 2>/dev/null
 
     if ! pf_zitadel=$(_oauth_pf_start platform-identity zitadel 8080); then
-        kill "$infisical_pid" 2>/dev/null || true
+        kill "$bao_pid" 2>/dev/null || true
         soft_fail "cannot reach Zitadel (port-forward failed) — the issuer is not serving yet"
         return 0
     fi
     read -r zitadel_pid zitadel_port <<< "$pf_zitadel"
 
     local out
-    out=$(SECRET_STORE_BASE="http://127.0.0.1:$infisical_port" \
+    out=$(OPENBAO_BASE="https://127.0.0.1:$bao_port" \
+          OPENBAO_CA="$ca_file" \
           IDENTITY_PROVIDER_BASE="http://127.0.0.1:$zitadel_port" \
           IDENTITY_PROVIDER_HOST="id.${ENV_ZONE}" \
-          SECRET_STORE_CLIENT_ID="$infisical_client_id" \
-          SECRET_STORE_CLIENT_SECRET="$infisical_client_secret" \
-          SECRET_STORE_PROJECT_ID="$secrets_project_id" \
-          SECRET_STORE_ENV="$env_slug" \
+          HUB_JWT="$hub_jwt" APP_JWT="$app_jwt" \
           TENANTS="$tenants" \
           python3 - <<'PY'
-import json, os, sys, urllib.error, urllib.parse, urllib.request
+import json, os, ssl, sys, urllib.error, urllib.parse, urllib.request
 
-INF   = os.environ["SECRET_STORE_BASE"]
+BAO   = os.environ["OPENBAO_BASE"]
+# Verified against the listener CA, for the name the certificate carries; the
+# port-forward's 127.0.0.1 is not it.
+TLS = ssl.create_default_context(cafile=os.environ["OPENBAO_CA"])
+TLS.check_hostname = False
 ZIT   = os.environ["IDENTITY_PROVIDER_BASE"]
 # Zitadel is MULTI-INSTANCE: it resolves which instance serves a request from
 # the request's origin. Reached through a port-forward the origin is
@@ -158,69 +126,62 @@ ZIT   = os.environ["IDENTITY_PROVIDER_BASE"]
 # as a wrong endpoint rather than a wrong host. Sending the public issuer as the
 # Host header is what auth-proxy does for the same reason.
 ZIT_HOST = os.environ["IDENTITY_PROVIDER_HOST"]
-PROJ  = os.environ["SECRET_STORE_PROJECT_ID"]
-ENVS  = os.environ["SECRET_STORE_ENV"]
-
 def http(method, url, body=None, headers=None, timeout=15):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
     for k, v in (headers or {}).items():
         req.add_header(k, v)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    ctx = TLS if url.startswith("https://") else None
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
         return json.loads(r.read() or b"{}")
 
-# 1. Authenticate to Infisical as the platform's own machine identity.
+# 1. Log in to OpenBao as the two identities the platform itself uses.
+def login(role, jwt):
+    return http("POST", f"{BAO}/v1/auth/kubernetes/login",
+                {"role": role, "jwt": jwt.strip()})["auth"]["client_token"]
 try:
-    tok = http("POST", f"{INF}/api/v1/auth/universal-auth/login", {
-        "clientId": os.environ["SECRET_STORE_CLIENT_ID"].strip(),
-        "clientSecret": os.environ["SECRET_STORE_CLIENT_SECRET"].strip(),
-    })["accessToken"].strip()
+    hub_tok = login("eso-hub", os.environ["HUB_JWT"])
+    app_tok = login("openbao-app-secrets", os.environ["APP_JWT"])
 except Exception as e:
-    print(f"SOFT|Infisical authentication failed ({e}) — the machine identity is not usable yet")
+    print(f"SOFT|OpenBao login failed ({e}) — the secret store is not serving yet")
     sys.exit(0)
 
-ihdr = {"Authorization": f"Bearer {tok}"}
-
-def secret(name, path):
-    """One secret value, WHITESPACE-STRIPPED.
+_scopes = {}
+def secret(name, scope):
+    """One value from a KV scope, WHITESPACE-STRIPPED.
 
     The strip is not cosmetic. A credential stored through a file or a UI
     commonly carries a trailing newline, and Python refuses to build a request
-    with one:
-
-      Invalid header value b'Bearer eyJ...\n'
-
-    which names neither the credential nor its source and reads as a malformed
-    token rather than one extra byte. internal/kube-sbt/providers/zitadel/
-    config.go trims for exactly this reason; this is the same guard on the
-    validation path.
+    with one, naming neither the credential nor its source.
     """
-    url = (f"{INF}/api/v3/secrets/raw/{name}"
-           f"?workspaceId={PROJ}&environment={ENVS}&secretPath={urllib.parse.quote(path, safe='')}")
-    try:
-        return (http("GET", url, headers=ihdr)["secret"]["secretValue"] or "").strip()
-    except Exception:
-        return ""
+    if scope not in _scopes:
+        tok = hub_tok if scope == "hub" else app_tok
+        try:
+            _scopes[scope] = http("GET", f"{BAO}/v1/kv/data/{scope}",
+                                  headers={"X-Vault-Token": tok})["data"]["data"] or {}
+        except Exception:
+            _scopes[scope] = {}
+    return str(_scopes[scope].get(name) or "").strip()
 
 # 2. The service token the platform manages Zitadel with.
-svc = secret("hub-identity-service-token", "/")
+svc = secret("hub-identity-service-token", "hub")
 if not svc:
-    print("SOFT|Infisical holds no hub-identity-service-token — the identity service has not been provisioned yet")
+    print("SOFT|OpenBao holds no hub-identity-service-token — the identity service has not been provisioned yet")
     sys.exit(0)
 
 zhdr = {"Authorization": f"Bearer {svc}", "Host": ZIT_HOST}
 
 for line in os.environ["TENANTS"].strip().splitlines():
     tenant, cell = line.split()
-    tpath = f"/spoke-pool/{cell}/tenants/{tenant}"
+    tpath = f"spokes/{cell}/tenants/{tenant}"
 
     org = secret("OIDC_ORG_ID", tpath)
     pub = secret("OIDC_CLIENT_ID", tpath)
     bff = secret("OAUTH_BFF_CLIENT_ID", tpath)
 
     if not org or not pub:
-        print(f"SOFT|{tenant}: Infisical holds no OIDC_ORG_ID/OIDC_CLIENT_ID yet — identity provisioning has not completed")
+        print(f"SOFT|{tenant}: OpenBao holds no OIDC_ORG_ID/OIDC_CLIENT_ID yet — identity provisioning has not completed")
         continue
 
     # 3. Resolve the project inside the tenant's OWN organisation. The org header
@@ -267,7 +228,7 @@ for line in os.environ["TENANTS"].strip().splitlines():
               f"know, which fails in the browser only")
 
     if not bff:
-        print(f"SOFT|{tenant}: Infisical holds no OAUTH_BFF_CLIENT_ID yet — the server-side client has not been provisioned")
+        print(f"SOFT|{tenant}: OpenBao holds no OAUTH_BFF_CLIENT_ID yet — the server-side client has not been provisioned")
     elif bff in by_client:
         print(f"PASS|{tenant}: server-side client registered in Zitadel as {by_client[bff]!r}")
     else:
@@ -277,11 +238,12 @@ for line in os.environ["TENANTS"].strip().splitlines():
 PY
     ) || true
 
-    kill "$infisical_pid" "$zitadel_pid" 2>/dev/null || true
-    wait "$infisical_pid" "$zitadel_pid" 2>/dev/null || true
+    kill "$bao_pid" "$zitadel_pid" 2>/dev/null || true
+    wait "$bao_pid" "$zitadel_pid" 2>/dev/null || true
+    rm -f "$ca_file"
 
     if [[ -z "$out" ]]; then
-        soft_fail "OAuth client verification produced no result — Infisical or Zitadel did not answer"
+        soft_fail "OAuth client verification produced no result — OpenBao or Zitadel did not answer"
         return 0
     fi
 

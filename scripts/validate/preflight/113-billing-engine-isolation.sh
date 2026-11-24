@@ -67,8 +67,8 @@ EM_ARGS = ["--set", "environmentSlug=dev", "--set", "provider=hybrid", "--set", 
            "--set", "instanceRepoURL=https://github.com/example-org/example-gitops",
            # The declaration a box is created with, from the one fixture every
            # render gate shares. This carried its own list, which was missing a
-           # value the chart requires (management.infisicalEnvironmentSlug), so
-           # this check reported the chart broken when it was the fixture.
+           # value the chart requires, so this check reported the chart broken
+           # when it was the fixture.
            "-f", DECL_FIXTURE,
            "--set", "topology=single", "--set", "publicTlsIssuer=letsencrypt-prod",
            "--set", "oidcIssuer=https://auth.example.invalid"]
@@ -187,7 +187,7 @@ es = yaml.safe_load(open(f"{DB}/hub-billing-db-credentials-es.yaml"))
 kust = yaml.safe_load(open(f"{DB}/kustomization.yaml"))
 netpol = next((d for d in objs if d["kind"] == "NetworkPolicy"), {})
 app_from = netpol.get("spec", {}).get("ingress", [{}])[0].get("from", [])
-mappings = open("operators/hub-operator/internal/infisical/secret_mappings.go").read()
+mappings = open("operators/hub-operator/internal/hubsecrets/secret_mappings.go").read()
 namespaces = [d["metadata"]["name"] for d in docs(open("manifests/hub-core-services/platform-namespaces/namespaces.yaml").read())]
 check(cluster.get("spec", {}).get("imageName", "").startswith("ghcr.io/kamarkat/kamarkat/postgres-partman")
       and initdb.get("owner") == "hub_billing" and initdb.get("secret", {}).get("name") == es["metadata"]["name"] == "hub-billing-db-credentials"
@@ -197,7 +197,7 @@ check(cluster.get("spec", {}).get("imageName", "").startswith("ghcr.io/kamarkat/
       # The cluster and its credential must BE there; the pooler may be. This
       # demanded exactly the first two, and ADR-112 §83 gives a cluster "a Pooler
       # only where the application needs one" -- billing-db has one
-      # (billing-db-pooler.yaml, matching infisical-db's), so the check failed on a
+      # (billing-db-pooler.yaml), so the check failed on a
       # component the design permits. Stated as "these are required, and nothing
       # unknown is present", so a fourth file still fails.
       and {"billing-db.yaml", "hub-billing-db-credentials-es.yaml"}.issubset(set(kust["resources"]))

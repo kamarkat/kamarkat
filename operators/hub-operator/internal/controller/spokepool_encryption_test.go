@@ -46,14 +46,6 @@ func (m *mockEscrowStore) RestoreArtifact(ctx context.Context, id escrow.Identit
 	return m.artifacts[id.BoxID+"/"+id.ClusterName+"/"+artifact], nil
 }
 
-func (m *mockEscrowStore) BackupMasterKeys(ctx context.Context, id escrow.Identity, keys interface{}) error {
-	return nil
-}
-
-func (m *mockEscrowStore) RestoreMasterKeys(ctx context.Context, id escrow.Identity) (interface{}, error) {
-	return nil, nil
-}
-
 func newSpokePoolTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()

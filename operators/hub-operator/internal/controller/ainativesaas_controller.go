@@ -15,9 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -838,15 +838,15 @@ func (r *AINativeSaaSReconciler) publishCrossApplicationTrust(
 	}
 
 	// Per dependency, for the chart to render one list entry each. See
-	// InfisicalBackendScopeKey for why the aggregate above cannot serve this.
+	// BackendScopeKey for why the aggregate above cannot serve this.
 	for _, d := range deps {
 		if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
-			InfisicalBackendScopeKey(d.AppID), audienceScopeFor(d.ProjectID)); err != nil {
+			BackendScopeKey(d.AppID), audienceScopeFor(d.ProjectID)); err != nil {
 			logger.Error(err, "Could not publish a backend audience scope",
 				"tenant", tenantId, "app", appId, "target", d.AppID)
 		}
 		if err := r.publishTenantSecret(ctx, clusterName, tenantId, appId,
-			InfisicalBackendProjectKey(d.AppID), d.ProjectID); err != nil {
+			BackendProjectKey(d.AppID), d.ProjectID); err != nil {
 			logger.Error(err, "Could not publish a backend project id",
 				"tenant", tenantId, "app", appId, "target", d.AppID)
 		}
@@ -1107,7 +1107,7 @@ func audienceScopeFor(projectID string) string {
 	return "urn:zitadel:iam:org:project:id:" + projectID + ":aud"
 }
 
-// InfisicalBackendScopeKey and InfisicalBackendProjectKey name ONE dependency's
+// BackendScopeKey and BackendProjectKey name ONE dependency's
 // facts in the caller's own Infisical folder.
 //
 // PER DEPENDENCY, beside the space-joined aggregate rather than instead of it,
@@ -1130,16 +1130,16 @@ func audienceScopeFor(projectID string) string {
 // comes from the platform, where it is allocated. The chart renders exactly as
 // many entries as the fleet declared, each naming its own variable, and neither
 // side parses anything the other wrote.
-func InfisicalBackendScopeKey(targetAppID string) string {
+func BackendScopeKey(targetAppID string) string {
 	return "OIDC_BACKEND_AUDIENCE_SCOPE_" + secrets.OAuthKeySegment(targetAppID)
 }
 
-// InfisicalBackendProjectKey is the target's project id on its own, which the
+// BackendProjectKey is the target's project id on its own, which the
 // exchange sends as the RFC 8693 `audience` parameter. Published separately from
 // the scope because they are consumed at different moments -- the scope at login,
 // the audience at the exchange -- and deriving one from the other at the consumer
 // would put the issuer's scope grammar into a chart (ADR-059).
-func InfisicalBackendProjectKey(targetAppID string) string {
+func BackendProjectKey(targetAppID string) string {
 	return "OIDC_BACKEND_PROJECT_ID_" + secrets.OAuthKeySegment(targetAppID)
 }
 
@@ -1202,7 +1202,7 @@ type conditionState int
 
 const (
 	conditionSeeded        conditionState = iota // first-time: generated and uploaded
-	conditionAlreadyExists                       // idempotent: already present in Infisical
+	conditionAlreadyExists                       // idempotent: already present in OpenBao
 	conditionMissing                             // error: missing post-provisioning
 )
 
@@ -1270,21 +1270,21 @@ func (r *AINativeSaaSReconciler) setCondition(ctx context.Context, obj *unstruct
 			Type:    conditionTypeDBSeeded,
 			Status:  metav1.ConditionTrue,
 			Reason:  "Seeded",
-			Message: fmt.Sprintf("DB credentials generated and uploaded to Infisical for tenant %s", tenantId),
+			Message: fmt.Sprintf("DB credentials generated and written to OpenBao for tenant %s", tenantId),
 		}
 	case conditionAlreadyExists:
 		cond = metav1.Condition{
 			Type:    conditionTypeDBSeeded,
 			Status:  metav1.ConditionTrue,
 			Reason:  "AlreadyExists",
-			Message: fmt.Sprintf("DB credentials already present in Infisical for tenant %s", tenantId),
+			Message: fmt.Sprintf("DB credentials already present in OpenBao for tenant %s", tenantId),
 		}
 	case conditionMissing:
 		cond = metav1.Condition{
 			Type:    conditionTypeDBSeeded,
 			Status:  metav1.ConditionFalse,
 			Reason:  "CredentialsMissing",
-			Message: fmt.Sprintf("CRITICAL: DB credentials missing from Infisical for already-provisioned tenant %s. Manual recovery required.", tenantId),
+			Message: fmt.Sprintf("CRITICAL: DB credentials missing from OpenBao for already-provisioned tenant %s. Manual recovery required.", tenantId),
 		}
 	}
 
@@ -1386,9 +1386,9 @@ func (r *AINativeSaaSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // answer different questions and conflating them is what let a credential
 // introduced after a tenant's provisioning become unseedable.
 func (r *AINativeSaaSReconciler) setCacheSeededCondition(ctx context.Context, obj *unstructured.Unstructured, tenantId string, outcome secrets.EnsureResult) error {
-	reason, message := "Seeded", fmt.Sprintf("Cache credential generated and uploaded to Infisical for tenant %s", tenantId)
+	reason, message := "Seeded", fmt.Sprintf("Cache credential generated and written to OpenBao for tenant %s", tenantId)
 	if outcome == secrets.EnsureAlreadyExists {
-		reason, message = "AlreadyExists", fmt.Sprintf("Cache credential already present in Infisical for tenant %s", tenantId)
+		reason, message = "AlreadyExists", fmt.Sprintf("Cache credential already present in OpenBao for tenant %s", tenantId)
 	}
 	return r.mergeCondition(ctx, obj, metav1.Condition{
 		Type:    conditionTypeCacheSeeded,

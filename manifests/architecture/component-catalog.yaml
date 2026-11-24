@@ -419,27 +419,15 @@ components:
     # end-of-life on 2026-11-10.
     layer: machinery
     match: ["ghcr.io/external-secrets/*", "oci.external-secrets.io/*"]
-  - name: Infisical
-    description: The secret store. Holds every platform and application secret.
-    license: "MIT (enterprise directory unused)"
-    repo: Infisical/infisical
+  - name: OpenBao
+    description: >-
+      The secret store and private certificate authority. Holds every platform and
+      application secret, generates and rotates database passwords, and issues internal
+      certificates (ADR-117).
+    license: MPL-2.0
+    repo: openbao/openbao
     layer: machinery
-    match: ["docker.io/infisical/infisical"]
-    behind:
-      - versions: ["v0.167.12"]
-        status: held
-        reason: >-
-          Assessed and moved in 0.3.30, from v0.160.11, for the Applications API the PKI issuer
-          v1.x contract needs; its 196 database migrations ran in under a minute on a live box.
-          Upstream publishes releases continuously, so a bundle pins the version it qualified
-          and re-qualifies when a platform change needs a newer one, rather than following a
-          component that runs migrations on start.
-  - name: Infisical PKI issuer
-    description: Issues internal certificates from the secret store's certificate authority.
-    license: MIT
-    repo: Infisical/infisical-issuer
-    layer: machinery
-    match: ["docker.io/infisical/pki-issuer"]
+    match: ["quay.io/openbao/openbao"]
   # ── Identity ────────────────────────────────────────────────────────────
   - name: ZITADEL
     description: The identity provider. Sign-in for people and identities for applications.
@@ -724,14 +712,6 @@ components:
     track: ghcr
     layer: machinery
     match: [ghcr.io/kamarkat/kamarkat/auth-proxy]
-
-  - name: Cluster identity operator
-    description: Gives each managed cluster its identity with the management cluster.
-    license: Apache-2.0
-    repo: https://github.com/kamarkat/kamarkat
-    track: ghcr
-    layer: machinery
-    match: [ghcr.io/kamarkat/kamarkat/spoke-identity-operator]
 
   - name: Ephemeral job operator
     description: Runs short-lived jobs on managed clusters.

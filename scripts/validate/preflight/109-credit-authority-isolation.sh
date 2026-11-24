@@ -66,8 +66,8 @@ EM_ARGS = ["--set", "environmentSlug=dev", "--set", "provider=hybrid", "--set", 
            "--set", "instanceRepoURL=https://github.com/example-org/example-gitops",
            # The declaration a box is created with, from the one fixture every
            # render gate shares. This carried its own list, which was missing a
-           # value the chart requires (management.infisicalEnvironmentSlug), so
-           # this check reported the chart broken when it was the fixture.
+           # value the chart requires, so this check reported the chart broken
+           # when it was the fixture.
            "-f", DECL_FIXTURE,
            "--set", "topology=single", "--set", "publicTlsIssuer=letsencrypt-prod",
            "--set", "oidcIssuer=https://auth.example.invalid"]
@@ -184,24 +184,33 @@ else:
 objs = docs(open(f"{DB}/credits-db.yaml").read())
 credits_db = next((d for d in objs if d["kind"] == "Database" and d["spec"].get("name") == "credits"), {})
 cluster = next((d for d in objs if d["kind"] == "Cluster"), {})
-es = yaml.safe_load(open(f"{DB}/hub-credits-db-credentials-es.yaml"))
-kust = yaml.safe_load(open(f"{DB}/kustomization.yaml"))
+# hub_credits's password is OpenBao's (static role hub-credits, ADR-117 §7.3),
+# read by the ledger's own namespace through its own VaultDynamicSecret.
+_ledger, _ = render(CA, FIXTURE)
+vds = next((d for d in docs(_ledger) if d.get("kind") == "VaultDynamicSecret"
+            and d["metadata"]["name"] == "hub-credits-db"), {})
+openbao_values = open("manifests/hub-core-services/openbao/values.yaml").read()
 pg_peers = [f["namespaceSelector"]["matchLabels"].get("kubernetes.io/metadata.name")
             for d in objs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "credits-db-access"
             for r in d["spec"]["ingress"] for f in r.get("from", []) if "namespaceSelector" in f]
 hubenv = yaml.safe_load(open("manifests/environments/base/hubenvironment.yaml"))
 roles = {r["name"]: r for r in hubenv["spec"]["database"]["roles"]}
-mappings = open("operators/hub-operator/internal/infisical/secret_mappings.go").read()
 namespaces = [d["metadata"]["name"] for d in docs(open("manifests/hub-core-services/platform-namespaces/namespaces.yaml").read())]
-check(credits_db.get("spec", {}).get("owner") == "hub_credits" and credits_db["spec"].get("databaseReclaimPolicy") == "retain"
+login = next((d for d in objs if d["kind"] == "DatabaseRole" and d["spec"].get("name") == "hub_credits"), {})
+check(credits_db.get("spec", {}).get("owner") == "credits_owner" and credits_db["spec"].get("databaseReclaimPolicy") == "retain"
+      and login.get("spec", {}).get("inRoles") == ["credits_owner"]
+      and login["spec"].get("clientCertificate", {}).get("enabled") is True
+      and "passwordSecret" not in login["spec"]
       and credits_db["spec"]["cluster"]["name"] == cluster["metadata"]["name"] == "credits-db"
-      and es["metadata"]["namespace"] == "platform-data" and es["metadata"]["name"] == "hub-credits-db-credentials"
-      and "hub-credits-db-credentials-es.yaml" in kust["resources"]
+      and vds.get("metadata", {}).get("namespace") == "platform-credits"
+      and vds.get("spec", {}).get("path") == "database/static-creds/hub-credits"
+      and 'path      = "auth/kubernetes/role/hub-credits-db"' in openbao_values
       and roles.get("hub_credits", {}).get("database") == "credits"
       and roles.get("hub_credits", {}).get("clusterRef") == "credits-db"
-      and '"hub-credits-db-password"' in mappings and "platform-credits" in namespaces and "platform-credits" in pg_peers,
-      "I9 the ledger's own cluster, its database (owned, retained), the role bound to that cluster, the credential, the namespace and database access are on every box",
+      and "platform-credits" in namespaces and "platform-credits" in pg_peers,
+      "I9 the ledger's own cluster, its database (owned by credits_owner, retained), the login role hub_credits (member, certificate, no stored password), its OpenBao-delivered credential, the namespace and database access are on every box",
       f"I9 prerequisite missing: cluster={cluster.get('metadata', {}).get('name')} database={credits_db.get('spec')} "
+      f"login={login.get('spec')} generator={vds.get('spec', {}).get('path')} "
       f"role={roles.get('hub_credits')} namespace={'platform-credits' in namespaces} db access={pg_peers}")
 
 # Enablement.

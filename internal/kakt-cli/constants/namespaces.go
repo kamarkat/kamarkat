@@ -17,7 +17,6 @@ const (
 	NamespaceOps = "platform-ops"
 
 	// Security (Infisical)
-	NamespaceSecurity = "platform-security"
 
 	// Edge services (AgentGateway, auth-proxy, Ingress)
 	NamespaceEdge = "platform-edge"

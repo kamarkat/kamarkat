@@ -75,7 +75,7 @@ func boundaryProject(n int) string {
 var boundaryDescriptions = map[int]string{
 	1: "Boundary 01 — platform infrastructure (ArgoCD, operators, CRDs)",
 	2: "Boundary 02 — platform data workloads (CNPG, Redis)",
-	3: "Boundary 03 — platform services (Infisical, hub Gateway, platform APIs)",
+	3: "Boundary 03 — platform services (OpenBao, hub Gateway, platform APIs)",
 	4: "Boundary 04 — tenant services (identity, billing, auth proxy)",
 	5: "Boundary 05 — fleet provisioning (ADR-047)",
 	6: "Boundary 06 — public tenant TLS (ADR-051)",

@@ -28,7 +28,6 @@ rendered=$(mktemp)
 trap 'rm -f "$rendered"' EXIT
 if ! helm template platform-bundle "$CHART" \
     --set environmentSlug=dev --set boxId=example-box --set provider=hybrid \
-    --set management.infisicalEnvironmentSlug=management \
     --set instanceRepoURL=https://github.com/example-org/example-gitops \
     --set hubDomain=dev.example.test \
     --set previewDomain=example-preview.test \

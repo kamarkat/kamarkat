@@ -32,9 +32,6 @@ import (
 // not: Infisical Cloud, or any Infisical the tenant runs elsewhere. Out-of-band by
 // construction, reachable when the cluster is not.
 type EscrowClient interface {
-	BackupMasterKeys(ctx context.Context, id Identity, keys interface{}) error
-	RestoreMasterKeys(ctx context.Context, id Identity) (interface{}, error)
-
 	// BackupArtifact and RestoreArtifact hold anything else a box cannot be
 	// rebuilt without, under a name of the caller's choosing.
 	//
@@ -70,8 +67,8 @@ const ArtifactKubeconfig = "admin-kubeconfig"
 // It qualifies by the membership test rather than by being important: it is
 // generated once and NEVER rotated, because it encrypts every column the identity
 // provider has written and a new one orphans all of them. So a box that loses its
-// secret store can restore the store from `infisical-master-keys` and still hold an
-// identity database nothing can decrypt.
+// secret store can restore the store (ADR-117 §9) and still hold an identity
+// database nothing can decrypt.
 //
 // The live source is unchanged -- the box's own secret store serves it, because a
 // key read at startup must not depend on reaching another site. This is the
@@ -108,17 +105,6 @@ const ArtifactSecretEncryptionKey = "secret-encryption-key"
 // flight, not that something is missing.
 const ArtifactSecretEncryptionKeyPrevious = "secret-encryption-key-previous"
 
-// MasterKeysBackup is what is escrowed. The field names are the ones the restore
-// path reads back, so changing one is a migration rather than a rename.
-type MasterKeysBackup struct {
-	EncryptionKey   string    `json:"encryptionKey"`
-	AuthSecret      string    `json:"authSecret"`
-	CreatedAt       time.Time `json:"createdAt"`
-	ClusterID       string    `json:"clusterId"`
-	Version         string    `json:"version"`
-	BackupTimestamp time.Time `json:"backupTimestamp"`
-}
-
 // infisicalEscrow escrows into an Infisical instance outside this box.
 //
 // It speaks the Infisical API directly rather than reusing either of the platform's
@@ -149,10 +135,9 @@ const (
 	pathFolders    = "/api/v1/folders"
 )
 
-// escrowSecretName is the single secret each cluster's master-key backup occupies.
-// One name, no timestamps: a restore must find exactly one answer, and a list of
-// dated backups is a decision nobody is present to make when it is needed.
-const escrowSecretName = "infisical-master-keys"
+// preflightProbe is a name nothing writes: reading it proves the project type
+// without needing write access (verifyProject).
+const preflightProbe = "escrow-preflight-probe"
 
 // Identity names what an artefact belongs to: the box, and the cluster within it.
 //
@@ -315,7 +300,6 @@ var boxScoped = map[string]bool{
 	ArtifactAlertDestination:      true,
 	ArtifactMailTransportURL:      true,
 	ArtifactTailnetAuthkey:        true,
-	escrowSecretName:              true, // infisical-master-keys
 	ArtifactZitadelMasterkey:      true,
 	ArtifactBackupSSECKey:         true,
 	ArtifactBackupStoreCredential: true,
@@ -518,7 +502,7 @@ func NewEscrowClientForToken(ctx context.Context, url, projectID, token string) 
 // The probe is a read of a path that does not exist: one request, no write
 // access needed to establish the type, and 404 is the healthy answer.
 func (e *infisicalEscrow) verifyProject(ctx context.Context) error {
-	_, err := e.RestoreArtifact(ctx, ForCluster("__escrow_preflight__", "__escrow_preflight__"), escrowSecretName)
+	_, err := e.RestoreArtifact(ctx, ForCluster("__escrow_preflight__", "__escrow_preflight__"), preflightProbe)
 	if err == nil {
 		return nil
 	}
@@ -737,34 +721,6 @@ func (e *infisicalEscrow) RestoreArtifact(ctx context.Context, id Identity, name
 		return "", fmt.Errorf("read the escrow response: %w", err)
 	}
 	return out.Secret.SecretValue, nil
-}
-
-// BackupMasterKeys writes this cluster's Infisical master keys into the escrow.
-func (e *infisicalEscrow) BackupMasterKeys(ctx context.Context, id Identity, keys interface{}) error {
-	payload, err := json.Marshal(keys)
-	if err != nil {
-		return fmt.Errorf("marshal escrow payload: %w", err)
-	}
-	return e.BackupArtifact(ctx, id, escrowSecretName, string(payload))
-}
-
-// RestoreMasterKeys returns this cluster's escrowed keys, or nil when there are
-// none.
-func (e *infisicalEscrow) RestoreMasterKeys(ctx context.Context, id Identity) (interface{}, error) {
-	raw, err := e.RestoreArtifact(ctx, id, escrowSecretName)
-	if err != nil {
-		return nil, err
-	}
-	if raw == "" {
-		return nil, nil
-	}
-	var out map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("the escrowed keys for %s are not readable as a backup: %w. "+
-			"Generating new keys over them would make the existing store permanently "+
-			"undecryptable, so this fails instead", id.ClusterName, err)
-	}
-	return out, nil
 }
 
 // readAt reads one artefact from an explicit path. Empty and error are different

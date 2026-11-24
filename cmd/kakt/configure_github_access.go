@@ -22,8 +22,8 @@ This command injects GitHub credentials that enable ArgoCD to sync manifests:
 1. ArgoCD GitHub repository access (GitHub PAT)
 2. GHCR pull secret for container images
 
-This is Step 3 in the bootstrap workflow - it must be run BEFORE init-secrets
-to allow ArgoCD to create the platform-data namespace.
+This is Step 3 in the bootstrap workflow: ArgoCD needs it to sync the platform,
+which creates the platform namespaces.
 
 Prerequisites:
 - Hub cluster must be bootstrapped
@@ -32,11 +32,10 @@ Prerequisites:
 After running this command:
 - ArgoCD will sync and create platform namespaces
 - Platform components will be deployed
-- You can then run init-secrets (Step 4)
 
 Security Note:
 - This is a bootstrap secret (Secret Zero)
-- ESO will replace it with Infisical-backed version after deployment`,
+- hub-operator writes it into OpenBao and ESO delivers it from there`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if ghcrPAT == "" {
 				return fmt.Errorf("--ghcr-pat is required")
@@ -106,8 +105,6 @@ func runConfigureGitHubAccess(cmd *cobra.Command, ghcrPAT, orgURL, kubeconfig st
 	fmt.Println("   kubectl get applications -n platform-ops")
 	fmt.Println("2. Verify platform-data namespace exists:")
 	fmt.Println("   kubectl get namespace platform-data")
-	fmt.Println("3. Run init-secrets:")
-	fmt.Println("   ./bin/kakt init-secrets --cluster <management-cluster>")
 
 	return nil
 }

@@ -224,7 +224,7 @@ log() {
 
 # End-to-end wall clock. The Go bootstrap reports its own per-phase timings, but
 # creating a usable cluster also includes everything this script does afterwards
-# (tailscale, AWS/GitHub wiring, waiting for Infisical, the database and the
+# (tailscale, AWS/GitHub wiring, waiting for OpenBao, the database and the
 # spoke). This is the number to quote for "how long does a cluster take".
 RUN_START_EPOCH=$(date +%s)
 
@@ -786,8 +786,6 @@ step1_bootstrap_hub() {
         rm -f "$go_state_file"
         rm -f "$LOG_DIR/bootstrap.log"
         rm -f "$LOG_DIR/bootstrap-hub.log"
-        rm -f "$LOG_DIR/init-secrets.log"
-        rm -f "$LOG_DIR/infisical-bootstrap.json"
         rm -f "$ZERO_OPS_DIR/.state/kind/kind-config-generated.yaml"
         log "✓ Bootstrap state, logs, and stale kind resources reset for fresh start"
         sleep 10  # let the smoke clear
@@ -914,7 +912,7 @@ step1_bootstrap_hub() {
 # Step 1c: Configure Tailscale credentials (hybrid only)
 # Creates platform-capi/tailscale-hybrid-psk from the operator's store (~/.kamarkat/tailscale/*)
 # (gitignored), mirroring the hetzner/github Secret Zero pattern. hub-operator
-# uploads it to Infisical via CLISecretMappings and ESO syncs it back, so
+# writes it into OpenBao via CLISecretMappings and ESO syncs it back, so
 # ArgoCD never resets it to empty. Required before a hybrid spoke provisions
 # (the ClusterClass pre-kubeadm hook reads this Secret).
 step1c_configure_tailscale() {
@@ -1143,103 +1141,69 @@ step4_wait_namespaces() {
     log "✅ platform-data namespace created by ArgoCD"
 }
 
-# Step 5: Verify bootstrap secrets (handled internally by hub bootstrap orchestrator)
+# Step 5: Verify the secret store's Day-0 prerequisites (ADR-117). The
+# orchestrator's openbao-prerequisites phase delivers the seal key from the
+# escrow and the listener CA's public certificate; nothing here creates them.
 step5_verify_secrets() {
     if is_step_completed "verify_secrets"; then
-        log "Step 5: Bootstrap secrets already verified, skipping"
+        log "Step 5: OpenBao prerequisites already verified, skipping"
         return
     fi
 
-    log "Step 5: Verifying bootstrap secrets (initialized by hub bootstrap orchestrator)..."
-
-    # The init-secrets pipeline now runs as an internal Go function inside the
-    # hub bootstrap orchestrator (between Boundary 02 and Boundary 03). This
-    # step is a lightweight verification that the infisical-auth Secret was
-    # created and Infisical is operational.
-
-    local max_attempts=60
-    local attempt=1
-
-    while [[ $attempt -le $max_attempts ]]; do
-        local infisical_auth_data
-        infisical_auth_data=$(kubectl get secret infisical-auth -n platform-ops \
-            -o jsonpath='{.data.client-id}{" "}{.data.client-secret}' \
-            --kubeconfig="$KUBECONFIG_PATH" 2>/dev/null || echo "")
-
-        if [[ -n "$infisical_auth_data" ]]; then
-            log "✓ infisical-auth Secret verified"
-            break
-        fi
-
-        log "Waiting for infisical-auth secret (attempt $attempt/$max_attempts)..."
-        sleep 10
-        attempt=$((attempt + 1))
+    log "Step 5: Verifying OpenBao prerequisites (delivered by the hub bootstrap orchestrator)..."
+    local missing=()
+    kubectl get secret openbao-seal -n platform-data --kubeconfig="$KUBECONFIG_PATH" >/dev/null 2>&1 \
+        || missing+=("platform-data/secret/openbao-seal")
+    local ns
+    for ns in platform-data platform-ops cert-manager; do
+        kubectl get configmap openbao-listener-trust -n "$ns" --kubeconfig="$KUBECONFIG_PATH" >/dev/null 2>&1 \
+            || missing+=("$ns/configmap/openbao-listener-trust")
     done
-
-    if [[ $attempt -gt $max_attempts ]]; then
-        log "❌ infisical-auth Secret not found after bootstrap"
-        log "   The orchestrator's init-secrets phase may have failed."
-        log "   Check bootstrap logs and re-run: hub bootstrap"
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log "❌ OpenBao prerequisites missing: ${missing[*]}"
+        log "   The orchestrator's openbao-prerequisites phase did not complete."
+        log "   Re-run the hub bootstrap; it resumes from its recorded state."
         return 1
     fi
 
     mark_step_completed "verify_secrets"
-    log "Bootstrap secrets verification completed"
+    log "✅ OpenBao prerequisites present"
 }
 
-# Step 6: Wait for Infisical to be ready
-step6_wait_infisical() {
-    if is_step_completed "wait_infisical"; then
-        log "Step 6: Infisical already ready, skipping"
+# Step 6: Wait for OpenBao to be initialized, unsealed and serving. Its pod is
+# Ready only when it is unsealed (the chart's readiness probe), and the Day-0
+# trust bootstrap and intermediate signing have already completed by the time
+# the orchestrator returns.
+step6_wait_openbao() {
+    if is_step_completed "wait_openbao"; then
+        log "Step 6: OpenBao already ready, skipping"
         return
     fi
 
-    log "Step 6: Waiting for Infisical to be ready..."
-
-    # Wait for Infisical pods to be ready (using same logic as Step 5)
-    log "Checking Infisical pods status..."
-    local max_attempts=180  # 30 minutes to match Step 5
-    local attempt=1
-
-    while [[ $attempt -le $max_attempts ]]; do
-        local pod_ready
-        pod_ready=$(kubectl get pods -n platform-security \
-            --kubeconfig="$KUBECONFIG_PATH" \
-            -l app=infisical-standalone \
-            -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "NotFound")
-
-        if [[ "$pod_ready" == "True" ]]; then
-            log "Infisical is ready"
-            break
-        fi
-
-        log "Waiting for Infisical to be ready (attempt $attempt/$max_attempts, ready: $pod_ready)"
-        sleep 10
-        attempt=$((attempt + 1))
-    done
-
-    if [[ $attempt -gt $max_attempts ]]; then
-        error_exit "Infisical did not become ready within expected time"
+    log "Step 6: Waiting for OpenBao to be ready (unsealed)..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=openbao,component=server \
+        -n platform-data --timeout=1800s --kubeconfig="$KUBECONFIG_PATH"; then
+        error_exit "OpenBao did not become ready (unsealed) within 30 minutes. Check: kubectl -n platform-data logs statefulset/openbao"
     fi
 
-    mark_step_completed "wait_infisical"
-    log "Infisical pods are running"
+    mark_step_completed "wait_openbao"
+    log "✅ OpenBao is unsealed and serving"
 }
 
-# Step 6b: Seed externally-issued credentials into Infisical
+# Step 6b: Seed externally-issued credentials (hub-operator copies them into OpenBao)
 #
 # Some credentials are issued by systems OUTSIDE this platform — object storage
 # keys, IRM alert URLs — so nothing in the cluster can generate them.
-# They used to be seeded by hand into the Infisical console, which meant a rebuilt
-# Infisical silently came up without them: the ExternalSecret said only "could not
+# They used to be seeded by hand into the secret store's console, which meant a
+# rebuilt store silently came up without them: the ExternalSecret said only "could not
 # get secret data from provider", the consuming pod said only
 # CreateContainerConfigError, and neither named the missing key or its owner.
 #
 # This step turns that folklore into a declared, repeatable phase. Each entry below
 # maps a directory in the operator's store to one Kubernetes Secret; the
-# hub-operator's CLISecretMappings then uploads it to Infisical and ESO syncs it
+# hub-operator's CLISecretMappings then writes it into OpenBao and ESO syncs it
 # back out — the same Secret Zero path already used for hetzner, github and
-# tailscale. Nothing new writes to Infisical directly.
+# tailscale. Nothing else writes to OpenBao directly.
 #
 # Placeholder files are created for anything missing so the required set is
 # discoverable from the filesystem rather than from documentation. A key that is
@@ -1353,17 +1317,17 @@ step6b_seed_external_credentials() {
 
     log "Step 6b: $seeded seeded, $skipped awaiting values"
     if [[ "$skipped" -gt 0 ]]; then
-        log "  Note: hub-operator uploads these to Infisical on its next reconcile,"
+        log "  Note: hub-operator writes these into OpenBao on its next reconcile,"
         log "        so re-running this step once the values are present is enough."
     fi
 }
 
-# Step 8b: Re-trigger ESO after Day-0 has populated Infisical
+# Step 8b: Re-trigger ESO after hub-operator has populated OpenBao
 #
 # Ordering makes this necessary, and without it a first bootstrap looks broken for
 # a full hour:
 #
-#   ESO reconciles first  -> Infisical is empty, Day-0 has not run yet
+#   ESO reconciles first  -> OpenBao's hub scope is empty, hub-operator has not written it yet
 #                         -> every ExternalSecret records SecretSyncedError
 #   refreshInterval: 1h   -> ESO caches that failure and will not look again
 #   Day-0 completes       -> hub-operator uploads the secrets
@@ -1377,7 +1341,7 @@ step6b_seed_external_credentials() {
 # annotation is the supported nudge. It is idempotent and harmless when the secrets
 # already resolve.
 step8b_refresh_external_secrets() {
-    log "Step 8b: Re-syncing ExternalSecrets now that Infisical is populated..."
+    log "Step 8b: Re-syncing ExternalSecrets now that OpenBao is populated..."
 
     local stamp total=0 ready=0
     stamp="$(date +%s)"
@@ -1441,11 +1405,10 @@ step9_wait_database() {
 
     log "Step 9: Waiting for database deployment (timeout: 1800s)..."
 
-    # The BOOTSTRAP cluster only. Each platform application owns its own (ADR-112)
-    # and the rest arrive with boundary 02, after this step; Day-0 cannot proceed
-    # without this one, because Infisical's database is on it.
-    log "Running: kubectl wait --for=condition=ready pod -l cnpg.io/cluster=infisical-db --timeout=1800s"
-    kubectl wait --for=condition=ready pod -l cnpg.io/cluster=infisical-db \
+    # The secret store's own database: Day-0 cannot proceed without it, because
+    # OpenBao's storage is on it. Each platform application owns its own (ADR-112).
+    log "Running: kubectl wait --for=condition=ready pod -l cnpg.io/cluster=openbao-db --timeout=1800s"
+    kubectl wait --for=condition=ready pod -l cnpg.io/cluster=openbao-db \
         -n platform-data --timeout=1800s \
         --kubeconfig="$KUBECONFIG_PATH"
 
@@ -1589,7 +1552,7 @@ step10_wait_spokepool() {
 
     # Step 10c: Wait for Identity Infrastructure Readiness
     # The PKI artifacts depend on the HubEnvironment controller finishing Phase 3 (OAuth clients).
-    # That phase is gated by Infisical -> ExternalSecrets -> Hydra. We wait for the condition here
+    # That phase is gated by OpenBao -> ExternalSecrets -> the identity provider. We wait for the condition here
     # to avoid race conditions with ArgoCD's retry backoffs.
     # resolve_owned, not ZERO_OPS_DIR: this is a PLATFORM script, and the tenant's
     # checkout has no scripts/ at all (ADR-072). Looked for there it was never
@@ -1603,44 +1566,16 @@ step10_wait_spokepool() {
         error_exit "wait-for-identity.sh not found at $identity_wait. The PKI wait below depends on it; skipping it turns a missing precondition into a twenty-minute timeout."
     fi
 
-    # Step 10d: Wait for bootstrap PKI artifacts (machine-identity + bootstrap-cert CRS wrappers)
-    # Created by hub-operator (bootstrap-cert) and spoke-identity-operator (machine-identity)
-    # in platform-capi namespace for ClusterResourceSet consumption.
-    log "Step 10d: Waiting for bootstrap PKI artifacts..."
-    local pki_attempt=1
-    local pki_max_attempts=$((CERT_TIMEOUT / 10))
-
-    while [[ $pki_attempt -le $pki_max_attempts ]]; do
-        local identity_ready=false
-        local cert_ready=false
-
-        # Wait for Certificate CR to be Ready (cert-manager issued)
-        if kubectl wait --for=condition=Ready certificate "argocd-agent-${SPOKEPOOL_NAME}" \
-            -n platform-capi --kubeconfig="$KUBECONFIG_PATH" --timeout=5s >/dev/null 2>&1; then
-            cert_ready=true
-        fi
-
-        # Wait for SpokeMachineIdentity CR to be Ready (identity provisioned)
-        if kubectl wait --for=condition=Ready spokemachineidentity "${SPOKEPOOL_NAME}" \
-            -n platform-capi --kubeconfig="$KUBECONFIG_PATH" --timeout=5s >/dev/null 2>&1; then
-            identity_ready=true
-        fi
-
-        if [[ "$identity_ready" == "true" && "$cert_ready" == "true" ]]; then
-            log "✅ Bootstrap PKI artifacts ready"
-            break
-        fi
-
-        log "Waiting for bootstrap PKI. Usually becomes ready at 5th attempt. (attempt $pki_attempt/$pki_max_attempts): certificate=$cert_ready identity=$identity_ready"
-        sleep 10
-        pki_attempt=$((pki_attempt + 1))
-    done
-
-    if [[ $pki_attempt -gt $pki_max_attempts ]]; then
-        log "❌ Bootstrap PKI artifacts not ready within timeout"
-        log "Check hub-operator and spoke-identity-operator logs"
-        log "This may mean Infisical is unhealthy or the infisical-auth secret is missing"
-        error_exit "bootstrap PKI timeout. Resume the run 5min sometime later."
+    # Step 10d: Wait for the bootstrap certificate (the bootstrap-cert CRS wrapper's
+    # source), issued by openbao-fleet from the box's OpenBao (ADR-117 §8). The
+    # spoke needs no delivered identity: it logs in with its own tokens.
+    log "Step 10d: Waiting for the bootstrap certificate..."
+    if ! kubectl wait --for=condition=Ready certificate "argocd-agent-${SPOKEPOOL_NAME}" \
+        -n platform-capi --kubeconfig="$KUBECONFIG_PATH" --timeout="${CERT_TIMEOUT}s"; then
+        log "❌ argocd-agent-${SPOKEPOOL_NAME} not issued within ${CERT_TIMEOUT}s"
+        log "Check: kubectl -n platform-capi describe certificate argocd-agent-${SPOKEPOOL_NAME}"
+        log "and that the intermediate is signed (kakt pki sign-intermediate) and openbao-fleet is Ready"
+        error_exit "bootstrap certificate timeout. Resume the run later."
     fi
 
     # Step 10d: Verify certificates exist in target namespaces
@@ -2128,7 +2063,7 @@ main() {
     esac
 
     # Export KUBECONFIG so the Go bootstrap binary's internal bare-kubectl calls
-    # (e.g. infisical bootstrap pod discovery) resolve the same cluster instead
+    # (e.g. OpenBao port-forwards) resolve the same cluster instead
     # of a stale default context. The path is deterministic per cluster name.
     if [[ -f "${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig" ]]; then
         export KUBECONFIG="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
@@ -2144,8 +2079,8 @@ main() {
 
     # --seed-only runs step 6b alone, for the normal case: the placeholders under
     # the operator's store were empty on the first run, they have since been
-    # filled, and the values need to reach Infisical without rebuilding anything. The operator
-    # uploads them on its next reconcile.
+    # filled, and the values need to reach OpenBao without rebuilding anything. The operator
+    # writes them on its next reconcile.
     if [[ "$SEED_ONLY" == "true" ]]; then
         if [[ -z "${KUBECONFIG_PATH:-}" || ! -f "$KUBECONFIG_PATH" ]]; then
             KUBECONFIG_PATH="${KAMARKAT_HOME:-$HOME/.kamarkat}/run/kubeconfig/${CLUSTER_NAME}.kubeconfig"
@@ -2221,10 +2156,9 @@ main() {
     # reports Ready. Checked here because everything below this line depends on it.
     run_gate "kubelet-reachability" "API server → kubelet reachability"
 
-    # The HubEnvironment and ClusterSecretStore now exist, so the Infisical slug is
-    # decidable. A wrong slug is invisible afterwards: every ExternalSecret
-    # resolves against another environment and reports Healthy doing it.
-    run_gate "environment-isolation" "environment isolation"
+    # The hub's secret store now exists: prove it reads OpenBao, verified, as the
+    # restricted eso-hub identity, before anything is built on what it delivers.
+    run_gate "secret-store-isolation" "secret store isolation"
 
     step1c_configure_tailscale
 
@@ -2246,7 +2180,7 @@ main() {
 
     step5_verify_secrets
 
-    step6_wait_infisical
+    step6_wait_openbao
 
     step6b_seed_external_credentials
 
@@ -2254,7 +2188,7 @@ main() {
 
     step8b_refresh_external_secrets
 
-    # Infisical is up and ESO has had a reconcile window, so an ExternalSecret that
+    # OpenBao is up and ESO has had a reconcile window, so an ExternalSecret that
     # still cannot resolve is a seeding fault rather than a race.
     run_gate "secrets-resolve" "secret resolution"
 

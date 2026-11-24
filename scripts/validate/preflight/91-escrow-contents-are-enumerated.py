@@ -43,6 +43,8 @@ ADR = ZERO_OPS / "docs/adr/076-reaching-a-box-you-own.md"
 # eight files: infisical-admin-credential is declared in admin_credential.go, so
 # the check called it documented-but-unimplemented for as long as it has existed.
 ESCROW_PKG = ZERO_OPS / "internal/platform/escrow"
+# OpenBao's artefacts (ADR-117 §6) are named by the CLI package that writes them.
+OPENBAO_PKG = ZERO_OPS / "internal/kakt-cli/openbao"
 
 # Artefacts the ADR lists as NOT YET IMPLEMENTED. Each needs that status written
 # beside it in the ADR, so the exemption cannot be silent -- it is a promise with a
@@ -94,13 +96,13 @@ def code_artefacts() -> set:
     if not ESCROW_PKG.is_dir():
         return set()
     names: set = set()
-    for path in sorted(ESCROW_PKG.glob("*.go")):
+    for path in sorted(ESCROW_PKG.glob("*.go")) + sorted(OPENBAO_PKG.glob("*.go")):
         if path.name.endswith("_test.go"):
             continue
         names.update(
             re.findall(
-                r"const\s+(?:[A-Za-z]*[Aa]rtifact[A-Za-z]*|escrowSecretName)\s*=\s*\"([a-z0-9-]+)\"",
-                path.read_text(),
+                r"(?:const\s+|^\s+)[A-Za-z]*[Aa]rtifact[A-Za-z]*\s*=\s*\"([a-z0-9-]+)\"",
+                path.read_text(), re.M,
             )
         )
     return names

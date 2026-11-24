@@ -150,9 +150,9 @@ def generated_destination_wins():
                            f"IT names instead of the one the generator selected -- which is the "
                            f"placement decision ADR-082 took away from applications"))
         return
-    if f"/spoke-pool/{generated}/" not in r.stdout:
-        out.append(("BAD", f"the clusterName parameter did not reach the rendered Infisical path; "
-                           f"expected /spoke-pool/{generated}/ in the output"))
+    if f"spokes/{generated}/" not in r.stdout:
+        out.append(("BAD", f"the clusterName parameter did not reach the rendered OpenBao scope; "
+                           f"expected spokes/{generated}/ in the output"))
         return
     out.append(("OK", f"a clusterName parameter overrides a stale one in an application's values "
                       f"file, so an application declared before ADR-082 is placed where the "

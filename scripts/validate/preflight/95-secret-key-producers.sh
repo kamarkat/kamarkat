@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every ExternalSecret backed by Infisical names a key that something must put
+# Every ExternalSecret backed by OpenBao names a key that something must put
 # there. When nothing does, the failure is mute in a very specific way: the
 # ExternalSecret reports "could not get secret data from provider" — which never
 # says WHERE it looked or WHO was supposed to write it — and the consuming pod
@@ -7,7 +7,7 @@
 #
 # It has cost a full bootstrap four times: agentgateway-oidc-cookie-secret,
 # waypoint-bff-client-secret, the Grafana Cloud set and the S3 backup pair all
-# reached a rebuilt Infisical with no producer. The first was a genuine omission —
+# reached a rebuilt secret store with no producer. The first was a genuine omission —
 # its siblings hub-kratos-ui-cookie-secret and hub-hydra-system-secret were in the
 # operator's registry and it simply was not.
 #
@@ -15,8 +15,8 @@
 # PRODUCES, and require that anything left over be declared here deliberately, with
 # the reason it cannot be generated. Producers are read from the operator source, so
 # adding a registry entry is enough — this check needs no edit to stay correct.
-validate_infisical_key_producers() {
-    section "Every Infisical-backed ExternalSecret key has a producer"
+validate_secret_key_producers() {
+    section "Every OpenBao-backed ExternalSecret key has a producer"
 
     local out rc=0
     out=$(cd "$VALIDATE_ROOT" && python3 - <<'PY'
@@ -61,10 +61,10 @@ PENDING = {
     ),
 }
 
-SRC = glob.glob("operators/hub-operator/internal/infisical/*.go") + \
-      glob.glob("operators/hub-operator/internal/database/*.go") + \
-      glob.glob("operators/hub-operator/internal/secrets/*.go") + \
-      glob.glob("operators/hub-operator/internal/controller/*.go")
+SRC = [f for f in glob.glob("operators/hub-operator/internal/hubsecrets/*.go") +
+       glob.glob("operators/hub-operator/internal/secrets/*.go") +
+       glob.glob("operators/hub-operator/internal/controller/*.go")
+       if not f.endswith("_test.go")]
 
 # Keys produced INTO a cluster path (/spoke-pool/<clusterName>/...), as opposed to the
 # Infisical root. This distinction is the whole point of the check: a spoke's
@@ -81,7 +81,7 @@ SRC = glob.glob("operators/hub-operator/internal/infisical/*.go") + \
 # consumer of a copied credential has been passing this check on an empty set.
 # A check that cannot see its source must fail, not shrug.
 CELL_SRC = "operators/hub-operator/internal/secrets/cluster_credentials.go"
-cell_produced = {"infisical-credentials"}  # EnsureInfisicalCredentials, shared path
+cell_produced = set()
 if not os.path.exists(CELL_SRC):
     print(f"BAD\t{CELL_SRC} is missing, so the credentials copied into each cell cannot be "
           f"derived and every consumer of one would pass this check unexamined")
@@ -95,7 +95,10 @@ if not block:
     print("BAD\tFleetCredentials was not found in " + CELL_SRC + ", so the keys each cluster "
           "receives cannot be derived")
     raise SystemExit
-cell_produced |= set(re.findall(r'Key:\s*"([^"]+)"', block.group(1)))
+cell_produced |= set(re.findall(r'\bKey:\s*"([^"]+)"', block.group(1)))
+# Generated directly into each cluster's platform scope (EnsureCrossplaneAdminPassword).
+cell_produced |= set(re.findall(r'CrossplaneAdminPasswordKey\s*=\s*"([^"]+)"',
+                                open("operators/hub-operator/internal/secrets/store.go").read()))
 
 # Externally provisioned PER CELL: each cell has its own value, issued outside the
 # platform, so no producer here writes it and the hub's must never be copied in
@@ -118,9 +121,9 @@ external_cell = set()
 # not copied, so they are declared alongside the other generated secrets: any
 # mapping carrying CellScopedKey is written once per SpokePool into that cell's
 # shared path. Derived from the source so deleting the field breaks this check.
-MAP_SRC = "operators/hub-operator/internal/infisical/secret_mappings.go"
+MAP_SRC = "operators/hub-operator/internal/hubsecrets/secret_mappings.go"
 if os.path.exists(MAP_SRC):
-    cell_produced |= set(re.findall(r'CellScopedKey:\s*"([^"]+)"', open(MAP_SRC).read()))
+    cell_produced |= set(re.findall(r'ClusterScopedKey:\s*"([^"]+)"', open(MAP_SRC).read()))
 if not SRC:
     print("SKIP\thub-operator source not found")
     raise SystemExit
@@ -128,7 +131,7 @@ if not SRC:
 produced = set()
 for f in SRC:
     src = open(f).read()
-    produced |= set(re.findall(r'InfisicalKey:\s*"([^"]+)"', src))
+    produced |= set(re.findall(r'\bKey:\s*"([^"]+)"', src))
     produced |= set(re.findall(r'PasswordKey:\s*"([^"]+)"', src))
     produced |= {k for k in re.findall(r'UsernameKey:\s*"([^"]+)"', src) if k}
     # Key pairs: PrivateKeyKey / PublicKeyKey (KeyType != "")
@@ -155,7 +158,7 @@ for f in SRC:
                for f in SRC if not f.endswith("constants.go")):
             produced.add(key)
     # Values written inline, e.g. the Svix JWT derived from its signing secret.
-    produced |= set(re.findall(r'CreateOrUpdateSecretRaw\([^)]*?"([A-Za-z0-9_.\-]+)"', src, re.S))
+    produced |= set(re.findall(r'(?:Create|Update)Secret\([^)]*?"([A-Za-z0-9_.\-]+)"', src, re.S))
 
 wanted = {}
 wanted_cell = {}
@@ -173,21 +176,19 @@ for f in glob.glob("manifests/**/*.yaml", recursive=True):
         if d.get("kind") != "ExternalSecret":
             continue
         store = (d.get("spec", {}).get("secretStoreRef") or {}).get("name", "")
-        if "infisical" not in store:
+        if store not in ("openbao-hub", "openbao-platform"):
             continue
         for item in d["spec"].get("data") or []:
-            k = (item.get("remoteRef") or {}).get("key")
-            if not k:
+            ref = item.get("remoteRef") or {}
+            k, prop = ref.get("key"), ref.get("property")
+            if not k or not prop:
                 continue
-            # A cell-scoped key names its path; PLACEHOLDER is substituted per
-            # spoke at render time. Previously any key containing PLACEHOLDER was
-            # skipped outright, which excluded EVERY spoke ExternalSecret from the
-            # check — the exact set most likely to reference an unproduced path.
-            # Evaluate the leaf against the cell producers instead of skipping.
-            if k.startswith("/spoke-pool/"):
-                wanted_cell.setdefault(k.rsplit("/", 1)[-1], (k, f))
-            elif "PLACEHOLDER" not in k:
-                wanted.setdefault(k, f)
+            # The hub scope, or a cluster's platform scope (its cluster name is
+            # substituted per spoke at render time; the property is the key).
+            if k == "hub":
+                wanted.setdefault(prop, f)
+            elif k.startswith("spokes/") and k.endswith("/platform"):
+                wanted_cell.setdefault(prop, (k + "#" + prop, f))
 
 # Producers whose key names are BUILT from declared input and so cannot be found by
 # scanning for literals: one OAuth client credential per client a fleet declares
@@ -196,7 +197,7 @@ for f in glob.glob("manifests/**/*.yaml", recursive=True):
 # rather than silently widening it — the same principle as deriving the literal
 # producers from source instead of restating them here.
 DYNAMIC = [
-    (re.compile(r"^OAUTH_[A-Z0-9_]+_CLIENT_(ID|SECRET)$"), "func InfisicalOAuthClientIDKey("),
+    (re.compile(r"^OAUTH_[A-Z0-9_]+_CLIENT_(ID|SECRET)$"), "func OAuthClientIDKey("),
 ]
 
 all_src = "\n".join(open(f).read() for f in SRC)
@@ -236,7 +237,7 @@ for leaf in sorted(wanted_cell):
         continue
     where = "produced at the ROOT only" if (leaf in produced or leaf in EXTERNAL) else "not produced anywhere"
     print("\t".join(["BAD", full,
-                     "%s — consumed from a cell path but %s; a cell SecretStore cannot read the root (ADR-031)"
+                     "%s — consumed from a cluster's platform scope but %s; a spoke cannot read the hub scope (ADR-117 §4)"
                      % (os.path.relpath(f), where)]))
 
 for k in sorted(EXTERNAL):
@@ -254,7 +255,7 @@ PY
     fi
 
     if [[ -z "$out" ]]; then
-        pass "no Infisical-backed ExternalSecrets found to check"
+        pass "no OpenBao-backed ExternalSecrets found to check"
         return 0
     fi
 
@@ -267,14 +268,14 @@ PY
     while IFS=$'\t' read -r tag a b; do
         [[ "$tag" == "BAD" ]] || continue
         bad=1
-        hard_fail "Infisical key '$a' has no producer — nothing generates or uploads it ($b)"
+        hard_fail "secret key '$a' has no producer — nothing generates or writes it ($b)"
     done <<< "$out"
 
-    (( bad )) || pass "every consumed Infisical key is produced by the hub-operator, or declared external"
+    (( bad )) || pass "every consumed secret key is produced by the hub-operator, or declared external"
 
     while IFS=$'\t' read -r tag a b; do
         [[ "$tag" == "PENDING" ]] || continue
-        warn "Infisical key '$a' has no producer (tracked gap, not yet closed)"
+        warn "secret key '$a' has no producer (tracked gap, not yet closed)"
         note "$b"
     done <<< "$out"
 

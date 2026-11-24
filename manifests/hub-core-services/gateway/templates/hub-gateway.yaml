@@ -86,7 +86,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-edge, platform-identity, platform-ops]
     - name: auth
       hostname: auth.{{ .Values.global.hubDomain }}
       port: 443
@@ -103,7 +103,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-edge, platform-identity, platform-ops]
     # Zitadel (evaluation spike), alongside the `auth` listener that fronts Ory.
     # A separate HOSTNAME, so a spike that fails takes id.dev.nutgraf.in with it
     # and leaves auth.dev.nutgraf.in serving. Not a separate certificate: the
@@ -125,7 +125,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-edge, platform-identity, platform-ops]
     - name: console
       hostname: console.{{ .Values.global.hubDomain }}
       port: 443
@@ -142,7 +142,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-edge, platform-identity, platform-ops]
     - name: argocd
       hostname: argocd.{{ .Values.global.hubDomain }}
       port: 443
@@ -159,7 +159,7 @@ spec:
             matchExpressions:
               - key: kubernetes.io/metadata.name
                 operator: In
-                values: [platform-edge, platform-identity, platform-ops, platform-security]
+                values: [platform-edge, platform-identity, platform-ops]
     # The box's OpenBao (ADR-117 §2), for workload clusters' secret stores and
     # issuers. Public TLS terminates here with the wildcard certificate; the
     # route re-originates TLS to OpenBao, verified against its listener CA

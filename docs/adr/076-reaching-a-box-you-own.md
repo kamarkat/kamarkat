@@ -222,9 +222,14 @@ requires it.
 | `secret-encryption-key` | per cluster | the escrow, by the provisioning contract (ADR-003 §6, ADR-100) | **required** | read from the node's own file |
 | `secret-encryption-key-previous` | per cluster, **only during a rotation** | the escrow, for the length of the rotation | **required while present** | read from the node's own file as the second provider |
 | `admin-kubeconfig` | per cluster | the platform's cluster lifecycle | **required** | none — break-glass only |
-| `zitadel-masterkey` | hub | Infisical; the escrow holds a recovery copy | **required** | read from Infisical by the workload |
-| `infisical-master-keys` | hub | Infisical's own bootstrap; the escrow holds the only recoverable copy | **required** | read at the secret store's start |
-| `infisical-admin-credential` | hub | generated when the box's first cluster is declared; the escrow holds the only copy | **required** | Day-0 logs in to the box's own store with it |
+| `zitadel-masterkey` | hub | OpenBao (ADR-117); the escrow holds a recovery copy | **required** | read from OpenBao by the workload |
+| `openbao-seal` | hub | generated when the management cluster is declared, one record per seal generation (ADR-117 §6); the escrow holds the only copy | **required** | delivered to the cluster at Day-0; OpenBao unseals with it |
+| `openbao-recovery-key-encrypted` | hub | OpenBao's recovery-key initialisation at Day-0, encrypted to the custody PGP key; the escrow holds the only copy | **required** | none — restored-store recovery only, decryptable only with `openbao-recovery-pgp-private` |
+| `openbao-recovery-pgp-public` | hub | `kakt escrow init` | **required** | the recovery key is encrypted to it |
+| `pki-root-certificate` | hub | `kakt escrow init` | **required** | the trust anchor the issuing intermediate is checked against |
+| `custody-project-id` | hub | `kakt escrow init` | **required** | locates the box's administrator-only custody project |
+| `pki-root` | hub, **custody project** | `kakt escrow init`; administrator-only, never readable by any automation identity | **required** | `kakt pki sign-intermediate`, under the administrator's own session |
+| `openbao-recovery-pgp-private` | hub, **custody project** | `kakt escrow init`; administrator-only | **required** | decrypting the recovery key during restored-store recovery |
 | `provider-credential-` | hub, one per provider | the tenant's cloud account, enrolled once | **required** | every command that creates or destroys infrastructure reads it from here |
 | `backup-store-credential` | hub | the tenant's object-store account, enrolled once and rotatable | **required** | delivered into the cluster for archiving, and read directly on a restore |
 | `backup-ssec-key` | hub | the tenant's, and immutable while any backup written under it is retained | **required** | the management-state archive is encrypted with it |
@@ -234,12 +239,18 @@ requires it.
 | `alert-destination` | hub | the tenant's paging provider, enrolled once | not required to rebuild | where this box's alerts page, set before the box can hold anything |
 | `mail-transport-url` | hub | the tenant's mail transport, enrolled once | not required to rebuild | the identity provider needs it while it is being created |
 | `tailnet-authkey` | hub | the tenant's tailnet, enrolled once | not required to rebuild | a control plane joins the tailnet from cloud-init, with no cluster yet |
-| ordinary application secrets | as ADR-003 declares | **Infisical** | per that system's own contract | delivered by ESO |
+| ordinary application secrets | as ADR-003 declares | **OpenBao** (ADR-117) | per that system's own contract | delivered by ESO |
+
+**Custody-project rows** (ADR-117 §3, §6) are held in the box's separate,
+administrator-only custody project, not under `/boxes/<boxId>` in the box escrow
+project: no automation identity is a member of it, so CI, the cluster and
+hub-operator can never read the root CA or the recovery-key decryption key.
 
 **Authority is declared per artefact, never inferred.** The escrow is the recovery
 authority ONLY for an artefact whose row says so. It does not override ADR-003's rule
-that Infisical is the System of Record for secret material: for `zitadel-masterkey`
-the authoritative value is Infisical's and the escrow holds a copy, while for
+that the box's secret store (OpenBao, ADR-117) is the System of Record for secret
+material: for `zitadel-masterkey` the authoritative value is OpenBao's and the
+escrow holds a copy, while for
 #### Cloud KMS keys are not escrow artefacts
 
 **A Cloud KMS encryption key is never an escrow artefact, and exporting or duplicating
@@ -253,7 +264,8 @@ removes. Recovery of an encrypted cluster therefore depends on the **continuity 
 external KMS authority**, not on anything this escrow holds.
 
 The escrow's scope is unchanged: it holds secret VALUES that cannot be regenerated —
-the Zitadel masterkey, Infisical's master keys, admin kubeconfigs. Those have a
+the Zitadel masterkey, OpenBao's seal keys and encrypted recovery key, admin
+kubeconfigs. Those have a
 different custody model from a cryptographic key, and conflating the two would mean
 either a second secret store or a key copied into the first.
 

@@ -167,6 +167,13 @@ func runAddManagementCluster(ctx context.Context, m tenant.ManagementCluster) er
 	fmt.Println("      cluster this push ADDS is built, so editing one that exists changes")
 	fmt.Println("      nothing here.")
 	fmt.Println()
+	fmt.Println("Then, once, as the box's administrator (ADR-117):")
+	fmt.Println()
+	fmt.Println("  kakt pki sign-intermediate")
+	fmt.Println("      signs the box's issuing certificate authority with the root held in")
+	fmt.Println("      your administrator-only custody project. Start it right after the")
+	fmt.Println("      push: it waits for the cluster's secret store, and Day-0 waits for it.")
+	fmt.Println()
 	fmt.Println("`kakt escrow verify` reports this box's escrow, including the binding, if")
 	fmt.Println("you want to see it before you push.")
 

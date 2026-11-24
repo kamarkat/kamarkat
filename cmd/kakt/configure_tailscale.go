@@ -30,7 +30,7 @@ or $KAMARKAT_HOME -- so they are found from any directory and survive a checkout
 being deleted.
 
 After running this command:
-- hub-operator uploads tailscale-hybrid-psk to Infisical (CLISecretMappings)
+- hub-operator writes tailscale-hybrid-psk into OpenBao (CLISecretMappings)
 - ESO syncs it back, so ArgoCD cannot reset it to empty
 - Hybrid workload cluster CP nodes join the tailnet before kubeadm init`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -93,7 +93,7 @@ func runConfigureTailscale(cmd *cobra.Command, authkey, hostname, kubeconfig str
 
 	fmt.Println("\n✅ Tailscale credentials configured!")
 	fmt.Println("\nNext steps:")
-	fmt.Println("1. hub-operator uploads tailscale-hybrid-psk to Infisical on next reconcile")
+	fmt.Println("1. hub-operator writes tailscale-hybrid-psk into OpenBao on next reconcile")
 	fmt.Println("2. ESO syncs it back (tailscale-authkey / tailscale-hostname)")
 	fmt.Println("3. Delete any stuck hybrid cluster so CAPI recreates the CP with the pre-kubeadm join")
 	fmt.Println("4. Run on-prem-join.sh on home nodes once that cluster's CP is Ready")

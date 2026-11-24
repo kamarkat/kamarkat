@@ -308,16 +308,9 @@ spec:
                           kind: ConfigMap
                         - name: argocd-agent-rbac
                           kind: ConfigMap
-                        # Bootstrap PKI (hub-operator/spoke-identity-operator)
+                        # Bootstrap PKI (hub-operator)
                         - name: ""
                           kind: Secret
-                        - name: ""
-                          kind: Secret
-                        - name: ""
-                          kind: Secret
-                        # ADR-048 second-stage: completed ClusterIssuer rendered by
-                        # spoke-identity-operator into the {spoke}-cluster-issuer CRS
-                        # wrapper Secret.
                         - name: ""
                           kind: Secret
                         # ADR-046 §24 / ADR-048 second-stage: the spoke's cilium-config,
@@ -388,7 +381,7 @@ spec:
                   - type: string
                     string:
                       type: Format
-                      fmt: "%s-machine-identity"
+                      fmt: "%s-bootstrap-cert"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
                 toFieldPath: spec.forProvider.manifest.spec.resources[13].name
@@ -396,26 +389,10 @@ spec:
                   - type: string
                     string:
                       type: Format
-                      fmt: "%s-bootstrap-cert"
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
                       fmt: "%s-agent-ca"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[15].name
-                transforms:
-                  - type: string
-                    string:
-                      type: Format
-                      fmt: "%s-cluster-issuer"
-              - type: FromCompositeFieldPath
-                fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[16].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
                 transforms:
                   - type: string
                     string:

@@ -43,9 +43,6 @@ func (f *fakeEscrowStore) RestoreArtifact(ctx context.Context, id escrow.Identit
 	return f.artifacts[id.BoxID+"/"+id.ClusterName+"/"+artifact], nil
 }
 
-func (f *fakeEscrowStore) BackupMasterKeys(ctx context.Context, id escrow.Identity, keys interface{}) error {
-	return nil
-}
 func (f *fakeEscrowStore) RestoreMasterKeys(ctx context.Context, id escrow.Identity) (interface{}, error) {
 	return nil, nil
 }
@@ -271,4 +268,6 @@ func TestEnsureClusterEncryptionUnreadableEscrowFailsClosed(t *testing.T) {
 }
 
 func (f *fakeEscrowStore) BackupProjectArtifact(context.Context, string, string) error { return nil }
-func (f *fakeEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) { return "", nil }
+func (f *fakeEscrowStore) RestoreProjectArtifact(context.Context, string) (string, error) {
+	return "", nil
+}

@@ -52,13 +52,13 @@ func (su *SecretUploader) UploadCLISecrets(ctx context.Context) error {
 			logger.Error(err, "Failed to upload secret",
 				"description", mapping.Description,
 				"source", fmt.Sprintf("%s/%s", mapping.SourceNamespace, mapping.SourceName),
-				"infisicalKey", mapping.Key)
+				"key", mapping.Key)
 			failedKeys = append(failedKeys, mapping.Key)
 		} else {
 			successCount++
-			logger.Info("Uploaded secret to Infisical",
+			logger.Info("Wrote secret to OpenBao",
 				"description", mapping.Description,
-				"infisicalKey", mapping.Key)
+				"key", mapping.Key)
 		}
 	}
 

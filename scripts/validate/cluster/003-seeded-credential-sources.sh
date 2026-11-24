@@ -28,8 +28,8 @@ validate_adr003_seeded_credential_sources() {
     out=$(cd "$VALIDATE_ROOT" && HUB_KUBECONFIG="$HUB_KUBECONFIG" python3 - <<'PYCHECK'
 import json, os, re, subprocess
 
-SRC = "operators/hub-operator/internal/infisical/secret_mappings.go"
-CONSTS = "operators/hub-operator/internal/infisical/constants.go"
+SRC = "operators/hub-operator/internal/hubsecrets/secret_mappings.go"
+CONSTS = "operators/hub-operator/internal/hubsecrets/constants.go"
 kubeconfig = os.environ["HUB_KUBECONFIG"]
 
 # Namespace constants, read from the source so a renamed namespace cannot make this
@@ -52,7 +52,7 @@ for entry in re.findall(r'\{(.*?)\n\t\}', body, re.S):
     ns = re.search(r'SourceNamespace:\s*(\w+)', entry)
     name = re.search(r'SourceName:\s*"([^"]+)"', entry)
     key = re.search(r'SourceKey:\s*"([^"]+)"', entry)
-    ikey = re.search(r'InfisicalKey:\s*"([^"]+)"', entry)
+    ikey = re.search(r'\bKey:\s*"([^"]+)"', entry)
     allow_empty = bool(re.search(r'AllowEmpty:\s*true', entry))
     if not (ns and name and key):
         continue
@@ -81,7 +81,7 @@ for (namespace, name), keys in sorted(wanted.items()):
     inert = [k for k, _, allow in keys if k in data and len(data[k]) == 0 and allow]
     if missing:
         print("FAIL %s/%s exists but is missing %s -- the uploader fails this on every "
-              "reconcile with 'source secret missing key', and the Infisical value is "
+              "reconcile with 'source secret missing key', and the OpenBao value is "
               "whatever was seeded last. Re-apply it from the operator store (hub-bootstrap "
               "step 6b)" % (namespace, name, ", ".join(sorted(missing))))
     if empty:
