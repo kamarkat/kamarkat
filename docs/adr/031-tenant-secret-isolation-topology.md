@@ -1,6 +1,7 @@
 # ADR 031: Tenant Secret Isolation and Identity Topology
 
 *Amended by: ADR-062 (Onboarding and Scaffolding a Tenant), ADR-064 (Bundle Promotion and Cell-Scoped Policy)*
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — OpenBao ACL policies and per-cluster JWT mounts replace per-cluster Infisical projects and identities, under ADR-117 §4's revocation contract.*
 
 > Secret isolation is bounded by a box: a spoke cluster belongs to exactly one
 > tenant, and no secret store serves more than one. The cross-tenant reasoning

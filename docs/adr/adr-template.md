@@ -57,7 +57,7 @@ All ADRs must respect these architectural rules without restating them:
 
 4. **Single Authority per Domain (ADR-043):** Exactly one authority exists per domain. Where two ADRs appear to conflict, ADR-043 controls.
 
-5. **Secret Lifecycle (ADR-003):** All secrets follow: Generation → Storage (Infisical) → Delivery (ESO) → Consumption → Rotation. No Kubernetes Secret may be a System of Record for secret material.
+5. **Secret Lifecycle (ADR-003, ADR-117):** All secrets follow: Generation → Storage (OpenBao) → Delivery (ESO) → Consumption → Rotation. Values flow one way; nothing is published into OpenBao from a cluster. No Kubernetes Secret may be a System of Record for secret material.
 
 6. **No actor-focused language:** Describe what must be stored where and who owns the lifecycle. Do not describe "who performs the API call."
 

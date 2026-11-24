@@ -1,5 +1,7 @@
 # ADR-030: Autonomous Credential Rotation and Lifecycle Management
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — The zero-downtime claim is withdrawn. Rotation converges eventually, may temporarily fail new authentications, and makes no unconditional zero-downtime guarantee (ADR-117 §5).*
+
 ## Status
 Accepted
 

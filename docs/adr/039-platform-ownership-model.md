@@ -1,5 +1,7 @@
 # ADR-039: Platform Ownership Model
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — Ownership rows for secret storage, database credentials, PKI and escrow custody follow ADR-117's Ownership table.*
+
 **Date:** 2026-06-08
 **Status:** Accepted
 

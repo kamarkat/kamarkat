@@ -1,5 +1,7 @@
 # ADR-003: Secret Management Architecture
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — §2 superseded: OpenBao replaces self-hosted Infisical as the System of Record. Credentials flow one way, and rotation is OpenBao-native (ADR-117 §1, §5).*
+
 **Date:** 2026-06-08 (rewritten)
 **Status:** Accepted (rewritten — supersedes original ADR-003 and `bootstrap-vs-application-secrets.md`)
 

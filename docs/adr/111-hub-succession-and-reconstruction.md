@@ -1,5 +1,7 @@
 # ADR-111: A hub is replaced, not upgraded
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — Class E inventory, reconstruction order and recovery incarnations for OpenBao follow ADR-117 §7. `infisical-db` becomes `openbao-db`.*
+
 **Date:** 2026-11-02
 **Status:** Proposed
 **Relates to:** ADR-014 (platform-owned stateful infrastructure), ADR-076 (reaching a box you own),

@@ -4,6 +4,7 @@
 Accepted, partially amended (2026-09-10)
 *Supersedes: ADR-002 (Hub Operator Database Management)*
 *Amended by: ADR-074 (Withdrawing Atlas)*
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — CloudNativePG owns database owner roles (which cannot log in) and login-role existence; OpenBao owns hub login-role passwords. The 2026-08-22 Day-0 bootstrap-role addendum is retired with `infisical-db` (ADR-117 §5).*
 
 > The tri-state contract below is now two-state. CloudNativePG and Crossplane
 > `provider-sql` stand; the Atlas leg is vacant, and schema migration has no owner.

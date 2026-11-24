@@ -1,5 +1,7 @@
 # ADR-076: Reaching a Box You Own
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — Adds a custody escrow project whose only member is the administrator. Seal-key generations, seal-configuration history and encrypted recovery shares replace `infisical-master-keys` and `infisical-admin-credential`. The runtime's master-key escrow access is removed (ADR-117 §3).*
+
 **Date:** 2026-09-11
 
 **Status:** Proposed
@@ -655,8 +657,11 @@ at-rest encryption key before any operator exists. A folder named after a contro
 that controller owns what is in it, and for this material that is simply untrue -- it is
 the box's. The word is also one this platform retired (ADR-111 Revision 9 §4: a management
 cluster and managed clusters, and "hub" is not in the vocabulary), and the escrow root is
-where a tenant met it first. Plural, because one escrow project serves every box in the
-organisation.
+where a tenant met it first. Plural, because the path names the box the material belongs
+to. *(Corrected 2026-11-24: this sentence previously said "one escrow project serves every box
+in the organisation". That is not what `kakt escrow init` does. Each box has its own escrow
+project, and the organisation's one automation identity is added to each (§4a). ADR-117
+adds a per-box, administrator-only custody project beside it.)*
 
 **No compatibility path, deliberately.** `legacyPath`, `MigrateArtifactPath` and
 `kakt escrow migrate-paths` are removed with the old root rather than kept to reach it. A

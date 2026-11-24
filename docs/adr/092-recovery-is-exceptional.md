@@ -1,5 +1,7 @@
 # ADR-092: Recovery is exceptional, and its exit is machine-enforced
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — OpenBao's recovery mode omits consumer admission. Settling the manifest requires a complete recovery record for the incarnation (ADR-117 §7).*
+
 **Date:** 2026-09-28
 **Status:** Accepted
 **Relates to:** ADR-014 (platform-owned stateful infrastructure), ADR-063 (bundle versions), ADR-047 addendum (the identifier check, the same enforcement shape)

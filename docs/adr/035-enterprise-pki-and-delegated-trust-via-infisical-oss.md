@@ -1,5 +1,7 @@
 # ADR-035: Enterprise PKI and Delegated Trust via Infisical OSS
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — OpenBao replaces Infisical as the intermediate authority, and cert-manager's built-in Vault issuer replaces the Infisical issuer. Root custody moves from "offline / HSM required" to "outside every runtime and automation identity; escrow-held by default; offline or HSM optional". Issuance restrictions follow ADR-117 §6.*
+
 **Date:** 2026-06-08 (rewritten)
 **Status:** Accepted (rewritten — supersedes original ADR-035)
 

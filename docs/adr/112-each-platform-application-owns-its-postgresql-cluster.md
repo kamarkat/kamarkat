@@ -1,5 +1,7 @@
 # ADR-112: Each platform application owns its PostgreSQL cluster
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — `infisical-db` becomes `openbao-db`, with no pooler (a §9 exception). Application clusters separate the owner role from the login role. `openbao-db` takes a backup before each OpenBao version change (ADR-117 §2, §5, §7).*
+
 **Date:** 2026-11-02
 **Status:** Accepted (implemented 2026-11-03)
 **Amends:** ADR-023 (addendum 2026-08-22, the Day-0 bootstrap role), ADR-078 (addendum 5 §6,

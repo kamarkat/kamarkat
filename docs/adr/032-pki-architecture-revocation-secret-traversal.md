@@ -1,5 +1,7 @@
 # ADR 032: PKI Architecture, Revocation, and Secret Traversal
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — The issuing authority is OpenBao's intermediate, signed by an escrow-held root (ADR-117 §6).*
+
 ## Status
 
 Superseded in part by ADR-035, 2026-08-31. The Delegated Spoke Issuance and

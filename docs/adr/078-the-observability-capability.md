@@ -7,6 +7,7 @@
 *Constrained by: ADR-065 (The Control Plane Ships Into the Box), ADR-066 (The Platform Boundary), ADR-069 (The Maintenance Promise), ADR-070 (The Minimum Supported Box), ADR-071 (How This Platform Differs from Kubefirst), ADR-077 (The Support Agent)*
 
 *Amended by: addendum 3 (2026-10-24) — SUPERSEDED BY ADDENDUM 5. It moved the backend
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — OpenBao's audit stream is a security-relevant log source with restricted read access (ADR-117 §8).*
 and UI to the box owner's Grafana Cloud stack and removed the in-box stores, Grafana
 and ADR-083's federation. Addendum 5 (2026-10-28) reversed that to a self-hosted
 backend, and addendum 10 (2026-11-24) settles the principle it was decided without:

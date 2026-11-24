@@ -1,5 +1,7 @@
 # ADR-079: A Day-0 Phase Declares Whether It Can Be Re-Run
 
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — A failed OpenBao self-initialization is not re-entrant. Bootstrap fails closed and preserves `openbao-db` (ADR-117 §3).*
+
 **Date:** 2026-09-13
 
 **Status:** Proposed

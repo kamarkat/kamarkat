@@ -4,6 +4,7 @@
 **Status:** Accepted
 
 *Amended by: ADR-063 (The Platform Bundle and its Version)*
+*Amended by: ADR-117 (Self-Hosted Secret Management on OpenBao), 2026-11-24 — Seal keys, recovery material and the root CA are Day-0 CLI artefacts. Seal rotation and intermediate rollover are maintenance operations under ADR-035's rollover provision (ADR-117 §3, §6).*
 
 > Day-0 is unchanged as a boundary. What Day-0 installs is a published bundle at a
 > version rather than content resolved from the platform's repository.
