@@ -18,6 +18,10 @@ import (
 
 // Orchestrator manages the forceful teardown process
 type Orchestrator struct {
+	// infraName is each cluster's HetznerCluster name, resolved once from the CAPI
+	// Clusters before anything is deleted (see ownershipKeys).
+	infraName map[string]string
+
 	ClusterName string
 	Force       bool
 	Debug       bool
@@ -241,6 +245,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	dnsOwn, hasDNS := o.resolveDNSOwnership(ctx)
 
 	ccmLoadBalancerIPs := o.drainLoadBalancerServices(ctx)
+
+	// Read while the CAPI objects still exist: everything after this deletes them.
+	o.resolveInfraNames(ctx, append([]string{o.ClusterName}, o.Scope...))
 
 	// Step 2: Strip Kubernetes finalizers & delete CAPI CRs fast (non-blocking)
 	o.stripKubernetesFinalizers(ctx)
@@ -592,7 +599,7 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// clusters in scope, and which are excluded and why. A missing kubeconfig
 	// proves none of them -- reading it as "already gone" is what let a teardown
 	// destroy nothing and report success.
-	inv, invErr := o.discoverInventory(ctx, client, append([]string{o.ClusterName}, workload...))
+	inv, invErr := o.discoverInventory(ctx, client, o.ownershipKeys(ctx, append([]string{o.ClusterName}, workload...)))
 	if invErr != nil {
 		// Uncertainty refuses. An inventory that could not be read is not an empty
 		// one, and the difference is a box whose servers keep running.
@@ -648,10 +655,10 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	// can finish the job.
 	for _, name := range workload {
 		fmt.Printf("\n[teardown] Destroying workload cluster %s, before the management cluster.\n", name)
-		o.sweepOwned(ctx, client, []string{name}, nil)
+		o.sweepOwned(ctx, client, o.ownershipKeys(ctx, []string{name}), nil)
 	}
 	if len(workload) > 0 {
-		after, err := o.discoverInventory(ctx, client, workload)
+		after, err := o.discoverInventory(ctx, client, o.ownershipKeys(ctx, workload))
 		if err != nil {
 			return fmt.Errorf("%w: the workload cluster(s) were swept, but the provider could "+
 				"not be re-read to confirm it: %v\n\n%s was NOT touched. Re-run once the "+
@@ -675,7 +682,7 @@ func (o *Orchestrator) deleteHetznerResources(ctx context.Context, ccmLoadBalanc
 	}
 
 	fmt.Printf("\n[teardown] Destroying the management cluster %s, last.\n", o.ClusterName)
-	o.sweepOwned(ctx, client, []string{o.ClusterName}, orphanIPs)
+	o.sweepOwned(ctx, client, o.ownershipKeys(ctx, []string{o.ClusterName}), orphanIPs)
 
 	fmt.Println("[teardown] ✓ Hetzner Cloud resource cleanup completed")
 

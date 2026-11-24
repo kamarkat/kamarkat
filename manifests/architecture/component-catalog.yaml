@@ -260,6 +260,11 @@ components:
     repo: crossplane/crossplane
     layer: machinery
     match: ["xpkg.crossplane.io/crossplane/*"]
+    behind:
+      - versions: ["v2.4.3"]
+        status: not assessed
+        reason: >-
+          The newer Crossplane release has not been assessed against the platform's compositions and providers; it moves when that assessment is done.
   - name: Crossplane Kubernetes provider
     description: Lets a composition create objects in any cluster the platform manages.
     license: Apache-2.0
@@ -278,6 +283,11 @@ components:
     repo: crossplane-contrib/function-patch-and-transform
     layer: machinery
     match: [xpkg.upbound.io/crossplane-contrib/function-patch-and-transform]
+    behind:
+      - versions: ["v0.11.2"]
+        status: not assessed
+        reason: >-
+          The newer function release has not been assessed against the platform's compositions; it moves with the Crossplane assessment.
   - name: Reloader
     description: Restarts a workload when a secret or config map it reads changes.
     license: Apache-2.0
@@ -704,6 +714,11 @@ components:
     repo: grafana/mcp-grafana
     layer: capability
     match: ["docker.io/grafana/mcp-grafana"]
+    behind:
+      - versions: ["2.3.0"]
+        status: not assessed
+        reason: >-
+          The newer release has not been assessed against the read-only tool set the platform MCP server exposes (ADR-116).
 
   - name: Login gateway
     description: Signs people in before a request reaches a protected route.
