@@ -224,6 +224,8 @@ func main() {
 		os.Exit(1)
 	}
 	store := secrets.NewStore(baoClient)
+	// No value is generated while the store is an unfinished restore (ADR-117 §7).
+	store.RestoreGuard = controller.NewRestoreGuard(uncachedClient, baoClient)
 
 	if err := (&controller.HubEnvironmentReconciler{
 		Client:         mgr.GetClient(),

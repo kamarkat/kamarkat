@@ -203,8 +203,43 @@ func TestSpokeAuthSeparatesReaderAndSigner(t *testing.T) {
 	if !strings.Contains(reader, "kv/data/spokes/c1/platform") || strings.Contains(reader, "pki_int") {
 		t.Errorf("reader policy = %q", reader)
 	}
-	if !strings.Contains(signer, "pki_int/sign/infrastructure-services") || strings.Contains(signer, "kv/") {
-		t.Errorf("signer policy = %q", signer)
+	// The signer may sign ONLY through this cluster's own two roles: never the
+	// hub's shared profile, never another cluster's role.
+	for _, want := range []string{`"pki_int/sign/spoke-c1"`, `"pki_int/sign/spoke-c1-cache"`} {
+		if !strings.Contains(signer, want) {
+			t.Errorf("signer policy lacks %s: %q", want, signer)
+		}
+	}
+	if strings.Count(signer, "path ") != 2 || strings.Contains(signer, "infrastructure-services") ||
+		strings.Contains(signer, "kv/") || strings.Contains(signer, "*") {
+		t.Errorf("signer policy grants more than this cluster's two roles: %q", signer)
+	}
+
+	client := f.writes["pki_int/roles/spoke-c1"]
+	ids, _ := client["allowed_domains"].([]any)
+	if len(ids) != 3 || ids[0] != "argocd-agent:c1" || ids[1] != "alloy:c1" || ids[2] != "support-agent:c1" {
+		t.Errorf("client role admits %v, want exactly this cluster's three identities", ids)
+	}
+	cache := f.writes["pki_int/roles/spoke-c1-cache"]
+	for name, r := range map[string]map[string]any{"client": client, "cache": cache} {
+		if r["allow_any_name"] != false || r["allow_subdomains"] != false || r["allow_ip_sans"] != false ||
+			r["allow_wildcard_certificates"] != false || r["allow_localhost"] != false ||
+			r["allowed_uri_sans"] != "" || r["allowed_other_sans"] != "" {
+			t.Errorf("%s role admits names beyond its list: %v", name, r)
+		}
+		// OpenBao skips the allowed-names check entirely for cn_validations=disabled.
+		if v, _ := r["cn_validations"].([]any); len(v) != 1 || v[0] != "hostname" {
+			t.Errorf("%s role's CN is not checked against its allowed names: %v", name, r["cn_validations"])
+		}
+	}
+	if client["allow_bare_domains"] != true || client["allow_glob_domains"] != false ||
+		client["client_flag"] != true || client["server_flag"] != false || client["max_ttl"] != "24h" {
+		t.Errorf("client role constraints: %v", client)
+	}
+	if g, _ := cache["allowed_domains"].([]any); len(g) != 1 || g[0] != "*-cache" ||
+		cache["client_flag"] != false || cache["server_flag"] != true || cache["max_ttl"] != "168h" ||
+		cache["enforce_hostnames"] != true {
+		t.Errorf("cache role constraints: %v", cache)
 	}
 	for role, sub := range map[string]string{
 		"platform":     "system:serviceaccount:external-secrets:openbao-platform-reader",

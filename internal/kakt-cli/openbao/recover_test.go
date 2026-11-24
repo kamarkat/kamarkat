@@ -135,6 +135,10 @@ func (l *fakeLive) Hub(context.Context) (HubState, error) {
 	h := l.hub
 	if l.polls > l.hubCatchesUpAfter {
 		h.OpenBaoIncarnation = l.dbs[DatabaseOpenBao].UID
+		if h.PlatformSecretsWritten && h.PlatformSecretsMessage == "" {
+			h.PlatformSecretsMessage = "Day-0 and application secrets are in OpenBao (openbao-db incarnation " +
+				l.dbs[DatabaseOpenBao].UID + ")"
+		}
 	}
 	return h, nil
 }
@@ -376,5 +380,67 @@ func TestSealConfigForStoreSelectsByTheStoresState(t *testing.T) {
 	l.missing = errors.New("connection refused")
 	if _, _, err := SealConfigForStore(context.Background(), l, rec); err == nil {
 		t.Fatal("an unreadable store was treated as no store")
+	}
+}
+
+// A restore missing an authoritative value: hub-operator refuses to regenerate
+// it, so recovery stays open, names the value, and nothing is marked complete.
+func TestRecoveryStaysOpenWhileARestoredValueIsMissing(t *testing.T) {
+	l, esc := recoverySetup(t, true, false, true)
+	l.hub.PlatformSecretsWritten = false
+	l.hub.PlatformSecretsMessage = "1 of 9 writes failed: hub-zitadel-masterkey: refusing to generate a secret value during an unfinished restore"
+	var out strings.Builder
+	err := Recover(context.Background(), RecoverOptions{Live: l, Escrow: esc, Out: &out, Poll: time.Millisecond})
+	if !errors.Is(err, ErrRecoveryIncomplete) {
+		t.Fatalf("got %v, want incomplete", err)
+	}
+	if !strings.Contains(out.String(), "hub-zitadel-masterkey") {
+		t.Fatalf("the missing value is not reported:\n%s", out.String())
+	}
+	r := record(t, l, DatabaseOpenBao, "bao-2")
+	if _, ok := r.Steps["generated"]; ok || !r.Completed.IsZero() {
+		t.Fatalf("recovery recorded as complete with a value missing: %+v", r)
+	}
+
+	// The value is restored; hub-operator's next pass reports this incarnation.
+	l.hub.PlatformSecretsWritten = true
+	l.hub.PlatformSecretsMessage = ""
+	if err := Recover(context.Background(), RecoverOptions{Live: l, Escrow: esc, Poll: time.Millisecond}); err != nil {
+		t.Fatalf("after the value is restored: %v", err)
+	}
+	if record(t, l, DatabaseOpenBao, "bao-2").Completed.IsZero() {
+		t.Fatal("a fully recovered incarnation is not marked complete")
+	}
+}
+
+// A "written" condition from before the restore says nothing about the restored store.
+func TestAPreRestoreSecretsConditionDoesNotCompleteRecovery(t *testing.T) {
+	l, esc := recoverySetup(t, true, false, true)
+	l.hub.PlatformSecretsMessage = "Day-0 and application secrets are in OpenBao (openbao-db incarnation bao-1)"
+	err := Recover(context.Background(), RecoverOptions{Live: l, Escrow: esc, Poll: time.Millisecond})
+	if !errors.Is(err, ErrRecoveryIncomplete) {
+		t.Fatalf("got %v; a condition for the previous incarnation completed recovery", err)
+	}
+	if _, ok := record(t, l, DatabaseOpenBao, "bao-2").Steps["generated"]; ok {
+		t.Fatal("the generated step was recorded from a stale condition")
+	}
+}
+
+// An application whose credential the restore lost keeps recovery open, even
+// though the hub's own secrets are all present.
+func TestRecoveryStaysOpenWhileAnApplicationsCredentialIsMissing(t *testing.T) {
+	l, esc := recoverySetup(t, true, false, true)
+	l.hub.Applications = []ApplicationSecrets{
+		{Name: "shop", Present: true, Message: "every credential is present (openbao-db incarnation bao-2)"},
+		{Name: "blog", Present: false, Message: "failed to generate spokes/c1/tenants/blog/BLOG_INTERNAL_TOKEN for tenant acme: " +
+			"refusing to generate a secret value during an unfinished restore"},
+	}
+	var out strings.Builder
+	err := Recover(context.Background(), RecoverOptions{Live: l, Escrow: esc, Out: &out, Poll: time.Millisecond})
+	if !errors.Is(err, ErrRecoveryIncomplete) || !strings.Contains(out.String(), "BLOG_INTERNAL_TOKEN") {
+		t.Fatalf("got %v; output:\n%s", err, out.String())
+	}
+	if !record(t, l, DatabaseOpenBao, "bao-2").Completed.IsZero() {
+		t.Fatal("recovery marked complete with an application credential missing")
 	}
 }

@@ -69,6 +69,8 @@ type TenantSecretStore interface {
 	// HexKey draws a hex key from an OpenBao password policy: OpenBao, not this
 	// operator, generates the value.
 	HexKey(ctx context.Context, nbytes int) (string, error)
+	// GenerationAllowed refuses generation during an unfinished restore.
+	GenerationAllowed(ctx context.Context) error
 }
 
 type AINativeSaaSReconciler struct {
@@ -197,6 +199,10 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	result, err := r.Store.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
+	// Whether every credential this application needs is in the store, stated
+	// for the openbao-db incarnation it was checked against: after a restore,
+	// `kakt openbao recover` waits for every application to say so (ADR-117 §7).
+	r.recordSecretsPresent(ctx, ainativesaas, err)
 	if err != nil {
 		logger.Error(err, "Failed to ensure tenant credentials in OpenBao", "tenant", tenantId, "cluster", clusterName)
 		if result != nil && result.Result == secrets.EnsureMissing {
@@ -544,6 +550,37 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // conditionTypeDBSeeded is the condition recording that this tenant's credentials
 // have been provisioned. It doubles as the durable first-provisioning marker.
 const conditionTypeDBSeeded = "TenantDBCredentialsSeeded"
+
+// conditionTypeSecretsPresent says every credential the application needs is in
+// OpenBao, for a named openbao-db incarnation -- or which one a restore lost.
+const conditionTypeSecretsPresent = "TenantSecretsPresent"
+
+// recordSecretsPresent sets TenantSecretsPresent from the producer's outcome,
+// writing status only when it changes.
+func (r *AINativeSaaSReconciler) recordSecretsPresent(ctx context.Context, obj *unstructured.Unstructured, ensureErr error) {
+	incarnation, _, err := openBaoIncarnation(ctx, r.Client)
+	if err != nil {
+		return
+	}
+	cond := metav1.Condition{Type: conditionTypeSecretsPresent, Status: metav1.ConditionTrue, Reason: "Present",
+		Message: "every credential is present (openbao-db incarnation " + incarnation + ")"}
+	switch {
+	case ensureErr == nil:
+	case errors.Is(ensureErr, ErrRestoreUnfinished):
+		cond.Status, cond.Reason = metav1.ConditionFalse, "MissingAfterRestore"
+		cond.Message = ensureErr.Error()
+	default:
+		return // not a statement about presence
+	}
+	conds, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	for _, c := range conds {
+		m, _ := c.(map[string]interface{})
+		if m["type"] == cond.Type && m["status"] == string(cond.Status) && m["message"] == cond.Message {
+			return
+		}
+	}
+	_ = r.mergeCondition(ctx, obj, cond)
+}
 
 // conditionTypeCacheSeeded records that THIS tenant's cache credential has been
 // written, separately from whether the tenant itself is new.

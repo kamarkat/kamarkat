@@ -1,6 +1,14 @@
-# This cluster's private-PKI issuer (ADR-035, ADR-117 §8): cert-manager's own
-# Vault issuer against its hub's OpenBao, signing through the
-# infrastructure-services profile (pki_int role, 7-day cap).
+# This cluster's private-PKI issuers (ADR-035, ADR-117 §8): cert-manager's own
+# Vault issuer against its hub's OpenBao, each signing through one of THIS
+# cluster's own pki_int roles, which admit only this cluster's identities:
+#
+#   openbao-fleet         spoke-<cluster>: client certificates for
+#                         argocd-agent:<cluster>, alloy:<cluster> and
+#                         support-agent:<cluster>, 24h
+#   openbao-tenant-cache  spoke-<cluster>-cache: tenant cache servers, <app>-cache, 168h
+#
+# A cluster cannot obtain a certificate for another cluster's identities or the
+# hub's: its signing policy names these two roles and nothing else.
 #
 # cert-manager logs in through the cluster's own auth mount, spoke-<cluster>,
 # with a token for the openbao-issuer ServiceAccount signed by THIS cluster's API
@@ -16,7 +24,23 @@ metadata:
 spec:
   vault:
     server: "https://openbao.dev.nutgraf.in"
-    path: pki_int/sign/infrastructure-services
+    path: pki_int/sign/spoke-PLACEHOLDER
+    auth:
+      kubernetes:
+        mountPath: /v1/auth/spoke-PLACEHOLDER
+        role: cert-manager
+        serviceAccountRef:
+          name: openbao-issuer
+          audiences: [openbao]
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-tenant-cache
+spec:
+  vault:
+    server: "https://openbao.dev.nutgraf.in"
+    path: pki_int/sign/spoke-PLACEHOLDER-cache
     auth:
       kubernetes:
         mountPath: /v1/auth/spoke-PLACEHOLDER

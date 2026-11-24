@@ -1038,10 +1038,32 @@ spec:
                 - op: replace
                   path: /spec/provider/vault/auth/jwt/path
                   value: 'spoke-{{"{{"}} .name {{"}}"}}'
+                - op: replace
+                  path: /spec/provider/vault/server
+                  value: 'https://openbao.{{ include "environment-manager.hubDomain" $ }}'
             - target:
                 kind: ClusterIssuer
                 name: openbao-fleet
               patch: |
+                - op: replace
+                  path: /spec/vault/path
+                  value: 'pki_int/sign/spoke-{{"{{"}} .name {{"}}"}}'
+                - op: replace
+                  path: /spec/vault/server
+                  value: 'https://openbao.{{ include "environment-manager.hubDomain" $ }}'
+                - op: replace
+                  path: /spec/vault/auth/kubernetes/mountPath
+                  value: '/v1/auth/spoke-{{"{{"}} .name {{"}}"}}'
+            - target:
+                kind: ClusterIssuer
+                name: openbao-tenant-cache
+              patch: |
+                - op: replace
+                  path: /spec/vault/path
+                  value: 'pki_int/sign/spoke-{{"{{"}} .name {{"}}"}}-cache'
+                - op: replace
+                  path: /spec/vault/server
+                  value: 'https://openbao.{{ include "environment-manager.hubDomain" $ }}'
                 - op: replace
                   path: /spec/vault/auth/kubernetes/mountPath
                   value: '/v1/auth/spoke-{{"{{"}} .name {{"}}"}}'

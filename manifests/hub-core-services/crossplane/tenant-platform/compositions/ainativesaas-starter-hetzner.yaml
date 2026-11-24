@@ -232,7 +232,9 @@ spec:
                       # ADR-035: cert-manager is the only issuer of X.509 material.
                       secretName: ""
                       issuerRef:
-                        name: openbao-fleet
+                        # The cluster's tenant-cache issuer: <app>-cache server
+                        # certificates only, through this cluster's own role.
+                        name: openbao-tenant-cache
                         kind: ClusterIssuer
                         group: cert-manager.io
                       commonName: ""

@@ -17,6 +17,20 @@ import (
 // value once and never regenerates it (ADR-003 §1).
 type Store struct {
 	Bao *openbao.Client
+	// RestoreGuard, when set, is asked before ANY value is generated. It refuses
+	// while the store is an unfinished restore (ADR-117 §7): a value missing from
+	// a restored store was lost, not never-created, and a regenerated one would
+	// silently replace what consumers and external integrations still use.
+	RestoreGuard func(context.Context) error
+}
+
+// GenerationAllowed reports whether a new value may be generated now. Every
+// generator calls it, including the in-process key-pair generators.
+func (c *Store) GenerationAllowed(ctx context.Context) error {
+	if c.RestoreGuard == nil {
+		return nil
+	}
+	return c.RestoreGuard(ctx)
 }
 
 // NewStore wraps an OpenBao client.
@@ -76,12 +90,18 @@ const (
 
 // Password returns a new default credential (32 hex characters) from OpenBao.
 func (c *Store) Password(ctx context.Context) (string, error) {
+	if err := c.GenerationAllowed(ctx); err != nil {
+		return "", err
+	}
 	return c.Bao.GeneratePassword(ctx, policyPassword)
 }
 
 // HexKey returns nbytes of randomness, hex-encoded (2*nbytes characters), from
 // the matching OpenBao password policy.
 func (c *Store) HexKey(ctx context.Context, nbytes int) (string, error) {
+	if err := c.GenerationAllowed(ctx); err != nil {
+		return "", err
+	}
 	switch nbytes {
 	case 16, 32, 64:
 		return c.Bao.GeneratePassword(ctx, fmt.Sprintf("hex-%d", 2*nbytes))
@@ -91,6 +111,9 @@ func (c *Store) HexKey(ctx context.Context, nbytes int) (string, error) {
 
 // URLSafe returns length characters from [A-Za-z0-9-._~], from OpenBao.
 func (c *Store) URLSafe(ctx context.Context, length int) (string, error) {
+	if err := c.GenerationAllowed(ctx); err != nil {
+		return "", err
+	}
 	switch length {
 	case 32, 64:
 		return c.Bao.GeneratePassword(ctx, fmt.Sprintf("urlsafe-%d", length))
@@ -196,7 +219,7 @@ func (c *Store) EnsureCrossplaneAdminPassword(ctx context.Context, spokeName str
 	password, err := c.Password(ctx)
 	if err != nil {
 		logger.Error(err, "Failed to generate crossplane-admin password", "spoke", spokeName)
-		return EnsureMissing, fmt.Errorf("failed to generate crossplane-admin password: %w", err)
+		return EnsureMissing, fmt.Errorf("failed to generate %s/%s: %w", scope, key, err)
 	}
 
 	logger.Info("Uploading crossplane-admin password to OpenBao", "spoke", spokeName, "key", key, "passwordLength", len(password))
@@ -269,7 +292,7 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 		password, err := c.Password(ctx)
 		if err != nil {
 			logger.Error(err, "Failed to generate password for tenant")
-			return nil, fmt.Errorf("failed to generate password for tenant %s: %w", tenantId, err)
+			return nil, fmt.Errorf("failed to generate %s/%s for tenant %s: %w", tenantPath, dbSecretName, tenantId, err)
 		}
 
 		logger.Info("Generated database password for tenant", "passwordLength", len(password))
@@ -374,7 +397,7 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 			}
 			value, err := c.Password(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("failed to generate cache credential for tenant %s: %w", tenantId, err)
+				return nil, fmt.Errorf("failed to generate %s/%s for tenant %s: %w", tenantPath, CachePasswordKey, tenantId, err)
 			}
 			if err := c.CreateSecret(ctx, tenantPath, CachePasswordKey, value); err != nil {
 				return nil, fmt.Errorf("failed to write %s for tenant %s: %w", CachePasswordKey, tenantId, err)
@@ -404,7 +427,7 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 		if !exists {
 			value, err := c.HexKey(ctx, 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to generate gateway cookie key for tenant %s: %w", tenantId, err)
+				return nil, fmt.Errorf("failed to generate %s/%s for tenant %s: %w", tenantPath, GatewayCookieSecretKey, tenantId, err)
 			}
 			if err := c.CreateSecret(ctx, tenantPath, GatewayCookieSecretKey, value); err != nil {
 				return nil, fmt.Errorf("failed to write %s for tenant %s: %w", GatewayCookieSecretKey, tenantId, err)
@@ -442,7 +465,7 @@ func (c *Store) EnsureTenantFolderAndCredentials(ctx context.Context, clusterNam
 	if !exists {
 		value, err := c.HexKey(ctx, 32)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate internal token for tenant %s: %w", tenantId, err)
+			return nil, fmt.Errorf("failed to generate %s/%s for tenant %s: %w", tenantPath, internalTokenKey, tenantId, err)
 		}
 		if err := c.CreateSecret(ctx, tenantPath, internalTokenKey, value); err != nil {
 			return nil, fmt.Errorf("failed to write %s for tenant %s: %w", internalTokenKey, tenantId, err)
@@ -640,7 +663,7 @@ func (c *Store) ensureOAuthClientCredentials(ctx context.Context, tenantPath, te
 
 		value, err := c.Password(ctx)
 		if err != nil {
-			return outcome, fmt.Errorf("failed to generate credential for client %s of tenant %s: %w", client.Name, tenantId, err)
+			return outcome, fmt.Errorf("failed to generate %s/%s for client %s of tenant %s: %w", tenantPath, secretKey, client.Name, tenantId, err)
 		}
 		if err := c.CreateSecret(ctx, tenantPath, secretKey, value); err != nil {
 			return outcome, fmt.Errorf("failed to write %s for tenant %s: %w", secretKey, tenantId, err)

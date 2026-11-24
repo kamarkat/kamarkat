@@ -79,6 +79,8 @@ func (f *fakeSecretStore) RemoveTenantAuth(context.Context, string, string, stri
 	return nil
 }
 
+func (f *fakeSecretStore) GenerationAllowed(context.Context) error { return nil }
+
 func (f *fakeSecretStore) HexKey(_ context.Context, n int) (string, error) {
 	return strings.Repeat("ab", n), nil
 }

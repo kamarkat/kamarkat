@@ -56,7 +56,10 @@ func hexKey(nbytes int) func(context.Context, TenantSecretStore) (string, error)
 
 // rsaPrivateKey is a 2048-bit RSA key as the engine reads it: base64 of its
 // PKCS#1 PEM.
-func rsaPrivateKey(context.Context, TenantSecretStore) (string, error) {
+func rsaPrivateKey(ctx context.Context, s TenantSecretStore) (string, error) {
+	if err := s.GenerationAllowed(ctx); err != nil {
+		return "", err
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", err

@@ -155,8 +155,20 @@
 
 - kind: ClusterIssuer
   name: openbao-fleet
-  # The same per-cluster mount, for cert-manager's login (ADR-117 §8).
+  # The same per-cluster mount for cert-manager's login, and this cluster's own
+  # signing role (ADR-117 §8).
   fields:
+    - path: [spec, vault, path]
+      value: 'pki_int/sign/spoke-{{ .Values.spokeName }}'
+    - path: [spec, vault, auth, kubernetes, mountPath]
+      value: '/v1/auth/spoke-{{ .Values.spokeName }}'
+    - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
+
+- kind: ClusterIssuer
+  name: openbao-tenant-cache
+  fields:
+    - path: [spec, vault, path]
+      value: 'pki_int/sign/spoke-{{ .Values.spokeName }}-cache'
     - path: [spec, vault, auth, kubernetes, mountPath]
       value: '/v1/auth/spoke-{{ .Values.spokeName }}'
     - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}

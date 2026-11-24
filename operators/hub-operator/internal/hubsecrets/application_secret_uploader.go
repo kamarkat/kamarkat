@@ -181,7 +181,13 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 				continue
 
 			default:
-				// Both missing — generate new key pair
+				// Both missing — generate new key pair, unless the store is an
+				// unfinished restore, where missing means lost (ADR-117 §7).
+				if err := u.store.GenerationAllowed(ctx); err != nil {
+					logger.Error(err, "Refusing to generate a key pair", "privateKey", secretDef.PrivateKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
 				privPEM, pubB64, err := secrets.GenerateEd25519KeyPair()
 				if err != nil {
 					logger.Error(err, "Failed to generate Ed25519 key pair", "selector", secretDef.Selector)
@@ -315,6 +321,11 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 							"so the login service is still signing with it and a new pair would be rejected by "+
 							"the running issuer until both are restarted (ADR-060, AUTH-7fs1e)",
 						"privateKey", secretDef.PrivateKeyKey, "certificate", secretDef.PublicKeyKey)
+					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
+					continue
+				}
+				if err := u.store.GenerationAllowed(ctx); err != nil {
+					logger.Error(err, "Refusing to generate the login service keypair", "privateKey", secretDef.PrivateKeyKey)
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				}

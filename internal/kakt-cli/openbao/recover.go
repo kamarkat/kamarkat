@@ -67,7 +67,42 @@ type DatabaseState struct {
 type HubState struct {
 	OpenBaoIncarnation     string
 	PlatformSecretsWritten bool
+	// PlatformSecretsMessage names the openbao-db incarnation a True condition
+	// covers, and the missing keys a False one refused to regenerate.
+	PlatformSecretsMessage string
 	Roles                  []AppRole
+	// Applications report TenantSecretsPresent the same way, per incarnation.
+	Applications []ApplicationSecrets
+}
+
+// ApplicationSecrets is one tenant application's TenantSecretsPresent condition.
+type ApplicationSecrets struct {
+	Name    string
+	Present bool
+	Message string
+}
+
+// missingAfterRestore lists what the hub and every application have NOT
+// confirmed present in incarnation uid, with hub-operator's reason.
+func (h HubState) missingAfterRestore(uid string) []string {
+	var out []string
+	switch {
+	case h.PlatformSecretsWritten && strings.Contains(h.PlatformSecretsMessage, uid):
+	case !h.PlatformSecretsWritten && h.PlatformSecretsMessage != "":
+		out = append(out, "hub platform secrets: "+h.PlatformSecretsMessage)
+	default:
+		out = append(out, "hub platform secrets: not yet checked against incarnation "+uid)
+	}
+	for _, a := range h.Applications {
+		switch {
+		case a.Present && strings.Contains(a.Message, uid):
+		case !a.Present && a.Message != "":
+			out = append(out, "application "+a.Name+": "+a.Message)
+		default:
+			out = append(out, "application "+a.Name+": not yet checked against incarnation "+uid)
+		}
+	}
+	return out
 }
 
 // Live is the cluster side of recovery. The production implementation reads the
@@ -105,6 +140,9 @@ type RecoveryRecord struct {
 	Incarnation string               `json:"incarnation"`
 	Began       time.Time            `json:"began"` // OpenBao's clock: the first session's token creation
 	Steps       map[string]time.Time `json:"steps"`
+	// Completed is set once every step of this incarnation is verified. It is what
+	// hub-operator reads to resume generating values (ADR-117 §7).
+	Completed time.Time `json:"completed,omitempty"`
 }
 
 func recordPath(cluster, uid string) string {
@@ -211,6 +249,12 @@ func Recover(ctx context.Context, opt RecoverOptions) error {
 			return err
 		}
 		if open {
+			// After settling, the live Cluster may keep its restore stanza: a
+			// completed record is a finished recovery, not a refusal.
+			if done, err := recordCompleted(ctx, live, DatabaseOpenBao, bao.UID); err == nil && done {
+				fmt.Fprintf(out, "openbao-db incarnation %s is already recovered.\n", bao.UID)
+				return nil
+			}
 			return errors.New("openbao-db is in recovery mode but OpenBao's consumer admission is open " +
 				"(NetworkPolicy openbao-consumers exists). Point the OpenBao component at its " +
 				"openbao-recovery overlay first: consumers must not reach a store that still holds " +
@@ -248,10 +292,18 @@ func Recover(ctx context.Context, opt RecoverOptions) error {
 			return err
 		}
 		if !baoRec.done("generated") {
-			if !hub.PlatformSecretsWritten {
-				pending = append(pending, "openbao-db: hub-operator does not yet report PlatformSecretsWritten")
-			} else if err := baoRec.mark(ctx, c, "generated", self.created); err != nil {
-				return err
+			// Only a pass over THIS incarnation counts, by hub-operator and by every
+			// application; anything missing from the restored store is reported, not
+			// replaced, and keeps recovery open until it is restored.
+			if missing := hub.missingAfterRestore(bao.UID); len(missing) > 0 {
+				for _, m := range missing {
+					pending = append(pending, "openbao-db: "+m)
+				}
+			} else {
+				if err := baoRec.mark(ctx, c, "generated", self.created); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "  ✓ every hub and application secret is present in the restored store; none was regenerated\n")
 			}
 		}
 	}
@@ -304,6 +356,21 @@ func Recover(ctx context.Context, opt RecoverOptions) error {
 		}
 		fmt.Fprintf(out, "\nRe-run `kakt openbao recover` once they are resolved; completed steps are kept.\n")
 		return ErrRecoveryIncomplete
+	}
+	// Every step of every incarnation is done: mark the records complete, which
+	// lets hub-operator generate values for genuinely new resources again.
+	completed := []*RecoveryRecord{baoRec}
+	for _, r := range appRecs {
+		completed = append(completed, r)
+	}
+	for _, r := range completed {
+		if r == nil || !r.Completed.IsZero() {
+			continue
+		}
+		r.Completed = self.created
+		if err := r.save(ctx, c); err != nil {
+			return err
+		}
 	}
 	for _, name := range inRecovery {
 		fmt.Fprintf(out, "  ✓ %s: recovery record complete\n", name)
@@ -578,4 +645,18 @@ func staticRotation(ctx context.Context, c *Client, name string) (time.Time, err
 		return time.Time{}, fmt.Errorf("static role %s reports an unreadable rotation time %q", name, out.Data.LastVaultRotation)
 	}
 	return t, nil
+}
+
+// recordCompleted reports whether an incarnation's recovery record is complete.
+func recordCompleted(ctx context.Context, live Live, cluster, uid string) (bool, error) {
+	c, err := live.Connect(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	r, err := loadRecord(ctx, c, cluster, uid, time.Time{})
+	if err != nil {
+		return false, err
+	}
+	return !r.Completed.IsZero(), nil
 }

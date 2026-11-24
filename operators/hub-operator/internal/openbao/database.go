@@ -2,6 +2,8 @@ package openbao
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,4 +72,29 @@ func (c *Client) StaticRoleRotated(ctx context.Context, username string, since t
 		return false, fmt.Errorf("unreadable last_vault_rotation %q: %w", r.LastVaultRotation, err)
 	}
 	return !t.Before(since), nil
+}
+
+// RecoveryComplete reports whether `kakt openbao recover` has marked the recovery
+// record of cluster's incarnation uid complete (kv/platform/recovery/<cluster>/<uid>).
+// An absent record is an unfinished recovery.
+func (c *Client) RecoveryComplete(ctx context.Context, cluster, uid string) (bool, error) {
+	var out struct {
+		Data struct {
+			Data map[string]string `json:"data"`
+		} `json:"data"`
+	}
+	err := c.Read(ctx, "kv/data/platform/recovery/"+cluster+"/"+uid, &out)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var rec struct {
+		Completed time.Time `json:"completed"`
+	}
+	if err := json.Unmarshal([]byte(out.Data.Data["record"]), &rec); err != nil {
+		return false, fmt.Errorf("the recovery record for %s/%s is unreadable: %w", cluster, uid, err)
+	}
+	return !rec.Completed.IsZero(), nil
 }

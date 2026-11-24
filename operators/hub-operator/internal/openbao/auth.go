@@ -40,9 +40,81 @@ const (
 	SpokeIssuerRole           = "cert-manager"
 	SpokeIssuerNamespace      = "cert-manager"
 	SpokeIssuerServiceAccount = "openbao-issuer"
-	// SpokeIssuerProfile is the pki_int role spoke certificates are signed through.
-	SpokeIssuerProfile = "infrastructure-services"
+	// Spoke certificate lifetimes, the ceilings of their pki_int roles.
+	spokeClientTTL = "24h"
+	spokeCacheTTL  = "168h"
 )
+
+// SpokeClientIdentities are the only client identities a workload cluster may
+// hold: its own Argo CD agent, Alloy and Support Agent, each named for it.
+func SpokeClientIdentities(cluster string) []string {
+	return []string{"argocd-agent:" + cluster, "alloy:" + cluster, "support-agent:" + cluster}
+}
+
+// SpokePKIRole signs this cluster's client identities; SpokeCachePKIRole its
+// tenant cache servers (<app>-cache). Each cluster has its own, and its signing
+// policy names only these two (ADR-035, ADR-117 §8).
+func SpokePKIRole(cluster string) string      { return "spoke-" + cluster }
+func SpokeCachePKIRole(cluster string) string { return "spoke-" + cluster + "-cache" }
+
+// spokePKIRoles are the two roles' constraints. CN checking: OpenBao skips the
+// allowed_domains check entirely when cn_validations is ["disabled"], so it is
+// ["hostname"] -- which here only admits the CN type -- with enforce_hostnames off
+// for the client identities, whose names carry a colon; allow_bare_domains is an
+// exact, case-insensitive match. Nothing else is admitted: no IP, URI or other
+// SANs, no wildcards, no localhost, and one key usage per role.
+func spokePKIRoles(cluster string) map[string]map[string]any {
+	common := map[string]any{
+		"issuer_ref":                  "default",
+		"allow_any_name":              false,
+		"allow_subdomains":            false,
+		"allow_localhost":             false,
+		"allow_ip_sans":               false,
+		"allowed_uri_sans":            "",
+		"allowed_other_sans":          "",
+		"allow_wildcard_certificates": false,
+		"allow_token_displayname":     false,
+		"require_cn":                  true,
+		"use_csr_common_name":         true,
+		"use_csr_sans":                true,
+		"cn_validations":              []string{"hostname"},
+		"key_usage":                   []string{"DigitalSignature", "KeyEncipherment"},
+		"ext_key_usage":               []string{},
+		"no_store":                    true,
+	}
+	merge := func(extra map[string]any) map[string]any {
+		out := map[string]any{}
+		for k, v := range common {
+			out[k] = v
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+	return map[string]map[string]any{
+		SpokePKIRole(cluster): merge(map[string]any{
+			"allowed_domains":    SpokeClientIdentities(cluster),
+			"allow_bare_domains": true,
+			"allow_glob_domains": false,
+			"enforce_hostnames":  false,
+			"client_flag":        true,
+			"server_flag":        false,
+			"ttl":                spokeClientTTL,
+			"max_ttl":            spokeClientTTL,
+		}),
+		SpokeCachePKIRole(cluster): merge(map[string]any{
+			"allowed_domains":    []string{"*-cache"},
+			"allow_bare_domains": false,
+			"allow_glob_domains": true,
+			"enforce_hostnames":  true,
+			"client_flag":        false,
+			"server_flag":        true,
+			"ttl":                spokeCacheTTL,
+			"max_ttl":            spokeCacheTTL,
+		}),
+	}
+}
 
 // SpokeMount is the auth mount for one workload cluster.
 func SpokeMount(cluster string) string { return "spoke-" + cluster }
@@ -84,11 +156,19 @@ func (c *Client) EnsureSpokeAuth(ctx context.Context, cluster, uid, signingKeyPE
 		subject(SpokePlatformNamespace, SpokePlatformServiceAccount), policy); err != nil {
 		return err
 	}
-	// The spoke's certificate issuer: signing only, a separate identity and
-	// policy so the secret reader cannot sign and the signer cannot read secrets.
+	// The spoke's certificate issuer: signing only, through this cluster's own
+	// two roles, a separate identity and policy so the secret reader cannot sign
+	// and the signer cannot read secrets or sign as any other cluster.
+	for role, params := range spokePKIRoles(cluster) {
+		if err := c.PutPKIRole(ctx, role, params); err != nil {
+			return fmt.Errorf("pki_int role %s: %w", role, err)
+		}
+	}
 	pkiPolicy := SpokePKIPolicyName(uid)
 	if err := c.PutPolicy(ctx, pkiPolicy, fmt.Sprintf(
-		"path \"pki_int/sign/%s\" { capabilities = [\"create\", \"update\"] }\n", SpokeIssuerProfile)); err != nil {
+		"path \"pki_int/sign/%s\" { capabilities = [\"create\", \"update\"] }\n"+
+			"path \"pki_int/sign/%s\" { capabilities = [\"create\", \"update\"] }\n",
+		SpokePKIRole(cluster), SpokeCachePKIRole(cluster))); err != nil {
 		return fmt.Errorf("write policy %s: %w", pkiPolicy, err)
 	}
 	return c.putJWTRole(ctx, mount, SpokeIssuerRole,
@@ -143,6 +223,11 @@ func (c *Client) RemoveSpoke(ctx context.Context, cluster, uid string) error {
 	}
 	if err := c.DisableMount(ctx, SpokeMount(cluster)); err != nil {
 		return err
+	}
+	for role := range spokePKIRoles(cluster) {
+		if err := c.DeletePKIRole(ctx, role); err != nil {
+			return err
+		}
 	}
 	return c.DeleteTree(ctx, "spokes/"+cluster)
 }

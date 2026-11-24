@@ -136,8 +136,9 @@ func (l ClusterLive) Hub(ctx context.Context) (HubState, error) {
 		Status struct {
 			OpenBaoIncarnation string `json:"openBaoIncarnation"`
 			Conditions         []struct {
-				Type   string `json:"type"`
-				Status string `json:"status"`
+				Type    string `json:"type"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
 			} `json:"conditions"`
 		} `json:"status"`
 	}
@@ -146,12 +147,43 @@ func (l ClusterLive) Hub(ctx context.Context) (HubState, error) {
 	}
 	st := HubState{OpenBaoIncarnation: he.Status.OpenBaoIncarnation}
 	for _, c := range he.Status.Conditions {
-		if c.Type == "PlatformSecretsWritten" && c.Status == "True" {
-			st.PlatformSecretsWritten = true
+		if c.Type == "PlatformSecretsWritten" {
+			st.PlatformSecretsWritten = c.Status == "True"
+			st.PlatformSecretsMessage = c.Message
 		}
 	}
 	for _, r := range he.Spec.Database.Roles {
 		st.Roles = append(st.Roles, AppRole{Role: r.Name, Database: r.Database, Cluster: r.ClusterRef})
+	}
+	var apps struct {
+		Items []struct {
+			Metadata struct {
+				Name              string     `json:"name"`
+				DeletionTimestamp *time.Time `json:"deletionTimestamp"`
+			} `json:"metadata"`
+			Status struct {
+				Conditions []struct {
+					Type    string `json:"type"`
+					Status  string `json:"status"`
+					Message string `json:"message"`
+				} `json:"conditions"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := l.kubectlJSON(ctx, &apps, "get", "ainativesaases.nutgraf.in", "-A"); err != nil {
+		return HubState{}, fmt.Errorf("list applications: %w", err)
+	}
+	for _, a := range apps.Items {
+		if a.Metadata.DeletionTimestamp != nil {
+			continue
+		}
+		app := ApplicationSecrets{Name: a.Metadata.Name}
+		for _, c := range a.Status.Conditions {
+			if c.Type == "TenantSecretsPresent" {
+				app.Present, app.Message = c.Status == "True", c.Message
+			}
+		}
+		st.Applications = append(st.Applications, app)
 	}
 	return st, nil
 }

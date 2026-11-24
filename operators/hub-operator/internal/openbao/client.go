@@ -198,3 +198,10 @@ func (c *Client) Delete(ctx context.Context, path string) error {
 	}
 	return err
 }
+
+// NewWithClient is a client for addr using hc and an already-issued token, for
+// callers that authenticate elsewhere (and tests against a fake server).
+func NewWithClient(addr string, hc *http.Client, token string) *Client {
+	return &Client{addr: strings.TrimSuffix(addr, "/"), http: hc, token: token,
+		expires: time.Now().Add(24 * time.Hour)}
+}

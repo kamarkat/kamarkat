@@ -152,8 +152,14 @@ func (r *HubEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			strings.Join(writeErrs, "; "))
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+	// The incarnation is named so a recovery can tell this pass from one made
+	// against the store before it was restored (kakt openbao recover).
+	incarnation, _, err := openBaoIncarnation(ctx, r.Client)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
 	r.setCondition(ctx, hubEnv, "PlatformSecretsWritten", metav1.ConditionTrue, "Written",
-		"Day-0 and application secrets are in OpenBao")
+		"Day-0 and application secrets are in OpenBao (openbao-db incarnation "+incarnation+")")
 
 	// Certificate profiles: the pki_int roles the hub and spoke issuers sign through.
 	if err := r.Store.Bao.EnsurePKIRoles(ctx); err != nil {
@@ -229,15 +235,14 @@ const openBaoDatabase = "openbao-db"
 // policies, each application's role and policy -- when the live openbao-db
 // Cluster is not the incarnation last recorded, then records it.
 func (r *HubEnvironmentReconciler) reconcileOpenBaoIncarnation(ctx context.Context, hubEnv *opsv1alpha1.HubEnvironment) error {
-	var db cnpgv1.Cluster
-	if err := r.Get(ctx, types.NamespacedName{Namespace: hubEnv.Spec.Database.Namespace, Name: openBaoDatabase}, &db); err != nil {
-		return fmt.Errorf("read %s: %w", openBaoDatabase, err)
+	uid, _, err := openBaoIncarnation(ctx, r.Client)
+	if err != nil {
+		return err
 	}
-	uid := string(db.UID)
-	if hubEnv.Status.OpenBaoIncarnation == uid {
+	if uid == "" || hubEnv.Status.OpenBaoIncarnation == uid {
 		return nil
 	}
-	if err := reconcileOpenBaoAuthorization(ctx, r.Client, r.UncachedClient, r.Store.Bao); err != nil {
+	if err := reconcileOpenBaoAuthorization(ctx, r.Client, r.UncachedClient, r.Store.Bao, uid); err != nil {
 		return err
 	}
 	hubEnv.Status.OpenBaoIncarnation = uid

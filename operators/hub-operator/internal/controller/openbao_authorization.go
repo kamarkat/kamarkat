@@ -7,10 +7,15 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/kamarkat/kamarkat/operators/hub-operator/internal/openbao"
 )
+
+// incarnationAnnotation records the openbao-db incarnation an application was
+// last brought up to date with.
+const incarnationAnnotation = "ops.nutgraf.in/openbao-incarnation"
 
 // reconcileOpenBaoAuthorization applies, in one pass, every authorization object
 // hub-operator owns in OpenBao. The per-object controllers converge the same
@@ -18,7 +23,7 @@ import (
 // must be back to desired state before recovery can be recorded (ADR-117 §7).
 // It fails on the first object it cannot converge, so a pass that returns nil
 // covered all of them.
-func reconcileOpenBaoAuthorization(ctx context.Context, c, uncached client.Client, bao *openbao.Client) error {
+func reconcileOpenBaoAuthorization(ctx context.Context, c, uncached client.Client, bao *openbao.Client, incarnation string) error {
 	if err := bao.EnsurePKIRoles(ctx); err != nil {
 		return err
 	}
@@ -58,6 +63,14 @@ func reconcileOpenBaoAuthorization(ctx context.Context, c, uncached client.Clien
 		}
 		if err := bao.EnsureTenantAuth(ctx, cluster, tenant, app, string(a.GetUID())); err != nil {
 			return fmt.Errorf("application %s on %s: %w", app, cluster, err)
+		}
+		// Stamp the incarnation: the metadata change wakes the application's own
+		// reconcile, which re-checks its credentials against the restored store.
+		if a.GetAnnotations()[incarnationAnnotation] != incarnation {
+			patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, incarnationAnnotation, incarnation))
+			if err := c.Patch(ctx, &a, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				return fmt.Errorf("application %s on %s: mark incarnation: %w", app, cluster, err)
+			}
 		}
 	}
 	return nil
