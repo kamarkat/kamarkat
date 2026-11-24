@@ -90,10 +90,19 @@ rules:
   - nutgraf.in
   resources:
   - ainativesaases
+  - spokepools
   verbs:
   - get
   - list
+  - update
   - watch
+- apiGroups:
+  - nutgraf.in
+  resources:
+  - ainativesaases/finalizers
+  - spokepools/finalizers
+  verbs:
+  - update
 - apiGroups:
   - nutgraf.in
   resources:
@@ -103,15 +112,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - nutgraf.in
-  resources:
-  - spokepools
-  verbs:
-  - get
-  - list
-  - update
-  - watch
 - apiGroups:
   - ops.nutgraf.in
   resources:

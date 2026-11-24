@@ -75,6 +75,10 @@ func (f *fakeSecretStore) EnsureTenantAuth(context.Context, string, string, stri
 	return nil
 }
 
+func (f *fakeSecretStore) RemoveTenantAuth(context.Context, string, string, string) error {
+	return nil
+}
+
 func (f *fakeSecretStore) HexKey(_ context.Context, n int) (string, error) {
 	return strings.Repeat("ab", n), nil
 }

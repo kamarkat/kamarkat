@@ -431,6 +431,13 @@ spec:
               # base64 is an encoding -- etcd data, backups and disk snapshots all
               # disclose every credential on the box.
               encryption-provider-config: /etc/kubernetes/enc/enc.yaml
+              # ServiceAccount tokens this cluster signs are trusted by its hub's
+              # OpenBao (auth/spoke-<cluster>, ADR-117 §4). Bound the trust: no
+              # token lives longer than an hour, and the API server does not
+              # silently extend projected tokens beyond what was requested (its
+              # legacy-compatibility extension to a year).
+              service-account-max-token-expiration: 1h
+              service-account-extend-token-expiration: "false"
             # The API server runs as a static pod, so a path outside the directories
             # kubeadm already mounts is invisible to it. Without this the process
             # fails to start on a file that exists on the node -- which reads as a

@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -63,6 +64,8 @@ type TenantSecretStore interface {
 	// nothing else (ADR-117 §4): a JWT role on its cluster's mount, bound to the
 	// namespace's openbao-secrets ServiceAccount, holding a policy named by uid.
 	EnsureTenantAuth(ctx context.Context, cluster, tenantID, app, uid string) error
+	// RemoveTenantAuth withdraws it when the application is deleted.
+	RemoveTenantAuth(ctx context.Context, cluster, app, uid string) error
 	// HexKey draws a hex key from an OpenBao password policy: OpenBao, not this
 	// operator, generates the value.
 	HexKey(ctx context.Context, nbytes int) (string, error)
@@ -79,7 +82,8 @@ type AINativeSaaSReconciler struct {
 	IdentityClient *client2.IdentityClient
 }
 
-//+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases,verbs=get;list;watch
+//+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases/finalizers,verbs=update
 //+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases/status,verbs=get;update;patch
 
 // Reconcile provisions all tenant resources into Infisical on AINativeSaaS creation or update.
@@ -167,6 +171,25 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// enabled today on a tenant provisioned months ago is new, and its absent
 	// credential is not evidence of loss.
 	cacheIsFirstTime := !r.isConditionTrue(ainativesaas, conditionTypeCacheSeeded)
+
+	// Withdrawal (ADR-117 §4): the application's policy and role go before the
+	// object does, so a token already issued fails on its next request.
+	if !ainativesaas.GetDeletionTimestamp().IsZero() {
+		if !controllerutil.ContainsFinalizer(ainativesaas, openBaoFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		if err := r.Store.RemoveTenantAuth(ctx, clusterName, appId, string(ainativesaas.GetUID())); err != nil {
+			logger.Error(err, "Failed to withdraw the tenant's OpenBao authority; retrying", "tenant", tenantId)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		controllerutil.RemoveFinalizer(ainativesaas, openBaoFinalizer)
+		return ctrl.Result{}, r.Update(ctx, ainativesaas)
+	}
+	if controllerutil.AddFinalizer(ainativesaas, openBaoFinalizer) {
+		if err := r.Update(ctx, ainativesaas); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	if err := r.Store.EnsureTenantAuth(ctx, clusterName, tenantId, appId, string(ainativesaas.GetUID())); err != nil {
 		logger.Error(err, "Failed to authorize the tenant's secret store", "tenant", tenantId, "cluster", clusterName)

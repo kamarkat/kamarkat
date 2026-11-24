@@ -50,6 +50,11 @@ func (c *Store) EnsureTenantAuth(ctx context.Context, cluster, tenantID, app, ui
 	return c.Bao.EnsureTenantAuth(ctx, cluster, tenantID, app, uid)
 }
 
+// RemoveTenantAuth withdraws one tenant application's authority (openbao.RemoveTenantAuth).
+func (c *Store) RemoveTenantAuth(ctx context.Context, cluster, app, uid string) error {
+	return c.Bao.RemoveTenantAuth(ctx, cluster, app, uid)
+}
+
 // GetSecretValue is GetSecret reporting absence as found=false rather than an error.
 func (c *Store) GetSecretValue(ctx context.Context, scope, key string) (string, bool, error) {
 	v, err := c.Bao.GetSecret(ctx, scope, key)

@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -44,6 +45,7 @@ type SpokePoolReconciler struct {
 
 //+kubebuilder:rbac:groups=nutgraf.in,resources=spokepools,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups=nutgraf.in,resources=spokepools/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=nutgraf.in,resources=spokepools/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
@@ -69,6 +71,26 @@ func (r *SpokePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	spokeName := spokePool.GetName()
 	logger.Info("Reconciling SpokePool", "spoke", spokeName)
+
+	// Withdrawal (ADR-117 §4): a deleted cluster's policies, auth mount (which
+	// revokes every token it issued) and KV tree are removed before the object
+	// goes. Fail closed: the finalizer stays until OpenBao confirms.
+	if !spokePool.GetDeletionTimestamp().IsZero() {
+		if !controllerutil.ContainsFinalizer(spokePool, openBaoFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		if err := r.Store.Bao.RemoveSpoke(ctx, spokeName, string(spokePool.GetUID())); err != nil {
+			logger.Error(err, "Failed to withdraw the spoke's OpenBao authority; retrying", "spoke", spokeName)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		controllerutil.RemoveFinalizer(spokePool, openBaoFinalizer)
+		return ctrl.Result{}, r.Update(ctx, spokePool)
+	}
+	if controllerutil.AddFinalizer(spokePool, openBaoFinalizer) {
+		if err := r.Update(ctx, spokePool); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	// hybrid provider cell: mint home-worker join tokens and expose the join payload
 	// (ADR-046 §WS4). Gated on spec.provider == hybrid + home-worker-enabled annotation.
@@ -906,6 +928,10 @@ func (r *SpokePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Marking a genuinely required kind optional would hide that.
 	return b.Complete(r)
 }
+
+// openBaoFinalizer holds a SpokePool or AINativeSaaS until its OpenBao
+// authority has been withdrawn.
+const openBaoFinalizer = "ops.nutgraf.in/openbao-authority"
 
 // spokeSigningKey returns the public half of the workload cluster's ServiceAccount
 // signing key: Cluster API's <cluster>-sa Secret, tls.crt. Only the public key is
