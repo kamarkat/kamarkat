@@ -1,0 +1,43 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-openbao
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    component: alerting
+    app.kubernetes.io/managed-by: platform
+spec:
+  groups:
+    - name: platform.openbao.audit
+      interval: 30s
+      rules:
+        # OpenBao refuses a request it cannot audit, so a failing audit device is
+        # an outage as well as a gap in the record (ADR-117 §11, G13). The counter
+        # is audit.log_request_failure, scraped from /v1/sys/metrics.
+        - alert: OpenBaoAuditLogFailure
+          expr: sum by (pod) (increase(vault_audit_log_request_failure[5m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "OpenBao cannot write its audit log, so it is refusing requests"
+            description: >-
+              {{ $labels.pod }} failed to write {{ $value | humanize }} audit
+              record(s) in the last five minutes. OpenBao refuses any request it
+              cannot audit, so secret delivery, certificate issuance and logins are
+              failing until the audit device (file, to stdout) is healthy again.
+        # Without this the alert above can never fire: a scrape that stopped looks
+        # exactly like an audit device that never fails.
+        - alert: OpenBaoMetricsMissing
+          expr: absent(up{job="openbao"} == 1)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OpenBao's metrics are not being collected, so audit failures cannot alert"
+            description: >-
+              No OpenBao server has been scraped successfully for ten minutes. Check
+              the hub Alloy's openbao scrape (it verifies the listener against
+              openbao-listener-trust in platform-observability) and NetworkPolicy
+              openbao-base.

@@ -34,10 +34,10 @@ data:
       forward_to = [prometheus.remote_write.platform.receiver]
 
       // BEGIN generated metric allowlist (scripts/observability/metric-allowlist.py)
-      // 88 metric names: every one a shipped dashboard or rule reads.
+      // 89 metric names: every one a shipped dashboard or rule reads.
       rule {
         source_labels = ["__name__"]
-        regex         = "argocd_app_condition|argocd_app_info|cnpg_collector_first_recoverability_point|cnpg_collector_last_available_backup_timestamp|cnpg_collector_last_failed_backup_timestamp|cnpg_collector_pg_wal_archive_status|cnpg_pg_cluster_status|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_usage_seconds_total|container_fs_reads_bytes_total|container_fs_reads_total|container_fs_writes_bytes_total|container_fs_writes_total|container_memory_cache|container_memory_mapped_file|container_memory_rss|container_memory_swap|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_receive_packets_dropped_total|container_network_receive_packets_total|container_network_transmit_bytes_total|container_network_transmit_packets_dropped_total|container_network_transmit_packets_total|container_spec_memory_limit_bytes|go_goroutines|grafana_datasource_request_total|kube_job_owner|kube_namespace_status_phase|kube_node_info|kube_node_status_allocatable|kube_node_status_capacity|kube_node_status_condition|kube_pod_container_resource_limits|kube_pod_container_resource_requests|kube_pod_container_status_last_terminated_reason|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_pod_info|kube_pod_owner|kube_pod_status_phase|kube_replicaset_owner|kube_resourcequota|kubelet_cgroup_manager_duration_seconds_bucket|kubelet_cgroup_manager_duration_seconds_count|kubelet_node_config_error|kubelet_node_name|kubelet_pleg_relist_duration_seconds_bucket|kubelet_pleg_relist_duration_seconds_count|kubelet_pleg_relist_interval_seconds_bucket|kubelet_pod_start_duration_seconds_bucket|kubelet_pod_start_duration_seconds_count|kubelet_pod_worker_duration_seconds_bucket|kubelet_pod_worker_duration_seconds_count|kubelet_running_containers|kubelet_running_pods|kubelet_runtime_operations_duration_seconds_bucket|kubelet_runtime_operations_errors_total|kubelet_runtime_operations_total|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes|loki_write_dropped_entries_total|node_cpu_seconds_total|node_memory_Buffers_bytes|node_memory_Cached_bytes|node_memory_MemAvailable_bytes|node_memory_MemFree_bytes|node_memory_MemTotal_bytes|node_memory_Slab_bytes|node_netstat_TcpExt_TCPSynRetrans|node_netstat_Tcp_OutSegs|node_netstat_Tcp_RetransSegs|pg_settings_max_connections|pg_stat_database_numbackends|pg_stat_database_xact_rollback|pg_up|process_cpu_seconds_total|process_resident_memory_bytes|prometheus_remote_storage_samples_dropped_total|prometheus_remote_storage_samples_failed_total|rest_client_request_duration_seconds_bucket|rest_client_requests_total|storage_operation_duration_seconds_bucket|storage_operation_duration_seconds_count|storage_operation_errors_total|up|volume_manager_total_volumes"
+        regex         = "argocd_app_condition|argocd_app_info|cnpg_collector_first_recoverability_point|cnpg_collector_last_available_backup_timestamp|cnpg_collector_last_failed_backup_timestamp|cnpg_collector_pg_wal_archive_status|cnpg_pg_cluster_status|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_usage_seconds_total|container_fs_reads_bytes_total|container_fs_reads_total|container_fs_writes_bytes_total|container_fs_writes_total|container_memory_cache|container_memory_mapped_file|container_memory_rss|container_memory_swap|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_receive_packets_dropped_total|container_network_receive_packets_total|container_network_transmit_bytes_total|container_network_transmit_packets_dropped_total|container_network_transmit_packets_total|container_spec_memory_limit_bytes|go_goroutines|grafana_datasource_request_total|kube_job_owner|kube_namespace_status_phase|kube_node_info|kube_node_status_allocatable|kube_node_status_capacity|kube_node_status_condition|kube_pod_container_resource_limits|kube_pod_container_resource_requests|kube_pod_container_status_last_terminated_reason|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_pod_info|kube_pod_owner|kube_pod_status_phase|kube_replicaset_owner|kube_resourcequota|kubelet_cgroup_manager_duration_seconds_bucket|kubelet_cgroup_manager_duration_seconds_count|kubelet_node_config_error|kubelet_node_name|kubelet_pleg_relist_duration_seconds_bucket|kubelet_pleg_relist_duration_seconds_count|kubelet_pleg_relist_interval_seconds_bucket|kubelet_pod_start_duration_seconds_bucket|kubelet_pod_start_duration_seconds_count|kubelet_pod_worker_duration_seconds_bucket|kubelet_pod_worker_duration_seconds_count|kubelet_running_containers|kubelet_running_pods|kubelet_runtime_operations_duration_seconds_bucket|kubelet_runtime_operations_errors_total|kubelet_runtime_operations_total|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes|loki_write_dropped_entries_total|node_cpu_seconds_total|node_memory_Buffers_bytes|node_memory_Cached_bytes|node_memory_MemAvailable_bytes|node_memory_MemFree_bytes|node_memory_MemTotal_bytes|node_memory_Slab_bytes|node_netstat_TcpExt_TCPSynRetrans|node_netstat_Tcp_OutSegs|node_netstat_Tcp_RetransSegs|pg_settings_max_connections|pg_stat_database_numbackends|pg_stat_database_xact_rollback|pg_up|process_cpu_seconds_total|process_resident_memory_bytes|prometheus_remote_storage_samples_dropped_total|prometheus_remote_storage_samples_failed_total|rest_client_request_duration_seconds_bucket|rest_client_requests_total|storage_operation_duration_seconds_bucket|storage_operation_duration_seconds_count|storage_operation_errors_total|up|vault_audit_log_request_failure|volume_manager_total_volumes"
         action        = "keep"
       }
       // END generated metric allowlist
@@ -391,10 +391,10 @@ data:
       forward_to = [prometheus.remote_write.platform.receiver]
 
       // BEGIN generated metric allowlist (scripts/observability/metric-allowlist.py)
-      // 88 metric names: every one a shipped dashboard or rule reads.
+      // 89 metric names: every one a shipped dashboard or rule reads.
       rule {
         source_labels = ["__name__"]
-        regex         = "argocd_app_condition|argocd_app_info|cnpg_collector_first_recoverability_point|cnpg_collector_last_available_backup_timestamp|cnpg_collector_last_failed_backup_timestamp|cnpg_collector_pg_wal_archive_status|cnpg_pg_cluster_status|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_usage_seconds_total|container_fs_reads_bytes_total|container_fs_reads_total|container_fs_writes_bytes_total|container_fs_writes_total|container_memory_cache|container_memory_mapped_file|container_memory_rss|container_memory_swap|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_receive_packets_dropped_total|container_network_receive_packets_total|container_network_transmit_bytes_total|container_network_transmit_packets_dropped_total|container_network_transmit_packets_total|container_spec_memory_limit_bytes|go_goroutines|grafana_datasource_request_total|kube_job_owner|kube_namespace_status_phase|kube_node_info|kube_node_status_allocatable|kube_node_status_capacity|kube_node_status_condition|kube_pod_container_resource_limits|kube_pod_container_resource_requests|kube_pod_container_status_last_terminated_reason|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_pod_info|kube_pod_owner|kube_pod_status_phase|kube_replicaset_owner|kube_resourcequota|kubelet_cgroup_manager_duration_seconds_bucket|kubelet_cgroup_manager_duration_seconds_count|kubelet_node_config_error|kubelet_node_name|kubelet_pleg_relist_duration_seconds_bucket|kubelet_pleg_relist_duration_seconds_count|kubelet_pleg_relist_interval_seconds_bucket|kubelet_pod_start_duration_seconds_bucket|kubelet_pod_start_duration_seconds_count|kubelet_pod_worker_duration_seconds_bucket|kubelet_pod_worker_duration_seconds_count|kubelet_running_containers|kubelet_running_pods|kubelet_runtime_operations_duration_seconds_bucket|kubelet_runtime_operations_errors_total|kubelet_runtime_operations_total|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes|loki_write_dropped_entries_total|node_cpu_seconds_total|node_memory_Buffers_bytes|node_memory_Cached_bytes|node_memory_MemAvailable_bytes|node_memory_MemFree_bytes|node_memory_MemTotal_bytes|node_memory_Slab_bytes|node_netstat_TcpExt_TCPSynRetrans|node_netstat_Tcp_OutSegs|node_netstat_Tcp_RetransSegs|pg_settings_max_connections|pg_stat_database_numbackends|pg_stat_database_xact_rollback|pg_up|process_cpu_seconds_total|process_resident_memory_bytes|prometheus_remote_storage_samples_dropped_total|prometheus_remote_storage_samples_failed_total|rest_client_request_duration_seconds_bucket|rest_client_requests_total|storage_operation_duration_seconds_bucket|storage_operation_duration_seconds_count|storage_operation_errors_total|up|volume_manager_total_volumes"
+        regex         = "argocd_app_condition|argocd_app_info|cnpg_collector_first_recoverability_point|cnpg_collector_last_available_backup_timestamp|cnpg_collector_last_failed_backup_timestamp|cnpg_collector_pg_wal_archive_status|cnpg_pg_cluster_status|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_usage_seconds_total|container_fs_reads_bytes_total|container_fs_reads_total|container_fs_writes_bytes_total|container_fs_writes_total|container_memory_cache|container_memory_mapped_file|container_memory_rss|container_memory_swap|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_receive_packets_dropped_total|container_network_receive_packets_total|container_network_transmit_bytes_total|container_network_transmit_packets_dropped_total|container_network_transmit_packets_total|container_spec_memory_limit_bytes|go_goroutines|grafana_datasource_request_total|kube_job_owner|kube_namespace_status_phase|kube_node_info|kube_node_status_allocatable|kube_node_status_capacity|kube_node_status_condition|kube_pod_container_resource_limits|kube_pod_container_resource_requests|kube_pod_container_status_last_terminated_reason|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_pod_info|kube_pod_owner|kube_pod_status_phase|kube_replicaset_owner|kube_resourcequota|kubelet_cgroup_manager_duration_seconds_bucket|kubelet_cgroup_manager_duration_seconds_count|kubelet_node_config_error|kubelet_node_name|kubelet_pleg_relist_duration_seconds_bucket|kubelet_pleg_relist_duration_seconds_count|kubelet_pleg_relist_interval_seconds_bucket|kubelet_pod_start_duration_seconds_bucket|kubelet_pod_start_duration_seconds_count|kubelet_pod_worker_duration_seconds_bucket|kubelet_pod_worker_duration_seconds_count|kubelet_running_containers|kubelet_running_pods|kubelet_runtime_operations_duration_seconds_bucket|kubelet_runtime_operations_errors_total|kubelet_runtime_operations_total|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes|loki_write_dropped_entries_total|node_cpu_seconds_total|node_memory_Buffers_bytes|node_memory_Cached_bytes|node_memory_MemAvailable_bytes|node_memory_MemFree_bytes|node_memory_MemTotal_bytes|node_memory_Slab_bytes|node_netstat_TcpExt_TCPSynRetrans|node_netstat_Tcp_OutSegs|node_netstat_Tcp_RetransSegs|pg_settings_max_connections|pg_stat_database_numbackends|pg_stat_database_xact_rollback|pg_up|process_cpu_seconds_total|process_resident_memory_bytes|prometheus_remote_storage_samples_dropped_total|prometheus_remote_storage_samples_failed_total|rest_client_request_duration_seconds_bucket|rest_client_requests_total|storage_operation_duration_seconds_bucket|storage_operation_duration_seconds_count|storage_operation_errors_total|up|vault_audit_log_request_failure|volume_manager_total_volumes"
         action        = "keep"
       }
       // END generated metric allowlist
@@ -552,6 +552,48 @@ data:
       tls_config {
         ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
         insecure_skip_verify = true
+      }
+    }
+
+    // The box's OpenBao (ADR-117): its audit-failure counter, for the
+    // OpenBaoAuditLogFailure alert. /v1/sys/metrics on the TLS listener, verified
+    // against the listener CA (openbao-listener-trust, delivered by Day-0) for the
+    // name the certificate carries.
+    discovery.relabel "openbao" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_label_app_kubernetes_io_name", "__meta_kubernetes_pod_label_component", "__meta_kubernetes_pod_container_port_number"]
+        regex         = "platform-data;openbao;server;8200"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        target_label = "job"
+        replacement  = "openbao"
+      }
+    }
+
+    prometheus.scrape "openbao" {
+      clustering {
+        enabled = true
+      }
+      targets         = discovery.relabel.openbao.output
+      forward_to      = [prometheus.relabel.allowlist.receiver]
+      scheme          = "https"
+      metrics_path    = "/v1/sys/metrics"
+      params          = { "format" = ["prometheus"] }
+      scrape_interval = "30s"
+      scrape_timeout  = "10s"
+      tls_config {
+        ca_file     = "/etc/openbao-trust/ca.crt"
+        server_name = "openbao.platform-data.svc"
       }
     }
 
@@ -819,6 +861,9 @@ spec:
           mountPath: /etc/alloy
         - name: data
           mountPath: /var/lib/alloy/data
+        - name: openbao-trust
+          mountPath: /etc/openbao-trust
+          readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -830,6 +875,12 @@ spec:
       - name: config
         configMap:
           name: grafana-alloy-cluster
+      # The OpenBao listener CA's public certificate (Day-0); optional so Alloy
+      # starts before it exists, and the OpenBao scrape simply fails until then.
+      - name: openbao-trust
+        configMap:
+          name: openbao-listener-trust
+          optional: true
       # The transit buffer (ADR-078 add.3 §2): the metrics WAL survives a
       # restart or a reschedule.
   volumeClaimTemplates:

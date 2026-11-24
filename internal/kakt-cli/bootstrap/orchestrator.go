@@ -20,6 +20,7 @@ import (
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/components"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/constants"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/health"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/preflight"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/state"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
@@ -1676,7 +1677,21 @@ func (o *Orchestrator) deployBoundaryN(ctx context.Context, kubeconfig string, n
 	if err != nil {
 		return err
 	}
-	return o.runBoundary(ctx, kubeconfig, c)
+	err = o.runBoundary(ctx, kubeconfig, c)
+	if err == nil {
+		return nil
+	}
+	// A boundary that waits on OpenBao times out generically when OpenBao is
+	// refusing to unseal an interrupted self-initialization. Name the real cause
+	// (ADR-117 §6.2); nothing is deleted either way.
+	if cs, cerr := kubeClient(kubeconfig); cerr == nil {
+		if pod, failed, serr := openbao.SelfInitFailed(ctx, cs); serr == nil && failed {
+			return fmt.Errorf("%w on %s/%s (boundary %02d stopped; nothing was deleted, and recovering "+
+				"the store is an administrator decision under ADR-092): %v",
+				openbao.ErrSelfInitFailed, openbao.Namespace, pod, number, err)
+		}
+	}
+	return err
 }
 
 // tailnetCredentialStagedOnHub reports whether the Secret the hub-operator reads

@@ -156,6 +156,18 @@ server:
         tls_cert_file   = "/openbao/tls/listener/tls.crt"
         tls_key_file    = "/openbao/tls/listener/tls.key"
         tls_auto_reload = true
+
+        # /v1/sys/metrics only, over the same verified TLS listener: the hub's
+        # Alloy scrapes it to alert on audit failures (ADR-117 §11, G13). Metrics
+        # carry no secret values; every other path still requires a token.
+        telemetry {
+          unauthenticated_metrics_access = true
+        }
+      }
+
+      telemetry {
+        prometheus_retention_time = "12h"
+        disable_hostname          = true
       }
 
       storage "postgresql" {
@@ -405,13 +417,30 @@ server:
           data = {
             policy = <<-EOP
               path "pki_int/keys"                           { capabilities = ["list"] }
-              path "pki_int/key/*"                          { capabilities = ["read"] }
+              path "pki_int/key/*"                          { capabilities = ["read", "delete"] }
               path "pki_int/keys/generate/internal"         { capabilities = ["update"] }
               path "pki_int/intermediate/generate/existing" { capabilities = ["update"] }
               path "pki_int/intermediate/set-signed"        { capabilities = ["update"] }
               path "pki_int/issuers"                        { capabilities = ["list"] }
-              path "pki_int/issuer/*"                       { capabilities = ["read", "update"] }
+              path "pki_int/issuer/*"                       { capabilities = ["read", "update", "delete"] }
               path "pki_int/config/issuers"                 { capabilities = ["read", "update"] }
+            EOP
+          }
+        }
+        # Dynamic-credential capability drill (ADR-117 §7.6, G10): administrator only,
+        # and only database connections and roles named drill-*. A drill connection's
+        # credentials are whatever the administrator supplies; this grants no access to
+        # any platform database, and a drill role cannot use a platform connection
+        # (each allows only its own static role).
+        request "capability-drill-policy" {
+          operation = "update"
+          path      = "sys/policies/acl/openbao-capability-drill"
+          data = {
+            policy = <<-EOP
+              path "database/config/drill-*" { capabilities = ["create", "read", "update", "delete"] }
+              path "database/roles/drill-*"  { capabilities = ["create", "read", "update", "delete"] }
+              path "database/creds/drill-*"  { capabilities = ["read"] }
+              path "sys/leases/lookup"       { capabilities = ["update"] }
             EOP
           }
         }
@@ -558,6 +587,20 @@ server:
             bound_service_account_namespaces = ["platform-data"]
             audience                         = "openbao"
             token_policies                   = ["openbao-pki-signing"]
+            token_type                       = "service"
+            token_ttl                        = "15m"
+            token_max_ttl                    = "15m"
+            token_explicit_max_ttl           = "15m"
+          }
+        }
+        request "capability-drill-role" {
+          operation = "update"
+          path      = "auth/kubernetes/role/openbao-capability-drill"
+          data = {
+            bound_service_account_names      = ["openbao-capability-drill"]
+            bound_service_account_namespaces = ["platform-data"]
+            audience                         = "openbao"
+            token_policies                   = ["openbao-capability-drill"]
             token_type                       = "service"
             token_ttl                        = "15m"
             token_max_ttl                    = "15m"

@@ -213,14 +213,11 @@ func sameShares(a, b []string) bool {
 // identity. Re-running after completion is a no-op: the role no longer exists and
 // the escrow already holds the key.
 func TrustBootstrap(ctx context.Context, cs kubernetes.Interface, kubeconfig string, esc Escrow) error {
-	c, err := Connect(ctx, cs, kubeconfig)
+	c, err := WaitForStore(ctx, cs, kubeconfig, 15*time.Minute)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	if err := waitUnsealed(ctx, c, 15*time.Minute); err != nil {
-		return err
-	}
 	_, escrowed, err := readEscrowedRecovery(ctx, esc)
 	if err != nil {
 		return err
@@ -236,24 +233,4 @@ func TrustBootstrap(ctx context.Context, cs kubernetes.Interface, kubeconfig str
 		return err
 	}
 	return RecoveryKeySequence(ctx, c, esc)
-}
-
-func waitUnsealed(ctx context.Context, c *Client, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		s, err := c.SealStatus(ctx)
-		if err == nil && s.Initialized && !s.Sealed {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("OpenBao is not initialized and unsealed after %s (last status %+v, %v). "+
-				"If its pods report `self-initialization failed: refusing to unseal`, the store is "+
-				"preserved and recovering it is an administrator decision under ADR-092", timeout, s, err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-	}
 }

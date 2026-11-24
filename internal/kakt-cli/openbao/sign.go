@@ -47,14 +47,11 @@ func SignIntermediateOnBox(ctx context.Context, cs kubernetes.Interface, opt Sig
 	if err != nil {
 		return err
 	}
-	c, err := Connect(ctx, cs, opt.Kubeconfig)
+	c, err := WaitForStore(ctx, cs, opt.Kubeconfig, 30*time.Minute)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	if err := waitUnsealed(ctx, c, 30*time.Minute); err != nil {
-		return err
-	}
 	if err := c.LoginAs(ctx, cs, saPKISigning, rolePKISigning); err != nil {
 		return err
 	}
@@ -66,8 +63,8 @@ func SignIntermediateOnBox(ctx context.Context, cs kubernetes.Interface, opt Sig
 	if current != nil {
 		if current.CheckSignatureFrom(rootCert) != nil {
 			return errors.New("this box's default issuer does not chain to the custody root; the trust " +
-				"hierarchy is not the expected one (refusing to sign). If the root was replaced after a " +
-				"compromise, follow the root-rollover procedure")
+				"hierarchy is not the expected one (refusing to sign). If a compromise rollover was " +
+				"interrupted, re-run it: kakt pki sign-intermediate --compromised <serial>")
 		}
 		if !opt.Renew && current.NotAfter.Sub(opt.Now) > renewalThreshold {
 			fmt.Fprintf(out, "The issuing intermediate is already signed by this box's root (valid until %s). Nothing to do.\n",
@@ -80,6 +77,19 @@ func SignIntermediateOnBox(ctx context.Context, cs kubernetes.Interface, opt Sig
 	if err != nil {
 		return err
 	}
+	issuerID, err := installIntermediate(ctx, c, keyName, opt.Root, opt.BoxID, opt.Validity, opt.Now)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Signed and installed the issuing intermediate (issuer %s, key %s). Only the certificate chain left this machine.\n",
+		issuerID, keyName)
+	return nil
+}
+
+// installIntermediate has OpenBao produce a CSR over keyName, signs it with root,
+// installs the chain and makes the new issuer the default. Returns the issuer id.
+func installIntermediate(ctx context.Context, c *Client, keyName string, root RootCA, boxID string,
+	validity time.Duration, now time.Time) (string, error) {
 	var gen struct {
 		Data struct {
 			CSR string `json:"csr"`
@@ -88,11 +98,11 @@ func SignIntermediateOnBox(ctx context.Context, cs kubernetes.Interface, opt Sig
 	if err := c.Write(ctx, "pki_int/intermediate/generate/existing", map[string]any{
 		"key_ref": keyName, "common_name": IntermediateCommonName,
 	}, &gen); err != nil {
-		return fmt.Errorf("ask OpenBao for a CSR over key %s: %w", keyName, err)
+		return "", fmt.Errorf("ask OpenBao for a CSR over key %s: %w", keyName, err)
 	}
-	chain, err := SignIntermediate([]byte(gen.Data.CSR), opt.Root, opt.BoxID, opt.Validity, opt.Now)
+	chain, err := SignIntermediate([]byte(gen.Data.CSR), root, boxID, validity, now)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var set struct {
 		Data struct {
@@ -100,23 +110,26 @@ func SignIntermediateOnBox(ctx context.Context, cs kubernetes.Interface, opt Sig
 		} `json:"data"`
 	}
 	if err := c.Write(ctx, "pki_int/intermediate/set-signed", map[string]any{"certificate": string(chain)}, &set); err != nil {
-		return fmt.Errorf("install the signed chain: %w", err)
+		return "", fmt.Errorf("install the signed chain: %w", err)
 	}
 	issuerID, err := issuerFor(ctx, c, set.Data.ImportedIssuers)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := c.Write(ctx, "pki_int/issuer/"+issuerID, map[string]any{
 		"issuer_name": keyName, "leaf_not_after_behavior": "err",
 	}, nil); err != nil {
-		return fmt.Errorf("configure issuer %s: %w", issuerID, err)
+		return "", fmt.Errorf("configure issuer %s: %w", issuerID, err)
 	}
 	if err := c.Write(ctx, "pki_int/config/issuers", map[string]any{"default": issuerID}, nil); err != nil {
-		return fmt.Errorf("make issuer %s the default: %w", issuerID, err)
+		return "", fmt.Errorf("make issuer %s the default: %w", issuerID, err)
 	}
-	fmt.Fprintf(out, "Signed and installed the issuing intermediate (issuer %s, key %s). Only the certificate chain left this machine.\n",
-		issuerID, keyName)
-	return nil
+	return issuerID, nil
+}
+
+// LoginSigning logs c in as the administrator-mintable signing identity.
+func LoginSigning(ctx context.Context, c *Client, cs kubernetes.Interface) error {
+	return c.LoginAs(ctx, cs, saPKISigning, rolePKISigning)
 }
 
 // IntermediateSigned is Day-0's pki-signed check: the unauthenticated default CA

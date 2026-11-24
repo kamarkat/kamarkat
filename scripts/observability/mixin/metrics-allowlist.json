@@ -88,6 +88,7 @@
     "storage_operation_duration_seconds_count",
     "storage_operation_errors_total",
     "up",
+    "vault_audit_log_request_failure",
     "volume_manager_total_volumes"
   ]
 }

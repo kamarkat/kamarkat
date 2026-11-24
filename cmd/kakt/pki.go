@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -24,9 +26,9 @@ func newPKICmd() *cobra.Command {
 }
 
 func newPKISignIntermediateCmd() *cobra.Command {
-	var gitopsDir, cluster string
+	var gitopsDir, cluster, compromised string
 	var renew bool
-	var validity time.Duration
+	var validity, leafWait time.Duration
 	cmd := &cobra.Command{
 		Use:   "sign-intermediate",
 		Short: "Sign the box's issuing intermediate CA with its custody-held root",
@@ -56,7 +58,10 @@ The root is read only under your own session; it never enters CI or the cluster.
 			if err != nil {
 				return err
 			}
-			custody, _, who, err := hubaccess.OpenCustody(ctx, coords)
+			if compromised != "" && renew {
+				return fmt.Errorf("--compromised and --renew are different procedures; choose one")
+			}
+			custody, box, who, err := hubaccess.OpenCustody(ctx, coords)
 			if err != nil {
 				return err
 			}
@@ -86,6 +91,10 @@ The root is read only under your own session; it never enters CI or the cluster.
 			if err != nil {
 				return err
 			}
+			if compromised != "" {
+				return rollOverCompromised(ctx, cs, kubeconfig, coords.EscrowProjectID, who, root, custody, box,
+					compromised, validity, leafWait)
+			}
 			fmt.Printf("Signing box %s's issuing intermediate as %s.\n", coords.BoxID, who)
 			return openbao.SignIntermediateOnBox(ctx, cs, openbao.SignOptions{
 				// The root is bound to the box's escrow project (kakt escrow init).
@@ -102,7 +111,45 @@ The root is read only under your own session; it never enters CI or the cluster.
 	cmd.Flags().StringVar(&gitopsDir, "gitops-dir", ".", "the box's repository")
 	cmd.Flags().StringVar(&cluster, "cluster", "", "the management cluster, when the repository declares more than one")
 	cmd.Flags().BoolVar(&renew, "renew", false, "issue a new intermediate over a new key (scheduled renewal)")
+	cmd.Flags().StringVar(&compromised, "compromised", "",
+		"serial (hex) of a COMPROMISED intermediate: replace the root, sign a new intermediate, destroy the "+
+			"old issuers and keys, and reissue every certificate on the hub and spokes (ADR-117 §8.3)")
+	cmd.Flags().DurationVar(&leafWait, "leaf-wait", 30*time.Minute,
+		"with --compromised: how long to wait for every certificate to be reissued under the new root")
 	cmd.Flags().DurationVar(&validity, "validity", openbao.DefaultIntermediateValidity,
 		"the intermediate's validity; always bounded by the root's remaining validity")
 	return cmd
+}
+
+// rollOverCompromised is --compromised: the OpenBao and custody half, then every
+// leaf on the fleet. Exit 2 (ErrRolloverIncomplete) means re-run to continue.
+func rollOverCompromised(ctx context.Context, cs kubernetes.Interface, kubeconfig, boxID, who string,
+	root openbao.RootCA, custody, box openbao.ProjectStore, compromised string, validity, leafWait time.Duration) error {
+	fmt.Printf("Compromise rollover for box %s as %s: intermediate %s.\n", boxID, who, compromised)
+	c, err := openbao.WaitForStore(ctx, cs, kubeconfig, 30*time.Minute)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := openbao.LoginSigning(ctx, c, cs); err != nil {
+		return err
+	}
+	newRoot, err := openbao.RollOverCompromised(ctx, c, openbao.RolloverOptions{
+		BoxID: boxID, Root: root, Custody: custody, Box: box, Compromised: compromised,
+		Validity: validity, Now: time.Now(), Out: os.Stdout,
+	})
+	if err != nil {
+		return err
+	}
+	clusters, cleanup, err := openbao.FleetLeafClusters(ctx, cs, kubeconfig)
+	defer cleanup()
+	if err != nil {
+		return err
+	}
+	err = openbao.ReissueLeaves(ctx, clusters, newRoot.CertPEM, leafWait, 15*time.Second, os.Stdout)
+	if errors.Is(err, openbao.ErrRolloverIncomplete) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	return err
 }

@@ -54,6 +54,10 @@ const (
 type RootCA struct {
 	CertPEM []byte
 	KeyPEM  []byte
+	// Replaces is the certificate (public only) of the root this one replaced in a
+	// compromise rollover. It lets a re-run recognise a rollover already begun; the
+	// replaced root's key is not kept.
+	Replaces []byte `json:",omitempty"`
 }
 
 // GenerateRootCA creates the box's root. Its subject names the box, so a root can

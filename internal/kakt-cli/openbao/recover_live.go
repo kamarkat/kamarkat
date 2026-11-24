@@ -236,31 +236,16 @@ func (l ClusterLive) Connect(ctx context.Context) (*Client, error) {
 	if wait == 0 {
 		wait = 30 * time.Minute
 	}
-	deadline := time.Now().Add(wait)
-	for {
-		c, err := Connect(ctx, l.CS, l.Kubeconfig)
-		if err == nil {
-			s, serr := c.SealStatus(ctx)
-			if serr == nil && s.Initialized && !s.Sealed {
-				if err := c.LoginAs(ctx, l.CS, saRecovery, roleRecovery); err != nil {
-					c.Close()
-					return nil, err
-				}
-				return c, nil
-			}
-			c.Close()
-			err = fmt.Errorf("status %+v %v", s, serr)
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("OpenBao is not serving and unsealed after %s (%v). If its pods report "+
-				"a seal error, the escrowed seal configuration does not match the restored store", wait, err)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(10 * time.Second):
-		}
+	c, err := WaitForStore(ctx, l.CS, l.Kubeconfig, wait)
+	if err != nil {
+		return nil, fmt.Errorf("%w. If its pods report a seal error, the escrowed seal configuration "+
+			"does not match the restored store", err)
 	}
+	if err := c.LoginAs(ctx, l.CS, saRecovery, roleRecovery); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
 }
 
 // VerifyLogin authenticates to role's own database, as the application would.

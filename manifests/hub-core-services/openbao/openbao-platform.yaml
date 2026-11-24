@@ -59,6 +59,7 @@ spec:
 #   openbao-pki-signing      kakt pki sign-intermediate (administrator session)
 #   openbao-app-secrets      kakt app secrets (tenant application secrets only)
 #   openbao-recovery         kakt recovery in ADR-092 recovery mode
+#   openbao-capability-drill dynamic-credential drill (drill-* database roles only)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -84,6 +85,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: openbao-recovery
+  namespace: platform-data
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-capability-drill
   namespace: platform-data
 automountServiceAccountToken: false
 ---
@@ -118,6 +126,16 @@ spec:
       ports:
         - {protocol: TCP, port: 8200}
         - {protocol: TCP, port: 8201}
+    # The hub's cluster Alloy scrapes /v1/sys/metrics (audit-failure alert).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-observability
+          podSelector:
+            matchLabels:
+              app: grafana-alloy-cluster
+      ports:
+        - {protocol: TCP, port: 8200}
 ---
 # CONSUMER ADMISSION (ADR-117 §7). Steady state only: the recovery overlay
 # (../openbao-recovery) removes it, so a restored store serves no consumer until its

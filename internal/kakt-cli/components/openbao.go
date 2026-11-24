@@ -144,7 +144,7 @@ func (i *Installer) WaitIntermediateSigned(ctx context.Context, wait time.Durati
 		return fmt.Errorf("the box escrow holds no root certificate (%s): run `kakt escrow init` "+
 			"as the administrator: %v", openbao.ArtifactRootCertificate, err)
 	}
-	c, err := openbao.Connect(ctx, cs, i.Kubeconfig)
+	c, err := openbao.WaitForStore(ctx, cs, i.Kubeconfig, wait)
 	if err != nil {
 		return err
 	}
