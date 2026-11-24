@@ -59,8 +59,8 @@ committing to the box's repository.**
   `mcp-grafana`. Every request is authenticated once, by `kamarkat-mcp`, as §3 describes.
   `mcp-grafana`'s caller token never leaves the cluster.
 - Each is a capability under ADR-071. It ships in every bundle, does nothing until the
-  management cluster's `values.yaml` enables it, and is enabled independently of the
-  other.
+  management cluster's `values.yaml` enables it (`capabilities.platformMcp`,
+  `capabilities.grafanaMcp`), and is enabled independently of the other.
 
 ### 2. What `kamarkat-mcp` serves
 
@@ -93,9 +93,14 @@ second authority over every domain it touched.
   `platform.verifier`.
 - **Its clients are declared, never registered at runtime.** Enabling the capability
   declares them (ADR-053):
-  - `kakt`: a confidential client using the authorization-code and refresh grants, with
-    the redirect URIs of the kakt deployments the tenant names. Tokens are held
-    server-side by kakt, per person (ADR-110). It holds no token-exchange grant.
+  - `kakt`: a **public** client using the authorization-code grant with PKCE, plus the
+    refresh grant, with the redirect URIs of the kakt deployments the tenant names.
+    It is public on purpose. A confidential client's secret is issued in the box and
+    would have to be carried to kakt, which is a box secret leaving the box (ADR-065).
+    A public client has nothing to carry, and its id is published in the resource
+    metadata (below). Tokens are held server-side by kakt, sealed, per person
+    (ADR-110). The browser and the agent's sandbox never hold them. It holds no
+    token-exchange grant.
   - `kakt-cli`: a public client using PKCE with a loopback redirect, for `kakt mcp`.
   - `kakt-agent` (optional, off by default): a service user that authenticates with a
     private-key JWT and holds `platform.viewer` only. It is used by agents that run with
@@ -113,8 +118,11 @@ second authority over every domain it touched.
   - It then **impersonates** the token's subject and groups against the Kubernetes API.
     Its own ServiceAccount may impersonate and do nothing else, so ADR-058 RBAC decides
     what each call can read.
-- `kamarkat-mcp` publishes OAuth Protected Resource Metadata (RFC 9728) naming the box's
-  issuer, so any MCP client can discover how to sign in.
+- `kamarkat-mcp` publishes OAuth Protected Resource Metadata (RFC 9728) at
+  `/.well-known/oauth-protected-resource/platform` (and `/grafana`). It names the box's
+  issuer, plus a `kamarkat` member with the `kamarkat-mcp` project id, the declared
+  client ids and the enabled capabilities. Ids and names are not credentials, so any
+  MCP client can discover how to sign in without being given anything.
 
 ### 4. Who can connect
 
