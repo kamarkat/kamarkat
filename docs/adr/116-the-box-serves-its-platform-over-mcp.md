@@ -115,9 +115,13 @@ second authority over every domain it touched.
     tool category only if the token carries that category's role (`platform.viewer` for
     the platform categories, `platform.observer` for `/grafana`, `platform.verifier` for
     `verify`).
-  - It then **impersonates** the token's subject and groups against the Kubernetes API.
-    Its own ServiceAccount may impersonate and do nothing else, so ADR-058 RBAC decides
-    what each call can read.
+  - It then **impersonates** the person against the Kubernetes API: their email, which
+    is the name the API server gives an OIDC user (`--oidc-username-claim=email`), plus
+    one group per project role the token carries (`kamarkat-mcp:platform.viewer`, …).
+    The capability binds `kamarkat-mcp:platform.viewer` to a read-only ClusterRole with
+    no access to Secrets. So a role granted in the issuer is what gives read access,
+    and revoking it there takes effect on the person's next token. Its own
+    ServiceAccount may impersonate those three groups and any user, and nothing else.
 - `kamarkat-mcp` publishes OAuth Protected Resource Metadata (RFC 9728) at
   `/.well-known/oauth-protected-resource/platform` (and `/grafana`). It names the box's
   issuer, plus a `kamarkat` member with the `kamarkat-mcp` project id, the declared
@@ -130,7 +134,7 @@ second authority over every domain it touched.
 |---|---|---|
 | kakt, hosted by the platform's creator | the creator's cloud | `kakt` client, the person's delegated token |
 | kakt, run by the tenant or a developer | in the box, or on a workstation | the same client, with that deployment's redirect URI declared |
-| any MCP client (Claude Code, Cursor, …) | a workstation | `kakt mcp`, a local stdio server that signs in through `kakt-cli` |
+| any MCP client (Claude Code, Cursor, …) | a workstation | `kakt mcp`, a local stdio server that reads with the person's own kubeconfig: the OIDC one ADR-076 issues, or the break-glass one when the issuer is what is down. The `kakt-cli` client is provisioned for a later sign-in flow of its own. |
 
 ### 5. The connection is a person's, not the platform's
 
@@ -195,8 +199,28 @@ not this component.
 
 ## Impact
 
-- `cmd/mcp-server`, its image and `manifests/hub-core-services/api-gateway/mcp-server/`
-  are replaced by `kamarkat-mcp`.
+- `cmd/mcp-server` keeps its path and image name and now builds `kamarkat-mcp`, from
+  `internal/platform/boxmcp`. Its boundary-04 descriptor and
+  `manifests/hub-core-services/api-gateway/mcp-server/` are removed, replaced by
+  `manifests/hub-core-services/kamarkat-mcp` and `manifests/hub-core-services/mcp-grafana`,
+  each applied by a boundary-03 element gated on its capability. The hub gateway gains
+  the `mcp` listener and route under the same gate.
+- kube-sbt gains `POST /internal/platform/projects/roles` (several roles in one grant)
+  and `POST /internal/platform/public-clients`. The hub-operator gains
+  `PlatformMcpReconciler`, watching the `platform-mcp/kamarkat-mcp` marker.
+- The `kakt-agent` is built with a key pair kakt generates. The tenant declares the
+  public half (`capabilities.platformMcp.agentPublicKey`). The hub-operator registers
+  it for a machine user holding `platform.viewer` (kube-sbt
+  `POST /internal/platform/machine-key-users`). kamarkat-mcp accepts that user only
+  while the declaration stands. No private key exists in the box.
+- The `verify` category serves no tools, deliberately. Assessing acceptance needs
+  the management cluster's escrowed kubeconfig, which is privileged work, so it runs
+  in the box repository's **Acceptance** workflow (scheduled and on demand,
+  `kakt verify --accept`), next to Day-0. Agents read its verdicts through GitHub.
+- Declaring a managed cluster no longer needs escrow access at the keyboard:
+  `kakt tenant add-cluster --declare-only` writes the declaration, and the
+  repository's **Finalize cluster** workflow runs `kakt tenant finalize-cluster` on
+  the pull request.
 - ADR-067 is clarified by §5: a connection made as a person, with that person's token
   and the tenant's declared consent, is not a platform component initiating access.
 - `kakt` gains `kakt mcp`.

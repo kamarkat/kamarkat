@@ -129,6 +129,28 @@ components:
       allowlist, Certificate and Deployment are all applied by the boundary-03
       descriptor, and four release gates hold the boundary.
 
+  # ── Platform MCP (ADR-116) ──────────────────────────────────────────────
+  - name: kamarkat-mcp
+    declared_by: [116-the-box-serves-its-platform-over-mcp.md]
+    status: shipped
+    path: manifests/hub-core-services/kamarkat-mcp
+    note: >-
+      The box's platform state over MCP, read as the person who asks: the
+      server validates a token from the box's identity provider and
+      impersonates the person, holding no read access of its own. Applied by a
+      boundary-03 element gated on capabilities.platformMcp.enabled; its
+      listener and route are the hub gateway's, gated on the same value.
+
+  - name: mcp-grafana
+    declared_by: [116-the-box-serves-its-platform-over-mcp.md]
+    status: shipped
+    path: manifests/hub-core-services/mcp-grafana
+    note: >-
+      Grafana's own MCP server, unmodified, with --disable-write and a Viewer
+      service account. Reached only through kamarkat-mcp's /grafana, which
+      requires platform.observer. Gated on capabilities.grafanaMcp.enabled with
+      platformMcp and observability.
+
 # Directories deliberately not applied on their own. Each needs a reason,
 # because a waiver without one is an orphan with paperwork -- and the gate
 # rejects a waiver for something that IS applied, so the list cannot rot into a
@@ -390,3 +412,30 @@ capabilities:
       caller and collects nothing: payment is the caller's. Planned until
       ADR-113's isolation proof passes, billing-db's recovery is qualified,
       and the engine's encryption keys are escrowed -- see ADR-113.
+
+  - name: platformMcp
+    kind: selectable
+    enable: capabilities.platformMcp.enabled
+    lifecycle: declared
+    status: shipped
+    declared_by:
+      - 116-the-box-serves-its-platform-over-mcp.md
+    components: [kamarkat-mcp]
+    note: >-
+      ADR-116. Off by default: new, and it publishes mcp.<hubDomain>. The
+      hub-operator provisions its identity (a dedicated project with three
+      roles and public kakt clients) while the marker exists. Declared until a
+      box has run an agent against it end to end.
+
+  - name: grafanaMcp
+    kind: selectable
+    enable: capabilities.grafanaMcp.enabled
+    lifecycle: declared
+    status: shipped
+    declared_by:
+      - 116-the-box-serves-its-platform-over-mcp.md
+    components: [mcp-grafana]
+    note: >-
+      ADR-116 §1. Grafana's MCP server behind kamarkat-mcp. Requires
+      platformMcp and observability; the boundary element is not rendered
+      without both.

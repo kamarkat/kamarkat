@@ -242,6 +242,35 @@ helmValues: |
       # failure above could recur. It is declared here because ArgoCD renders
       # argocd-cmd-params-cm from these values and owns the field.
       controller.diff.server.side: "true"
+      # BOUND THE SYNC OPERATION. Default is "0", which means no timeout at all --
+      # verified in argo-cd v3.5.7's own params contract
+      # (docs/operator-manual/argocd-cmd-params-cm.yaml), the version this chart
+      # pin (10.11.7) packages.
+      #
+      # WHY. ArgoCD completes a sync wave only when its resources are Healthy, and
+      # its built-in Deployment/StatefulSet assessment reports Progressing -- never
+      # Degraded -- while pods are not Ready. So one resource that cannot become
+      # Ready keeps the operation Running for ever, and ArgoCD will not begin a new
+      # operation while one is in flight. A promotion that moves targetRevision is
+      # then SEEN and cannot be acted on: the Application reports OutOfSync at the
+      # new version and converges never. Recovery meant terminating the operation
+      # by hand, which is how manual synchronisation entered the release path.
+      #
+      # 900s: three times the 300s a sync is expected to take
+      # (scripts/argocd-hard-sync.sh WAIT_TIMEOUT), which leaves room for a cold
+      # spoke pulling images, and far short of anything a person would wait through.
+      #
+      # INTERACTION WITH RETRY, which is what makes this sufficient on its own: at
+      # the bound the operation FAILS, and syncPolicy.retry takes over -- unlimited
+      # attempts under a 3m backoff cap for platform services, five for the rest.
+      # A new revision is not synced while an operation runs, but once the bound
+      # expires the controller sees OutOfSync and syncs the current revision. So a
+      # promotion that lands on top of a stuck sync converges by itself, which is
+      # the behaviour that was missing.
+      #
+      # It does not mask a failure: a resource that stays unhealthy keeps failing
+      # the sync, and the Application reports it. Retries are not health.
+      controller.sync.timeout.seconds: "900"
 
   # ArgoCD is reached through the hub Gateway's HTTPRoute, not an Ingress
   # (ADR-086: Gateway API is the platform's ingress mechanism, served by the

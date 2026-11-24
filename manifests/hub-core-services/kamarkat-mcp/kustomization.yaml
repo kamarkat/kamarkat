@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# kamarkat-mcp (ADR-116): the box's platform state over MCP, read as the person
+# who asks. Applied only while capabilities.platformMcp.enabled.
+resources:
+- marker.yaml
+- rbac.yaml
+- identity.yaml
+- deployment.yaml
+- network-policy.yaml
+
+# Pinned by digest, not by tag -- the mcp-server workflow rewrites this with
+# `kustomize edit set image` after each build.
+images:
+- digest: sha256:990bfec09d9e6e89ac6e375f8137d014ce870ad19cec61b40bbfb464838928e0
+  name: ghcr.io/kamarkat/kamarkat/mcp-server

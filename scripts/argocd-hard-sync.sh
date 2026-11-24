@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
 # Force an ArgoCD Application to re-read its source and sync -- correctly.
 #
-#   scripts/argocd-hard-sync.sh <app> [<app>...]         refresh + sync + wait
-#   scripts/argocd-hard-sync.sh --refresh-only <app>...  refresh only
+#   scripts/argocd-hard-sync.sh --wait-promote <version> OBSERVE a promotion
 #   scripts/argocd-hard-sync.sh --wait <app>...          just report/wait
-#   scripts/argocd-hard-sync.sh --promote <version>      a whole promotion, in order
+#   scripts/argocd-hard-sync.sh --refresh-only <app>...  refresh only  [break-glass]
+#   scripts/argocd-hard-sync.sh <app> [<app>...]         refresh + sync + wait  [break-glass]
+#   scripts/argocd-hard-sync.sh --promote <version>      force a whole promotion  [break-glass]
+#
+# THE NORMAL RELEASE PATH USES --wait-promote AND NOTHING ELSE.
+#
+# `kakt promote sync` ran --promote, so forced synchronisation was step 5 of the
+# documented release (the release skill), and the CLI was a second reconciliation
+# engine beside ArgoCD. Git declares the desired state, ArgoCD reconciles it, and
+# the CLI observes the result.
+#
+# The modes marked break-glass remain for administrative recovery and are not part
+# of normal platform operation. Reaching for one is a signal that something is
+# wrong with an Application, not with the promotion -- read it before forcing it.
+#
+# What made forcing look routine was a liveness defect, now fixed at its cause: a
+# sync wave placed after the workloads made every workload's health a gate on the
+# operation finishing, ArgoCD's built-in workload health reports Progressing and
+# never Degraded while pods are not Ready, and the operation had no bound, so one
+# resource that could never become Ready left an operation Running for ever -- and
+# ArgoCD will not begin a new operation while one is in flight. The late wave is
+# gone and controller.sync.timeout.seconds is configured, so an operation ends and
+# the next revision reconciles on its own.
 #
 #   KUBECONFIG=~/.kamarkat/run/kubeconfig/nutgraf-hub.kubeconfig \
 #     scripts/argocd-hard-sync.sh --promote 0.1.16-rc.104
@@ -83,6 +104,10 @@ MODE="sync"
 case "${1:-}" in
   --refresh-only) MODE="refresh"; shift ;;
   --promote)      MODE="promote"; shift ;;
+  # Observation. The same traversal as --promote with no refresh and no submitted
+  # operation: this is what the normal release path uses, because a promotion that
+  # needs forcing is a defect in the Application, not in the promotion.
+  --wait-promote) MODE="wait-promote"; shift ;;
   --wait)         MODE="wait";    shift ;;
   -h|--help|"")   sed -n '2,10p' "$0" | sed 's/^# //'; exit 0 ;;
 esac
@@ -288,14 +313,24 @@ rc=0
 FAILURES=()
 fail() { FAILURES+=("$1"); rc=1; }
 
-if [ "$MODE" = "promote" ]; then
-  VERSION="${1:?usage: $0 --promote <version>}"
-  echo "Promoting to ${VERSION}"
+if [ "$MODE" = "promote" ] || [ "$MODE" = "wait-promote" ]; then
+  VERSION="${1:?usage: $0 [--promote|--wait-promote] <version>}"
+  # FORCE separates break-glass from normal operation on one code path, so the two
+  # cannot drift apart. wait-promote observes; promote refreshes and submits.
+  FORCE=0
+  [ "$MODE" = "promote" ] && FORCE=1
+  if [ "$FORCE" = "1" ]; then
+    echo "Promoting to ${VERSION} (forcing: break-glass, not the release path)"
+  else
+    echo "Waiting for the box to converge on ${VERSION}"
+  fi
   echo
   echo "-- ${ROOT_APP} (reads the gitops repo)"
   app_exists "$ROOT_APP" || { echo "   ERROR no Application ${ROOT_APP} in ${ARGOCD_NS}"; exit 1; }
-  hard_refresh "$ROOT_APP"
-  trigger_sync "$ROOT_APP"
+  if [ "$FORCE" = "1" ]; then
+    hard_refresh "$ROOT_APP"
+    trigger_sync "$ROOT_APP"
+  fi
   wait_for "$ROOT_APP" || fail "${ROOT_APP}: root did not reach Synced -- children cannot regenerate"
   conditions_of "$ROOT_APP"
   echo
@@ -322,8 +357,10 @@ if [ "$MODE" = "promote" ]; then
       echo "   ${app}: regenerated at ${VERSION}"
     fi
     echo "-- ${app}"
-    hard_refresh "$app"
-    trigger_sync "$app"
+    if [ "$FORCE" = "1" ]; then
+      hard_refresh "$app"
+      trigger_sync "$app"
+    fi
     wait_for "$app" "$VERSION" || fail "${app}: did not reach Synced at ${VERSION}"
     conditions_of "$app"
   done
@@ -332,7 +369,7 @@ if [ "$MODE" = "promote" ]; then
 fi
 
 if [ $# -lt 1 ]; then
-  echo "usage: $0 [--refresh-only|--wait|--promote <version>] <app>..." >&2
+  echo "usage: $0 [--refresh-only|--wait|--wait-promote <version>|--promote <version>] <app>..." >&2
   exit 1
 fi
 

@@ -1,0 +1,72 @@
+# The ids the hub-operator published once the project and clients exist.
+# None of them is a credential (ADR-116 §3) -- the Secret is simply how hub
+# values reach a pod. Two objects because the kakt client exists only when the
+# tenant declared a kakt deployment, and one missing key would hold back the
+# whole Secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kamarkat-mcp-identity
+  namespace: platform-mcp
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: infisical-backend
+    kind: ClusterSecretStore
+  target:
+    name: kamarkat-mcp-identity
+    creationPolicy: Owner
+  data:
+    - secretKey: projectId
+      remoteRef:
+        key: hub-kamarkat-mcp-project-id
+    - secretKey: kaktCliClientId
+      remoteRef:
+        key: hub-kamarkat-mcp-kakt-cli-client-id
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kamarkat-mcp-kakt-client
+  namespace: platform-mcp
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: infisical-backend
+    kind: ClusterSecretStore
+  target:
+    name: kamarkat-mcp-kakt-client
+    creationPolicy: Owner
+  data:
+    - secretKey: clientId
+      remoteRef:
+        key: hub-kamarkat-mcp-kakt-client-id
+---
+# The kakt-agent machine user and its key id (ADR-116 §3), once the box
+# declares kakt's public key. Not credentials: the private key is kakt's alone.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kamarkat-mcp-agent
+  namespace: platform-mcp
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: infisical-backend
+    kind: ClusterSecretStore
+  target:
+    name: kamarkat-mcp-agent
+    creationPolicy: Owner
+  data:
+    - secretKey: userId
+      remoteRef:
+        key: hub-kamarkat-mcp-agent-user-id
+    - secretKey: keyId
+      remoteRef:
+        key: hub-kamarkat-mcp-agent-key-id

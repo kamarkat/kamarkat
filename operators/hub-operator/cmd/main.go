@@ -395,6 +395,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The box's MCP server identity (ADR-116 §3): its project, roles and the
+	// public clients kakt signs people in with, while capabilities.platformMcp is on.
+	if err := (&controller.PlatformMcpReconciler{AINativeSaaSReconciler: tenantResources}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "PlatformMcp")
+		os.Exit(1)
+	}
+
 	// The UserGroups controller was removed with ADR-059.
 	//
 	// It reconciled an identity-user-groups ConfigMap into Kratos

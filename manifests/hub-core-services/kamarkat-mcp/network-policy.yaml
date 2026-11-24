@@ -1,0 +1,19 @@
+# Reached only through the hub gateway, at mcp.<hub-domain> (ADR-103). Every
+# request is then authenticated by the server itself; this admits the gateway
+# and nothing else in the cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kamarkat-mcp-ingress
+  namespace: platform-mcp
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: kamarkat-mcp
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

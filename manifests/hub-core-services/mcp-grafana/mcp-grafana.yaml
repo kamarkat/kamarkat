@@ -1,0 +1,191 @@
+# Grafana's Viewer service account, minted by the Grafana operator. Its token is
+# the only Grafana credential mcp-grafana holds: it cannot change a dashboard,
+# an alert or a datasource, and --disable-write removes those tools as well.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaServiceAccount
+metadata:
+  name: mcp-grafana
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  instanceName: platform
+  name: mcp-grafana
+  role: Viewer
+  tokens:
+    - name: mcp-grafana
+      secretName: mcp-grafana-sa
+---
+# The caller token mcp-grafana requires of every request. Generated here and
+# read by nobody but kamarkat-mcp (the Role below), which presents it after
+# authenticating the person -- so a static token never stands in for a person
+# anywhere outside the cluster.
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: mcp-grafana-caller
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  length: 48
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mcp-grafana-caller
+  namespace: platform-observability
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  # As vmauth's: keep reconciling (a deleted Secret comes back) without minting
+  # a new token under the running server every interval.
+  refreshInterval: 24h
+  refreshPolicy: CreatedOnce
+  target:
+    name: mcp-grafana-caller
+    creationPolicy: Owner
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: mcp-grafana-caller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kamarkat-mcp-grafana-caller
+  namespace: platform-observability
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["mcp-grafana-caller"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kamarkat-mcp-grafana-caller
+  namespace: platform-observability
+subjects:
+  - kind: ServiceAccount
+    name: kamarkat-mcp
+    namespace: platform-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kamarkat-mcp-grafana-caller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-grafana
+  namespace: platform-observability
+  labels:
+    app.kubernetes.io/name: mcp-grafana
+    app.kubernetes.io/part-of: platform-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-grafana
+        app.kubernetes.io/part-of: platform-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-grafana
+          image: docker.io/grafana/mcp-grafana:2.3.0@sha256:c27248b5919d09d64ea273ca1b128b32902c6796f6e2dfcd11849d4f1363f9ed
+          args:
+            - --transport=streamable-http
+            - --address=0.0.0.0:8000
+            - --disable-write
+            # The Host it is reached by: kamarkat-mcp's proxy, in-cluster. Host
+            # validation stays on for every other name.
+            - --allowed-hosts=mcp-grafana.platform-observability.svc:8000,mcp-grafana.platform-observability.svc.cluster.local:8000
+          env:
+            - name: GRAFANA_URL
+              value: http://platform-service.platform-observability.svc:3000
+            - name: GRAFANA_SERVICE_ACCOUNT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-grafana-sa
+                  key: token
+            - name: MCP_GRAFANA_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-grafana-caller
+                  key: password
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-grafana
+  namespace: platform-observability
+  labels:
+    app.kubernetes.io/name: mcp-grafana
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-grafana
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+# platform-observability is default-deny for ingress. kamarkat-mcp is the only
+# caller from outside the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-grafana-from-kamarkat-mcp
+  namespace: platform-observability
+  labels:
+    app.kubernetes.io/managed-by: platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-grafana
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-mcp
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kamarkat-mcp
+      ports:
+        - protocol: TCP
+          port: 8000

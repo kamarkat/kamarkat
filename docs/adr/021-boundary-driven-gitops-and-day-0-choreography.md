@@ -239,3 +239,120 @@ What the deviation must preserve, and does:
 
 No retry count or backoff value is changed by this amendment. The numbers above are the
 contract for boundary 04's multi-source set; Decision 3's remain the contract elsewhere.
+
+## Addendum: a promotion converges without being driven (2026-11-24) — Accepted
+
+**Status: Accepted (2026-11-24).** Approved by the architecture review of
+2026-11-24, which corrected the first RCA on two points recorded below.
+
+A promotion must converge on its own. Git declares the desired state, ArgoCD
+reconciles it, and the CLI observes the result. The CLI is not a second
+reconciliation engine, and forced synchronisation is administrative recovery, not
+a release step.
+
+### 1. What was reported, what is verified, and what is derived
+
+Kept apart deliberately: the first RCA presented all three as one, and two of its
+load-bearing claims were wrong.
+
+**Reported** (release engineer, 0.3.45 promotions): `argocd-hard-sync.sh` was run
+twice on `platform-spoke-catalog-nutgraf-stg-01` and waited on; a sync operation
+would not terminate; `argocd app terminate-op` failed; `status.operationState` was
+patched and then removed by hand. The cause was given as `grafana-alloy-cluster`
+crashing "due to log bucket allocation failure on Hetzner S3".
+
+**Verified from source, at the pinned versions:**
+
+- The ApplicationSets already declare `automated: {prune: true, selfHeal: true}`
+  with `ServerSideApply=true` and a retry policy. **GitOps was configured
+  correctly; no policy was missing.**
+- The spoke catalogue carried sync waves `-5` (87 CRDs), `0` (default, every
+  workload) and `5` (Kyverno `ValidatingPolicy` objects). ArgoCD completes a wave
+  only when its resources are Healthy.
+- `platform-argocd.yaml` carries six health customizations -- ExternalSecret,
+  Gateway, CNPG Cluster, Crossplane Provider and Function, webhook configuration --
+  and **none for Deployment or StatefulSet**, so those use ArgoCD's built-in
+  assessment, which reports `Progressing` and never `Degraded` while pods are not
+  Ready.
+- Chart pin `10.11.7` packages ArgoCD `v3.5.7` (`Chart.yaml`: `appVersion:
+  v3.5.7`). That version's params contract declares
+  `controller.sync.timeout.seconds`, **default `"0"`, meaning no timeout**
+  (`docs/operator-manual/argocd-cmd-params-cm.yaml`). It was not configured here.
+- `argocd_app_info` at v3.5.7 declares `namespace, name, project,
+  autosync_enabled, repo, dest_server, dest_namespace, sync_status, health_status,
+  operation` (`controller/metrics/metrics.go`, `descAppInfo`). **There is no
+  `operation_phase` label**; `phase` belongs to `argocd_app_sync_total`.
+- Alloy writes logs to `http://loki.platform-observability.svc:3100/loki/api/v1/push`
+  and references **no bucket**. The S3 bucket belongs to Loki (ADR-078 add.5 §4).
+
+**Derived** -- the mechanism, which holds independently of which resource triggers
+it:
+
+> A wave placed after the workloads makes every workload's health a precondition
+> for the sync operation finishing. A workload that cannot become Ready reports
+> Progressing indefinitely. With no operation bound, the operation stays `Running`
+> for ever. ArgoCD will not begin a new operation while one is in flight, so a
+> promotion that moves `targetRevision` is seen and cannot be acted on: the
+> Application reports OutOfSync at the new version and converges never.
+
+**Corrections to the first RCA, both material:**
+
+1. It claimed ArgoCD has no sync-operation timeout. **Wrong.** The capability
+   exists from v2.14 and is disabled by default; the defect was that this platform
+   had never configured it.
+2. It proposed custom Deployment and StatefulSet health checks treating
+   `observedGeneration == generation && replicas > 0 && readyReplicas == 0` as
+   terminal failure. **Rejected, correctly.** A healthy workload satisfies that
+   during scheduling, image pull or volume attachment. Kubernetes already
+   expresses stalled rollout through `ProgressDeadlineExceeded`; native health
+   semantics are preserved.
+
+**Unestablished, and not asserted:** why `grafana-alloy-cluster` was not Ready.
+Alloy has no bucket dependency, so the reported chain does not hold as given; an
+unavailable Loki makes Alloy *drop* entries (`loki_write_dropped_entries_total`,
+and add.5 §5's `LogsDroppedUnsent`), not crash. Also unestablished is why
+`terminate-op` failed -- the error output was not captured. Neither matters to the
+mechanism, and neither licenses hand-editing `status.operationState`, which this
+addendum forbids as routine practice.
+
+### 2. The detection was broken, which is why nobody was told
+
+`ArgoCDSyncStuck` selected `argocd_app_info{operation_phase="Running"}`. That label
+does not exist, a selector on a non-existent label matches no series, and the
+expression was therefore always empty. **The alert could not fire.** A sync stuck
+far beyond its thirty-minute threshold paged no one, and the state was found only
+because a person went looking -- which is how forcing became routine.
+
+It now selects `operation="sync"`, which the controller sets while a sync is
+pending or in flight and clears when it completes.
+
+### 3. What changed
+
+- **`controller.sync.timeout.seconds: "900"`**, on the existing chart descriptor.
+  At the bound the operation fails and `syncPolicy.retry` takes over -- unlimited
+  attempts under a 3m backoff cap for platform services. A new revision is not
+  synced while an operation runs, but once the bound expires the controller sees
+  OutOfSync and syncs the current revision, so a promotion landing on a stuck sync
+  converges by itself.
+- **The wave-5 annotations are gone** from the spoke catalogue's Kyverno policies.
+  Nothing is lost: Kyverno generates its `ValidatingWebhookConfiguration` at
+  runtime, none is shipped, so a fail-closed policy denies nothing until Kyverno is
+  serving -- and admission is fail-closed from that moment whatever order the
+  objects arrived in. It is also stricter than before, since governance now lands
+  with the workloads instead of after them.
+- **The release path observes rather than forces.** `kakt promote sync` and the
+  release skill's step 5 ran `argocd-hard-sync.sh --promote`; they now use
+  `--wait-promote`, the same traversal with no refresh and no submitted operation,
+  on one code path so the two cannot drift. The forcing modes remain, marked
+  break-glass, and reaching for one is a signal to read the Application.
+- **`ArgoCDSyncStuck`** fires on the real label at 20m, against the 900s bound. Its
+  meaning changed with it: not "a slow sync", which the bound now ends, but "an
+  operation outlived its bound" -- a wedged controller, or a timeout not in effect.
+  ArgoCD monitoring stays on the hub alone (ADR-078 add.10 §6), where ArgoCD runs.
+
+### 4. What is not in scope
+
+The Hetzner capacity fault is an infrastructure problem and is unchanged. These
+corrections stop it from blocking unrelated Applications; they do not fix it. No
+custom health framework, promotion lock, release gate, status patching or new
+controller is introduced.

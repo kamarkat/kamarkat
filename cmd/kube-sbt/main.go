@@ -108,6 +108,7 @@ func main() {
 			// roles, and public clients for kakt, which no secret may leave the box for.
 			internal.POST("/platform/projects/roles", pa.EnsureProjectRoles)
 			internal.POST("/platform/public-clients", pa.EnsurePublicClient)
+			internal.POST("/platform/machine-key-users", pa.EnsureMachineKeyUser)
 		}
 	}
 

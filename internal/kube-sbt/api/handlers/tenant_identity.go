@@ -274,6 +274,10 @@ type PlatformAppProvisioner interface {
 	// for the box's MCP server are public so that no box secret leaves the box
 	// (kamarkat ADR-116 §3).
 	EnsurePublicClient(ctx context.Context, orgID, projectID, appName string, redirectURIs []string, native bool) (clientID string, err error)
+	// EnsureMachineKeyUser provisions a machine user authenticating with a
+	// private-key JWT whose public key the caller supplies, granted roles in a
+	// project: kakt's agent identity for a box (kamarkat ADR-116 §3).
+	EnsureMachineKeyUser(ctx context.Context, orgID, projectID, userName, publicKeyPEM, knownKeyID, revokeKeyID string, roles []string) (userID, keyID string, err error)
 }
 
 type ensurePlatformProjectRequest struct {
@@ -475,4 +479,34 @@ func (h *PlatformAppHandler) EnsurePublicClient(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"name": req.Name, "clientId": clientID})
+}
+
+type ensureMachineKeyUserRequest struct {
+	OrgID       string   `json:"orgId" binding:"required"`
+	ProjectID   string   `json:"projectId" binding:"required"`
+	Name        string   `json:"name" binding:"required"`
+	PublicKey   string   `json:"publicKey" binding:"required"`
+	KnownKeyID  string   `json:"knownKeyId"`
+	RevokeKeyID string   `json:"revokeKeyId"`
+	Roles       []string `json:"roles" binding:"required"`
+}
+
+// EnsureMachineKeyUser provisions a machine user registered with the caller's
+// PUBLIC key, and returns its user id and key id. No private key is minted.
+func (h *PlatformAppHandler) EnsureMachineKeyUser(c *gin.Context) {
+	if h.provisioner == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "the configured identity provider does not provision machine users"})
+		return
+	}
+	var req ensureMachineKeyUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	userID, keyID, err := h.provisioner.EnsureMachineKeyUser(c.Request.Context(), req.OrgID, req.ProjectID, req.Name, req.PublicKey, req.KnownKeyID, req.RevokeKeyID, req.Roles)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"userId": userID, "keyId": keyID})
 }

@@ -19,7 +19,8 @@ green. Follow the order; do not improvise around a gate.
 | Verifier | Checks the box once, syncs the docs | Re-publishes, re-promotes |
 
 `kakt release` runs from the root of a kamarkat checkout: each subcommand runs
-the checkout's own `scripts/release.sh` or `scripts/argocd-hard-sync.sh`. Without
+the checkout's own `scripts/release.sh`, or `scripts/argocd-hard-sync.sh` in its
+observe-only mode. Without
 an installed `kakt`, use `go run ./cmd/kakt release …`. Flags common to all:
 `--gitops-dir` (no default: a tenant's checkout, e.g. `../nutgraf-gitops-1794508917`
 -- a box mints `<tenant>-gitops-<timestamp>`, so the name is read from the checkout
@@ -199,8 +200,17 @@ What it does, in this order, and why the order matters:
    a version already in the registry, pushes. If it fails, nothing is promoted.
 4. **Promotes every reference** (with `--gitops-dir`) under `registry/` (a bundle carries the version
    twice), verifies none of the old one survives, commits, rebases, pushes.
-5. **Hard-syncs and verifies** (with `--gitops-dir`) the box reached the version
-   (`scripts/argocd-hard-sync.sh --promote`). Its exit code is the answer.
+5. **Observes convergence** (with `--gitops-dir`): the promotion commit is the
+   whole trigger, and ArgoCD reconciles it on its own. This waits and names any
+   Application that did not reach the version. Its exit code is the answer.
+
+   It no longer forces anything. This step used to hard-refresh each Application
+   and submit a sync operation for it, which made forced synchronisation part of
+   the documented release and the CLI a second reconciliation engine beside
+   ArgoCD. A promotion that needs forcing is a defect
+   in the Application, not in the promotion: read what this names and fix its
+   cause. The forcing modes remain in that script for administrative recovery and
+   are not part of normal operation.
 
 Without `--gitops-dir`, steps 2, 4 and 5 do not run. With it, `--no-promote`
 publishes only and `--no-sync` stops after the push.

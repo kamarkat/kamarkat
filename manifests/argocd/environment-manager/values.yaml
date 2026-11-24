@@ -222,6 +222,31 @@ capabilities:
   billing:
     enabled: false
 
+  # ADR-116: the box's platform state over MCP, read as the person who asks.
+  # OFF by default -- unlike the capabilities above it is new, so a default of
+  # false removes nothing from a running box, and it publishes a hostname
+  # (mcp.<hubDomain>) a tenant should choose to have.
+  #
+  # kaktRedirectUris are the kakt deployments allowed to receive an
+  # authorization code: the hosted kakt, a self-hosted one, a developer's
+  # http://localhost:3002. Each is
+  # <kakt origin>/settings/connections/box/callback. Empty: no kakt client, and
+  # `kakt mcp` on a workstation still works.
+  platformMcp:
+    enabled: false
+    kaktRedirectUris: []
+    # kakt's PUBLIC key (PEM) for agents that run with no person present -- a
+    # schedule, an alert. Shown in kakt under Settings › Connections. The box
+    # registers it for a `kakt-agent` machine user holding platform.viewer only;
+    # the private key never leaves kakt. Remove it to end that access.
+    agentPublicKey: ""
+
+  # ADR-116 §1: Grafana's own MCP server, read-only, relayed by kamarkat-mcp at
+  # /grafana to people holding platform.observer. Needs platformMcp and
+  # observability on.
+  grafanaMcp:
+    enabled: false
+
 # On-prem nodes (ADR-075): machines on the tenant's own premises, joining over
 # their tailnet. A selectable capability (ADR-066), not a property of the
 # provider, and revisable at any point in a cluster's life -- the datapath every

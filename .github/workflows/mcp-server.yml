@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - cmd/mcp-server/**
+      # kamarkat-mcp's server package and the validator it shares (ADR-116).
+      - internal/platform/boxmcp/**
+      - internal/auth-proxy/**
       # This file. A workflow that does not watch itself cannot react to
       # its own change: when the image path moved to the kamarkat
       # organisation, every workflow was edited and not one of them ran,
@@ -83,7 +86,7 @@ jobs:
       - name: Pin the manifest to the digest just built
         env:
           KUSTOMIZE_IMAGE_ARG: ghcr.io/${{ github.repository }}/mcp-server@${{ steps.build.outputs.digest }}
-          MANIFEST_DIR: manifests/hub-core-services/api-gateway/mcp-server
+          MANIFEST_DIR: manifests/hub-core-services/kamarkat-mcp
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

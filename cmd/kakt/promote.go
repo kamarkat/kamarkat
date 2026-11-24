@@ -82,34 +82,53 @@ name one.`, filepath.Join(tenant.RegistryDir, tenant.BoxDeclFile))
 	return cmd
 }
 
-// newSyncCmd drives a promoted version onto the box and verifies it arrived.
+// newSyncCmd OBSERVES a promotion. It does not drive one.
 //
-// Unlike promote, this still needs a kamarkat checkout: it runs the platform's
-// own hard-sync script. That is a gap, not a design -- a box owner cannot run
-// it -- and it is why the box's own Bundle sync workflow is the normal route to
-// convergence. This is the manual fallback when that workflow reports a box did
-// not converge.
+// It used to run `scripts/argocd-hard-sync.sh --promote`: a hard refresh of the
+// root Application, then a submitted sync operation for each child, waited on in
+// order. That made the CLI a second reconciliation engine beside ArgoCD, and put
+// forced synchronisation in the documented release path -- step 5 of the release
+// skill -- rather than in break-glass recovery where it belongs.
+//
+// Git declares the desired state, ArgoCD reconciles it, and this reports the
+// result. The promotion commit is the whole trigger; a box that does not converge
+// has a fault to read, not a sync to force.
+//
+// What made forcing look necessary was a liveness defect, now fixed at its cause:
+// a sync wave after the workloads turned every workload's health into a gate on
+// the operation finishing, ArgoCD's built-in workload health reports Progressing
+// rather than Degraded while pods are not Ready, and the operation had no bound --
+// so one resource that could not become Ready left an operation Running for ever,
+// and ArgoCD will not start a new one while one is in flight. The late wave is
+// gone from the spoke catalogue and controller.sync.timeout.seconds is set, so an
+// operation now ends and the next revision reconciles by itself.
 func newSyncCmd() *cobra.Command {
 	var version string
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Drive a promoted version onto this box and verify it arrived",
-		Long: `Sync the box to a promoted version and verify every Application reached it.
+		Short: "Report whether the box has converged on a promoted version",
+		Long: `Report whether every Application on this box reached a promoted version.
 
-For a release whose box did not converge: fix the Applications it named, then run
-this again. Never re-publish. KUBECONFIG names the hub to drive.`,
+This OBSERVES; it syncs nothing. ArgoCD reconciles the promotion commit on its
+own, and this waits for that to finish and names what has not converged.
+
+For a box that does not converge: read the Applications it names and fix their
+cause. Never re-publish, and do not force a sync -- a promotion that needs forcing
+is a defect in the Application, not in the promotion. KUBECONFIG names the hub.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if version == "" {
-				return fmt.Errorf("name the version the box should reach: --version")
+				return fmt.Errorf("name the version the box should have reached: --version")
 			}
 			if os.Getenv("KUBECONFIG") == "" {
-				return fmt.Errorf("set KUBECONFIG to the hub kubeconfig to drive")
+				return fmt.Errorf("set KUBECONFIG to the hub kubeconfig to read")
 			}
-			return runScript(nil, "scripts/argocd-hard-sync.sh", "--promote", version)
+			// --wait reports and waits. It issues no refresh and submits no
+			// operation, which is the whole difference from what this ran before.
+			return runScript(nil, "scripts/argocd-hard-sync.sh", "--wait-promote", version)
 		},
 	}
-	cmd.Flags().StringVar(&version, "version", "", "The promoted version the box should reach")
+	cmd.Flags().StringVar(&version, "version", "", "The promoted version the box should have reached")
 	cmd.SilenceUsage = true
 	return cmd
 }

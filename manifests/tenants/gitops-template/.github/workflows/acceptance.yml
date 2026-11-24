@@ -1,0 +1,83 @@
+# Acceptance (ADR-115, ADR-116).
+#
+# Whether each cluster does its job -- its behaviour asserted from outside, not
+# its reported state. It runs here, in this repository's own CI under its own
+# secrets, because assessing needs the management cluster's kubeconfig from the
+# escrow: privileged work stays where Day-0 runs, never in an MCP tool.
+#
+# Agents read the verdicts (kakt's verifier, through its GitHub connection):
+# each run's conclusion is the verdict, and its log names every failed check.
+# A person starts one by hand; a schedule keeps the verdict current; a merged
+# bundle change is assessed once it has had time to converge.
+name: Acceptance
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: The cluster to assess, as named under registry/clusters/ (empty for every cluster)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      clusters: ${{ steps.pick.outputs.clusters }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pick
+        env:
+          ONLY: ${{ inputs.cluster }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib, re, yaml
+          box = yaml.safe_load(open("registry/box.yaml"))
+          mgmt = box["managementClusterName"]
+          text = pathlib.Path(f"registry/clusters/{mgmt}/bundle.yaml").read_text()
+          m = re.search(r"chart:\s*environment-manager.*?targetRevision:\s*(\S+)", text, re.S)
+          names = [os.environ["ONLY"]] if os.environ.get("ONLY") else sorted(
+              p.name for p in pathlib.Path("registry/clusters").iterdir()
+              if (p / "values.yaml").is_file() and (p / "generated").exists())
+          print("clusters=" + json.dumps(names))
+          print("version=" + (m.group(1).strip("\"'") if m else ""))
+          PY
+
+  assess:
+    needs: resolve
+    if: needs.resolve.outputs.clusters != '[]' && needs.resolve.outputs.version != ''
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        cluster: ${{ fromJSON(needs.resolve.outputs.clusters) }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the platform CLI the management cluster runs
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/kamarkat/kamarkat/releases/download/v${VERSION}"
+          curl -fsSL --retry 3 -o kakt-linux-amd64 "${base}/kakt-linux-amd64"
+          curl -fsSL --retry 3 -o SHA256SUMS "${base}/SHA256SUMS"
+          grep " kakt-linux-amd64\$" SHA256SUMS | sha256sum -c -
+          mv kakt-linux-amd64 kakt && chmod +x kakt
+      - name: Assess ${{ matrix.cluster }}
+        env:
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
+        run: ./kakt verify --cluster "${{ matrix.cluster }}" --gitops-dir . --accept

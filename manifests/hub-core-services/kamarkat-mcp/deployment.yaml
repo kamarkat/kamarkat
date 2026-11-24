@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kamarkat-mcp
+  namespace: platform-mcp
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+    app.kubernetes.io/part-of: platform-mcp
+  annotations:
+    # Restarted when its marker or identity changes: removing the agent's key
+    # from the declaration must end the agent's access, not wait for a rollout.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kamarkat-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kamarkat-mcp
+        app.kubernetes.io/part-of: platform-mcp
+    spec:
+      serviceAccountName: kamarkat-mcp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kamarkat-mcp
+          image: ghcr.io/kamarkat/kamarkat/mcp-server
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Rendered per box by templated-fields.yaml.
+            - name: KAMARKAT_MCP_PUBLIC_URL
+              value: https://mcp.PLACEHOLDER_HUB_DOMAIN
+            - name: KAMARKAT_MCP_ISSUER
+              value: PLACEHOLDER_OIDC_ISSUER
+            # Published by the hub-operator once the identity exists. Optional:
+            # until then the server answers /healthz and refuses MCP requests,
+            # saying the identity is not provisioned yet.
+            - name: KAMARKAT_MCP_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kamarkat-mcp-identity
+                  key: projectId
+                  optional: true
+            - name: KAMARKAT_MCP_KAKT_CLI_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kamarkat-mcp-identity
+                  key: kaktCliClientId
+                  optional: true
+            - name: KAMARKAT_MCP_KAKT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kamarkat-mcp-kakt-client
+                  key: clientId
+                  optional: true
+            # Set by templated-fields.yaml while capabilities.grafanaMcp is on.
+            - name: KAMARKAT_MCP_GRAFANA_URL
+              value: ""
+            - name: KAMARKAT_MCP_GRAFANA_TOKEN_SECRET
+              value: platform-observability/mcp-grafana-caller
+            # The kakt-agent, accepted only while the marker declares its key.
+            - name: KAMARKAT_MCP_AGENT_DECLARED
+              valueFrom:
+                configMapKeyRef:
+                  name: kamarkat-mcp
+                  key: agentPublicKey
+                  optional: true
+            - name: KAMARKAT_MCP_AGENT_USER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kamarkat-mcp-agent
+                  key: userId
+                  optional: true
+            - name: KAMARKAT_MCP_AGENT_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kamarkat-mcp-agent
+                  key: keyId
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kamarkat-mcp
+  namespace: platform-mcp
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+spec:
+  selector:
+    app.kubernetes.io/name: kamarkat-mcp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

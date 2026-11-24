@@ -1,0 +1,108 @@
+# kamarkat-mcp reads AS THE PERSON (ADR-116 §3).
+#
+# Its own ServiceAccount may impersonate and nothing else: no get, list or watch
+# on any resource. What a person sees through it is decided by the bindings
+# below and by any binding the box already gives them by email (the API server
+# names an OIDC user by the `email` claim).
+#
+# Groups are limited to the three this server derives from a verified token's
+# project roles, so it cannot impersonate system:masters or any other group.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kamarkat-mcp
+  namespace: platform-mcp
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kamarkat-mcp-impersonator
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames:
+      - kamarkat-mcp:platform.viewer
+      - kamarkat-mcp:platform.observer
+      - kamarkat-mcp:platform.verifier
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kamarkat-mcp-impersonator
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+subjects:
+  - kind: ServiceAccount
+    name: kamarkat-mcp
+    namespace: platform-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kamarkat-mcp-impersonator
+---
+# What platform.viewer reads: the platform's state, and an app's workloads and
+# logs. NOT secrets -- app_secrets_status reads ExternalSecrets, which carry
+# names and conditions, never values -- and no write verb anywhere.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kamarkat-mcp-viewer
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "events", "services", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications", "applicationsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["clusters", "machines", "machinedeployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["nutgraf.in"]
+    resources: ["spokepools"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["ops.nutgraf.in"]
+    resources: ["hubenvironments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "certificaterequests", "issuers", "clusterissuers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters", "backups", "scheduledbackups"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["wgpolicyk8s.io"]
+    resources: ["policyreports", "clusterpolicyreports"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kamarkat-mcp-viewer
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+subjects:
+  - kind: Group
+    name: kamarkat-mcp:platform.viewer
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kamarkat-mcp-viewer

@@ -171,6 +171,11 @@ package_path loki manifests/hub-core-services/loki
 # bundle naming a chart no release produced.
 package_path support-agent manifests/hub-core-services/support-agent
 
+# ADR-116's MCP server and Grafana's, inline because each one's presence is a
+# function of capabilities.platformMcp / capabilities.grafanaMcp.
+package_path kamarkat-mcp manifests/hub-core-services/kamarkat-mcp
+package_path mcp-grafana manifests/hub-core-services/mcp-grafana
+
 # ADR-052's burst autoscaler, inline because its presence is a function of
 # burstSpokePool. It was left out when it moved from a descriptor to inline, and
 # every release named a chart none produced: a box with a burst pool got an

@@ -1,0 +1,24 @@
+# Per-box values (scripts/package/templated-fields.py), from the environment
+# manager's globals.
+- kind: ConfigMap
+  name: kamarkat-mcp
+  fields:
+    - path: [data, mcpUrl]
+      value: 'https://mcp.{{ .Values.global.hubDomain }}'
+    - path: [data, kaktRedirectUris]
+      # One line: a templated value is a single-quoted scalar, where a newline
+      # would fold into a space. The operator splits on commas.
+      value: '{{ (dig "platformMcp" "kaktRedirectUris" (list) .Values.global) | join "," }}'
+    - path: [data, agentPublicKey]
+      # Base64, for the same reason: a PEM is multi-line. The operator decodes it.
+      value: '{{ with (dig "platformMcp" "agentPublicKey" "" .Values.global) }}{{ . | b64enc }}{{ end }}'
+
+- kind: Deployment
+  name: kamarkat-mcp
+  fields:
+    - path: [spec, template, spec, containers, 0, env, 0, value]
+      value: 'https://mcp.{{ .Values.global.hubDomain }}'
+    - path: [spec, template, spec, containers, 0, env, 1, value]
+      value: '{{ .Values.global.oidcIssuer }}'
+    - path: [spec, template, spec, containers, 0, env, 5, value]
+      value: '{{ if (dig "platformMcp" "grafana" false .Values.global) }}http://mcp-grafana.platform-observability.svc:8000/mcp{{ end }}'

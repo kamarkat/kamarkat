@@ -371,3 +371,93 @@ func (c *IdentityClient) EnsurePlatformConfidentialClient(
 	}
 	return out.ClientID, out.ClientSecret, nil
 }
+
+// postPlatform POSTs body to the identity service's internal platform API and
+// decodes the answer into out (when out is non-nil).
+func (c *IdentityClient) postPlatform(ctx context.Context, path string, body, out any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s/internal/platform/%s", c.baseURL, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("identity service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	answer, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotImplemented {
+		return ErrIdentityProvisioningUnsupported
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(answer))
+		if len(msg) > 300 {
+			msg = msg[:300]
+		}
+		return fmt.Errorf("identity service: POST %s -> %d: %s", url, resp.StatusCode, msg)
+	}
+	if out != nil {
+		if err := json.Unmarshal(answer, out); err != nil {
+			return fmt.Errorf("identity service: decode response: %w", err)
+		}
+	}
+	return nil
+}
+
+// PlatformRole is one role of a platform project.
+type PlatformRole struct {
+	Key     string `json:"key"`
+	Display string `json:"display"`
+}
+
+// EnsurePlatformProjectRoles makes every role exist on a platform project and
+// admits the platform organisation's owners to all of them in one grant
+// (kamarkat ADR-116 §3). Called once per project, like
+// EnsurePlatformProjectAccess, by a caller that records that it has.
+func (c *IdentityClient) EnsurePlatformProjectRoles(ctx context.Context, orgID, projectID string, roles []PlatformRole) error {
+	return c.postPlatform(ctx, "projects/roles", map[string]any{"orgId": orgID, "projectId": projectID, "roles": roles}, nil)
+}
+
+// EnsurePlatformPublicClient provisions a public OIDC client -- code flow with
+// PKCE, no secret -- whose redirect URIs are reconciled on every call
+// (kamarkat ADR-116 §3). There is no secret to return.
+func (c *IdentityClient) EnsurePlatformPublicClient(ctx context.Context, orgID, projectID, name string, redirectURIs []string, native bool) (string, error) {
+	var out struct {
+		ClientID string `json:"clientId"`
+	}
+	if err := c.postPlatform(ctx, "public-clients", map[string]any{
+		"orgId": orgID, "projectId": projectID, "name": name, "redirectUris": redirectURIs, "native": native,
+	}, &out); err != nil {
+		return "", err
+	}
+	if out.ClientID == "" {
+		return "", fmt.Errorf("identity service: reported success with no client id for public client %q", name)
+	}
+	return out.ClientID, nil
+}
+
+// EnsurePlatformMachineKeyUser provisions a machine user registered with the
+// caller's PUBLIC key and granted roles in a project (kamarkat ADR-116 §3).
+// knownKeyID skips re-registering an unchanged key; revokeKeyID removes the one
+// it replaces. No private key is minted or returned.
+func (c *IdentityClient) EnsurePlatformMachineKeyUser(ctx context.Context, orgID, projectID, name, publicKeyPEM, knownKeyID, revokeKeyID string, roles []string) (userID, keyID string, err error) {
+	var out struct {
+		UserID string `json:"userId"`
+		KeyID  string `json:"keyId"`
+	}
+	if err := c.postPlatform(ctx, "machine-key-users", map[string]any{
+		"orgId": orgID, "projectId": projectID, "name": name, "publicKey": publicKeyPEM,
+		"knownKeyId": knownKeyID, "revokeKeyId": revokeKeyID, "roles": roles,
+	}, &out); err != nil {
+		return "", "", err
+	}
+	if out.UserID == "" || out.KeyID == "" {
+		return "", "", fmt.Errorf("identity service: machine key user %q reported without a user or key id", name)
+	}
+	return out.UserID, out.KeyID, nil
+}

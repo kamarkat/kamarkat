@@ -186,6 +186,52 @@ spec:
             extraManifestsPath: ''
           {{- end }}
 
+          {{- if (dig "platformMcp" "enabled" false .Values.capabilities) }}
+          # ADR-116: kamarkat-mcp. Inline rather than a descriptor for the
+          # support agent's reason: its presence is a function of a value.
+          - boundary: '03'
+            appName: 'kamarkat-mcp'
+            destinationNamespace: 'platform-mcp'
+            isPlatformOwned: 'true'
+            repoURL: ''
+            targetRevision: ''
+            path: 'manifests/hub-core-services/kamarkat-mcp'
+            chart: ''
+            directoryRecurse: ''
+            directoryInclude: ''
+            helmValues: |
+              {{- if $released }}
+              kamarkat-mcp:
+                enabled: true
+              {{- include "environment-manager.globalValues" $ | nindent 14 }}
+              {{- end }}
+            helmReleaseName: ''
+            ignoreDifferencesNamespace: ''
+            extraManifestsPath: ''
+          {{- if and (dig "grafanaMcp" "enabled" false .Values.capabilities) .Values.capabilities.observability.enabled }}
+          # ADR-116 §1: Grafana's MCP server, read-only, beside the hub's Grafana.
+          - boundary: '03'
+            appName: 'mcp-grafana'
+            destinationNamespace: 'platform-observability'
+            isPlatformOwned: 'true'
+            repoURL: ''
+            targetRevision: ''
+            path: 'manifests/hub-core-services/mcp-grafana'
+            chart: ''
+            directoryRecurse: ''
+            directoryInclude: ''
+            helmValues: |
+              {{- if $released }}
+              mcp-grafana:
+                enabled: true
+              {{- include "environment-manager.globalValues" $ | nindent 14 }}
+              {{- end }}
+            helmReleaseName: ''
+            ignoreDifferencesNamespace: ''
+            extraManifestsPath: ''
+          {{- end }}
+          {{- end }}
+
           {{- if .Values.capabilities.observability.enabled }}
           # ADR-078 add.5: the selectable observability BACKEND -- the stores, the
           # query gateway, the evaluators, Loki and Grafana. Collection itself is
@@ -384,6 +430,8 @@ spec:
                   enabled: {{ .Values.capabilities.credits.enabled }}
                 billingEngine:
                   enabled: {{ .Values.capabilities.billing.enabled }}
+                platformMcp:
+                  enabled: {{ dig "platformMcp" "enabled" false .Values.capabilities }}
               {{- include "environment-manager.globalValues" $ | nindent 14 }}
               {{- else }}
               externalDns:
@@ -392,6 +440,8 @@ spec:
                 enabled: {{ .Values.capabilities.credits.enabled }}
               billingEngine:
                 enabled: {{ .Values.capabilities.billing.enabled }}
+              platformMcp:
+                enabled: {{ dig "platformMcp" "enabled" false .Values.capabilities }}
               {{- include "environment-manager.globalValues" . | nindent 14 }}
               {{- end }}
             helmReleaseName: ''

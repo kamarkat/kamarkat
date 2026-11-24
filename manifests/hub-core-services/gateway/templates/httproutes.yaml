@@ -318,6 +318,35 @@ spec:
         - name: billing-engine
           port: 8080
 {{- end }}
+{{- if .Values.platformMcp.enabled }}
+---
+# kamarkat-mcp (ADR-116 §1): /platform, /grafana and the resource metadata. The
+# server authenticates every request; the route only places it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  {{- if $target }}
+  annotations:
+    external-dns.alpha.kubernetes.io/target: {{ $target | quote }}
+    external-dns.kubernetes.io/target: {{ $target | quote }}
+  {{- end }}
+  name: kamarkat-mcp
+  namespace: platform-mcp
+spec:
+  parentRefs:
+    - name: hub-gateway
+      namespace: platform-ops
+      sectionName: mcp
+  hostnames: ["mcp.{{ .Values.global.hubDomain }}"]
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: kamarkat-mcp
+          port: 8080
+{{- end }}
 ---
 # Headlamp Kubernetes dashboard.
 apiVersion: gateway.networking.k8s.io/v1

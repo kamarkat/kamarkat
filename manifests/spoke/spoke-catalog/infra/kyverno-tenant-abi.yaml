@@ -29,7 +29,26 @@ metadata:
   annotations:
     # ADR-023: delay policy injection until wave 5 so the API discovery cache
     # has stabilised before kind references are resolved at admission.
-    argocd.argoproj.io/sync-wave: "5"
+    # NO SYNC WAVE. This was wave "5" -- after everything -- and that was the
+    # liveness defect behind manual promotion syncs.
+    #
+    # ArgoCD completes a wave only when its resources are Healthy, so a wave AFTER
+    # the workloads turns every workload's health into a precondition for the sync
+    # operation finishing. One resource that cannot become Ready (its built-in
+    # Deployment/StatefulSet assessment reports Progressing, never Degraded) kept
+    # the operation Running, and ArgoCD will not start a new operation while one is
+    # in flight -- so a promotion was seen and could not be applied.
+    #
+    # Nothing is lost by removing it. A fail-closed ValidatingPolicy denies nothing
+    # on its own: Kyverno GENERATES the ValidatingWebhookConfiguration at runtime
+    # (none is shipped in infra/kyverno/), so the policy object is inert until
+    # Kyverno is serving, and admission is fail-closed from that moment whatever
+    # order the objects arrived in. SkipDryRunOnMissingResource above already
+    # covers the dry-run race.
+    #
+    # It is also stricter than before: governance now lands with the workloads
+    # rather than after them, instead of a first sync applying everything ungoverned
+    # and installing its policies last.
 spec:
   failurePolicy: Fail
   validationActions: [Deny]
@@ -94,7 +113,6 @@ metadata:
     app.kubernetes.io/component: tenant-governance
     app.kubernetes.io/managed-by: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
 spec:
   failurePolicy: Fail
   validationActions: [Deny]
@@ -179,7 +197,6 @@ metadata:
     app.kubernetes.io/component: tenant-governance
     app.kubernetes.io/managed-by: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
 spec:
   failurePolicy: Fail
   validationActions: [Deny]

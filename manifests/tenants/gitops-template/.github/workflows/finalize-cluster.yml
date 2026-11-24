@@ -1,0 +1,111 @@
+# Finalize cluster (ADR-116).
+#
+# Declaring a managed cluster has a half that needs the escrow: its encryption
+# key is generated (or restored), escrowed, and placed in platform-capi on the
+# management cluster. `kakt tenant add-cluster` does both halves on a machine
+# holding escrow access; `add-cluster --declare-only` -- or an agent proposing
+# the cluster as a pull request -- writes the declaration alone, and this
+# workflow does the other half, here, under this repository's own secrets.
+#
+# It runs ON THE PULL REQUEST, so the key exists before the declaration is
+# merged and the management cluster starts provisioning. Make it a required
+# check on the default branch. Its push run is a safety net for a declaration
+# that reached main another way. Both are idempotent: an escrowed key is
+# restored, never replaced. A pull request closed unmerged leaves one escrowed
+# key and one Secret behind, which name a cluster that does not exist.
+name: Finalize cluster
+
+on:
+  pull_request:
+    paths:
+      - 'registry/clusters/*/infrastructure/spokepool.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'registry/clusters/*/infrastructure/spokepool.yaml'
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: The managed cluster to finalize, as named under registry/clusters/
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finalize-cluster-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    # A pull request from a fork receives no secrets; there is nothing it could do.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Find the clusters this change adds
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_CLUSTER: ${{ inputs.cluster }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch) clusters="$DISPATCH_CLUSTER" ;;
+            pull_request) range="$BASE...HEAD" ;;
+            *)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "::notice::no base commit to diff against; nothing to finalize"
+                echo "clusters=" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              range="$BEFORE..HEAD" ;;
+          esac
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            clusters=$(git diff --diff-filter=A --name-only "$range" -- 'registry/clusters/*/infrastructure/spokepool.yaml' \
+              | sed 's|^registry/clusters/||; s|/infrastructure/spokepool.yaml$||' | tr '\n' ' ')
+          fi
+          echo "clusters=${clusters}" >> "$GITHUB_OUTPUT"
+          [ -n "${clusters// }" ] && echo "Finalizing: ${clusters}" || echo "::notice::this change adds no managed cluster"
+
+      - name: Fetch the platform CLI the management cluster runs
+        if: steps.pick.outputs.clusters != ''
+        run: |
+          set -euo pipefail
+          mgmt=$(python3 -c 'import yaml;print(yaml.safe_load(open("registry/box.yaml"))["managementClusterName"])')
+          VERSION=$(python3 - "$mgmt" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(f"registry/clusters/{sys.argv[1]}/bundle.yaml").read_text()
+          m = re.search(r"chart:\s*environment-manager.*?targetRevision:\s*(\S+)", text, re.S)
+          print(m.group(1).strip("\"'") if m else "")
+          PY
+          )
+          [ -n "$VERSION" ] || { echo "::error::the management cluster's bundle.yaml pins no version"; exit 1; }
+          base="https://github.com/kamarkat/kamarkat/releases/download/v${VERSION}"
+          asset="kakt-linux-amd64"
+          curl -fsSL --retry 3 -o "$asset" "${base}/${asset}"
+          curl -fsSL --retry 3 -o SHA256SUMS "${base}/SHA256SUMS"
+          grep " ${asset}\$" SHA256SUMS | sha256sum -c -
+          mv "$asset" kakt && chmod +x kakt
+          ./kakt tenant finalize-cluster --help >/dev/null 2>&1 || {
+            echo "::error::kakt ${VERSION} predates finalize-cluster: run \`kakt tenant finalize-cluster\` by hand, or promote the management cluster first"
+            exit 1
+          }
+
+      - name: Provision each cluster's encryption key
+        if: steps.pick.outputs.clusters != ''
+        env:
+          CLUSTERS: ${{ steps.pick.outputs.clusters }}
+          ESCROW_PROVIDER_URL: ${{ secrets.ESCROW_PROVIDER_URL }}
+          ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
+          ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
+          ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          for c in $CLUSTERS; do
+            ./kakt tenant finalize-cluster --name "$c" --gitops-dir .
+          done

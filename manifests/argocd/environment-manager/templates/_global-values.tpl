@@ -226,6 +226,14 @@ global:
              here once, quoted because an unquoted id is a number and a number
              formatted into a claim name is not the same string. */}}
       orgId: {{ dig "viewer" "orgId" "" ($root.Values.observability | default dict) | quote }}
+  {{- /* kamarkat-mcp (ADR-116): the kakt deployments the tenant allows to
+         receive a code, and whether Grafana is relayed. Globals because the
+         marker ConfigMap and the server's environment are rendered from them by
+         templated-fields, like every other fact about the box. */}}
+  platformMcp:
+    kaktRedirectUris: {{ (dig "platformMcp" "kaktRedirectUris" list ($root.Values.capabilities | default dict)) | toJson }}
+    agentPublicKey: {{ (dig "platformMcp" "agentPublicKey" "" ($root.Values.capabilities | default dict)) | toJson }}
+    grafana: {{ and (dig "platformMcp" "enabled" false ($root.Values.capabilities | default dict)) (dig "grafanaMcp" "enabled" false ($root.Values.capabilities | default dict)) (dig "observability" "enabled" false ($root.Values.capabilities | default dict)) }}
   {{- /* The spoke this box's burst-capacity autoscaler watches. A global for the
          same reason as hubDomain: it is a fact about the box, and the
          alternative was the component carrying one box's spoke name as a

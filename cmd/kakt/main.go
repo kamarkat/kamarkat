@@ -61,6 +61,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newReleaseCmd())
 	rootCmd.AddCommand(newPromoteCmd(), newSyncCmd())
 	rootCmd.AddCommand(newBootstrapDayZeroCmd())
+	rootCmd.AddCommand(newMCPCmd())
 
 	return rootCmd
 }

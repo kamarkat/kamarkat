@@ -1,0 +1,22 @@
+# The capability's marker (ADR-116 §3). Its presence is what tells the
+# hub-operator to provision the kamarkat-mcp project, its roles and the public
+# clients kakt signs people in with; its data is the tenant's declaration of
+# which kakt deployments may receive an authorization code.
+#
+# kaktRedirectUris comes from capabilities.platformMcp.kaktRedirectUris in the
+# management cluster's values.yaml, one per line. Empty means no kakt client:
+# `kakt mcp` on a workstation still works, through kakt-cli.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kamarkat-mcp
+  namespace: platform-mcp
+  labels:
+    app.kubernetes.io/name: kamarkat-mcp
+    app.kubernetes.io/part-of: platform-mcp
+data:
+  mcpUrl: https://mcp.PLACEHOLDER_HUB_DOMAIN
+  kaktRedirectUris: ""
+  # kakt's PUBLIC key for its agent identity (capabilities.platformMcp.
+  # agentPublicKey). Empty: no agent; agents act only as a person who connected.
+  agentPublicKey: ""

@@ -55,6 +55,16 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  # kamarkat-mcp (ADR-116). Exists on every box, like the other capabilities'
+  # namespaces; what runs in it depends on capabilities.platformMcp.
+  name: platform-mcp
+  labels:
+    name: platform-mcp
+    topology.platform.io/role: hub
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: platform-observability
   labels:
     name: platform-observability

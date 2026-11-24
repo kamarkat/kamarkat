@@ -34,3 +34,8 @@ creditAuthority:
 # from capabilities.billing.enabled. Off: no listener, no route, no hostname.
 billingEngine:
   enabled: false
+
+# kamarkat-mcp's listener and route (ADR-116), set by environment-manager from
+# capabilities.platformMcp.enabled. Off: no listener, no route, no hostname.
+platformMcp:
+  enabled: false

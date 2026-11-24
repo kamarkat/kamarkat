@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 
 	"github.com/kamarkat/kamarkat/internal/assets"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
@@ -23,6 +25,10 @@ import (
 // worker count (ADR-075) and the default is not known when flags are declared.
 var workloadClusterWorkers int
 
+// workloadClusterDeclareOnly writes the declaration and leaves the escrow-bound
+// step to `kakt tenant finalize-cluster` (ADR-116).
+var workloadClusterDeclareOnly bool
+
 func newTenantCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tenant",
@@ -31,6 +37,7 @@ func newTenantCmd() *cobra.Command {
 	cmd.AddCommand(newTenantSetGitopsTokenCmd())
 	cmd.AddCommand(newAddManagementClusterCmd())
 	cmd.AddCommand(newAddWorkloadClusterCmd())
+	cmd.AddCommand(newFinalizeClusterCmd())
 	cmd.AddCommand(newRemoveWorkloadClusterCmd())
 	cmd.AddCommand(newClusterStatusCmd())
 	cmd.AddCommand(newAddAppCmd())
@@ -261,6 +268,10 @@ path and its backup prefix for their whole lives.`,
 	// default. hybrid runs on the tenant's own hardware alone and has no cloud
 	// workers at all; silently ignoring a number someone typed would let them
 	// believe they had bought capacity they do not have.
+	f.BoolVar(&workloadClusterDeclareOnly, "declare-only", false,
+		"write the declaration only, with no escrow or management-cluster access; the "+
+			"cluster's encryption key is then provisioned by the repository's Finalize "+
+			"cluster workflow on the pull request, or by `kakt tenant finalize-cluster`")
 	f.IntVar(&workloadClusterWorkers, "workers", -1,
 		"cloud worker nodes this cluster starts with (default: 2 on hetzner). "+
 			"Not applicable on hybrid, which runs on your own premises alone (ADR-075)")
@@ -360,40 +371,6 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 			workloadCluster.Name, workloadCluster.GitopsDir)
 	}
 
-	// Preflight 2: Verify management cluster declaration exists
-	coords, err := hubaccess.Declaration(workloadCluster.GitopsDir, workloadCluster.MgmtCluster)
-	if err != nil {
-		return fmt.Errorf("preflight check failed: reading management cluster declaration: %w", err)
-	}
-
-	// Preflight 3: Connect to escrow and management cluster
-	access, err := hubaccess.Open(cmd.Context(), coords)
-	if err != nil {
-		return fmt.Errorf("preflight check failed: connecting to escrow and management cluster: %w", err)
-	}
-
-	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
-
-	// Preflight 4: Target provider configuration exists
-	if workloadCluster.Provider != "hybrid" {
-		if _, err := access.Provider(cmd.Context(), id, workloadCluster.Provider); err != nil {
-			return fmt.Errorf("preflight check failed: provider credentials for %q absent in escrow: %w",
-				workloadCluster.Provider, err)
-		}
-	}
-
-	// Preflight 5: Management cluster API connectivity
-	cfg, _, cleanup, err := access.Kubernetes(cmd.Context(), id)
-	if err != nil {
-		return fmt.Errorf("preflight check failed: connecting to management cluster API: %w", err)
-	}
-	defer cleanup()
-
-	clientset, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("preflight check failed: creating management cluster clientset: %w", err)
-	}
-
 	// The sentinel resolved against the provider, here rather than in Add(), so
 	// the struct that reaches the tenant package carries a real number.
 	//
@@ -417,30 +394,17 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		workloadCluster.Workers = workloadClusterWorkers
 	}
 
-	// Automatic Encryption Key & Configuration Provisioning:
-	// Resolve/generate key, persist to escrow BEFORE writing cluster manifests,
-	// and ensure Secret exists in platform-capi on management cluster.
-	fmt.Printf("Ensuring encryption configuration for %q...\n", workloadCluster.Name)
-	encOpts := encryption.EnsureOptions{
-		BoxID:        coords.BoxID,
-		ClusterName:  workloadCluster.Name,
-		Namespace:    "platform-capi",
-		EscrowClient: access.Escrow(),
-		SecretClient: encryption.KubeSecretClient{Clientset: clientset},
-	}
-	encRes, err := encryption.EnsureClusterEncryption(cmd.Context(), encOpts)
-	if err != nil {
-		return fmt.Errorf("provisioning encryption configuration for %q: %w", workloadCluster.Name, err)
-	}
-	if encRes.KeyGenerated {
-		fmt.Println("  ✓ encryption key generated and escrowed")
-	} else {
-		fmt.Println("  ✓ encryption key restored from escrow")
-	}
-	if encRes.SecretCreated {
-		fmt.Printf("  ✓ secret platform-capi/%s created on management cluster\n", assets.EncryptionSecretName(workloadCluster.Name))
-	} else if encRes.SecretAlreadyExisted {
-		fmt.Printf("  ✓ secret platform-capi/%s verified on management cluster\n", assets.EncryptionSecretName(workloadCluster.Name))
+	// The privileged part -- the escrow, the management cluster and the
+	// cluster's encryption key -- before any file is written. With
+	// --declare-only it is left to the repository's Finalize cluster workflow,
+	// which runs it on the pull request under the repository's own secrets, so
+	// a person or an agent with no escrow access can declare a cluster (ADR-116).
+	if workloadClusterDeclareOnly {
+		fmt.Printf("Declaring %q only: its encryption key is provisioned by the repository's\n", workloadCluster.Name)
+		fmt.Println("Finalize cluster workflow on the pull request, or by `kakt tenant finalize-cluster`.")
+	} else if err := finalizeCluster(cmd.Context(), workloadCluster.GitopsDir, workloadCluster.MgmtCluster,
+		workloadCluster.Name, workloadCluster.Provider); err != nil {
+		return err
 	}
 
 	written, err := workloadCluster.Add()
@@ -462,7 +426,131 @@ func runAddWorkloadCluster(cmd *cobra.Command, args []string) error {
 		fmt.Println("  scripts/hybrid/provision-flatcar-worker.sh for each node.")
 	}
 
-	fmt.Println("\nCommit and push; the management cluster provisions it.")
+	if workloadClusterDeclareOnly {
+		fmt.Println("\nOpen a pull request: the Finalize cluster workflow provisions its key on it.")
+		fmt.Println("Merge once that check passes; the management cluster then provisions it.")
+	} else {
+		fmt.Println("\nCommit and push; the management cluster provisions it.")
+	}
+	return nil
+}
+
+func newFinalizeClusterCmd() *cobra.Command {
+	var gitopsDir, name string
+	cmd := &cobra.Command{
+		Use:   "finalize-cluster",
+		Short: "Provision a declared workload cluster's encryption key (the escrow-bound half of add-cluster)",
+		Long: `Provision a declared workload cluster's encryption key.
+
+The half of add-cluster that needs the escrow and the management cluster: it
+generates the cluster's encryption key (or restores the one already escrowed),
+escrows it and places it in platform-capi. ` + "`add-cluster --declare-only`" + ` leaves
+this to the repository's Finalize cluster workflow, which runs it on the pull
+request under the repository's own secrets -- so a cluster can be declared by a
+person or an agent holding no escrow access, and its key exists before the
+declaration is merged.
+
+Idempotent: run it again and the escrowed key is restored, never replaced.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			values := filepath.Join(gitopsDir, "registry", "clusters", name, "values.yaml")
+			raw, err := os.ReadFile(values)
+			if err != nil {
+				return fmt.Errorf("%s is not declared here: %w", name, err)
+			}
+			var decl struct {
+				EnvironmentSlug string `json:"environmentSlug"`
+				Provider        string `json:"provider"`
+			}
+			if err := yaml.Unmarshal(raw, &decl); err != nil {
+				return fmt.Errorf("read %s: %w", values, err)
+			}
+			if decl.EnvironmentSlug == "" {
+				return fmt.Errorf("%s declares no environmentSlug: it is a management cluster, which Day-0 builds", values)
+			}
+			box, err := tenant.ReadBoxDecl(gitopsDir)
+			if err != nil {
+				return err
+			}
+			if err := finalizeCluster(cmd.Context(), gitopsDir, box.ManagementCluster, name, decl.Provider); err != nil {
+				return err
+			}
+			fmt.Printf("✓ %s is ready to be provisioned once its declaration is merged\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&gitopsDir, "gitops-dir", ".", "the tenant repository")
+	cmd.Flags().StringVar(&name, "name", "", "the declared workload cluster (required)")
+	_ = cmd.MarkFlagRequired("name")
+	return cmd
+}
+
+// finalizeCluster does what declaring a cluster needs the escrow for: it checks
+// the management cluster and the provider's credential, then generates (or
+// restores) the cluster's encryption key, escrows it and places it in
+// platform-capi on the management cluster. Idempotent: a key already in the
+// escrow is restored, never replaced.
+func finalizeCluster(ctx context.Context, gitopsDir, mgmtCluster, name, provider string) error {
+	// Preflight 2: Verify management cluster declaration exists
+	coords, err := hubaccess.Declaration(gitopsDir, mgmtCluster)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: reading management cluster declaration: %w", err)
+	}
+
+	// Preflight 3: Connect to escrow and management cluster
+	access, err := hubaccess.Open(ctx, coords)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: connecting to escrow and management cluster: %w", err)
+	}
+
+	id := hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}
+
+	// Preflight 4: Target provider configuration exists
+	if provider != "hybrid" {
+		if _, err := access.Provider(ctx, id, provider); err != nil {
+			return fmt.Errorf("preflight check failed: provider credentials for %q absent in escrow: %w",
+				provider, err)
+		}
+	}
+
+	// Preflight 5: Management cluster API connectivity
+	cfg, _, cleanup, err := access.Kubernetes(ctx, id)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: connecting to management cluster API: %w", err)
+	}
+	defer cleanup()
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("preflight check failed: creating management cluster clientset: %w", err)
+	}
+
+	// Automatic Encryption Key & Configuration Provisioning:
+	// Resolve/generate key, persist to escrow BEFORE writing cluster manifests,
+	// and ensure Secret exists in platform-capi on management cluster.
+	fmt.Printf("Ensuring encryption configuration for %q...\n", name)
+	encOpts := encryption.EnsureOptions{
+		BoxID:        coords.BoxID,
+		ClusterName:  name,
+		Namespace:    "platform-capi",
+		EscrowClient: access.Escrow(),
+		SecretClient: encryption.KubeSecretClient{Clientset: clientset},
+	}
+	encRes, err := encryption.EnsureClusterEncryption(ctx, encOpts)
+	if err != nil {
+		return fmt.Errorf("provisioning encryption configuration for %q: %w", name, err)
+	}
+	if encRes.KeyGenerated {
+		fmt.Println("  ✓ encryption key generated and escrowed")
+	} else {
+		fmt.Println("  ✓ encryption key restored from escrow")
+	}
+	if encRes.SecretCreated {
+		fmt.Printf("  ✓ secret platform-capi/%s created on management cluster\n", assets.EncryptionSecretName(name))
+	} else if encRes.SecretAlreadyExisted {
+		fmt.Printf("  ✓ secret platform-capi/%s verified on management cluster\n", assets.EncryptionSecretName(name))
+	}
+
 	return nil
 }
 

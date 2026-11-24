@@ -109,15 +109,39 @@ spec:
     # on, so a newer commit cannot begin — the app keeps reporting the old
     # revision as in-progress and nothing says why. Observed waiting on hook
     # Jobs that had completed eleven minutes earlier.
+    #
+    # THE LABEL WAS WRONG, SO THIS NEVER FIRED. It selected
+    # operation_phase="Running", and argocd_app_info declares no such label: at the
+    # pinned v3.5.7 (chart 10.11.7) its labels are namespace, name, project,
+    # autosync_enabled, repo, dest_server, dest_namespace, sync_status,
+    # health_status and `operation` (controller/metrics/metrics.go, descAppInfo).
+    # `phase` belongs to argocd_app_sync_total, a different metric.
+    #
+    # A selector on a label that does not exist matches no series, so this
+    # expression was always empty and the alert could not fire. A sync stuck far
+    # beyond thirty minutes paged nobody, and the state was found only because a
+    # person went looking at the Application -- which is how forced synchronisation
+    # became routine.
+    #
+    # `operation` is set to "sync" while app.Operation carries a sync -- that is,
+    # while one is pending or in flight -- and cleared when it completes
+    # (collectApps). Its continuous presence is therefore exactly "an operation has
+    # not finished".
+    #
+    # 20m, against the 900s bound now configured in
+    # controller.sync.timeout.seconds. The meaning has changed with it: this no
+    # longer reports a slow sync, which the bound now ends by itself. It reports an
+    # operation that OUTLIVED its bound -- a wedged controller or a timeout that is
+    # not in effect -- with five minutes of margin for the controller to act.
     - alert: ArgoCDSyncStuck
       expr: |
-        argocd_app_info{operation_phase="Running"} > 0
-      for: 30m
+        argocd_app_info{operation="sync"} > 0
+      for: 20m
       labels:
         severity: warning
         component: gitops
       annotations:
-        summary: "ArgoCD sync for {{ $labels.name }} has been running for 30m"
+        summary: "ArgoCD sync for {{ $labels.name }} has outlived its 900s bound"
         description: >-
           A sync operation that does not finish blocks every later revision for
           this application. Check status.operationState.message: a wait on hooks
