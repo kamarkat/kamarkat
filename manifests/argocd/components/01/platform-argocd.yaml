@@ -116,6 +116,30 @@ helmValues: |
         hs.message = "Waiting for cluster to be healthy"
         return hs
 
+      # CNPG Backup health check (ADR-117 §7). The OpenBao component declares a
+      # version-named Backup in an earlier sync wave than its StatefulSet; this is what
+      # makes the new version wait for a COMPLETED recovery point, and what stops the
+      # sync when the backup fails.
+      resource.customizations.health.postgresql.cnpg.io_Backup: |
+        hs = {}
+        if obj.status ~= nil and obj.status.phase ~= nil then
+          if obj.status.phase == "completed" then
+            hs.status = "Healthy"
+            hs.message = "Backup completed"
+            return hs
+          end
+          -- Terminal failures (CNPG v1.30.1 backup_types.go) stop the sync rather
+          -- than leave it Progressing forever.
+          if obj.status.phase == "failed" or obj.status.phase == "walArchivingFailing" or obj.status.phase == "invalid backup definition" then
+            hs.status = "Degraded"
+            hs.message = obj.status.error or "Backup failed"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the backup to complete"
+        return hs
+
       # Exclude dynamically-created CiliumIdentity resources from ArgoCD tracking.
       # Cilium copies argocd.argoproj.io/instance labels from pods onto CiliumIdentity
       # objects it creates. ArgoCD then treats them as orphaned managed resources and

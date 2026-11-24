@@ -1,0 +1,15 @@
+# Per-box values for the OpenBao component (ADR-117).
+- kind: StatefulSet
+  name: openbao
+  fields:
+    # The placement class (ADR-046 §11), as for openbao-db.
+    - path: [spec, template, spec, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
+# The pre-upgrade Backup's name is unique to the upgrade operation (ADR-117 §7). On a
+# released box the component chart's version IS the bundle version
+# (scripts/package/component-chart.sh), so a new bundle renders a new name.
+- kind: Backup
+  name: openbao-db-pre-2-7-3-development-openbao-db-v1
+  fields:
+    - path: [metadata, name]
+      value: 'openbao-db-pre-2-7-3-{{ .Chart.Version | replace "." "-" | replace "+" "-" }}-openbao-db-v1'

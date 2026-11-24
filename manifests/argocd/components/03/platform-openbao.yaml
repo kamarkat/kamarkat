@@ -1,11 +1,11 @@
 ---
 boundary: '03'
-appName: platform-infisical
-destinationNamespace: platform-security
+appName: platform-openbao
+destinationNamespace: platform-data
 isPlatformOwned: 'true'
 repoURL: ''
 targetRevision: ''
-path: manifests/hub-core-services/infisical
+path: manifests/hub-core-services/openbao
 chart: ''
 directoryRecurse: ''
 directoryInclude: ''

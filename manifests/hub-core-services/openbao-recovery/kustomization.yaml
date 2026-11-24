@@ -1,0 +1,31 @@
+# OpenBao in RECOVERY MODE (ADR-117 §7, ADR-092).
+#
+# Used only while the administrator has deliberately entered recovery for openbao-db.
+# Identical to the steady state except that consumer admission is absent: ESO,
+# cert-manager and the Gateway cannot reach the restored store. hub-operator, the
+# OpenBao peers and the CLI's recovery identity still can.
+#
+# The exit is ADR-092's: once the incarnation's recovery record under
+# kv/platform/recovery/openbao-db/<uid> is complete, the administrator settles the
+# descriptor back to ../openbao, and the preflight proves no recovery mode remains.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../openbao
+
+patches:
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: openbao-consumers
+        namespace: platform-data
+  - patch: |-
+      $patch: delete
+      apiVersion: cilium.io/v2
+      kind: CiliumNetworkPolicy
+      metadata:
+        name: openbao-consumers-gateway
+        namespace: platform-data

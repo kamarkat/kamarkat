@@ -1,0 +1,47 @@
+# OpenBao, the box's only self-hosted secret store (ADR-117), boundary 03.
+#
+# Its database is boundary 02 (database/, platform-openbao-db), so it exists first.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: openbao
+    repo: https://openbao.github.io/openbao-helm
+    version: 0.30.8
+    releaseName: openbao
+    namespace: platform-data
+    valuesFile: values.yaml
+    # The chart's `helm test` Pod is not a workload.
+    skipTests: true
+
+resources:
+  - openbao-platform.yaml
+
+patches:
+  # THE SEAL KEYS AS ENVIRONMENT (ADR-117 §3). The static seal reads
+  # BAO_STATIC_SEAL_CURRENT_KEY / _ID and, during a rotation only,
+  # BAO_STATIC_SEAL_PREVIOUS_KEY / _ID. The CLI delivers exactly those keys in Secret
+  # openbao-seal, so envFrom carries the previous key when present and nothing when
+  # absent, and a rotation changes the Secret, never this configuration. The chart has
+  # no envFrom, hence the patch.
+  #
+  # The Reloader annotation restarts the pods when the seal Secret changes (a rotation
+  # step), because the seal is read once at start. Auto-unseal makes that unattended.
+  - target:
+      kind: StatefulSet
+      name: openbao
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: openbao
+        annotations:
+          secret.reloader.stakater.com/reload: openbao-seal
+      spec:
+        template:
+          spec:
+            containers:
+              - name: openbao
+                envFrom:
+                  - secretRef:
+                      name: openbao-seal
