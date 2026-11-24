@@ -181,27 +181,16 @@ jobs:
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v3
 
-      - name: Build and Validate Dev Environment
+      # One management overlay since ADR-111: the hub is environment-independent,
+      # and the per-environment overlays (dev/stg/prod) no longer exist.
+      - name: Build and Validate the Management Environment
         run: |
-          kustomize build manifests/environments/dev > dev-render.yaml
-
-      - name: Build and Validate Staging Environment
-        run: |
-          kustomize build manifests/environments/stg > stg-render.yaml
-
-      - name: Build and Validate Production Environment
-        run: |
-          kustomize build manifests/environments/prod > prod-render.yaml
-
-      - name: Verify All Environments Build Successfully
-        run: |
-          for env in dev stg prod; do
-            if [ ! -s "${env}-render.yaml" ]; then
-              echo "FAIL: ${env}-render.yaml is empty"
-              exit 1
-            fi
-            echo "PASS: $env environment builds successfully"
-          done
+          kustomize build manifests/environments/management > management-render.yaml
+          if [ ! -s management-render.yaml ]; then
+            echo "FAIL: management-render.yaml is empty"
+            exit 1
+          fi
+          echo "PASS: management environment builds successfully"
 
       - name: Install yq and yamllint
         run: |

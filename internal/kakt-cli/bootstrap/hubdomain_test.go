@@ -110,12 +110,7 @@ func TestDerivationCoversEveryHubHostnameLiteral(t *testing.T) {
 				if strings.HasPrefix(trimmed, "#") {
 					continue // prose, not configuration
 				}
-				// Kubernetes API identifiers share the domain but are not hostnames:
-				// an apiVersion group, a CRD's <plural>.<group> name, and a
-				// domain-prefixed label key all match a hostname regex and none of
-				// them is a host. Deriving over them would rename an API group.
-				if strings.HasPrefix(trimmed, "apiVersion:") || strings.HasPrefix(trimmed, "name:") ||
-					strings.HasPrefix(trimmed, "group:") {
+				if isAPIIdentifierLine(trimmed) {
 					continue
 				}
 				for _, m := range host.FindAllStringIndex(line, -1) {
@@ -142,6 +137,41 @@ func TestDerivationCoversEveryHubHostnameLiteral(t *testing.T) {
 		for _, k := range keys {
 			t.Errorf("hostname %q is present in the manifests but is not produced by the "+
 				"derivation, so WS4 would change it when it replaces the literal: %v", k, unknown[k])
+		}
+	}
+}
+
+// isAPIIdentifierLine reports a manifest line whose domain-shaped value is a
+// Kubernetes API identifier, not a hostname: an apiVersion group, a CRD's
+// <plural>.<group> name, a resource group, or an RBAC rule's apiGroups. They all
+// match a hostname regex and none is a host; deriving over them would rename an
+// API group and break whatever selects it. (Label keys are excluded where they
+// are matched, by the "/" that follows them.)
+func isAPIIdentifierLine(trimmed string) bool {
+	trimmed = strings.TrimPrefix(trimmed, "- ")
+	for _, key := range []string{"apiVersion:", "name:", "group:", "apiGroups:"} {
+		if strings.HasPrefix(trimmed, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAPIIdentifierLinesAreNotHostnames(t *testing.T) {
+	for line, want := range map[string]bool{
+		`apiVersion: ops.nutgraf.in/v1alpha1`:  true,
+		`name: hubenvironments.ops.nutgraf.in`: true,
+		`group: acme.dev.nutgraf.in`:           true,
+		`apiGroups: ["ops.nutgraf.in"]`:        true,
+		`- apiGroups: ["ops.nutgraf.in"]`:      true,
+		// Hostnames everywhere else are still checked.
+		`- host: api.dev.nutgraf.in`:           false,
+		`value: "https://id.dev.nutgraf.in"`:   false,
+		`hostnames: ["argocd.dev.nutgraf.in"]`: false,
+		`- "--domain-filter=dev.nutgraf.in"`:   false,
+	} {
+		if got := isAPIIdentifierLine(line); got != want {
+			t.Errorf("isAPIIdentifierLine(%q) = %v, want %v", line, got, want)
 		}
 	}
 }
