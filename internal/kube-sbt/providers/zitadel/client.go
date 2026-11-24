@@ -117,7 +117,8 @@ func isUnchanged(err error) bool {
 	if !asAPIError(err, &ae) || ae.Status != http.StatusBadRequest {
 		return false
 	}
-	return strings.Contains(ae.Body, "has not been changed")
+	return strings.Contains(ae.Body, "has not been changed") ||
+		strings.Contains(ae.Body, "No changes")
 }
 
 func asAPIError(err error, target **apiError) bool {

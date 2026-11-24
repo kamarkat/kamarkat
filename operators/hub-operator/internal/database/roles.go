@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -200,17 +201,31 @@ func (rm *RoleManager) CreateOrUpdateRoles(ctx context.Context, hubEnv *opsv1alp
 
 	// The whole plan, before any of it runs.
 	//
-	// This loop returns on the first failure, so a role whose Secret is missing
-	// stops every role AFTER it. That happened: hub_hydra outlived the Ory stack
-	// in the CR spec, its Secret was gone, and the loop never reached hub_zitadel
-	// — which then could not authenticate to Postgres, with nothing in any log
-	// connecting the two. Naming the plan up front and the skipped remainder on
-	// failure is what makes that visible without reading this function.
+	// EVERY ROLE IS ATTEMPTED. This loop used to return on the first failure, so a
+	// role whose Secret was missing stopped every role AFTER it -- and the roles
+	// are independent, so that turned one component's problem into an outage in an
+	// unrelated one.
+	//
+	// It happened, twice. hub_hydra outlived the Ory stack in the CR spec, its
+	// Secret was gone, and the loop never reached hub_zitadel: the role kept
+	// whatever password it already had while Zitadel presented the one from its own
+	// Secret, and Postgres refused it as `failed SASL auth`. Nothing in any log
+	// connected the two, because the component that broke was not the component
+	// that failed. Naming the plan and the skipped remainder made that visible; it
+	// did not stop it happening.
+	//
+	// So failures are collected and every role is still attempted. This is not a
+	// swallowed error: each failure is logged as it happens and all of them are
+	// returned together, so the reconcile still fails and still names every cause.
+	// What it no longer does is let the first one decide which components work.
 	planned := make([]string, 0, len(hubEnv.Spec.RolesFor(rm.ep.Cluster)))
 	for _, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
 		planned = append(planned, roleSpec.Name)
 	}
 	logger.Info("Provisioning database roles", "count", len(planned), "roles", planned)
+
+	// Collected, not returned on sight: see the note above.
+	var failures []error
 
 	// Process each role from CR spec
 	for i, roleSpec := range hubEnv.Spec.RolesFor(rm.ep.Cluster) {
@@ -222,20 +237,17 @@ func (rm *RoleManager) CreateOrUpdateRoles(ctx context.Context, hubEnv *opsv1alp
 			"role", roleSpec.Name, "position", fmt.Sprintf("%d/%d", i+1, len(planned)),
 			"database", roleSpec.Database, "secret", secretNamespace+"/"+secretName)
 
-		// skipped names every role this failure prevents from being reached, so
-		// the consequence is in the same line as the cause.
-		skipped := planned[i+1:]
-
 		secret := &corev1.Secret{}
 		if err := rm.client.Get(ctx, client.ObjectKey{
 			Name:      secretName,
 			Namespace: secretNamespace,
 		}, secret); err != nil {
-			logger.Error(err, "Role credential Secret missing; every later role is skipped",
+			logger.Error(err, "Role credential Secret missing; this role is skipped and the rest continue",
 				"role", roleSpec.Name, "secret", secretNamespace+"/"+secretName,
-				"skipped", skipped,
-				"hint", "a role declared in HubEnvironment.spec.database.roles whose Secret no longer exists blocks the rest of the list")
-			return fmt.Errorf("failed to get secret %s in namespace %s: %w", secretName, secretNamespace, err)
+				"hint", "a role declared in HubEnvironment.spec.database.roles whose Secret no longer exists no longer blocks the other roles; remove it from the spec or restore its Secret")
+			failures = append(failures, fmt.Errorf("role %s: get secret %s/%s: %w",
+				roleSpec.Name, secretNamespace, secretName, err))
+			continue
 		}
 
 		username := string(secret.Data["username"])
@@ -243,17 +255,19 @@ func (rm *RoleManager) CreateOrUpdateRoles(ctx context.Context, hubEnv *opsv1alp
 
 		// Create or update role
 		if err := rm.createOrUpdateRole(ctx, username, password, roleSpec); err != nil {
-			logger.Error(err, "Role create/update failed; every later role is skipped",
-				"role", roleSpec.Name, "username", username, "skipped", skipped)
-			return fmt.Errorf("failed to create/update role %s: %w", roleSpec.Name, err)
+			logger.Error(err, "Role create/update failed; this role is skipped and the rest continue",
+				"role", roleSpec.Name, "username", username)
+			failures = append(failures, fmt.Errorf("role %s: create/update: %w", roleSpec.Name, err))
+			continue
 		}
 
 		// Grant permissions
 		// Requirement 6.8: Grant permissions based on CR specifications
 		if err := rm.grantPermissions(ctx, username, roleSpec); err != nil {
-			logger.Error(err, "Grant failed; every later role is skipped",
-				"role", roleSpec.Name, "username", username, "skipped", skipped)
-			return fmt.Errorf("failed to grant permissions to role %s: %w", roleSpec.Name, err)
+			logger.Error(err, "Grant failed; this role is skipped and the rest continue",
+				"role", roleSpec.Name, "username", username)
+			failures = append(failures, fmt.Errorf("role %s: grant: %w", roleSpec.Name, err))
+			continue
 		}
 
 		logger.Info("Role configured successfully",
@@ -264,6 +278,14 @@ func (rm *RoleManager) CreateOrUpdateRoles(ctx context.Context, hubEnv *opsv1alp
 
 	// Prune orphaned roles
 	// Requirement 6.15: Delete roles not in CR spec
+	// Every failure, named together. The reconcile still fails -- a role that was
+	// not configured is not working -- but it fails saying which roles, rather than
+	// stopping at the first and leaving the rest unattempted.
+	if len(failures) > 0 {
+		return fmt.Errorf("%d of %d database role(s) could not be configured: %w",
+			len(failures), len(planned), errors.Join(failures...))
+	}
+
 	if err := rm.pruneOrphanedRoles(ctx, hubEnv); err != nil {
 		return fmt.Errorf("failed to prune orphaned roles: %w", err)
 	}

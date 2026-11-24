@@ -142,6 +142,11 @@ spec:
             httpGet:
               path: /healthz
               port: http
+              httpHeaders:
+                # mcp-grafana validates Host against --allowed-hosts; without this,
+                # kubelet probes by pod IP and receives a 403 Forbidden.
+                - name: Host
+                  value: mcp-grafana.platform-observability.svc:8000
           resources:
             requests:
               cpu: 20m

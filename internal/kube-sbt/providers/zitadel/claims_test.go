@@ -139,6 +139,7 @@ func TestUnchangedRejectionIsNotAFailure(t *testing.T) {
 	}{
 		{"policy no-op", &apiError{Status: 400, Body: `{"code":9,"message":"Default Login Policy has not been changed (INSTANCE-5M9vdd)"}`}, true},
 		{"grant no-op", &apiError{Status: 400, Body: `{"code":9,"message":"User grant has not been changed (COMMAND-2M0fs)"}`}, true},
+		{"app oidc no-op", &apiError{Status: 400, Body: `{"code":9,"message":"No changes (COMMAND-1m88i)"}`}, true},
 		// A real rejection must still be a failure — matching on status alone
 		// would swallow this.
 		{"real bad request", &apiError{Status: 400, Body: `{"message":"invalid redirect uri"}`}, false},

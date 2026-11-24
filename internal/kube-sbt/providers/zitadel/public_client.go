@@ -90,7 +90,12 @@ func (a *Auth) EnsurePublicClient(ctx context.Context, orgID, projectID, appName
 				return "", fmt.Errorf("reactivate application %q (%s): %w", appName, app.ID, err)
 			}
 		}
-		if !sameSet(app.OIDCConfig.RedirectURIs, redirectURIs) || app.OIDCConfig.AppType != appType || app.OIDCConfig.DevMode != devMode {
+		currentAppType := app.OIDCConfig.AppType
+		if currentAppType == "" {
+			// Protobuf JSON serialization omits enum zero-value OIDC_APP_TYPE_WEB.
+			currentAppType = "OIDC_APP_TYPE_WEB"
+		}
+		if !sameSet(app.OIDCConfig.RedirectURIs, redirectURIs) || currentAppType != appType || app.OIDCConfig.DevMode != devMode {
 			err := a.api.do(ctx, http.MethodPut,
 				"/management/v1/projects/"+projectID+"/apps/"+app.ID+"/oidc_config",
 				orgID, config, nil)
