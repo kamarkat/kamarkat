@@ -308,6 +308,14 @@ stringData:
                     secretKeyRef:
                       name: hetzner
                       key: hcloud
+                # Every volume names its cluster (kamarkat.io/cluster), so teardown can
+                # attribute it; the per-spoke ConfigMap comes from the SpokePool's CRS.
+                - name: HCLOUD_VOLUME_EXTRA_LABELS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: hcloud-csi-volume-labels
+                      key: labels
+                      optional: true
               ports:
                 - name: metrics
                   containerPort: 9189

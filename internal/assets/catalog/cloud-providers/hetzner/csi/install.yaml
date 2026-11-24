@@ -321,6 +321,14 @@ spec:
                 secretKeyRef:
                   name: hetzner
                   key: hcloud
+            # Every volume names its cluster (kamarkat.io/cluster), so teardown can
+            # attribute it. Day-0 writes this ConfigMap before applying the driver.
+            - name: HCLOUD_VOLUME_EXTRA_LABELS
+              valueFrom:
+                configMapKeyRef:
+                  name: hcloud-csi-volume-labels
+                  key: labels
+                  optional: true
           ports:
             - name: metrics
               containerPort: 9189

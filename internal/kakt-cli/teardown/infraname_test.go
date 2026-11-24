@@ -57,3 +57,17 @@ func TestTheBoxRecordIsRequiredAndCanOnlyNameThisCluster(t *testing.T) {
 		}
 	}
 }
+
+// CSI volumes carry no CAPH label; the platform's driver labels them with the
+// cluster's name, exactly, and only that name attributes them.
+func TestCSIVolumesAreAttributedByTheirClusterLabel(t *testing.T) {
+	r := []Resource{
+		{Kind: "volume", Name: "pvc-1", Labels: map[string]string{"kamarkat.io/cluster": "nutgraf-mgmt-1794929668", "managed-by": "csi-driver"}},
+		{Kind: "volume", Name: "pvc-2", Labels: map[string]string{"kamarkat.io/cluster": "nutgraf-stg-01", "managed-by": "csi-driver"}},
+		{Kind: "volume", Name: "pvc-3", Labels: map[string]string{"managed-by": "csi-driver"}},
+	}
+	at := Attribute(r, []string{"nutgraf-mgmt-1794929668"})
+	if !at[0].Eligible || at[1].Eligible || at[2].Eligible {
+		t.Fatalf("eligible: own=%v other=%v unlabelled=%v", at[0].Eligible, at[1].Eligible, at[2].Eligible)
+	}
+}

@@ -21,8 +21,12 @@ import (
 // uses, so deleting it through one cluster's cleanup takes it from the others.
 const (
 	ownershipLabelPrefix = "caph-cluster-"
-	lifecycleOwned       = "owned"
-	lifecycleShared      = "shared"
+	// volumeClusterLabel is what the platform's CSI driver puts on every volume it
+	// creates (HCLOUD_VOLUME_EXTRA_LABELS): the cluster it belongs to, by name.
+	// CAPH does not label CSI volumes, so without it none can be attributed.
+	volumeClusterLabel = "kamarkat.io/cluster"
+	lifecycleOwned     = "owned"
+	lifecycleShared    = "shared"
 )
 
 // Resource is one provider object, as the provider reports it.
@@ -103,6 +107,15 @@ func Attribute(resources []Resource, targets []string) []Attribution {
 			break
 		}
 
+		if a.Cluster == "" && len(labelled) == 0 {
+			if c, ok := r.Labels[volumeClusterLabel]; ok {
+				if want[c] {
+					a.Cluster, a.Lifecycle, a.Eligible, a.Reason = c, lifecycleOwned, true, ""
+				} else {
+					labelled = append(labelled, c)
+				}
+			}
+		}
 		if a.Cluster == "" {
 			sort.Strings(labelled)
 			switch {
@@ -372,6 +385,10 @@ func (o *Orchestrator) discoverInventory(ctx context.Context, client *hcloud.Cli
 	// unrelated objects.
 	var labelled []Resource
 	for _, r := range resources {
+		if _, ok := r.Labels[volumeClusterLabel]; ok {
+			labelled = append(labelled, r)
+			continue
+		}
 		for key := range r.Labels {
 			if strings.HasPrefix(key, ownershipLabelPrefix) {
 				labelled = append(labelled, r)

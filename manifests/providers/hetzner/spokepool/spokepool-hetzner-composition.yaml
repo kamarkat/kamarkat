@@ -174,6 +174,9 @@ spec:
                           kind: Secret
                         - name: csi-addon-template
                           kind: Secret
+                        # This spoke's volume label, read by the CSI controller (index 4)
+                        - name: ""
+                          kind: ConfigMap
                         # ArgoCD namespace
                         - name: argocd-namespace
                           kind: ConfigMap
@@ -261,7 +264,15 @@ spec:
                       fmt: "%s-hetzner-credentials"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[5].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[4].name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-csi-volume-labels"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.manifest.spec.resources[6].name
                 transforms:
                   - type: string
                     string:
@@ -269,7 +280,7 @@ spec:
                       fmt: "%s-observability-namespace"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[10].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[11].name
                 transforms:
                   - type: string
                     string:
@@ -277,7 +288,7 @@ spec:
                       fmt: "%s-argocd-agent-params"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[12].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[13].name
                 transforms:
                   - type: string
                     string:
@@ -285,7 +296,7 @@ spec:
                       fmt: "%s-bootstrap-cert"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[13].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
                 transforms:
                   - type: string
                     string:
@@ -293,7 +304,7 @@ spec:
                       fmt: "%s-agent-ca"
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.name
-                toFieldPath: spec.forProvider.manifest.spec.resources[14].name
+                toFieldPath: spec.forProvider.manifest.spec.resources[15].name
                 transforms:
                   - type: string
                     string:
@@ -400,6 +411,52 @@ spec:
                       fmt: "%s-argocd-namespace"
 
           # platform-observability namespace ConfigMap
+          # The label every CSI volume on this spoke carries (kamarkat.io/cluster),
+          # delivered by the spoke's CRS: teardown attributes volumes by it.
+          - name: csi-volume-labels-configmap
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                managementPolicies:
+                  - "*"
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ConfigMap
+                    metadata:
+                      name: csi-volume-labels
+                      namespace: platform-capi
+                    data:
+                      volume-labels.yaml: ""
+                providerConfigRef:
+                  name: kubernetes-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-csi-volume-labels"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.manifest.metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-csi-volume-labels"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.manifest.data[volume-labels.yaml]
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hcloud-csi-volume-labels\n  namespace: kube-system\ndata:\n  labels: kamarkat.io/cluster=%s\n"
+
           - name: observability-namespace-configmap
             base:
               apiVersion: kubernetes.crossplane.io/v1alpha2

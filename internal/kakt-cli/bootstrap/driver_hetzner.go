@@ -407,6 +407,9 @@ func (d *HetznerDriver) PopulateClusterConfig(cfg *cluster.Config) {
 // (Hub) cluster so PVs provision (hcloud-volumes) for hub databases/Redis.
 func (d *HetznerDriver) OnPlatformPreReqs(ctx context.Context, kubeconfig string) error {
 	fmt.Println("[platform-pre] Installing hetzner-csi on management cluster...")
+	if err := applyCSIVolumeLabels(ctx, kubeconfig, d.ClusterName); err != nil {
+		return err
+	}
 	csiManifest, err := assets.ReadCatalog("cloud-providers/hetzner/csi/install.yaml")
 	if err != nil {
 		return fmt.Errorf("failed to read CSI manifest: %w", err)
@@ -471,4 +474,22 @@ func waitForDeployment(ctx context.Context, kubeconfig, namespace, deployment st
 			}
 		}
 	}
+}
+
+// applyCSIVolumeLabels writes the ConfigMap the CSI controller reads its extra
+// volume labels from, so every volume it creates names its cluster
+// (kamarkat.io/cluster=<cluster>) and teardown can attribute it. Before the
+// driver, so its first volume is already labelled.
+func applyCSIVolumeLabels(ctx context.Context, kubeconfig, cluster string) error {
+	if strings.TrimSpace(cluster) == "" {
+		return fmt.Errorf("the cluster name is required to label its volumes")
+	}
+	cm := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hcloud-csi-volume-labels\n"+
+		"  namespace: %s\ndata:\n  labels: kamarkat.io/cluster=%s\n", constants.NamespaceCloud, cluster)
+	cmd := exec.CommandContext(ctx, "kubectl", "apply", "--kubeconfig", kubeconfig, "-f", "-")
+	cmd.Stdin = strings.NewReader(cm)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("write the CSI volume labels: %w\n%s", err, out)
+	}
+	return nil
 }
