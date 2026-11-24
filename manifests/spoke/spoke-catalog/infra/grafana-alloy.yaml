@@ -870,6 +870,7 @@ spec:
               memory: "256Mi"
               cpu: "250m"
       securityContext:
+        fsGroup: 473
         runAsNonRoot: true
         runAsUser: 473
         seccompProfile:

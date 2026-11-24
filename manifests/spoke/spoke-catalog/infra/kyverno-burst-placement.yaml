@@ -75,7 +75,8 @@ spec:
   # synthesise rules for every pod controller, which is not what this governs.
   autogen:
     podControllers:
-      enabled: false
+      controllers:
+        - none
   matchConstraints:
     resourceRules:
       - apiGroups: [""]
@@ -201,7 +202,8 @@ spec:
       enabled: false
   autogen:
     podControllers:
-      enabled: false
+      controllers:
+        - none
   matchConstraints:
     resourceRules:
       - apiGroups: [""]

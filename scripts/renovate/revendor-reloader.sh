@@ -105,6 +105,7 @@ for d in docs:
     strip(d['metadata'])
     if d['kind'] == 'Deployment':
         strip(d['spec']['template']['metadata'])
+        (d['spec']['selector'].get('matchLabels') or {}).pop('release', None)
         c = d['spec']['template']['spec']['containers'][0]
         c['image'] = 'ghcr.io/stakater/reloader:${APP_VERSION}@${IMAGE_DIGEST}'
         c['resources'] = RESOURCES

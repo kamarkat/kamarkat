@@ -27,7 +27,8 @@ spec:
       enabled: true
   autogen:
     podControllers:
-      enabled: false
+      controllers:
+        - none
   matchConstraints:
     resourceRules:
       - apiGroups: ["monitoring.coreos.com"]
