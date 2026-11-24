@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 )
 
 // accessPageLimit is the issuer's per-request maximum for the searches below. Every
@@ -50,18 +51,35 @@ const accessPageLimit = 100
 // revocation durable; this function's job is to be correct when it is called,
 // and to report honestly whether it was.
 func (a *Auth) EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID, roleKey, roleDisplay string) error {
+	return a.EnsurePlatformProjectRoles(ctx, orgID, projectID, []string{roleKey}, []string{roleDisplay})
+}
+
+// EnsurePlatformProjectRoles is EnsurePlatformProjectAccess for a project with
+// several roles: every role exists, and each owner holding no grant in the
+// project is granted ALL of them in one grant (kamarkat ADR-116 §3).
+//
+// One grant, not one per role. A grant carries a user's whole role set for the
+// project and the issuer replaces it on update, and this function skips an
+// owner who already holds one -- so granting the roles one call at a time would
+// leave every owner with the first role only.
+func (a *Auth) EnsurePlatformProjectRoles(ctx context.Context, orgID, projectID string, roleKeys, roleDisplays []string) error {
 	if orgID == "" || projectID == "" {
 		return fmt.Errorf("zitadel: platform project access needs the resolved organisation and project; ensure the project first")
 	}
-	if roleKey == "" {
-		return fmt.Errorf("zitadel: platform project access needs a role key")
+	if len(roleKeys) == 0 || len(roleDisplays) != len(roleKeys) {
+		return fmt.Errorf("zitadel: platform project access needs at least one role key, each with its display name")
 	}
-	if roleDisplay == "" {
-		roleDisplay = roleKey
-	}
-
-	if err := a.ensurePlatformRole(ctx, orgID, projectID, roleKey, roleDisplay); err != nil {
-		return err
+	for i, roleKey := range roleKeys {
+		if roleKey == "" {
+			return fmt.Errorf("zitadel: platform project access needs a role key")
+		}
+		roleDisplay := roleDisplays[i]
+		if roleDisplay == "" {
+			roleDisplay = roleKey
+		}
+		if err := a.ensurePlatformRole(ctx, orgID, projectID, roleKey, roleDisplay); err != nil {
+			return err
+		}
 	}
 
 	owners, err := a.orgOwners(ctx, orgID)
@@ -89,7 +107,7 @@ func (a *Auth) EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID
 			continue
 		}
 		attempted++
-		if err := a.GrantRole(ctx, orgID, projectID, userID, []string{roleKey}); err != nil {
+		if err := a.GrantRole(ctx, orgID, projectID, userID, roleKeys); err != nil {
 			failed++
 			if firstErr == nil {
 				firstErr = err
@@ -98,7 +116,7 @@ func (a *Auth) EnsurePlatformProjectAccess(ctx context.Context, orgID, projectID
 	}
 	if failed > 0 {
 		return fmt.Errorf("zitadel: %d of %d grants of %q on project %s failed (first: %w); the service credential may hold neither PROJECT_OWNER nor ORG_USER_MANAGER on the platform organisation, and every refused owner is locked out of the project at sign-in",
-			failed, attempted, roleKey, projectID, firstErr)
+			failed, attempted, strings.Join(roleKeys, ","), projectID, firstErr)
 	}
 	return nil
 }
