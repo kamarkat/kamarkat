@@ -265,6 +265,15 @@ type PlatformAppProvisioner interface {
 	// own -- that is what makes projectRoleCheck mean "an observability viewer"
 	// instead of "any platform user" (ADR-078 add.5 §7).
 	EnsureConfidentialClient(ctx context.Context, orgID, projectID, appName string, redirectURIs []string, regenerateIfExists, tokenExchange bool) (clientID, clientSecret string, err error)
+	// EnsurePlatformProjectRoles is EnsurePlatformProjectAccess for a project
+	// people hold one of several roles in: every role exists, and each owner
+	// holding no grant is given all of them (kamarkat ADR-116 §3).
+	EnsurePlatformProjectRoles(ctx context.Context, orgID, projectID string, roleKeys, roleDisplays []string) error
+	// EnsurePublicClient provisions a client with no secret -- code flow with
+	// PKCE -- whose redirect URIs are reconciled on every call. kakt's clients
+	// for the box's MCP server are public so that no box secret leaves the box
+	// (kamarkat ADR-116 §3).
+	EnsurePublicClient(ctx context.Context, orgID, projectID, appName string, redirectURIs []string, native bool) (clientID string, err error)
 }
 
 type ensurePlatformProjectRequest struct {
@@ -399,6 +408,68 @@ func (h *PlatformAppHandler) EnsureApp(c *gin.Context) {
 		return
 	}
 	clientID, err := h.provisioner.EnsurePlatformApp(c.Request.Context(), req.Name, req.RedirectURIs, req.PostLogoutURIs)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"name": req.Name, "clientId": clientID})
+}
+
+type ensurePlatformProjectRolesRequest struct {
+	OrgID     string `json:"orgId" binding:"required"`
+	ProjectID string `json:"projectId" binding:"required"`
+	Roles     []struct {
+		Key     string `json:"key" binding:"required"`
+		Display string `json:"display"`
+	} `json:"roles" binding:"required"`
+}
+
+// EnsureProjectRoles makes several roles exist on a platform project and admits
+// the platform organisation's owners to all of them (kamarkat ADR-116 §3).
+func (h *PlatformAppHandler) EnsureProjectRoles(c *gin.Context) {
+	if h.provisioner == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "the configured identity provider does not provision platform projects"})
+		return
+	}
+	var req ensurePlatformProjectRolesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	keys := make([]string, 0, len(req.Roles))
+	displays := make([]string, 0, len(req.Roles))
+	for _, r := range req.Roles {
+		keys = append(keys, r.Key)
+		displays = append(displays, r.Display)
+	}
+	if err := h.provisioner.EnsurePlatformProjectRoles(c.Request.Context(), req.OrgID, req.ProjectID, keys, displays); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projectId": req.ProjectID, "roles": keys})
+}
+
+type ensurePublicClientRequest struct {
+	OrgID        string   `json:"orgId" binding:"required"`
+	ProjectID    string   `json:"projectId" binding:"required"`
+	Name         string   `json:"name" binding:"required"`
+	RedirectURIs []string `json:"redirectUris" binding:"required"`
+	Native       bool     `json:"native"`
+}
+
+// EnsurePublicClient provisions a platform capability's public OIDC client and
+// returns its id. There is no secret to return.
+func (h *PlatformAppHandler) EnsurePublicClient(c *gin.Context) {
+	if h.provisioner == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "the configured identity provider does not provision platform clients"})
+		return
+	}
+	var req ensurePublicClientRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	clientID, err := h.provisioner.EnsurePublicClient(c.Request.Context(), req.OrgID, req.ProjectID, req.Name, req.RedirectURIs, req.Native)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return

@@ -104,6 +104,10 @@ func main() {
 			// authority's admits one machine caller and the observability one
 			// admits the box's operators (ADR-078 add.5 §7).
 			internal.POST("/platform/projects/access", pa.EnsureProjectAccess)
+			// The box's MCP server (kamarkat ADR-116 §3): one project with several
+			// roles, and public clients for kakt, which no secret may leave the box for.
+			internal.POST("/platform/projects/roles", pa.EnsureProjectRoles)
+			internal.POST("/platform/public-clients", pa.EnsurePublicClient)
 		}
 	}
 
