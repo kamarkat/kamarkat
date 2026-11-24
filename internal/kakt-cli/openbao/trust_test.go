@@ -179,3 +179,35 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// The drill identity is retired by Day-0 unless the box opted in, and before the
+// trust-bootstrap identity retires itself (after which nothing can remove it).
+func TestDayZeroRetiresTheCapabilityDrillUnlessOptedIn(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		orig := KeepCapabilityDrill
+		KeepCapabilityDrill = func() bool { return keep }
+		f := &fakeBao{}
+		c, esc, _ := setup(t, f)
+		err := RecoveryKeySequence(context.Background(), c, esc)
+		KeepCapabilityDrill = orig
+		if err != nil {
+			t.Fatal(err)
+		}
+		idx := func(p string) int {
+			for i, d := range f.deleted {
+				if d == p {
+					return i
+				}
+			}
+			return -1
+		}
+		role, own := idx("auth/kubernetes/role/openbao-capability-drill"), idx("auth/kubernetes/role/openbao-trust-bootstrap")
+		policy := idx("sys/policies/acl/openbao-capability-drill")
+		if keep && (role >= 0 || policy >= 0) {
+			t.Fatalf("an opted-in box lost its drill identity: %v", f.deleted)
+		}
+		if !keep && (role < 0 || policy < 0 || role > own || policy > own) {
+			t.Fatalf("the drill identity was not retired before the bootstrap identity: %v", f.deleted)
+		}
+	}
+}

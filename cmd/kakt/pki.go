@@ -146,7 +146,7 @@ func rollOverCompromised(ctx context.Context, cs kubernetes.Interface, kubeconfi
 	if err != nil {
 		return err
 	}
-	err = openbao.ReissueLeaves(ctx, clusters, newRoot.CertPEM, leafWait, 15*time.Second, os.Stdout)
+	err = openbao.ReissueLeaves(ctx, clusters, newRoot.CertPEM, newRoot.Replaces, leafWait, 15*time.Second, os.Stdout)
 	if errors.Is(err, openbao.ErrRolloverIncomplete) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

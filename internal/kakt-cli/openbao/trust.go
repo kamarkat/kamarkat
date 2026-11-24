@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -33,7 +34,13 @@ const (
 	rolePKISigning     = "openbao-pki-signing"
 	saTrustBootstrap   = "openbao-trust-bootstrap"
 	saPKISigning       = "openbao-pki-signing"
+	// roleCapabilityDrill is the dynamic-credential drill identity (G10), present
+	// only on a test box that sets KAKT_CAPABILITY_DRILL=true.
+	roleCapabilityDrill = "openbao-capability-drill"
 )
+
+// KeepCapabilityDrill reports whether this box opted in to the capability drill.
+var KeepCapabilityDrill = func() bool { return os.Getenv("KAKT_CAPABILITY_DRILL") == "true" }
 
 // EncryptedRecoveryKey is what the box escrow holds: PGP ciphertext only, inert
 // without the custody-held private key.
@@ -185,6 +192,16 @@ func readRecoveryBackup(ctx context.Context, c *Client, fp string) (EncryptedRec
 }
 
 func retireTrustBootstrap(ctx context.Context, c *Client) error {
+	// The capability-drill identity first, while this identity can still act: a
+	// retired trust-bootstrap role is the record that the sequence finished, so
+	// nothing may remain to do after it. Kept only on a box that opts in.
+	if !KeepCapabilityDrill() {
+		for _, p := range []string{"auth/kubernetes/role/" + roleCapabilityDrill, "sys/policies/acl/" + roleCapabilityDrill} {
+			if err := c.Delete(ctx, p); err != nil && !errors.Is(err, ErrNotFound) {
+				return fmt.Errorf("retire the capability-drill identity (%s): %w", p, err)
+			}
+		}
+	}
 	for _, p := range []string{"auth/kubernetes/role/" + roleTrustBootstrap, "sys/policies/acl/" + roleTrustBootstrap} {
 		if err := c.Delete(ctx, p); err != nil && !errors.Is(err, ErrNotFound) {
 			return fmt.Errorf("retire the trust-bootstrap identity (%s): %w", p, err)

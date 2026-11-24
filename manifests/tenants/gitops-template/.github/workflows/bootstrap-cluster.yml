@@ -395,6 +395,9 @@ jobs:
           ESCROW_PROVIDER_PROJECT_ID: ${{ secrets.ESCROW_PROVIDER_PROJECT_ID }}
           ESCROW_PROVIDER_CLIENT_ID: ${{ secrets.ESCROW_PROVIDER_CLIENT_ID }}
           ESCROW_PROVIDER_CLIENT_SECRET: ${{ secrets.ESCROW_PROVIDER_CLIENT_SECRET }}
+          # Test boxes only (ADR-117 G10): keep the dynamic-credential drill
+          # identity. Unset on every other box, which Day-0 then retires.
+          KAKT_CAPABILITY_DRILL: ${{ vars.KAKT_CAPABILITY_DRILL }}
         run: |
           set -euo pipefail
           ./kakt bootstrap --cluster "${{ matrix.box.cluster }}" --gitops-dir .

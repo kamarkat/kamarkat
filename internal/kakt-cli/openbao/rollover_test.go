@@ -239,10 +239,14 @@ func TestCompromiseRolloverRefusesAnUnknownSerial(t *testing.T) {
 }
 
 type fakeLeafCluster struct {
-	certs    []LeafCert
-	reissued map[string]int
-	anchor   []byte
-	converge bool
+	certs     []LeafCert
+	reissued  map[string]int
+	anchor    []byte
+	converge  bool
+	consumers []Consumer
+	restarts  map[string]int
+	copies    []string
+	retired   int
 }
 
 func (f *fakeLeafCluster) Name() string { return "c" }
@@ -253,32 +257,103 @@ func (f *fakeLeafCluster) Reissue(_ context.Context, c LeafCert) error {
 	f.reissued[c.key()]++
 	for i := range f.certs {
 		if f.certs[i].key() == c.key() && f.converge {
-			f.certs[i].CA, f.certs[i].Ready = f.anchor, true
+			f.certs[i].CA, f.certs[i].Ready, f.certs[i].NotBefore = f.anchor, true, time.Now()
 		}
 	}
 	return nil
 }
+func (f *fakeLeafCluster) Consumers(_ context.Context, secrets map[string]bool) ([]Consumer, error) {
+	var out []Consumer
+	for _, c := range f.consumers {
+		if secrets[c.Workload.Namespace+"/"+c.Secret] {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (f *fakeLeafCluster) Restart(_ context.Context, w Workload) error {
+	f.restarts[w.String()]++
+	if f.converge {
+		for i := range f.consumers {
+			if f.consumers[i].Workload == w {
+				f.consumers[i].Started = time.Now().Add(time.Minute)
+			}
+		}
+	}
+	return nil
+}
+func (f *fakeLeafCluster) CompromisedCopies(_ context.Context, _ []byte, retire bool) ([]string, error) {
+	if retire {
+		f.retired++
+	}
+	return f.copies, nil
+}
 
-func TestReissueLeavesReissuesEachStaleCertificateOnce(t *testing.T) {
+func leafFixture(converge bool) (*fakeLeafCluster, RootCA, RootCA) {
 	oldR, _ := GenerateRootCA(rollBox, time.Now())
 	newR, _ := GenerateRootCA(rollBox, time.Now())
 	both := append(append([]byte{}, newR.CertPEM...), oldR.CertPEM...)
-	f := &fakeLeafCluster{anchor: newR.CertPEM, converge: true, reissued: map[string]int{}, certs: []LeafCert{
-		{Namespace: "a", Name: "old", CA: oldR.CertPEM, Ready: true},
-		{Namespace: "a", Name: "both", CA: both, Ready: true},
-		{Namespace: "a", Name: "done", CA: newR.CertPEM, Ready: true},
-	}}
-	if err := ReissueLeaves(context.Background(), []LeafCluster{f}, newR.CertPEM, time.Second, time.Millisecond, nil); err != nil {
+	early := time.Now().Add(-time.Hour)
+	return &fakeLeafCluster{anchor: newR.CertPEM, converge: converge, reissued: map[string]int{},
+		restarts: map[string]int{}, certs: []LeafCert{
+			{Namespace: "a", Name: "old", SecretName: "old-tls", CA: oldR.CertPEM, Ready: true},
+			{Namespace: "a", Name: "both", SecretName: "both-tls", CA: both, Ready: true},
+			{Namespace: "a", Name: "done", SecretName: "done-tls", CA: newR.CertPEM, Ready: true, NotBefore: early},
+		}, consumers: []Consumer{
+			{Workload: Workload{"Deployment", "a", "api"}, Secret: "old-tls", Started: early},
+			{Workload: Workload{"Deployment", "a", "fresh"}, Secret: "done-tls", Started: time.Now()},
+		}}, oldR, newR
+}
+
+func TestReissueLeavesReissuesStaleCertificatesAndRestartsTheirConsumersOnce(t *testing.T) {
+	f, oldR, newR := leafFixture(true)
+	if err := ReissueLeaves(context.Background(), []LeafCluster{f}, newR.CertPEM, oldR.CertPEM, time.Second, time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
 	if f.reissued["a/old"] != 1 || f.reissued["a/both"] != 1 || f.reissued["a/done"] != 0 {
 		t.Fatalf("reissued %v; a bundle still holding the old root must be reissued, a done one must not", f.reissued)
 	}
+	if f.restarts["Deployment/a/api"] != 1 || f.restarts["Deployment/a/fresh"] != 0 {
+		t.Fatalf("restarts %v; a consumer started before its reissue restarts once, a fresh one never", f.restarts)
+	}
+	if f.retired != 1 {
+		t.Fatalf("transit copies retired %d times, want once", f.retired)
+	}
+}
 
-	stuck := &fakeLeafCluster{anchor: newR.CertPEM, reissued: map[string]int{}, certs: []LeafCert{
-		{Namespace: "a", Name: "old", CA: oldR.CertPEM, Ready: true}}}
-	err := ReissueLeaves(context.Background(), []LeafCluster{stuck}, newR.CertPEM, 20*time.Millisecond, time.Millisecond, nil)
-	if !errors.Is(err, ErrRolloverIncomplete) || !strings.Contains(err.Error(), "c:a/old") || stuck.reissued["a/old"] != 1 {
-		t.Fatalf("got %v, reissued %v", err, stuck.reissued)
+// Not done while a certificate, a running consumer, or any copy of the
+// compromised root remains -- and each is named.
+func TestReissueLeavesIsIncompleteUntilNothingTrustsTheCompromisedRoot(t *testing.T) {
+	for name, mutate := range map[string]func(*fakeLeafCluster){
+		"certificate": func(f *fakeLeafCluster) { f.converge = false },
+		"consumer": func(f *fakeLeafCluster) {
+			f.converge = false // the restarted pods never come back
+			for i := range f.certs {
+				f.certs[i].CA, f.certs[i].Ready, f.certs[i].NotBefore = f.anchor, true, time.Now()
+			}
+		},
+		"bundle": func(f *fakeLeafCluster) { f.copies = []string{"configmap x/trust"} },
+	} {
+		f, oldR, newR := leafFixture(true)
+		mutate(f)
+		err := ReissueLeaves(context.Background(), []LeafCluster{f}, newR.CertPEM, oldR.CertPEM, 20*time.Millisecond, time.Millisecond, nil)
+		want := map[string]string{"certificate": "certificate c:a/old", "consumer": "consumer c:Deployment/a/api",
+			"bundle": "compromised root in c:configmap x/trust"}[name]
+		if !errors.Is(err, ErrRolloverIncomplete) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want it named %q", name, err, want)
+		}
+	}
+}
+
+func TestHoldsCertFindsARootIndentedInYAML(t *testing.T) {
+	r, _ := GenerateRootCA(rollBox, time.Now())
+	other, _ := GenerateRootCA(rollBox, time.Now())
+	blk, _ := pem.Decode(r.CertPEM)
+	indented := "stringData:\n  ca.crt: |\n" + "    " + strings.ReplaceAll(strings.TrimSpace(string(r.CertPEM)), "\n", "\n    ") + "\n"
+	if !holdsCert([]byte(indented), blk.Bytes) {
+		t.Fatal("an indented copy of the root was missed")
+	}
+	if holdsCert(other.CertPEM, blk.Bytes) {
+		t.Fatal("another certificate was taken for the root")
 	}
 }

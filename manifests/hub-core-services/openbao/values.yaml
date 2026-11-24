@@ -332,7 +332,6 @@ server:
               path "sys/auth/spoke-*"          { capabilities = ["create", "read", "update", "delete", "sudo"] }
               path "sys/mounts/auth/spoke-*/tune" { capabilities = ["read", "update"] }
               path "auth/spoke-*"              { capabilities = ["create", "read", "update", "delete", "list"] }
-              path "auth/kubernetes/role/*"    { capabilities = ["create", "read", "update", "delete", "list"] }
               path "pki_int/roles/*"           { capabilities = ["create", "read", "update", "delete", "list"] }
               path "pki_int/issuers"           { capabilities = ["list"] }
               path "pki_int/issuer/*"          { capabilities = ["read"] }
@@ -405,6 +404,8 @@ server:
               path "sys/rotate/recovery/backup" { capabilities = ["read", "delete"] }
               path "sys/policies/acl/openbao-trust-bootstrap"   { capabilities = ["delete"] }
               path "auth/kubernetes/role/openbao-trust-bootstrap" { capabilities = ["delete"] }
+              path "sys/policies/acl/openbao-capability-drill"     { capabilities = ["delete"] }
+              path "auth/kubernetes/role/openbao-capability-drill" { capabilities = ["delete"] }
             EOP
           }
         }
@@ -431,7 +432,9 @@ server:
         # and only database connections and roles named drill-*. A drill connection's
         # credentials are whatever the administrator supplies; this grants no access to
         # any platform database, and a drill role cannot use a platform connection
-        # (each allows only its own static role).
+        # (each allows only its own static role). TEST BOXES ONLY: Day-0's trust
+        # bootstrap retires it unless the box opts in (KAKT_CAPABILITY_DRILL=true), and
+        # after the drill it retires itself.
         request "capability-drill-policy" {
           operation = "update"
           path      = "sys/policies/acl/openbao-capability-drill"
@@ -441,6 +444,8 @@ server:
               path "database/roles/drill-*"  { capabilities = ["create", "read", "update", "delete"] }
               path "database/creds/drill-*"  { capabilities = ["read"] }
               path "sys/leases/lookup"       { capabilities = ["update"] }
+              path "sys/policies/acl/openbao-capability-drill"     { capabilities = ["delete"] }
+              path "auth/kubernetes/role/openbao-capability-drill" { capabilities = ["delete"] }
             EOP
           }
         }
