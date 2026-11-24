@@ -103,6 +103,15 @@
       type: int
       value: '{{ if .Values.global.previewDomain }}1{{ else }}0{{ end }}'
 
+    - path: [spec, template, spec, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
+
+- kind: Deployment
+  name: ephemeral-job-operator
+  fields:
+    - path: [spec, template, spec, nodeSelector, workload-location]
+      value: '{{ if eq .Values.global.provider "hybrid" }}on-prem{{ else }}hetzner{{ end }}'
+
 - kind: Deployment
   name: external-dns
   # WS3 blast radius and record ownership. --domain-filter scopes which zone a

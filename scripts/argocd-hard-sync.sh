@@ -306,7 +306,7 @@ if [ "$MODE" = "promote" ]; then
     [ "$app" = "$ROOT_APP" ] && continue
     cur="$(app_field "$app" .spec.source.targetRevision)"
     # Only version-pinned children are ours to promote; one tracking a branch is not.
-    case "$cur" in *rc.*) ;; *) continue ;; esac
+    case "$cur" in *rc.*|[0-9]*.[0-9]*.[0-9]*) ;; *) continue ;; esac
     if [ "$cur" != "$VERSION" ]; then
       echo "   ${app}: still ${cur:-<none>} -- waiting for the root to regenerate it"
       if ! wait_for_regeneration "$app" "$VERSION"; then

@@ -696,14 +696,26 @@ components:
     track: ghcr
     layer: machinery
     match: [ghcr.io/kamarkat/kamarkat/kube-sbt]
+    behind:
+      - versions: ["digest-pinned"]
+        status: scheduled
+        target: 0.3.48
+        reason: Image build for ADR-116 endpoints completed after the 0.3.47 release commit
 
-  - name: Control-plane API
-    description: The control plane's API.
+  - name: Platform MCP server
+    description: Serves the box's platform state to agents over MCP, read as the person who asks (ADR-116).
     license: Apache-2.0
     repo: https://github.com/kamarkat/kamarkat
     track: ghcr
-    layer: machinery
+    layer: capability
     match: [ghcr.io/kamarkat/kamarkat/mcp-server]
+
+  - name: Grafana MCP server
+    description: Grafana's own MCP server, read-only, behind the platform MCP server (ADR-116).
+    license: Apache-2.0
+    repo: grafana/mcp-grafana
+    layer: capability
+    match: ["docker.io/grafana/mcp-grafana"]
 
   - name: Login gateway
     description: Signs people in before a request reaches a protected route.
