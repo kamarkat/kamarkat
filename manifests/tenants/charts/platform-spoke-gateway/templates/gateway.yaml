@@ -40,6 +40,7 @@ metadata:
     # at this address. The Cilium gateway Service is ClusterIP under hostNetwork
     # (ADR-046 §8), so there is no LoadBalancer ingress for it to discover.
     external-dns.alpha.kubernetes.io/target: {{ .Values.externalDnsTarget | quote }}
+    external-dns.kubernetes.io/target: {{ .Values.externalDnsTarget | quote }}
   {{- end }}
 spec:
   gatewayClassName: cilium

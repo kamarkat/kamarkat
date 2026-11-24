@@ -55,6 +55,11 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: tenant-public-tls
     kamarkat.io/tenant-id: {{ .Values.tenantId }}
+  {{- if .Values.externalDnsTarget }}
+  annotations:
+    external-dns.alpha.kubernetes.io/target: {{ .Values.externalDnsTarget | quote }}
+    external-dns.kubernetes.io/target: {{ .Values.externalDnsTarget | quote }}
+  {{- end }}
 spec:
   parentRefs:
     - name: {{ .Values.tlsGatewayName }}

@@ -1,4 +1,4 @@
-{{- if and .Values.deployXR (ne ((.Values.database.enabled) | toString) "false") }}
+{{- if .Values.deployXR }}
 {{- /* One logical database per APP (ADR-088). Being siblings grants nothing:
        two apps of one customer are as separated in their data as two apps of
        different customers. Sharing takes a `sharedData` declaration naming
