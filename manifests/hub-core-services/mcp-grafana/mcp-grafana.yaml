@@ -89,6 +89,12 @@ metadata:
   labels:
     app.kubernetes.io/name: mcp-grafana
     app.kubernetes.io/part-of: platform-mcp
+  annotations:
+    # ADR-030 #3: both secrets it reads from env are rotated (the caller token by
+    # its generator, the service-account token by the Grafana operator), and an
+    # env var is read once -- so a rotation restarts the pod rather than leaving
+    # it on the old value. kamarkat-mcp re-reads the caller token every 5 minutes.
+    secret.reloader.stakater.com/reload: "mcp-grafana-caller,mcp-grafana-sa"
 spec:
   replicas: 1
   selector:
