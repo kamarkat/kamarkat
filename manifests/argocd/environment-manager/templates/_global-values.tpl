@@ -161,7 +161,7 @@ global:
   clusterName: {{ include "environment-manager.clusterName" $root | quote }}
   {{- /* The box's declared cloud region: where `kakt box init` created its bucket.
          The databases' object-store endpoint is derived from it. */}}
-  region: {{ $root.Values.region | quote }}
+  region: {{ $root.Values.region | default "" | quote }}
   {{- /*
     The box's own tenant id, for ADR-078 add.1 §7: Alloy stamps `cluster` AND
     `tenant` on everything it sends. `cluster` alone is unique within a box and
