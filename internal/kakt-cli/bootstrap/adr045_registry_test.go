@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,37 @@ func TestEveryADR045ArtifactHasAWriter(t *testing.T) {
 			t.Errorf("%s is registered in manifests/generated/artifacts.yaml, but no "+
 				"non-test Go source names %q, so nothing writes it and adr045-commit "+
 				"will fail on it", a.File, name)
+		}
+	}
+}
+
+// Every generated values file the box's bundle reads must be registered, because
+// registration is what gets it committed and pushed; ArgoCD reads only git.
+// gateway-dns-target.yaml was committed only as a side effect of another
+// registered file in the same directory, and when that entry was removed every
+// hub hostname went NXDOMAIN.
+func TestEveryGeneratedValuesFileTheBundleReadsIsRegistered(t *testing.T) {
+	fromRepoRoot(t)
+	src, err := os.ReadFile(filepath.Join("internal", "kakt-cli", "tenant", "render_box.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := regexp.MustCompile(`/generated/values/([A-Za-z0-9._-]+\.yaml)`).FindAllStringSubmatch(string(src), -1)
+	if len(read) == 0 {
+		t.Fatal("the bundle reads no generated values file; this test would prove nothing")
+	}
+	reg, err := (&Orchestrator{}).readADR045Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := map[string]bool{}
+	for _, a := range reg.Artifacts {
+		registered[filepath.Base(a.File)] = true
+	}
+	for _, m := range read {
+		if !registered[m[1]] {
+			t.Errorf("the box bundle reads generated/values/%s, but it is not in "+
+				"manifests/generated/artifacts.yaml, so adr045-commit never commits it", m[1])
 		}
 	}
 }

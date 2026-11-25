@@ -82,7 +82,7 @@ hubIngressAddress: %q
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("cannot record the gateway DNS target in %s: %w", path, err)
 	}
-	fmt.Printf("[seed] ✓ hub ingress address %s recorded in clusters/%s/generated/gateway-dns-target.yaml\n",
+	fmt.Printf("[seed] ✓ hub ingress address %s recorded in clusters/%s/generated/values/gateway-dns-target.yaml\n",
 		address, o.ClusterName)
 	return nil
 }

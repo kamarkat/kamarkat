@@ -12,10 +12,14 @@
 # registry/clusters/<cluster>/generated/<path>. Every file listed here must be
 # named by the code that writes it (TestEveryADR045ArtifactHasAWriter).
 #
-# The list is empty: per-cluster values now reach components as chart values,
-# not as committed files, and ADR-117 removed self-hosted Infisical, whose
-# identity values were the last entry. With nothing registered, [adr045-commit]
-# commits nothing and waits for no Application.
+# gateway-dns-target.yaml is the one artifact left: the hub's public ingress
+# address, read by environment-manager as hubIngressAddress and passed to the
+# hub Gateway and its routes as their external-dns target. Without it in git,
+# external-dns publishes nothing and every hub hostname is NXDOMAIN.
 apiVersion: bootstrap.kamarkat.io/v1alpha1
 kind: GeneratedArtifactRegistry
-artifacts: []
+artifacts:
+  - file: manifests/environments/{env}/generated/values/gateway-dns-target.yaml
+    consumedBy: hub-gateway
+    requiredFields:
+      - hubIngressAddress
