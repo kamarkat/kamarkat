@@ -385,6 +385,10 @@ components:
     repo: hetznercloud/csi-driver
     layer: machinery
     match: ["docker.io/hetznercloud/*"]
+    behind:
+      - versions: ["v2.24.2"]
+        status: not assessed
+        reason: One patch behind; released after this release's changes were made
   - name: CSI sidecars
     description: The standard Kubernetes storage sidecars the CSI driver runs with.
     license: Apache-2.0
@@ -519,6 +523,10 @@ components:
     repo: grafana/grafana
     layer: capability
     match: ["docker.io/grafana/grafana"]
+    behind:
+      - versions: ["13.3.1"]
+        status: not assessed
+        reason: One patch behind; released after this release's changes were made
   - name: Grafana operator
     description: Manages dashboards and data sources as declarations.
     license: Apache-2.0
