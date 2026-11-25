@@ -189,17 +189,15 @@ server:
       # token OpenBao revokes afterwards. Everything here is box-independent; per-box
       # and per-cluster state (policies for tenants and spokes, PKI roles, static roles)
       # is hub-operator's, reconciled afterwards.
-      initialize "audit" {
-        request "stdout-audit" {
-          operation = "update"
-          path      = "sys/audit/stdout"
-          data = {
-            type        = "file"
-            description = "Audit to stdout, collected by Alloy into Loki (ADR-117 §8)"
-            options = {
-              file_path = "stdout"
-            }
-          }
+      #
+      # The audit device is NOT a self-init request: since 2.3.2 OpenBao refuses
+      # API-created audit devices (self-init requests included) unless
+      # unsafe_allow_api_audit_creation is set, and that refusal failed self-init on
+      # its first request. Declared here instead, enabled by the active node at start.
+      audit "file" "stdout" {
+        description = "Audit to stdout, collected by Alloy into Loki (ADR-117 §8)"
+        options {
+          file_path = "stdout"
         }
       }
 
