@@ -15,6 +15,7 @@ func TestEmbeddedCarriesTheDayZeroEntryPoints(t *testing.T) {
 		"scripts/hub-bootstrap.sh",
 		"scripts/validate-all.sh",
 		"scripts/validate/run.sh",
+		"manifests/hub-core-services/gateway/templates/hub-gateway.yaml",
 	} {
 		b, err := FS.ReadFile(p)
 		if err != nil {

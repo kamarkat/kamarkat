@@ -46,6 +46,11 @@ PATHS=(
     # the repository plainly has, which is exactly the failure mode this embed
     # set exists to prevent.
     "manifests/hub-core-services/support-agent/allowlist.yaml"
+    # Hub Gateway listener hostnames, read at Day-0 before bootstrap to refuse
+    # foreign DNS owners (bootstrap/dns_ownership.go). Without this, a released
+    # binary fails outside a checkout with "release ... carries no
+    # manifests/hub-core-services/gateway/templates/hub-gateway.yaml".
+    "manifests/hub-core-services/gateway/templates/hub-gateway.yaml"
 )
 
 # THE RUNTIME SCRIPT CLOSURE, computed rather than listed.
