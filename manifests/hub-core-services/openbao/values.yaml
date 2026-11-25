@@ -233,7 +233,7 @@ server:
           path      = "sys/auth/kubernetes"
           data = {
             type   = "kubernetes"
-            config = { max_lease_ttl = "10m", default_lease_ttl = "10m" }
+            config = { max_lease_ttl = "30m", default_lease_ttl = "10m" }
           }
         }
         # In-cluster: reviewer token and CA read from the pod, so a successor hub needs
@@ -270,18 +270,6 @@ server:
           data = {
             policy = <<-EOP
               length = 64
-              rule "charset" {
-                charset = "0123456789abcdef"
-              }
-            EOP
-          }
-        }
-        request "password-policy-hex-128" {
-          operation = "update"
-          path      = "sys/policies/password/hex-128"
-          data = {
-            policy = <<-EOP
-              length = 128
               rule "charset" {
                 charset = "0123456789abcdef"
               }

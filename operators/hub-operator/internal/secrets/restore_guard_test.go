@@ -138,3 +138,13 @@ func TestGenerationResumesOnceRecoveryIsComplete(t *testing.T) {
 		t.Fatalf("the new value was not generated: %v (generated %d)", srv.kv[tenantScope], srv.generated)
 	}
 }
+
+// OpenBao's password policies stop at 100 characters, so a 64-byte key is two
+// hex-64 draws and no policy longer than that is asked for.
+func TestA64ByteHexKeyIsTwoDraws(t *testing.T) {
+	s, srv := storeWith(t, nil, nil)
+	v, err := s.HexKey(context.Background(), 64)
+	if err != nil || v != "fresh-valuefresh-value" || srv.generated != 2 {
+		t.Fatalf("HexKey(64) = %q, %v after %d draw(s)", v, err, srv.generated)
+	}
+}

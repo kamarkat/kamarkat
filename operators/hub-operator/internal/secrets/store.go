@@ -103,10 +103,22 @@ func (c *Store) HexKey(ctx context.Context, nbytes int) (string, error) {
 		return "", err
 	}
 	switch nbytes {
-	case 16, 32, 64:
+	case 16, 32:
 		return c.Bao.GeneratePassword(ctx, fmt.Sprintf("hex-%d", 2*nbytes))
+	case 64:
+		// OpenBao password policies stop at 100 characters, so 128 hex characters
+		// are two independent hex-64 draws.
+		var key string
+		for range 2 {
+			half, err := c.Bao.GeneratePassword(ctx, "hex-64")
+			if err != nil {
+				return "", err
+			}
+			key += half
+		}
+		return key, nil
 	}
-	return "", fmt.Errorf("no OpenBao password policy yields a %d-byte hex key (hex-32, hex-64, hex-128)", nbytes)
+	return "", fmt.Errorf("no OpenBao password policy yields a %d-byte hex key (16, 32 or 64)", nbytes)
 }
 
 // URLSafe returns length characters from [A-Za-z0-9-._~], from OpenBao.
