@@ -373,10 +373,15 @@ def main() -> int:
 
     # By kind and name, not object identity: a document that was escaped is a
     # different object, and identity matching would leave it in both halves.
+    #
+    # And by identity too: a declaration that assigns metadata.name renames the
+    # object in place, so its new name is not the claimed one and the object was
+    # ALSO emitted verbatim -- with the unrendered Helm expression as its name.
     remaining = {}
     for rendered, these in by_file.items():
         keep = [d for d in these
-                if (d.get("kind"), (d.get("metadata") or {}).get("name")) not in claimed]
+                if id(d) not in collected
+                and (d.get("kind"), (d.get("metadata") or {}).get("name")) not in claimed]
         remaining[rendered] = keep
         verbatim.extend(keep)
 

@@ -159,6 +159,9 @@ global:
   */}}
   boxId: {{ required "boxId is required (ADR-111): it keys everything in the escrow that outlives a cluster, and there is no safe value to assume for it" $root.Values.boxId | quote }}
   clusterName: {{ include "environment-manager.clusterName" $root | quote }}
+  {{- /* The box's declared cloud region: where `kakt box init` created its bucket.
+         The databases' object-store endpoint is derived from it. */}}
+  region: {{ $root.Values.region | quote }}
   {{- /*
     The box's own tenant id, for ADR-078 add.1 §7: Alloy stamps `cluster` AND
     `tenant` on everything it sends. `cluster` alone is unique within a box and

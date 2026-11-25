@@ -27,7 +27,7 @@ patches:
               destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
               # The incarnation being RESTORED FROM: what the lost cluster wrote.
               serverName: billing-db-v1
-              endpointURL: https://hel1.your-objectstorage.com
+              endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
               s3Credentials:
                 accessKeyId:
                   name: s3-credentials-escrowed

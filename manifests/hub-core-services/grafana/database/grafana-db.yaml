@@ -133,7 +133,7 @@ spec:
     barmanObjectStore:
       destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
       serverName: grafana-db-v1
-      endpointURL: https://hel1.your-objectstorage.com
+      endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
       s3Credentials:
         accessKeyId:
           name: s3-credentials-escrowed

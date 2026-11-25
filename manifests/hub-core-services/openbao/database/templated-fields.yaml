@@ -17,6 +17,10 @@
   fields:
     - path: [spec, backup, barmanObjectStore, destinationPath]
       value: 's3://{{ .Values.global.boxId }}/{{ .Values.global.clusterName }}/'
+    # The box's bucket is in its declared region (kakt box init), and Hetzner refuses
+    # a bucket addressed through another region's endpoint.
+    - path: [spec, backup, barmanObjectStore, endpointURL]
+      value: 'https://{{ .Values.global.region }}.your-objectstorage.com'
     # Management-plane availability (ADR-111 Revision 7 §3). Raising it is a capacity
     # decision, made together with `postgresql.synchronous` (ladder in openbao-db.yaml)
     # and OpenBao's replica count.

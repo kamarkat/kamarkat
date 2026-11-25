@@ -27,6 +27,9 @@
 #                         box outlives its clusters and a successor restores what its
 #                         predecessor wrote (ADR-111 §1).
 #
+#   PLACEHOLDER_REGION    the box's declared region (registry/box.yaml `region`), where
+#                         its bucket is. Another region's endpoint is refused.
+#
 #   PLACEHOLDER_CLUSTER   the archive PREFIX inside that bucket, which is the name of the
 #                         cluster whose archive is being READ. The steady state derives it
 #                         from global.clusterName; a recovery names the predecessor's --
@@ -67,7 +70,7 @@ patches:
               destinationPath: s3://PLACEHOLDER_BOX/PLACEHOLDER_CLUSTER/
               # The incarnation being RESTORED FROM: what the lost cluster wrote.
               serverName: openbao-db-v1
-              endpointURL: https://hel1.your-objectstorage.com
+              endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
               s3Credentials:
                 accessKeyId:
                   name: s3-credentials-escrowed

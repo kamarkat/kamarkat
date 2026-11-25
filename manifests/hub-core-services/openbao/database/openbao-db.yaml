@@ -82,7 +82,7 @@ spec:
       # Bumped only when a cluster is recreated (ADR-112 §6; the recovery overlay sets
       # -v2). The pre-upgrade Backup's name includes it (ADR-117 §7).
       serverName: openbao-db-v1
-      endpointURL: https://hel1.your-objectstorage.com
+      endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
       s3Credentials:
         accessKeyId:
           name: s3-credentials-escrowed
