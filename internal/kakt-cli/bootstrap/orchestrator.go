@@ -709,23 +709,25 @@ func (o *Orchestrator) runFresh(ctx context.Context, stateMgr *state.StateManage
 	if err != nil {
 		return fmt.Errorf("[adr045-commit] %w", err)
 	}
-	fmt.Printf("[adr045-commit] Waiting for ArgoCD apps to reconcile: %v\n", appsToWait)
-	fmt.Println("[adr045-commit] This requires the generated files to be committed AND pushed.")
-	fmt.Println("[adr045-commit] If auto-push failed, push manually.")
+	if len(appsToWait) > 0 {
+		fmt.Printf("[adr045-commit] Waiting for ArgoCD apps to reconcile: %v\n", appsToWait)
+		fmt.Println("[adr045-commit] This requires the generated files to be committed AND pushed.")
+		fmt.Println("[adr045-commit] If auto-push failed, push manually.")
 
-	waitCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
-	defer cancel()
+		waitCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+		defer cancel()
 
-	if err := o.waitForArgoCDAppsHealthy(waitCtx, mgmtKubeconfig, appsToWait); err != nil {
-		// Print diagnostic info even on timeout
-		fmt.Println("[adr045-commit] ❌ Some ArgoCD apps did not become healthy.")
-		fmt.Println("[adr045-commit] Diagnostic commands:")
-		for _, app := range appsToWait {
-			fmt.Printf("  kubectl describe application %s -n platform-ops\n", app)
+		if err := o.waitForArgoCDAppsHealthy(waitCtx, mgmtKubeconfig, appsToWait); err != nil {
+			// Print diagnostic info even on timeout
+			fmt.Println("[adr045-commit] ❌ Some ArgoCD apps did not become healthy.")
+			fmt.Println("[adr045-commit] Diagnostic commands:")
+			for _, app := range appsToWait {
+				fmt.Printf("  kubectl describe application %s -n platform-ops\n", app)
+			}
+			return fmt.Errorf("[adr045-commit] %w", err)
 		}
-		return fmt.Errorf("[adr045-commit] %w", err)
+		fmt.Println("[adr045-commit] ✓ All ArgoCD apps reconciled successfully")
 	}
-	fmt.Println("[adr045-commit] ✓ All ArgoCD apps reconciled successfully")
 
 	// ── Phase 12: Finalize ────────────────────────────────────────────
 	var kubeconfigPath string
@@ -2960,6 +2962,10 @@ func (o *Orchestrator) commitGeneratedArtifacts(ctx context.Context) error {
 	generatedPaths, err := o.adr045GeneratedDirs()
 	if err != nil {
 		return fmt.Errorf("[adr045-commit] %w", err)
+	}
+	if len(generatedPaths) == 0 {
+		// Nothing is registered, so there is nothing to commit or push.
+		return nil
 	}
 
 	if err := o.gitCommitArtifacts(ctx, generatedPaths); err != nil {

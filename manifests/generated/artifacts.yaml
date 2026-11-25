@@ -4,7 +4,7 @@
 # PhaseBoundary03 can proceed.
 apiVersion: bootstrap.kamarkat.io/v1alpha1
 kind: GeneratedArtifactRegistry
-artifacts:
+artifacts: []
   # Paths are relative to repo root. The CLI generates these files
   # during BootstrapInfisicalAPI phase. Kustomize patches: paths
   # are relative to the kustomization directory (resolved via the
@@ -14,24 +14,10 @@ artifacts:
   # repository; they now reach the security component as chart values read from
   # the infisical-auth Secret at seed time. Nothing is written to the tree, so
   # there is no artifact to register or validate.
-  # {env} is replaced with the environment slug being bootstrapped. The path is
-  # per environment because a single file under base was inherited by every
-  # overlay: it held whichever cluster bootstrapped last, so prod rendered dev's
-  # Infisical project and nothing in prod's directory showed why.
-  #
-  # consumedBy names the Application that cannot converge until this file is
-  # committed and pushed. It is declared rather than derived: this artifact sits
-  # under environments/base while the Application reconciles environments/<slug>
-  # and reaches it through a Kustomize ../base reference, so matching an
-  # Application's source path against the artifact's path finds nothing.
-  - file: manifests/environments/{env}/generated/values/infisical-identity.yaml
-    consumedBy: hub-environment
-    requiredFields:
-      # A values file now, not a ConfigMap: hub-environment renders the object
-      # from these and is its only writer.
-      - global.infisical.organizationId
-      - global.infisical.projectId
-      - global.infisical.secretsProjectId
+  # The self-hosted Infisical identity values (organisation and project ids)
+  # were registered here. ADR-117 removed self-hosted Infisical: no Day-0 phase
+  # writes that file and no chart reads it, so requiring it failed adr045-commit
+  # on a file nothing could produce.
   # NO PKI COORDINATES ARE GENERATED ANY MORE, and their absence is the decision.
   #
   # platform-pki-values.yaml was declared here, carrying this box's Infisical
