@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Releasing the box's DNS records is part of tearing it down, and until now
@@ -39,9 +42,10 @@ import (
 // So this deletes deliberately, on the way out, rather than hoping a controller
 // notices in time.
 
-const (
-	hetznerAPIBase = "https://api.hetzner.cloud/v1"
+// hetznerAPIBase is a variable so tests can point it at a fake API.
+var hetznerAPIBase = "https://api.hetzner.cloud/v1"
 
+const (
 	// dnsReclaimTimeout bounds the whole exchange. Teardown is a cleanup path:
 	// it must not hang on a DNS API that is slow or unreachable, because the
 	// resources that cost money have already been dealt with by the time this
@@ -99,10 +103,7 @@ func (o *Orchestrator) resolveDNSOwnership(ctx context.Context) (dnsOwnership, b
 	if o.DNS.Owner != "" && o.DNS.Zone != "" {
 		token := o.DNS.Token
 		if token == "" {
-			token = strings.TrimSpace(os.Getenv("HCLOUD_DNS_TOKEN"))
-		}
-		if token == "" {
-			token = strings.TrimSpace(os.Getenv("HETZNER_DNS_API_TOKEN"))
+			token = DNSToken(o.ProviderToken)
 		}
 		if token == "" {
 			fmt.Println("[teardown] ⚠️  a DNS owner and zone were given but no token; set")
@@ -116,7 +117,21 @@ func (o *Orchestrator) resolveDNSOwnership(ctx context.Context) (dnsOwnership, b
 			txtPrefix: "extdns-",
 		}, true
 	}
-	return o.readDNSOwnership(ctx)
+	if own, ok := o.readDNSOwnership(ctx); ok {
+		return own, true
+	}
+	// The cluster could not answer -- it is already gone, or its kubeconfig is.
+	// The box's own declaration names the same owner and zone, and outlives it.
+	owner, zone, err := DeclaredDNSOwnership(o.GitopsDir, o.ClusterName)
+	if err != nil || owner == "" || zone == "" {
+		return dnsOwnership{}, false
+	}
+	token := DNSToken(o.ProviderToken)
+	if token == "" {
+		return dnsOwnership{}, false
+	}
+	fmt.Printf("[teardown] DNS ownership read from the box's declaration: owner %s, zone %s\n", owner, zone)
+	return dnsOwnership{token: token, ownerID: owner, zoneHost: zone, txtPrefix: "extdns-"}, true
 }
 
 // readDNSOwnership pulls the DNS credential and this box's external-dns identity
@@ -377,6 +392,8 @@ func (o *Orchestrator) releaseDNSRecords(ctx context.Context, own dnsOwnership) 
 			fmt.Printf("[teardown]       %s\n", f)
 		}
 		fmt.Printf("[teardown]     Delete them from the %s zone by hand.\n", zoneName)
+		o.recordOutstanding("DNS records", fmt.Errorf("%d record(s) could not be deleted; re-run:\n      %s",
+			len(failed), releaseCommand(own.ownerID, own.zoneHost)))
 	}
 	return released
 }
@@ -388,9 +405,117 @@ func (o *Orchestrator) releaseDNSRecords(ctx context.Context, own dnsOwnership) 
 // records simply stayed, nothing mentioned them, and the next box on the domain
 // inherited a hostname it could not correct.
 func (o *Orchestrator) reportDNSResidue(own dnsOwnership, reason string) {
+	o.recordOutstanding("DNS records", fmt.Errorf("%s; release them with:\n      %s",
+		reason, releaseCommand(own.ownerID, own.zoneHost)))
 	fmt.Println("[teardown] ⚠️  DNS records were NOT released:", reason)
 	fmt.Printf("[teardown]     Records under %s owned by external-dns id '%s' remain in the\n", own.zoneHost, own.ownerID)
 	fmt.Println("[teardown]     zone. They will not be adopted, updated or deleted by any")
 	fmt.Println("[teardown]     future box — external-dns ignores records it does not own, and")
 	fmt.Println("[teardown]     logs nothing when it does. Delete them by hand.")
+}
+
+// releaseCommand is the exact command that releases one owner's records.
+func releaseCommand(owner, zone string) string {
+	if owner == "" {
+		owner = "<external-dns txt-owner-id>"
+	}
+	if zone == "" {
+		zone = "<zone>"
+	}
+	return fmt.Sprintf("kakt teardown --dns-only --dns-owner %s --dns-zone %s", owner, zone)
+}
+
+// DNSToken returns the credential for the Hetzner DNS API. The hub's
+// external-dns uses the box's cloud token (hcloud-token), so that is the
+// fallback after the DNS-specific variables.
+func DNSToken(providerToken string) string {
+	for _, v := range []string{os.Getenv("HETZNER_DNS_API_TOKEN"), os.Getenv("HCLOUD_DNS_TOKEN"),
+		providerToken, os.Getenv("HCLOUD_TOKEN")} {
+		if t := strings.TrimSpace(v); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// DeclaredDNSOwnership reads the external-dns owner and the hub domain from the
+// cluster's declaration (registry/clusters/<cluster>/values.yaml). Empty values
+// with a nil error mean the box declares no DNS of its own.
+func DeclaredDNSOwnership(gitopsDir, cluster string) (owner, zone string, err error) {
+	if gitopsDir == "" || cluster == "" {
+		return "", "", fmt.Errorf("no box repository or cluster named")
+	}
+	raw, err := os.ReadFile(filepath.Join(gitopsDir, "registry", "clusters", cluster, "values.yaml"))
+	if err != nil {
+		return "", "", err
+	}
+	var v struct {
+		Domain    string `yaml:"domain"`
+		Subdomain string `yaml:"subdomain"`
+		DNS       struct {
+			Provider string `yaml:"provider"`
+			OwnerID  string `yaml:"ownerId"`
+		} `yaml:"dns"`
+	}
+	if err := yaml.Unmarshal(raw, &v); err != nil {
+		return "", "", err
+	}
+	if p := strings.TrimSpace(v.DNS.Provider); p != "" && p != "hetzner" {
+		return "", "", nil // another provider's zone; not this API's to read
+	}
+	domain := strings.TrimSpace(strings.TrimSuffix(v.Domain, "."))
+	if sub := strings.Trim(strings.TrimSpace(v.Subdomain), "."); sub != "" && domain != "" {
+		domain = sub + "." + domain
+	}
+	return strings.TrimSpace(v.DNS.OwnerID), domain, nil
+}
+
+// ForeignDNSOwners reports which of hosts (fully qualified) carry an
+// external-dns ownership record naming an owner other than ownerID, as
+// host -> that owner. external-dns never updates such a record and logs nothing
+// about it, so a box whose hostnames are held by another owner serves none of
+// them.
+func ForeignDNSOwners(ctx context.Context, token, zoneHost, ownerID string, hosts []string) (map[string]string, error) {
+	own := dnsOwnership{token: token, ownerID: ownerID, zoneHost: zoneHost, txtPrefix: "extdns-"}
+	ctx, cancel := context.WithTimeout(ctx, dnsReclaimTimeout)
+	defer cancel()
+	zoneID, zoneName, err := own.zoneID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var page struct {
+		RRSets []hetznerRRSet `json:"rrsets"`
+	}
+	if err := own.do(ctx, http.MethodGet, fmt.Sprintf("/zones/%d/rrsets?per_page=500", zoneID), &page); err != nil {
+		return nil, err
+	}
+	want := map[string]string{} // zone-relative name -> fqdn
+	for _, h := range hosts {
+		rel := strings.TrimSuffix(h, "."+zoneName)
+		if h == zoneName {
+			rel = "@"
+		}
+		want[rel] = h
+	}
+	foreign := map[string]string{}
+	for _, rr := range page.RRSets {
+		if rr.Type != "TXT" || !strings.HasPrefix(rr.Name, own.txtPrefix) {
+			continue
+		}
+		host := strings.TrimPrefix(strings.TrimPrefix(rr.Name, own.txtPrefix), "a-")
+		fqdn, ok := want[host]
+		if !ok {
+			// extdns-a-<host> and a host itself beginning "a-" are told apart by
+			// trying the name with only the prefix removed.
+			if fqdn, ok = want[strings.TrimPrefix(rr.Name, own.txtPrefix)]; !ok {
+				continue
+			}
+		}
+		for _, rec := range rr.Records {
+			if o := txtOwner(rec.Value); o != "" && o != ownerID {
+				foreign[fqdn] = o
+			}
+		}
+	}
+	return foreign, nil
 }

@@ -146,7 +146,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 				"state them: --dns-owner, --dns-zone, and HETZNER_DNS_API_TOKEN in the environment.")
 		}
 		o.ReleasedDNSRecords = o.releaseDNSRecords(ctx, own)
-		return nil
+		return o.result()
 	}
 
 	if o.Debug {
@@ -295,11 +295,15 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// it, because external-dns silently ignores records it does not own.
 	if hasDNS {
 		o.releaseDNSRecords(ctx, dnsOwn)
+	} else if owner, zone, err := DeclaredDNSOwnership(o.GitopsDir, o.ClusterName); err == nil && (owner == "" || zone == "") {
+		fmt.Println("[teardown] This box declares no DNS of its own; no records to release")
 	} else {
-		fmt.Println("[teardown] ⚠️  DNS ownership could not be read from the cluster, so any")
-		fmt.Println("[teardown]     records it published are left in place. If this box served")
-		fmt.Println("[teardown]     public hostnames, check the zone: an orphaned record cannot")
-		fmt.Println("[teardown]     be reclaimed by a future box and must be deleted by hand.")
+		// Not a warning: records left here hold this box's hostnames against every
+		// later box on the domain, and nothing else will ever remove them.
+		o.recordOutstanding("DNS records", fmt.Errorf("this box's DNS owner, zone or "+
+			"token could not be read from the cluster or from %s, so its records were "+
+			"not released; set HETZNER_DNS_API_TOKEN (or HCLOUD_TOKEN) and run:\n      %s",
+			o.gitopsDirForMessage(), releaseCommand(owner, zone)))
 	}
 
 	// Step 5: Local Kind, Docker, and state cleanup

@@ -194,6 +194,10 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	if o.GitopsDir != "" {
 		stateMgr = state.NewTenantStateManager(o.GitopsDir, o.ClusterName)
 	}
+	if err := o.checkHubHostnamesUnclaimed(ctx); err != nil {
+		return err
+	}
+
 	bs, err := stateMgr.Load()
 	if err == nil && bs != nil {
 		return o.handleExistingState(ctx, stateMgr, bs)
