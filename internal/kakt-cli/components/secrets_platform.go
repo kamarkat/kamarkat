@@ -56,6 +56,11 @@ type optionalSecret struct {
 	// available to every tenant, and a tenant's own monitoring account is not a
 	// licence check.
 	destination bool
+	// declared names keys the artefact may omit because the cluster's
+	// declaration states them (secret key -> declaration value), filled only
+	// once the artefact supplies something: a box with no credential at all is
+	// still "not configured", not "partially supplied".
+	declared func(hubaccess.Coordinates) map[string]string
 	// capability marks a credential that IS the capability: with it the box does
 	// the thing, without it the box does not do the thing, and neither is a
 	// misconfiguration.
@@ -101,9 +106,10 @@ func optionalSecrets() []optionalSecret {
 		// credentials at Day-0 guarantees credentials exist before boundary 02 starts.
 		//
 		// Three keys, region included, because CNPG takes it as a discrete key.
-		// An escrowed credential that declares no region is refused by name
-		// rather than delivered incomplete: the archive fails at first use
-		// either way, and refusing says which field is missing.
+		// `kakt box init` enrols the key pair alone; the region is the cluster's
+		// declared one, where box init created the bucket (objectstore.Endpoint).
+		// A region in the artefact wins. Neither is refused by name rather than
+		// delivered incomplete.
 		{
 			name: "s3-credentials-escrowed", namespace: constants.NamespaceData,
 			artifact: escrow.ArtifactBackupStoreCredential,
@@ -111,6 +117,9 @@ func optionalSecrets() []optionalSecret {
 				"access-key-id":     escrow.FieldAccessKeyID,
 				"secret-access-key": escrow.FieldSecretAccessKey,
 				"region":            "region",
+			},
+			declared: func(c hubaccess.Coordinates) map[string]string {
+				return map[string]string{"region": c.Region}
 			},
 			secType: corev1.SecretTypeOpaque,
 			what:    "CNPG Barman backups of all hub PostgreSQL clusters",
@@ -225,6 +234,9 @@ func (i *Installer) InstallPlatformCredentials(ctx context.Context) error {
 			return err
 		}
 		data, found, missing := resolveOptional(s, payload)
+		if s.declared != nil && len(found) > 0 {
+			missing = fillDeclared(data, missing, s.declared(coords))
+		}
 		switch {
 		case len(found) == 0 && s.destination:
 			// Not an error. The capability ships and runs; it simply has nowhere
@@ -310,6 +322,20 @@ func resolveOptional(s optionalSecret, payload string) (data map[string]string, 
 		return nil, nil, nil
 	}
 	return data, found, missing
+}
+
+// fillDeclared supplies missing keys from the cluster's declaration, returning
+// the keys still missing.
+func fillDeclared(data map[string]string, missing []string, declared map[string]string) []string {
+	var still []string
+	for _, key := range missing {
+		if v := strings.TrimSpace(declared[key]); v != "" {
+			data[key] = v
+			continue
+		}
+		still = append(still, key)
+	}
+	return still
 }
 
 func applySecret(ctx context.Context, cs kubernetes.Interface, s optionalSecret, data map[string]string) error {

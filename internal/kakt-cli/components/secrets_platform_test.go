@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/platform/escrow"
 )
 
@@ -141,5 +142,34 @@ func TestRegistryPullSecretHonoursRegistry(t *testing.T) {
 		if doc := s.compose(in)[".dockerconfigjson"]; !strings.Contains(doc, "registry.acme.example") {
 			t.Errorf("registry not honoured: %s", doc)
 		}
+	}
+}
+
+// box init enrols the object-store key pair alone; Day-0 takes the region from
+// the cluster's declaration, and a credential that is absent stays absent.
+func TestBackupCredentialTakesRegionFromDeclaration(t *testing.T) {
+	var s optionalSecret
+	for _, c := range optionalSecrets() {
+		if c.name == "s3-credentials-escrowed" {
+			s = c
+		}
+	}
+	payload := escrow.RenderFields(map[string]string{
+		escrow.FieldAccessKeyID:     "AK",
+		escrow.FieldSecretAccessKey: "SK",
+	})
+	data, found, missing := resolveOptional(s, payload)
+	missing = fillDeclared(data, missing, s.declared(hubaccess.Coordinates{Region: "fsn1"}))
+	if len(found) != 2 || len(missing) != 0 || data["region"] != "fsn1" {
+		t.Fatalf("data=%v found=%v missing=%v", data, found, missing)
+	}
+
+	data, _, missing = resolveOptional(s, payload)
+	if missing = fillDeclared(data, missing, s.declared(hubaccess.Coordinates{})); len(missing) != 1 {
+		t.Fatalf("no declared region must stay missing, got %v", missing)
+	}
+
+	if _, found, _ := resolveOptional(s, ""); len(found) != 0 {
+		t.Fatalf("an absent credential must resolve to nothing, got %v", found)
 	}
 }

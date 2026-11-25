@@ -72,6 +72,9 @@ type Coordinates struct {
 	// box that named its administrator by email would hand that authority to
 	// whoever next holds it.
 	PlatformAdmin string
+	// Region is the cloud region the cluster declares; the box's object store
+	// is in the same region (objectstore.Endpoint).
+	Region string
 }
 
 // boxDeclPath is the box's authoritative declaration (registry/box.yaml).
@@ -133,6 +136,7 @@ func readDeclaration(gitopsDir, clusterName string) (Coordinates, error) {
 				OrganizationID string `yaml:"organizationId"`
 			} `yaml:"escrow"`
 			PlatformAdminIdentity string `yaml:"platformAdminIdentity"`
+			Region                string `yaml:"region"`
 		}
 		if err := yaml.Unmarshal(clusterRaw, &decl); err != nil {
 			return c, fmt.Errorf("parse %s: %w", clusterPath, err)
@@ -140,6 +144,7 @@ func readDeclaration(gitopsDir, clusterName string) (Coordinates, error) {
 		if strings.TrimSpace(decl.ClusterName) != "" {
 			c.ClusterName = strings.TrimSpace(decl.ClusterName)
 		}
+		c.Region = strings.TrimSpace(decl.Region)
 		if c.BoxID == "" {
 			c.BoxID = strings.TrimSpace(decl.BoxID)
 		}
