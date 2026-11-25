@@ -76,13 +76,11 @@ func RecoveryKeySequence(ctx context.Context, c *Client, esc Escrow) error {
 		return err
 	}
 
-	var status struct {
-		Started  bool `json:"started"`
-		Required int  `json:"required"`
-	}
-	if err := c.Read(ctx, "sys/rotate/recovery/init", &status); err != nil {
+	var statusResp recoveryInitResponse
+	if err := c.Read(ctx, "sys/rotate/recovery/init", &statusResp); err != nil {
 		return fmt.Errorf("read the recovery-key status: %w", err)
 	}
+	status := statusResp.get()
 	if status.Started {
 		return errors.New("a recovery-key rotation is already in progress on this OpenBao, and this " +
 			"bootstrap did not start it: refusing to interfere (fail closed). Inspect " +
@@ -91,16 +89,13 @@ func RecoveryKeySequence(ctx context.Context, c *Client, esc Escrow) error {
 
 	if status.Required == 0 {
 		// Step 2. No recovery key exists: this is the one moment one can be issued.
-		var init struct {
-			KeysBase64      []string `json:"keys_base64"`
-			PGPFingerprints []string `json:"pgp_fingerprints"`
-			Complete        bool     `json:"complete"`
-		}
+		var initResp recoveryInitResponse
 		if err := c.Write(ctx, "sys/rotate/recovery/init", map[string]any{
 			"secret_shares": 1, "secret_threshold": 1, "pgp_keys": []string{pub}, "backup": true,
-		}, &init); err != nil {
+		}, &initResp); err != nil {
 			return fmt.Errorf("initialize the recovery key: %w", err)
 		}
+		init := initResp.get()
 		if !init.Complete || len(init.KeysBase64) != 1 {
 			return errors.New("OpenBao did not issue an encrypted recovery key; check its seal configuration")
 		}
@@ -144,6 +139,27 @@ func RecoveryKeySequence(ctx context.Context, c *Client, esc Escrow) error {
 		return fmt.Errorf("delete the recovery-key backup: %w", err)
 	}
 	return retireTrustBootstrap(ctx, c)
+}
+
+// recoveryInit is sys/rotate/recovery/init, read or written. OpenBao answers
+// under "data"; the top level is read only when there is none.
+type recoveryInit struct {
+	Started    bool     `json:"started"`
+	Required   int      `json:"required"`
+	KeysBase64 []string `json:"keys_base64"`
+	Complete   bool     `json:"complete"`
+}
+
+type recoveryInitResponse struct {
+	Data *recoveryInit `json:"data"`
+	recoveryInit
+}
+
+func (r recoveryInitResponse) get() recoveryInit {
+	if r.Data != nil {
+		return *r.Data
+	}
+	return r.recoveryInit
 }
 
 func readEscrowedRecovery(ctx context.Context, esc Escrow) (EncryptedRecoveryKey, bool, error) {

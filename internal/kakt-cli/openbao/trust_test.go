@@ -47,7 +47,7 @@ func (f *fakeBao) handler(t *testing.T) http.Handler {
 		p := strings.TrimPrefix(r.URL.Path, "/v1/")
 		switch {
 		case p == "sys/rotate/recovery/init" && r.Method == http.MethodGet:
-			json.NewEncoder(w).Encode(map[string]any{"started": f.started, "required": f.required})
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"started": f.started, "required": f.required}})
 		case p == "sys/rotate/recovery/init" && r.Method == http.MethodPost:
 			f.initCalls++
 			var body struct {
@@ -61,7 +61,7 @@ func (f *fakeBao) handler(t *testing.T) http.Handler {
 			}
 			f.required = 1
 			f.backup = map[string][]string{fp: {"Y2lwaGVydGV4dA=="}}
-			json.NewEncoder(w).Encode(map[string]any{"complete": true, "keys_base64": []string{"Y2lwaGVydGV4dA=="}, "pgp_fingerprints": []string{fp}})
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"complete": true, "keys_base64": []string{"Y2lwaGVydGV4dA=="}, "pgp_fingerprints": []string{fp}}})
 		case p == "sys/rotate/recovery/backup" && r.Method == http.MethodGet:
 			if f.backup == nil {
 				w.WriteHeader(http.StatusBadRequest)
