@@ -98,12 +98,19 @@ spec:
             configMapKeyRef:
               name: hub-bootstrap-config
               key: CLUSTER_REGION
-        # ADR-078 add.5 §4: where each cluster's log bucket is created. The same
-        # object storage the database backups use (each cluster's endpointURL).
+        # ADR-078 add.5 §4: where each cluster's log bucket is created -- the
+        # box's region, the same object storage its database backups use.
         - name: OBJECT_STORAGE_ENDPOINT
-          value: hel1.your-objectstorage.com
+          valueFrom:
+            configMapKeyRef:
+              name: hub-bootstrap-config
+              key: OBJECT_STORAGE_ENDPOINT
+              optional: true
         - name: OBJECT_STORAGE_REGION
-          value: hel1
+          valueFrom:
+            configMapKeyRef:
+              name: hub-bootstrap-config
+              key: CLUSTER_REGION
         # The box's escrow (Infisical Cloud), outside the box: kubeconfigs, Cluster
         # API trust roots and the management-state backup key
         # (ADR-076). optional throughout: a box may be built without one, and the

@@ -26,3 +26,13 @@
       value: '{{ .Values.global.boxId }}'
     - replaceAll: {from: dev.nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
     - replaceAll: {from: nutgraf.in, with: '{{ .Values.global.hubDomain }}'}
+
+# The box's region, where its buckets are (kakt box init creates them there).
+# hub-operator creates each cluster's log bucket at this endpoint.
+- kind: ConfigMap
+  name: hub-bootstrap-config
+  fields:
+    - path: [data, CLUSTER_REGION]
+      value: '{{ .Values.global.region }}'
+    - path: [data, OBJECT_STORAGE_ENDPOINT]
+      value: '{{ .Values.global.region }}.your-objectstorage.com'

@@ -11,3 +11,4 @@ data:
   # no reader — it was wired into the operator as an env var nothing consumed.
   CLUSTER_ID: ""
   CLUSTER_REGION: ""
+  OBJECT_STORAGE_ENDPOINT: ""

@@ -21,6 +21,10 @@
       replace:
         from: 'replication_factor: 3'
         with: 'replication_factor: 1'
+    - path: [data, config.yaml]
+      replace:
+        from: PLACEHOLDER_REGION
+        with: '{{ .Values.global.region }}'
 
 - kind: StatefulSet
   name: loki

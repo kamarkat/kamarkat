@@ -473,6 +473,11 @@
       replace:
         from: PLACEHOLDER_LOGS_BUCKET
         with: '{{ .Values.spokeName }}-logs'
+    # The box's region: hub-operator creates every cluster's log bucket there.
+    - path: [data, config.yaml]
+      replace:
+        from: PLACEHOLDER_REGION
+        with: '{{ .Values.global.region }}'
     - path: [data, config.yaml]
       replace:
         from: 'replication_factor: 3'

@@ -52,11 +52,11 @@ func TestInfrastructureServicesCeilingMatchesPolicy(t *testing.T) {
 	}
 }
 
-// argocd-agent-jwt requests duration 43800h (5 years).
-func TestSigningKeysCapCoversFiveYearJWTKey(t *testing.T) {
+// argocd-agent-jwt requests duration 8760h (1 year); the cap must cover it.
+func TestSigningKeysCapCoversTheJWTKey(t *testing.T) {
 	for _, p := range RequiredProfiles {
-		if p.Slug == "signing-keys" && p.TTLDays < 1825 {
-			t.Errorf("signing-keys TTL cap is %d days; argocd-agent-jwt requests ~1825", p.TTLDays)
+		if p.Slug == "signing-keys" && p.TTLDays < 365 {
+			t.Errorf("signing-keys TTL cap is %d days; argocd-agent-jwt requests 365", p.TTLDays)
 		}
 	}
 }

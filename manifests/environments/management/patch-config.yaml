@@ -6,3 +6,4 @@ metadata:
 data:
   CLUSTER_ID: "hub-dev"
   CLUSTER_REGION: ""
+  OBJECT_STORAGE_ENDPOINT: ""

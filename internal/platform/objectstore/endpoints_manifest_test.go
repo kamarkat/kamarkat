@@ -19,9 +19,6 @@ var hardcodedEndpoint = regexp.MustCompile(`\b[a-z]{3}[0-9]\.your-objectstorage\
 // whatever the box's region is. Adding a file here needs that reason; a file
 // that stops naming a region must be removed from here.
 var fixedRegionEndpoints = map[string]string{
-	"manifests/hub-core-services/loki/loki.yaml":                        "hub log bucket; hub-operator creates it in hel1 (manager.yaml)",
-	"operators/hub-operator/config/manager/manager.yaml":                "where hub-operator creates log buckets",
-	"manifests/spoke/spoke-catalog/infra/loki/loki.yaml":                "spoke log buckets; created by hub-operator in hel1",
 	"manifests/spoke/spoke-catalog/providers/hetzner/cnpg-cluster.yaml": "shared spoke-pool-backups bucket in hel1",
 	"manifests/spoke/spoke-catalog/providers/hybrid/cnpg-cluster.yaml":  "shared spoke-pool-backups bucket in hel1",
 }

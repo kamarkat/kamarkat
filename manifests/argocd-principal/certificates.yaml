@@ -60,10 +60,10 @@ spec:
 ---
 # JWT signing key certificate (RSA private key for JWT signing)
 # Correction 1 (ADR-035): Long-lived asymmetric signing key.
-# Requires a dedicated "Signing Keys" certificate profile in Infisical PKI
-# with sufficient TTL. This is NOT an mTLS transport certificate.
-# Correction 2: duration capped at 5 years - the fleet intermediate CA's
-# notAfter (2036-06-07) cannot host a 10-year leaf issued from today.
+# Issued through the signing-keys profile (openbao-signing). This is NOT an
+# mTLS transport certificate. The issuing intermediate is valid 5 years and
+# OpenBao refuses a leaf that outlives it (leaf_not_after_behavior=err), so the
+# key lives 1 year and renews 30 days before expiry.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -71,7 +71,7 @@ metadata:
   namespace: platform-ops
 spec:
   secretName: argocd-agent-jwt
-  duration: 43800h # 5 years (fits under CA notAfter 2036-06-07)
+  duration: 8760h # 1 year, well inside the 5-year intermediate
   renewBefore: 720h # 30 days
   commonName: argocd-agent-jwt
   usages:
