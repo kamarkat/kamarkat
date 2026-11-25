@@ -75,3 +75,51 @@ func TestADR045RegistryResolvesTheOverlayPlaceholder(t *testing.T) {
 			HubOverlayDir)
 	}
 }
+
+// Every registered artifact must have code that writes it. adr045-commit fails
+// on a registered file that is absent, so an entry whose writer was removed (as
+// self-hosted Infisical's was under ADR-117) stops every Day-0 run there.
+func TestEveryADR045ArtifactHasAWriter(t *testing.T) {
+	fromRepoRoot(t)
+	reg, err := (&Orchestrator{}).readADR045Registry()
+	if err != nil {
+		t.Fatalf("reading the registry: %v", err)
+	}
+	if len(reg.Artifacts) == 0 {
+		return
+	}
+
+	var sources []string
+	for _, root := range []string{"internal", "operators", "cmd"} {
+		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() && (d.Name() == "embedded" || d.Name() == "vendor") {
+				return filepath.SkipDir
+			}
+			if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+				if b, err := os.ReadFile(path); err == nil {
+					sources = append(sources, string(b))
+				}
+			}
+			return nil
+		})
+	}
+
+	for _, a := range reg.Artifacts {
+		name := filepath.Base(a.File)
+		written := false
+		for _, src := range sources {
+			if strings.Contains(src, `"`+name+`"`) {
+				written = true
+				break
+			}
+		}
+		if !written {
+			t.Errorf("%s is registered in manifests/generated/artifacts.yaml, but no "+
+				"non-test Go source names %q, so nothing writes it and adr045-commit "+
+				"will fail on it", a.File, name)
+		}
+	}
+}
