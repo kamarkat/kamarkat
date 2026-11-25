@@ -21,7 +21,7 @@
 # failure; whatever had not been archived is gone. This BOUNDS data loss, it does not
 # eliminate it.
 #
-# TWO VALUES YOU MUST SET, and the overlay is deliberately not renderable without them:
+# THREE VALUES YOU MUST SET, and the overlay is deliberately not renderable without them:
 #
 #   PLACEHOLDER_BOX       the BUCKET, which is the boxId. One bucket per box, because a
 #                         box outlives its clusters and a successor restores what its

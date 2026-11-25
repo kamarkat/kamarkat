@@ -1,39 +1,21 @@
 # ADR-045: Bootstrap-Generated GitOps Artifacts Registry
-# CLI parses this file during PhaseInitSecrets to determine
-# which artifacts must be generated and validated before
-# PhaseBoundary03 can proceed.
+#
+# Files a Day-0 phase writes into the box's GitOps repository and that a later
+# phase reads through ArgoCD. [adr045-commit] validates each one, commits and
+# pushes it before boundary 04, and waits for its consumedBy Application.
+#
+# Entry shape:
+#   - file: manifests/environments/{env}/generated/<path>   # {env} = hub overlay
+#     consumedBy: <Application that cannot converge without it>
+#     requiredFields: [<dotted keys that must be non-empty>]
+# In a tenant repository the path is rewritten to
+# registry/clusters/<cluster>/generated/<path>. Every file listed here must be
+# named by the code that writes it (TestEveryADR045ArtifactHasAWriter).
+#
+# The list is empty: per-cluster values now reach components as chart values,
+# not as committed files, and ADR-117 removed self-hosted Infisical, whose
+# identity values were the last entry. With nothing registered, [adr045-commit]
+# commits nothing and waits for no Application.
 apiVersion: bootstrap.kamarkat.io/v1alpha1
 kind: GeneratedArtifactRegistry
 artifacts: []
-  # Paths are relative to repo root. The CLI generates these files
-  # during BootstrapInfisicalAPI phase. Kustomize patches: paths
-  # are relative to the kustomization directory (resolved via the
-  # generated/ subdirectory inside each consumer).
-  # The Infisical PKI coordinates were generated here as a Kustomize patch. They
-  # are per-cluster instance data, and ADR-062 keeps that out of the types
-  # repository; they now reach the security component as chart values read from
-  # the infisical-auth Secret at seed time. Nothing is written to the tree, so
-  # there is no artifact to register or validate.
-  # The self-hosted Infisical identity values (organisation and project ids)
-  # were registered here. ADR-117 removed self-hosted Infisical: no Day-0 phase
-  # writes that file and no chart reads it, so requiring it failed adr045-commit
-  # on a file nothing could produce.
-  # NO PKI COORDINATES ARE GENERATED ANY MORE, and their absence is the decision.
-  #
-  # platform-pki-values.yaml was declared here, carrying this box's Infisical
-  # project and machine-identity client id, because the security boundary emitted
-  # no ClusterIssuer without them -- which once left eleven certificates pending,
-  # the three argocd-agent mTLS identities and the Support Agent's enrolment
-  # (ADR-077).
-  #
-  # pki-issuer v1.x takes neither value: an Issuer names an application and a
-  # profile, the server resolves the project from the organisation's active
-  # Certificate Manager project, and the controller reads the client id from the
-  # infisical-auth Secret itself. So there is nothing per-cluster left to
-  # generate, the file is no longer written, and bundle.yaml no longer reads it --
-  # a $values source that no run creates would fail the render it is part of.
-
-  # The hub Gateway's external-dns target was generated here as a Kustomize
-  # patch. It is per-cluster instance data, and the gateway component now takes
-  # it as a chart value supplied from hubIngressAddress, so nothing is written
-  # to the tree and there is no artifact to register.

@@ -2854,7 +2854,7 @@ func (o *Orchestrator) validateADR045Artifacts(ctx context.Context) error {
 	}
 
 	if len(registry.Artifacts) == 0 {
-		fmt.Println("[adr045-validate] ⚠️  No artifacts registered in artifacts.yaml")
+		fmt.Println("[adr045-validate] No artifacts registered; nothing to validate or commit")
 		return nil
 	}
 
