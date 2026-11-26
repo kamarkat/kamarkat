@@ -97,7 +97,11 @@ func readDeclaration(gitopsDir, clusterName string) (Coordinates, error) {
 			"registry/box.yaml and registry/clusters/<cluster>/values.yaml, and there is nowhere to read them")
 	}
 	if strings.TrimSpace(clusterName) == "" {
-		return c, fmt.Errorf("no cluster name: these declarations belong to one cluster")
+		name, err := soleManagementCluster(gitopsDir)
+		if err != nil {
+			return c, err
+		}
+		clusterName = name
 	}
 
 	c.ClusterName = strings.TrimSpace(clusterName)
@@ -183,18 +187,18 @@ func Declaration(gitopsDir, clusterName string) (Coordinates, error) {
 		return c, err
 	}
 	if c.BoxID == "" {
-		return c, fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical "+
-			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
+		return c, fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical " +
+			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the " +
 			"cluster name")
 	}
 	if c.EscrowURL == "" || c.EscrowProjectID == "" {
-		return c, fmt.Errorf("registry/box.yaml declares no escrow coordinates.\n\n"+
-			"Add them -- they are names, not credentials, and they are what lets any\n"+
-			"authorized workstation reach this box:\n\n"+
-			"  escrow:\n"+
-			"    url: https://app.infisical.com\n"+
-			"    projectId: <the escrow project this box was enrolled in>\n\n"+
-			"`kakt escrow init` prints both when it creates the project, and they are in\n"+
+		return c, fmt.Errorf("registry/box.yaml declares no escrow coordinates.\n\n" +
+			"Add them -- they are names, not credentials, and they are what lets any\n" +
+			"authorized workstation reach this box:\n\n" +
+			"  escrow:\n" +
+			"    url: https://app.infisical.com\n" +
+			"    projectId: <the escrow project this box was enrolled in>\n\n" +
+			"`kakt escrow init` prints both when it creates the project, and they are in\n" +
 			"the escrow store of whoever ran it.")
 	}
 	return c, nil
@@ -213,8 +217,8 @@ func DeclaredBoxID(gitopsDir, clusterName string) (string, error) {
 		return "", err
 	}
 	if c.BoxID == "" {
-		return "", fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical "+
-			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the "+
+		return "", fmt.Errorf("registry/box.yaml declares no boxId: artefacts are escrowed under the logical " +
+			"box rather than the cluster (ADR-111 §1), so it cannot be inferred from the " +
 			"cluster name")
 	}
 	return c.BoxID, nil
@@ -669,4 +673,39 @@ func ProviderToken(ctx context.Context, gitopsDir, clusterName, provider string)
 	// The box on both halves: the credential is the box's, so every incarnation
 	// finds the same one (ADR-111 ss1).
 	return access.Provider(ctx, Identity{BoxID: coords.BoxID, ClusterName: coords.BoxID}, provider)
+}
+
+// soleManagementCluster names the one management cluster a repository declares:
+// the cluster directory whose values.yaml declares no environmentSlug (a managed
+// cluster always declares one). Refused when there is not exactly one, because
+// choosing between two would address one of them silently.
+func soleManagementCluster(gitopsDir string) (string, error) {
+	dirs, err := filepath.Glob(filepath.Join(gitopsDir, "registry", "clusters", "*", "values.yaml"))
+	if err != nil {
+		return "", err
+	}
+	var found []string
+	for _, p := range dirs {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var v struct {
+			EnvironmentSlug string `yaml:"environmentSlug"`
+		}
+		if yaml.Unmarshal(raw, &v) != nil || strings.TrimSpace(v.EnvironmentSlug) != "" {
+			continue
+		}
+		found = append(found, filepath.Base(filepath.Dir(p)))
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return "", fmt.Errorf("no cluster name, and %s declares no management cluster "+
+			"under registry/clusters/: run this from the box's GitOps repository, or pass --cluster", gitopsDir)
+	default:
+		return "", fmt.Errorf("this repository declares %d management clusters (%s): pass --cluster",
+			len(found), strings.Join(found, ", "))
+	}
 }

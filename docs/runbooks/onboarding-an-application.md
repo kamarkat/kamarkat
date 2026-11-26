@@ -84,7 +84,7 @@ about who may call you.
 
 ### Credentials the platform generates for you
 
-Written to your Infisical folder and delivered by ExternalSecret. You declare the
+Written to your app's path in the box's OpenBao and delivered by ExternalSecret. You declare the
 *capability*; the credential follows (ADR-087):
 
 - database credentials — owner and runtime roles (ADR-093)
@@ -209,8 +209,8 @@ secrets:
 Then supply the value — never in git, in any form:
 
 ```bash
-kakt fleet secrets status <env> <app>      # what is declared vs present, by NAME
-kakt fleet secrets set <env> <app> <KEY>   # echo disabled, or --stdin from a password manager
+kakt app secrets status <env> <app>        # what is declared vs present, by NAME
+kakt app secrets set <env> <app> <KEY>     # echo disabled, or --stdin from a password manager
 ```
 
 `workloads:` decides which ExternalSecret the key lands in, and that matters: an
@@ -295,7 +295,7 @@ That is ADR-094 Part 3 and it is **not decided** — do not build against it.
 
 | symptom | actual cause |
 |---|---|
-| `CreateContainerConfigError` naming a K8s Secret | an ExternalSecret could not resolve — check the *Infisical key*, not the Secret |
+| `CreateContainerConfigError` naming a K8s Secret | an ExternalSecret could not resolve — check the *key in OpenBao* (`kakt app secrets status`), not the Secret |
 | ExternalSecret `SecretSyncedError` | a declared key has no value, or the path is outside your cell's prefix |
 | login succeeds, first API call 401s | issuer or JWKS mismatch between gateway and workload — you hard-coded one |
 | `redirect_uri_mismatch` before any credential is typed | you typed a callback instead of reading `OAUTH_<NAME>_REDIRECT_URI` |

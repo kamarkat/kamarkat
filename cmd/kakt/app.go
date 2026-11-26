@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/app"
+	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/openbao"
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/tenant"
 )
@@ -114,7 +115,7 @@ secrets are still absent without any value being disclosed.`,
 	// one.
 	for _, c := range []*cobra.Command{status, set, importCmd} {
 		c.Flags().StringVar(&appKubeconfig, "kubeconfig", "",
-			"Path to this box's hub kubeconfig")
+			"the management cluster's kubeconfig. Defaults to the one this repository's escrow holds, read with your own session")
 	}
 	cmd.AddCommand(template, status, set, importCmd)
 	return cmd
@@ -125,11 +126,27 @@ secrets are still absent without any value being disclosed.`,
 // Reached through a port-forward over verified TLS; the administrator's kubeconfig
 // is what authorizes minting that identity's token.
 func withOpenBao(ctx context.Context, fn func(*openbao.Client) error) error {
-	if appKubeconfig == "" {
-		return fmt.Errorf("--kubeconfig is required: this box's secret store is reached " +
-			"through its management cluster")
+	kubeconfig := appKubeconfig
+	if kubeconfig == "" {
+		// The secret store is reached through the management cluster, whose
+		// kubeconfig the box's escrow holds; read it under the operator's own
+		// session from the repository these commands run in.
+		coords, err := hubaccess.Declaration(".", "")
+		if err != nil {
+			return fmt.Errorf("pass --kubeconfig, or run this from the box's GitOps repository: %w", err)
+		}
+		access, err := hubaccess.Open(ctx, coords)
+		if err != nil {
+			return err
+		}
+		_, path, cleanup, err := access.Kubernetes(ctx, hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName})
+		if err != nil {
+			return fmt.Errorf("read the management cluster's kubeconfig from the escrow: %w", err)
+		}
+		defer cleanup()
+		kubeconfig = path
 	}
-	cfg, err := clientcmd.BuildConfigFromFlags("", appKubeconfig)
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -137,7 +154,7 @@ func withOpenBao(ctx context.Context, fn func(*openbao.Client) error) error {
 	if err != nil {
 		return fmt.Errorf("build kubernetes client: %w", err)
 	}
-	c, err := openbao.ConnectForAppSecrets(ctx, clientset, appKubeconfig)
+	c, err := openbao.ConnectForAppSecrets(ctx, clientset, kubeconfig)
 	if err != nil {
 		return fmt.Errorf("connect to this box's OpenBao: %w", err)
 	}
