@@ -63,7 +63,8 @@ func newEscrowInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create the escrow project this tenant's boxes back up to",
-		Long: `Create the Secret Manager project a box escrows its master keys to.
+		Long: `Create the Secret Manager project a box escrows its seal key and recovery key to,
+and the administrator-only custody project that holds its root CA and recovery PGP key.
 
 Run it after ` + "`kakt login`" + `, as the administrator. It creates the project as YOU,
 so you are its admin, then makes sure the organisation's automation identity

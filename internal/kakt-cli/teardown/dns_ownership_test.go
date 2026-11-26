@@ -95,7 +95,7 @@ func TestUnreleasedDNSRecordsAreOutstanding(t *testing.T) {
 	o.reportDNSResidue(dnsOwnership{ownerID: "nutgraf-1", zoneHost: "nutgraf.in"}, "the zone could not be resolved")
 	err := o.result()
 	if err == nil || !strings.Contains(err.Error(),
-		"kakt teardown --dns-only --dns-owner nutgraf-1 --dns-zone nutgraf.in") {
+		"kakt teardown --dns-only --dns-owner nutgraf-1 --dns-zone nutgraf.in --confirm") {
 		t.Fatalf("result = %v, want an incomplete teardown naming the release command", err)
 	}
 }

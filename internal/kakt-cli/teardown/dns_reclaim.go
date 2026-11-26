@@ -422,7 +422,7 @@ func releaseCommand(owner, zone string) string {
 	if zone == "" {
 		zone = "<zone>"
 	}
-	return fmt.Sprintf("kakt teardown --dns-only --dns-owner %s --dns-zone %s", owner, zone)
+	return fmt.Sprintf("kakt teardown --dns-only --dns-owner %s --dns-zone %s --confirm", owner, zone)
 }
 
 // DNSToken returns the credential for the Hetzner DNS API. The hub's

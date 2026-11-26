@@ -2,7 +2,7 @@
  * The environment contract between the platform and an application.
  *
  * THE ONE PLACE these names are spelled. Every key here is written by the
- * platform -- the hub-operator into the tenant's Infisical folder, delivered by
+ * platform -- the hub-operator into the tenant's OpenBao path, delivered by
  * an ExternalSecret, or a ConfigMap the tenant chart mounts -- and an application
  * that spells one itself has taken a copy of a platform decision.
  *

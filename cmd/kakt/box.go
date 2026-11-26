@@ -177,7 +177,7 @@ func (b *boxInit) bind(cmd *cobra.Command) {
 	f.StringVar(&b.secrets.TailscaleAuthkey, "tailscale-authkey", "",
 		"a Tailscale auth key; the hybrid provider's control plane and home workers join the tenant's tailnet with it (ADR-046)")
 	f.StringVar(&b.secrets.EscrowURL, "escrow-url", "",
-		"an Infisical the TENANT controls and this box does not host, holding its master keys (ADR-076). Usually https://app.infisical.com")
+		"an Infisical the TENANT controls and this box does not host, holding its seal key and recovery key (ADR-076, ADR-117). Usually https://app.infisical.com")
 	f.StringVar(&b.secrets.EscrowProjectID, "escrow-project-id", "", "the project in that Infisical the backup is written to")
 	f.StringVar(&b.secrets.EscrowClientID, "escrow-client-id", "", "a machine identity with write access to that project")
 	f.StringVar(&b.secrets.EscrowClientSecret, "escrow-client-secret", "", "the matching machine identity client secret")
@@ -1013,7 +1013,7 @@ func printEscrowState() {
 		}
 	}
 	printState("ESCROW_PROVIDER_* (4)", have == 4,
-		fmt.Sprintf("where this box's master keys are kept (%d/4)", have))
+		fmt.Sprintf("where this box's seal key and recovery key are kept (%d/4)", have))
 }
 
 // boxInitVerdict says what remains, and what to run next.
@@ -1041,8 +1041,8 @@ func boxInitVerdict(ctx context.Context, skipped []string) error {
 		// box is refused without one (ADR-076) and finding that out later costs
 		// another round trip.
 		fmt.Printf("\nThis box also has no escrow, and will not be created without one:\n")
-		fmt.Printf("hub-operator copies the master keys that decrypt its secret store to an\n")
-		fmt.Printf("Infisical you control, because the box cannot hold them itself.\n\n")
+		fmt.Printf("its secret store's seal key and recovery key are kept in an Infisical\n")
+		fmt.Printf("you control, because the box cannot hold them itself.\n\n")
 		if _, err := session.Current(ctx, defaultEscrowDomain); err != nil {
 			fmt.Printf("  kakt login\n")
 		}

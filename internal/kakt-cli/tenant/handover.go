@@ -58,12 +58,12 @@ type Secrets struct {
 	// Infisical the TENANT controls and this box does not host -- Infisical Cloud,
 	// or one they run elsewhere.
 	//
-	// It holds the box's Infisical master keys: the root secret without which the
-	// box's own secret store cannot be decrypted, and every credential the platform
-	// manages is lost with the cluster (ADR-076).
+	// It holds OpenBao's seal key and encrypted recovery key: without them the
+	// box's own secret store cannot be opened, and every credential the platform
+	// manages is lost with the cluster (ADR-076, ADR-117).
 	//
-	// It cannot be the box's own Infisical, which is the thing those keys unlock and
-	// is unreachable exactly when they are needed. And it is the tenant's rather
+	// It cannot be the box's own secret store, which is the thing those keys open
+	// and is unreachable exactly when they are needed. And it is the tenant's rather
 	// than the platform's, because ADR-065 says the platform holds no secret
 	// credential belonging to a tenant -- least of all the one that unlocks the rest.
 	EscrowURL          string

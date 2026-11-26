@@ -57,7 +57,7 @@ func (o *Orchestrator) checkHubHostnamesUnclaimed(ctx context.Context) error {
 	}
 	token := teardown.DNSToken("")
 	if token == "" {
-		fmt.Println("[dns-check] ⚠️  no Hetzner token in the environment; hub hostname ownership not checked")
+		fmt.Println("[dns-check] ⚠️  no Hetzner token in the environment; hostname ownership not checked")
 		return nil
 	}
 	labels, err := hubHostnames()
@@ -70,11 +70,11 @@ func (o *Orchestrator) checkHubHostnamesUnclaimed(ctx context.Context) error {
 	}
 	foreign, err := dnsForeignOwners(ctx, token, zone, owner, hosts)
 	if err != nil {
-		fmt.Printf("[dns-check] ⚠️  hub hostname ownership could not be checked: %v\n", err)
+		fmt.Printf("[dns-check] ⚠️  hostname ownership could not be checked: %v\n", err)
 		return nil
 	}
 	if len(foreign) == 0 {
-		fmt.Printf("[dns-check] ✓ no hub hostname under %s is held by another owner\n", zone)
+		fmt.Printf("[dns-check] ✓ no hostname this box publishes under %s is held by another owner\n", zone)
 		return nil
 	}
 	byOwner := map[string][]string{}
@@ -87,9 +87,9 @@ func (o *Orchestrator) checkHubHostnamesUnclaimed(ctx context.Context) error {
 	}
 	sort.Strings(owners)
 	var b strings.Builder
-	fmt.Fprintf(&b, "hub hostnames under %s are held by another external-dns owner, not this "+
-		"box (%s).\nexternal-dns will never update them, so they keep pointing at the other "+
-		"box's address and nothing on this box can reach its own hostnames:\n", zone, owner)
+	fmt.Fprintf(&b, "hostnames this box publishes under %s are held by another DNS owner, "+
+		"not this box (%s).\nThis box never updates a record another owner holds, so they keep "+
+		"pointing at the other box's address and nothing can reach this box by them:\n", zone, owner)
 	for _, o := range owners {
 		sort.Strings(byOwner[o])
 		fmt.Fprintf(&b, "  owner %s: %s\n", o, strings.Join(byOwner[o], ", "))
@@ -97,7 +97,7 @@ func (o *Orchestrator) checkHubHostnamesUnclaimed(ctx context.Context) error {
 	b.WriteString("\nIf that owner is a box that no longer exists, release its records (this " +
 		"deletes public DNS records; confirm the owner first):\n")
 	for _, o := range owners {
-		fmt.Fprintf(&b, "  kakt teardown --dns-only --dns-owner %s --dns-zone %s\n", o, zone)
+		fmt.Fprintf(&b, "  kakt teardown --dns-only --dns-owner %s --dns-zone %s --confirm\n", o, zone)
 	}
 	b.WriteString("then re-run the bootstrap.")
 	return fmt.Errorf("%s", b.String())

@@ -44,7 +44,7 @@ func TestBootstrapRefusesHubHostnamesHeldByAnotherOwner(t *testing.T) {
 	t.Cleanup(func() { dnsForeignOwners = old })
 
 	err := (&Orchestrator{GitopsDir: dir, ClusterName: "c1"}).checkHubHostnamesUnclaimed(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "kakt teardown --dns-only --dns-owner nutgraf-old --dns-zone nutgraf.in") {
+	if err == nil || !strings.Contains(err.Error(), "kakt teardown --dns-only --dns-owner nutgraf-old --dns-zone nutgraf.in --confirm") {
 		t.Fatalf("err = %v, want a refusal naming the release command", err)
 	}
 	if !strings.Contains(strings.Join(asked, ","), "id.nutgraf.in") {

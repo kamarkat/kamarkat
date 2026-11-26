@@ -48,7 +48,7 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 		RunE:    runTeardown,
 	}
 
-	cmd.Flags().StringVar(&clusterName, "name", "", "management cluster name (required)")
+	cmd.Flags().StringVar(&clusterName, "name", "", "management cluster name (required, except with --dns-only)")
 	cmd.Flags().BoolVar(&teardownForce, "force", true, "Force deletion of resources (default true)")
 	cmd.Flags().BoolVar(&teardownConfirm, "confirm", false, "Confirm deletion (required for safety)")
 	cmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging")
@@ -122,13 +122,18 @@ caph-cluster-<cluster>=owned. Nothing is matched by name, prefix or substring.`,
 
 	// --name is required for a teardown, which destroys a named cluster. A
 	// --dns-only run destroys no cluster and names records by owner instead.
-	cmd.MarkFlagRequired("name")
-
 	return cmd
 }
 
 func validateTeardownFlags(cmd *cobra.Command, args []string) error {
-	if clusterName == "" {
+	// A --dns-only run releases one owner's records and touches no cluster, so it
+	// names the owner and zone, not a cluster: requiring --name made releasing a
+	// dead box's records mean naming a live cluster in a teardown command.
+	if teardownDNSOnly {
+		if teardownDNSOwner == "" || teardownDNSZone == "" {
+			return fmt.Errorf("--dns-only requires --dns-owner and --dns-zone")
+		}
+	} else if clusterName == "" {
 		return fmt.Errorf("--name is required")
 	}
 
@@ -187,6 +192,23 @@ func runTeardown(cmd *cobra.Command, args []string) error {
 		}
 		defer cleanup()
 		access.Kubeconfig = kubeconfig
+		access.ProviderToken = token
+	} else if teardownGitops != "" {
+		// The DNS token is the box's cloud credential, read from its escrow like
+		// every other use of it; the environment is only the fallback for a box
+		// whose repository is not at hand.
+		coords, err := hubaccess.Declaration(teardownGitops, clusterName)
+		if err != nil {
+			return err
+		}
+		esc, err := hubaccess.Open(ctx, coords)
+		if err != nil {
+			return err
+		}
+		token, err := esc.Provider(ctx, hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName}, "hetzner")
+		if err != nil {
+			return err
+		}
 		access.ProviderToken = token
 	}
 
