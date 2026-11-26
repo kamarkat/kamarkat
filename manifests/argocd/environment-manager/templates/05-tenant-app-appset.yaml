@@ -425,7 +425,7 @@ spec:
               # should fail that one object's render with a reason, not this whole
               # ApplicationSet and with it every application on the box.
               - name: hubDomain
-                value: {{ $.Values.hubDomain | quote }}
+                value: {{ include "environment-manager.hubDomain" $ | quote }}
               # Environment-owned, never application-supplied (ADR-050). Passed as a
               # parameter so it overrides anything an application's values file might
               # set, rather than merging with it.
