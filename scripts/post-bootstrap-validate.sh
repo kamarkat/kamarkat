@@ -464,12 +464,14 @@ check_openbao() {
         # cluster cannot initialise without.
         "platform-data:hub-billing-db-credentials"
     )
-    # The Credit Authority is capability-gated (capabilities.credits.enabled, ADR-109);
-    # check its database credential only when the service is deployed.
-    if kc -n platform-credits get deployment credit-authority >/dev/null 2>&1; then
+    # The Credit Authority is capability-gated (capabilities.credits.enabled, ADR-109).
+    # Gated on the DECLARATION -- environment-manager generates the credit-authority
+    # Application only when the capability is on -- not on the Deployment, so a box
+    # that declares credits and lost the Deployment fails here instead of skipping.
+    if kc -n platform-ops get application credit-authority >/dev/null 2>&1; then
         key_secrets+=("platform-credits:credit-authority-db")
     else
-        log_na "the Credit Authority is not enabled on this box (no deployment in platform-credits)"
+        log_na "the Credit Authority is not enabled on this box (capabilities.credits.enabled is false)"
     fi
     for entry in "${key_secrets[@]}"; do
         local ns="${entry%%:*}"
