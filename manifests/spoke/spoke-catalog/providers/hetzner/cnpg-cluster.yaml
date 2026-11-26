@@ -71,9 +71,9 @@ spec:
   externalClusters:
     - name: shared-cnpg-v3
       barmanObjectStore:
-        destinationPath: s3://spoke-pool-backups/
+        destinationPath: s3://PLACEHOLDER_BOX/spokes/
         serverName: shared-cnpg-v3
-        endpointURL: https://hel1.your-objectstorage.com
+        endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
         s3Credentials:
           accessKeyId:
             name: s3-credentials
@@ -95,7 +95,7 @@ spec:
     barmanObjectStore:
       # Per-spoke prefix applied by the platform-spoke-catalog ApplicationSet
       # patch on /spec/backup/barmanObjectStore/destinationPath.
-      destinationPath: s3://spoke-pool-backups/
+      destinationPath: s3://PLACEHOLDER_BOX/spokes/
       # serverName defaults to the CLUSTER name, which is stable across
       # recreations — so a rebuilt cluster lands on the previous incarnation's
       # WALs. barman-cloud-check-wal-archive then fails "Expected empty archive"
@@ -122,8 +122,8 @@ spec:
       # EARLIER incarnation of the SAME spoke — which is precisely what a
       # local-path rebuild produces every time.
       serverName: shared-cnpg-v3
-      # ADR-014 backup contract: Hetzner Object Storage, hel1.
-      endpointURL: https://hel1.your-objectstorage.com
+      # ADR-014 backup contract: Hetzner Object Storage, in the box's bucket and region.
+      endpointURL: https://PLACEHOLDER_REGION.your-objectstorage.com
       s3Credentials:
         accessKeyId:
           name: s3-credentials

@@ -38,7 +38,9 @@
   # Cluster property; ScheduledBackup has no destination fields and inherits it.
   fields:
     - path: [spec, backup, barmanObjectStore, destinationPath]
-      value: 's3://spoke-pool-backups/{{ .Values.spokeName }}/'
+      value: 's3://{{ .Values.global.boxId }}/spokes/{{ .Values.spokeName }}/'
+    - path: [spec, backup, barmanObjectStore, endpointURL]
+      value: 'https://{{ .Values.global.region }}.your-objectstorage.com'
     # The SAME prefix on the RECOVERY source, and it is a SECOND, independent
     # copy of the object-store configuration: externalClusters inherits nothing
     # from spec.backup above. Templating only the backup path leaves recovery
@@ -59,7 +61,9 @@
     # resolves a concrete path, so an entry that only existed during a recovery
     # would fail packaging for every spoke in between.
     - path: [spec, externalClusters, 0, barmanObjectStore, destinationPath]
-      value: 's3://spoke-pool-backups/{{ .Values.spokeName }}/'
+      value: 's3://{{ .Values.global.boxId }}/spokes/{{ .Values.spokeName }}/'
+    - path: [spec, externalClusters, 0, barmanObjectStore, endpointURL]
+      value: 'https://{{ .Values.global.region }}.your-objectstorage.com'
 
 - kind: ExternalSecret
   name: s3-credentials
@@ -71,6 +75,8 @@
       value: 'spokes/{{ .Values.spokeName }}/platform'
     - path: [spec, data, 1, remoteRef, key]
       value: 'spokes/{{ .Values.spokeName }}/platform'
+    - path: [spec, target, template, data, region]
+      value: '{{ .Values.global.region }}'
 
 - kind: Deployment
   name: preview-access

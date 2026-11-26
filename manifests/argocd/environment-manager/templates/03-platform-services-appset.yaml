@@ -849,7 +849,10 @@ spec:
               patch: |
                 - op: replace
                   path: /spec/backup/barmanObjectStore/destinationPath
-                  value: 's3://spoke-pool-backups/{{"{{"}}.name{{"}}"}}/'
+                  value: 's3://{{ $.Values.boxId }}/spokes/{{"{{"}}.name{{"}}"}}/'
+                - op: replace
+                  path: /spec/backup/barmanObjectStore/endpointURL
+                  value: 'https://{{ $.Values.region }}.your-objectstorage.com'
             # The SAME per-spoke prefix on the RECOVERY source.
             #
             # externalClusters is a second, independent copy of the object-store
@@ -879,7 +882,10 @@ spec:
               patch: |
                 - op: replace
                   path: /spec/externalClusters/0/barmanObjectStore/destinationPath
-                  value: 's3://spoke-pool-backups/{{"{{"}}.name{{"}}"}}/'
+                  value: 's3://{{ $.Values.boxId }}/spokes/{{"{{"}}.name{{"}}"}}/'
+                - op: replace
+                  path: /spec/externalClusters/0/barmanObjectStore/endpointURL
+                  value: 'https://{{ $.Values.region }}.your-objectstorage.com'
             # ADR-014 backup contract: per-spoke S3 keys in the hub-secrets
             # project at spokes/<spoke>/platform . The hcloud-token is an
             # HCloud API token, NOT a Hetzner Object Storage key — it fails with
@@ -894,6 +900,9 @@ spec:
                 - op: replace
                   path: /spec/data/1/remoteRef/key
                   value: 'spokes/{{"{{"}}.name{{"}}"}}/platform'
+                - op: replace
+                  path: /spec/target/template/data/region
+                  value: {{ $.Values.region | quote }}
             # The provider DNS credential, from this cluster's own project.
             #
             # It read `hcloud-token` at the project ROOT, which was reachable while

@@ -18,10 +18,7 @@ var hardcodedEndpoint = regexp.MustCompile(`\b[a-z]{3}[0-9]\.your-objectstorage\
 // Files that may name a region, because the bucket they use is in that region
 // whatever the box's region is. Adding a file here needs that reason; a file
 // that stops naming a region must be removed from here.
-var fixedRegionEndpoints = map[string]string{
-	"manifests/spoke/spoke-catalog/providers/hetzner/cnpg-cluster.yaml": "shared spoke-pool-backups bucket in hel1",
-	"manifests/spoke/spoke-catalog/providers/hybrid/cnpg-cluster.yaml":  "shared spoke-pool-backups bucket in hel1",
-}
+var fixedRegionEndpoints = map[string]string{}
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
