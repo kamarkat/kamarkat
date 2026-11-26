@@ -459,12 +459,18 @@ check_openbao() {
     # roles (VaultDynamicSecret beside each consumer), and billing's owner Secret.
     local key_secrets=(
         "platform-identity:zitadel-db-credentials"
-        "platform-credits:credit-authority-db"
         "platform-observability:grafana-db"
         # Not a static role: billing-db's initdb owner (ADR-113), which the
         # cluster cannot initialise without.
         "platform-data:hub-billing-db-credentials"
     )
+    # The Credit Authority is capability-gated (capabilities.credits.enabled, ADR-109);
+    # check its database credential only when the service is deployed.
+    if kc -n platform-credits get deployment credit-authority >/dev/null 2>&1; then
+        key_secrets+=("platform-credits:credit-authority-db")
+    else
+        log_na "the Credit Authority is not enabled on this box (no deployment in platform-credits)"
+    fi
     for entry in "${key_secrets[@]}"; do
         local ns="${entry%%:*}"
         local name="${entry##*:}"
