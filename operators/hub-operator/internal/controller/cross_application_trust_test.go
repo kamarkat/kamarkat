@@ -86,7 +86,7 @@ func (f *fakeSecretStore) HexKey(_ context.Context, n int) (string, error) {
 }
 
 func (f *fakeSecretStore) EnsureTenantFolderAndCredentials(
-	_ context.Context, _, _, _ string, _ bool, _ []secrets.OAuthClient, _, _, _ bool,
+	_ context.Context, _, _, _ string, _ bool, _ []secrets.OAuthClient, _, _, _, _ bool,
 ) (*secrets.EnsureTenantCredentialsResult, error) {
 	return &secrets.EnsureTenantCredentialsResult{}, nil
 }

@@ -610,6 +610,11 @@ func defaultBundleVersion() string {
 // addApp is the application `kakt tenant add-app` declares.
 var addApp tenant.AppSpec
 
+// addAppCharts and addAppImages declare how the application's packages are
+// published, for when the registry cannot say: before the first build, a
+// package does not exist yet.
+var addAppCharts, addAppImages string
+
 // addAppWorkloads is repeatable: an application is one or more deployables, and
 // each is its own directory and its own chart (ADR-073, ADR-088).
 var addAppWorkloads []string
@@ -652,6 +657,10 @@ may serve one environment, so the application names which.`,
 	f.StringVar(&addApp.OwnerEmail, "owner-email", "", "who is paged for it (required)")
 	f.StringSliceVar(&addAppWorkloads, "workload", nil,
 		"a deployable inside this application; repeat for each")
+	f.StringVar(&addAppCharts, "charts", "",
+		"public or private: how the application's charts are published, when the registry cannot tell yet")
+	f.StringVar(&addAppImages, "images", "",
+		"public or private: how the application's images are published, when the registry cannot tell yet")
 
 	for _, required := range []string{"env", "app", "owner-email"} {
 		_ = cmd.MarkFlagRequired(required)
@@ -661,9 +670,26 @@ may serve one environment, so the application names which.`,
 
 func runAddApp(cmd *cobra.Command, _ []string) error {
 	addApp.Workloads = addAppWorkloads
+	charts, err := tenant.ParseVisibility(addAppCharts)
+	if err != nil {
+		return fmt.Errorf("--charts: %w", err)
+	}
+	images, err := tenant.ParseVisibility(addAppImages)
+	if err != nil {
+		return fmt.Errorf("--images: %w", err)
+	}
 
 	written, err := tenant.AddApp(addApp)
 	if err != nil {
+		return err
+	}
+
+	// Registry access, only when a private package needs it (ADR-076). A
+	// declaration that cannot be completed is removed again, so running the
+	// command a second time starts clean.
+	appDir := filepath.Join(addApp.GitopsDir, "environments", addApp.Environment, addApp.AppID)
+	if err := resolveAppRegistry(cmd.Context(), appDir, charts, images); err != nil {
+		_ = os.RemoveAll(appDir)
 		return err
 	}
 	for _, p := range written {
@@ -755,4 +781,25 @@ version a build has pinned: adding a second workload must not reset the first.`,
 		_ = cmd.MarkFlagRequired(required)
 	}
 	return cmd
+}
+
+// resolveAppRegistry settles an application's registry declaration and writes it
+// into its values.yaml.
+func resolveAppRegistry(ctx context.Context, appDir string, charts, images tenant.Visibility) error {
+	pkgs, repo, err := tenant.WorkloadCharts(appDir)
+	if err != nil {
+		return err
+	}
+	others, err := tenant.OtherPrivateApps(addApp.GitopsDir, addApp.Environment, addApp.AppID)
+	if err != nil {
+		return err
+	}
+	decl, err := tenant.ResolveRegistry(ctx, tenant.RegistryInput{
+		Charts: pkgs, DeclaredCharts: charts, DeclaredImages: images,
+		ChartRepository: repo, Others: others,
+	}, newTerminalRegistryIO(addApp.GitopsDir))
+	if err != nil {
+		return err
+	}
+	return tenant.WriteRegistryDecl(appDir, decl)
 }

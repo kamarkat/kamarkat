@@ -161,8 +161,6 @@ func (b *boxInit) bind(cmd *cobra.Command) {
 	f.StringVar(&b.spec.BundleRegistry, "bundle-registry", "ghcr.io/kamarkat/charts",
 		"registry published bundles are pulled from (no scheme)")
 	f.BoolVar(&b.spec.Private, "private", true, "create the repository private")
-	f.BoolVar(&b.spec.PrivateRegistry, "private-registry", false,
-		"this tenant runs private images; a registry credential becomes required (ADR-066)")
 
 	// The tenant's own credentials. Flags so automation can supply them;
 	// prompted when a terminal is present and they are absent.
@@ -888,10 +886,6 @@ func (b *boxInit) escrowBoxCredentials(ctx context.Context) error {
 		escrow.FieldAccessKeyID:     strings.TrimSpace(b.secrets.S3AccessKeyID),
 		escrow.FieldSecretAccessKey: strings.TrimSpace(b.secrets.S3SecretAccessKey),
 	})
-	registry := escrow.RenderFields(map[string]string{
-		escrow.FieldRegistryUser:  strings.TrimSpace(b.secrets.GHCRUsername),
-		escrow.FieldRegistryToken: strings.TrimSpace(b.secrets.GHCRToken),
-	})
 	alerts := escrow.RenderFields(map[string]string{
 		escrow.FieldAlertmanagerURL: strings.TrimSpace(b.secrets.GrafanaIRMAlertmanagerURL),
 		escrow.FieldHeartbeatURL:    strings.TrimSpace(b.secrets.GrafanaIRMHeartbeatURL),
@@ -909,8 +903,6 @@ func (b *boxInit) escrowBoxCredentials(ctx context.Context) error {
 	}{
 		{escrow.ArtifactBackupStoreCredential, store,
 			"object storage for database backups", "backups of its databases"},
-		{escrow.ArtifactRegistryCredential, registry,
-			"pulling this tenant's private images", "credential for private images"},
 		{escrow.ArtifactAlertDestination, alerts,
 			"where this box's alerts page", "paging destination for its alerts"},
 		{escrow.ArtifactMailTransportURL, strings.TrimSpace(b.secrets.ZitadelSMTPURL),

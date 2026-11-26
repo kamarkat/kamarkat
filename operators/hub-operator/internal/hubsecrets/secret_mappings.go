@@ -56,7 +56,6 @@ const (
 // │ CLI-INJECTED SECRETS (CLI creates, operator uploads)                   │
 // ├─────────────────────────────────────────────────────────────────────────┤
 // │ 5. hetzner-dns                → Used by external-dns, cert-manager     │
-// │ 6. ghcr-pull-secret           → Used by mcp-server (image pulls)       │
 // │ 7. github-username            → Used by ArgoCD (repo access)           │
 // │ 8. github-token               → Used by ArgoCD (repo access)           │
 // └─────────────────────────────────────────────────────────────────────────┘
@@ -184,20 +183,8 @@ var CLISecretMappings = []SecretMapping{
 		Description:     "Hub Grafana admin password (grafana-operator generated)",
 	},
 
-	// ========================================================================
-	// 6. GITHUB CONTAINER REGISTRY PULL SECRET
-	// ========================================================================
-	// Purpose: Pull private images from ghcr.io
-	// Source: ghcr-pull-secret (deployed by CLI/manually in platform-ops)
-	// Consumers: mcp-server, other private image deployments
-	// ExternalSecret: manifests/api-gateway/mcp-server/ghcr-pull-secret-externalsecret.yaml
-	{
-		SourceNamespace: NamespaceOps,        // platform-ops
-		SourceName:      "ghcr-pull-secret",  // ghcr-pull-secret
-		SourceKey:       ".dockerconfigjson", // .dockerconfigjson
-		Key:             "ghcr-pull-secret",  // ghcr-pull-secret
-		Description:     "GitHub Container Registry pull secret",
-	},
+	// The registry credential is not a Day-0 upload: hub-operator converges it
+	// from the escrow (syncRegistryCredential), whenever an application needs it.
 
 	// ========================================================================
 	// 7. GITHUB USERNAME (for ArgoCD)

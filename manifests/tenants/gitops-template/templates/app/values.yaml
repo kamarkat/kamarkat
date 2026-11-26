@@ -127,3 +127,14 @@ secrets: []
 #   - name: AI_GATEWAY_API_KEY
 #     capability: "the AI gateway the SDK calls"
 #     workloads: [sdk]
+
+# How this application's packages are published. Written by `kakt tenant add-app`
+# from what the registry answers, or from --charts / --images when it cannot tell
+# yet. Charts and images are independent: a private chart gives the management
+# cluster's GitOps engine a registry credential for chartRepository, private
+# images give this application's namespace a pull secret, and a public package
+# gives nothing. The credential itself is the box's, in its escrow.
+registry:
+  charts: public
+  images: public
+  chartRepository: ""

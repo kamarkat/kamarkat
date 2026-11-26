@@ -332,6 +332,12 @@ func (r *HubEnvironmentReconciler) reconcileEscrow(ctx context.Context, store es
 	boxID := escrowID.BoxID
 	clusterID := escrowID.ClusterName
 
+	// Before anything that waits on the cluster: a registry credential enrolled
+	// after Day-0 must reach OpenBao whether or not the rest of this pass can run.
+	if err := r.syncRegistryCredential(ctx, store, boxID); err != nil {
+		logger.Error(err, "Failed to converge the registry credential from the escrow; retrying next pass")
+	}
+
 	var capiSecret corev1.Secret
 	capiKey := types.NamespacedName{Name: clusterID + "-kubeconfig", Namespace: "platform-capi"}
 	if err := r.UncachedClient.Get(ctx, capiKey, &capiSecret); err != nil {

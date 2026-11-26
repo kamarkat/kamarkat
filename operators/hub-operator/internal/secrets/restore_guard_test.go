@@ -98,7 +98,7 @@ func TestEveryGeneratorRefusesDuringAnUnfinishedRestore(t *testing.T) {
 func TestRestoreWithEveryValuePresentGeneratesNothing(t *testing.T) {
 	s, srv := storeWith(t, map[string]any{TenantDBPasswordKey: "restored-db", CachePasswordKey: "restored-cache", internalKey: "restored-token"}, unfinished)
 	res, err := s.EnsureTenantFolderAndCredentials(context.Background(), "c1", "acme", "shop",
-		false, nil, false, false, false)
+		false, nil, false, false, false, false)
 	if err != nil {
 		t.Fatalf("a complete restore was refused: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRestoreWithEveryValuePresentGeneratesNothing(t *testing.T) {
 func TestRestoreMissingACredentialFailsAndNamesIt(t *testing.T) {
 	s, srv := storeWith(t, map[string]any{TenantDBPasswordKey: "restored-db", CachePasswordKey: "restored-cache"}, unfinished)
 	_, err := s.EnsureTenantFolderAndCredentials(context.Background(), "c1", "acme", "shop",
-		true, nil, false, false, false)
+		true, nil, false, false, false, false)
 	if err == nil {
 		t.Fatal("a missing credential was regenerated during an unfinished restore")
 	}
@@ -131,7 +131,7 @@ func TestRestoreMissingACredentialFailsAndNamesIt(t *testing.T) {
 func TestGenerationResumesOnceRecoveryIsComplete(t *testing.T) {
 	s, srv := storeWith(t, map[string]any{TenantDBPasswordKey: "restored-db", CachePasswordKey: "restored-cache"}, nil)
 	if _, err := s.EnsureTenantFolderAndCredentials(context.Background(), "c1", "acme", "shop",
-		true, nil, false, false, false); err != nil {
+		true, nil, false, false, false, false); err != nil {
 		t.Fatalf("ordinary generation refused: %v", err)
 	}
 	if srv.kv[tenantScope][internalKey] != "fresh-value" || srv.generated != 1 {

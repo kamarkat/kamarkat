@@ -20,8 +20,6 @@ spec:
         app: auth-proxy
     spec:
       serviceAccountName: auth-proxy
-      imagePullSecrets:
-      - name: ghcr-pull-secret
       # No init container gating startup on the issuer.
       #
       # This used to block until Hydra answered /health/ready. Zitadel takes

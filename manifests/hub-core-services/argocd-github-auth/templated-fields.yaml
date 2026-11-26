@@ -10,11 +10,6 @@
     - path: [spec, target, template, data, url]
       value: '{{ .Values.global.gitOrgURL }}'
 
-# The OCI registry this box's ArgoCD reads workload charts from. Same reasoning
-# as the git organisation above: a literal ships the platform's registry to every
-# tenant, and the box then holds a credential for charts it never reads.
-- kind: ExternalSecret
-  name: argocd-chart-registry-creds
-  fields:
-    - path: [spec, target, template, data, url]
-      value: '{{ .Values.global.chartRegistryURL }}/charts'
+# No chart-registry credential here. ArgoCD gets one per application that
+# declares private charts, for that application's own chart repository, from
+# hub-operator (ADR-076, amended); a box of public charts holds none.

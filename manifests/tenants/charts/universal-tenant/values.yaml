@@ -259,6 +259,15 @@ oauth:
   clients: []
 tier: starter
 
+# How the application's packages are published (kakt tenant add-app writes it).
+# images: private delivers the box's registry credential into this namespace as
+# ghcr-pull-secret; public delivers nothing. charts: private gives the management
+# cluster's GitOps engine a credential for chartRepository.
+registry:
+  charts: public
+  images: public
+  chartRepository: ""
+
 # Region for tenant resources (required)
 region: fsn1
 

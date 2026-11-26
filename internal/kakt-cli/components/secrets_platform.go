@@ -2,9 +2,7 @@ package components
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -68,7 +66,7 @@ type optionalSecret struct {
 	// Distinct from destination, which is a capability that ships either way and
 	// merely has nowhere to send. This one does not ship: a box that pulls only
 	// public images has no use for a pull secret, and `kakt box init` does not ask
-	// for one unless --private-registry says the box needs it.
+	// for one; registry access is enrolled by kakt tenant add-app when needed.
 	//
 	// It had no category and so was refused when absent, which is how a box that
 	// deliberately declined private images failed Day-0 at generate-local-secrets
@@ -152,42 +150,10 @@ func optionalSecrets() []optionalSecret {
 			what:        "the identity provider sending verification and password-reset mail",
 			destination: true,
 		},
-		{
-			// A tenant's own registry credential, not the platform's.
-			//
-			// The platform's images are public, so this looked cosmetic -- the
-			// only symptom on a platform-only box is a FailedToRetrieveImagePullSecret
-			// warning next to images that pull anyway. It is not cosmetic for a
-			// tenant: ADR-066 makes workloads theirs, and universal-tenant's
-			// pull-secret-es.yaml and the stateless-web rollout base both mount
-			// this. A tenant keeping its packages private has no way to run them
-			// without it.
-			name: "ghcr-pull-secret", namespace: constants.NamespaceOps,
-			artifact:   escrow.ArtifactRegistryCredential,
-			capability: true,
-			keys: map[string]string{
-				"username": escrow.FieldRegistryUser,
-				"token":    escrow.FieldRegistryToken,
-			},
-			secType: corev1.SecretTypeDockerConfigJson,
-			what:    "pulling private images for this tenant's workloads",
-			compose: func(in map[string]string) map[string]string {
-				// The registry is not one of the required keys: it has a correct
-				// default, and making it one would mean a tenant using ghcr had to
-				// supply it or be told their credential was half-configured.
-				registry := strings.TrimSpace(os.Getenv("GHCR_REGISTRY"))
-				if registry == "" {
-					registry = "ghcr.io"
-				}
-				auth := base64.StdEncoding.EncodeToString(
-					[]byte(in["username"] + ":" + in["token"]))
-				return map[string]string{
-					corev1.DockerConfigJsonKey: fmt.Sprintf(
-						`{"auths":{%q:{"username":%q,"password":%q,"auth":%q}}}`,
-						registry, in["username"], in["token"], auth),
-				}
-			},
-		},
+		// No registry credential here. It is enrolled when an application first
+		// declares a private package (`kakt tenant add-app`), and hub-operator
+		// converges it from the escrow into OpenBao on every reconcile, so Day-0
+		// is not the only way in (ADR-076, amended).
 	}
 }
 

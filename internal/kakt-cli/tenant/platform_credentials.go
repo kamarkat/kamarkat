@@ -84,7 +84,6 @@ func platformCredentials() []platformCredential {
 	// Only when the tenant runs images the platform cannot pull anonymously.
 	// ADR-066 makes workloads theirs, so this credential is irreducibly theirs
 	// too -- and equally, a tenant running public images should never be asked.
-	privateImages := func(s Spec, _ Secrets) bool { return s.PrivateRegistry }
 	always := func(Spec, Secrets) bool { return true }
 
 	return []platformCredential{
@@ -109,22 +108,6 @@ func platformCredentials() []platformCredential {
 			Field:      func(s *Secrets) *string { return &s.S3SecretAccessKey },
 			Needed:     backupsWanted,
 			Store:      "s3/secret-access-key",
-		},
-		{
-			Secret: "GHCR_USERNAME", Tier: tierCapability,
-			Capability: "pulling your own private images",
-			Prompt:     "GHCR_USERNAME (to pull your private images): ",
-			Field:      func(s *Secrets) *string { return &s.GHCRUsername },
-			Needed:     privateImages,
-			Store:      "ghcr/username",
-		},
-		{
-			Secret: "GHCR_TOKEN", Tier: tierCapability,
-			Capability: "pulling your own private images",
-			Prompt:     "GHCR_TOKEN (a token with read:packages): ",
-			Field:      func(s *Secrets) *string { return &s.GHCRToken },
-			Needed:     privateImages,
-			Store:      "ghcr/token",
 		},
 		{
 			Secret: "GRAFANA_IRM_ALERTMANAGER_URL", Tier: tierDestination,

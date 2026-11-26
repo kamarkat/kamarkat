@@ -83,9 +83,6 @@ type Secrets struct {
 
 	// The issuer's outbound mail, as an SMTP URL (smtps://user:password@host:port).
 	ZitadelSMTPURL string
-
-	GHCRUsername string
-	GHCRToken    string
 }
 
 // hasEscrow reports whether a complete escrow credential was supplied.

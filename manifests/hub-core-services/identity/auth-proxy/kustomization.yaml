@@ -7,7 +7,6 @@ resources:
 - rbac.yaml
 - deployment.yaml
 - service.yaml
-- ghcr-pull-secret-es.yaml
 
 # Pinned by digest, not by tag. The auth-proxy workflow rewrites this line with
 # `kustomize edit set image` after each build and commits it, so the running

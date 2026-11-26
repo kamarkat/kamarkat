@@ -92,13 +92,6 @@ func credentialGuidance(secret string) guidance {
 				"  keep backups elsewhere",
 			},
 		}
-	case "GHCR_TOKEN":
-		return guidance{
-			URL: "https://github.com/settings/tokens/new?scopes=read:packages&description=kamarkat%20image%20pull",
-			Steps: []string{
-				"`read:packages` is pre-selected, and read is all this needs",
-			},
-		}
 	case "TS_AUTHKEY":
 		return guidance{
 			URL: "https://login.tailscale.com/admin/settings/keys",

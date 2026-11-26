@@ -59,7 +59,7 @@ type TenantSecretStore interface {
 	DeleteSecret(ctx context.Context, secretPath, secretName string) error
 	EnsureTenantFolderAndCredentials(ctx context.Context, clusterName, tenantId, appId string,
 		isFirstTime bool, oauthClients []secrets.OAuthClient,
-		cacheEnabled, cacheIsFirstTime, gatewayEnabled bool) (*secrets.EnsureTenantCredentialsResult, error)
+		cacheEnabled, cacheIsFirstTime, gatewayEnabled, privateImages bool) (*secrets.EnsureTenantCredentialsResult, error)
 	// EnsureTenantAuth lets this application's namespace read its own scope and
 	// nothing else (ADR-117 §4): a JWT role on its cluster's mount, bound to the
 	// namespace's openbao-secrets ServiceAccount, holding a policy named by uid.
@@ -87,6 +87,7 @@ type AINativeSaaSReconciler struct {
 //+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases/finalizers,verbs=update
 //+kubebuilder:rbac:groups=nutgraf.in,resources=ainativesaases/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile provisions all tenant resources into Infisical on AINativeSaaS creation or update.
 //
@@ -168,6 +169,9 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// A fleet with no browser-facing gateway needs no session-cookie key.
 	gatewayEnabled, _, _ := unstructured.NestedBool(ainativesaas.Object, "spec", "gateway", "enabled")
+	chartsVis, _, _ := unstructured.NestedString(ainativesaas.Object, "spec", "registry", "charts")
+	imagesVis, _, _ := unstructured.NestedString(ainativesaas.Object, "spec", "registry", "images")
+	chartRepository, _, _ := unstructured.NestedString(ainativesaas.Object, "spec", "registry", "chartRepository")
 
 	// Per-credential, for the same reason the OAuth clients above are: a cache
 	// enabled today on a tenant provisioned months ago is new, and its absent
@@ -184,6 +188,10 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "Failed to withdraw the tenant's OpenBao authority; retrying", "tenant", tenantId)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		if err := r.reconcileChartRegistry(ctx, tenantId, appId, false, ""); err != nil {
+			logger.Error(err, "Failed to withdraw the tenant's chart registry credential; retrying", "tenant", tenantId)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		controllerutil.RemoveFinalizer(ainativesaas, openBaoFinalizer)
 		return ctrl.Result{}, r.Update(ctx, ainativesaas)
 	}
@@ -198,7 +206,7 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	result, err := r.Store.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled)
+	result, err := r.Store.EnsureTenantFolderAndCredentials(ctx, clusterName, tenantId, appId, isFirstTime, nil, cacheEnabled, cacheIsFirstTime, gatewayEnabled, imagesVis == "private")
 	// Whether every credential this application needs is in the store, stated
 	// for the openbao-db incarnation it was checked against: after a restore,
 	// `kakt openbao recover` waits for every application to say so (ADR-117 §7).
@@ -209,6 +217,13 @@ func (r *AINativeSaaSReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			_ = r.setCondition(ctx, ainativesaas, tenantId, conditionMissing)
 		}
 		return ctrl.Result{}, err
+	}
+
+	// The GitOps engine's credential for this app's chart repository, only for
+	// private charts (ADR-076, amended). A missing box credential is reported and
+	// retried: the app's other resources do not wait on it.
+	if err := r.reconcileChartRegistry(ctx, tenantId, appId, chartsVis == "private", chartRepository); err != nil {
+		logger.Error(err, "Chart registry credential not in place", "tenant", tenantId, "app", appId)
 	}
 
 	// Tenant identity, provisioned by the service that owns it (ADR-041).

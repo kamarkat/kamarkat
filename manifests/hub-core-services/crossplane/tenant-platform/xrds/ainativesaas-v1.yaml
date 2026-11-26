@@ -224,6 +224,26 @@ spec:
                 type: string
                 description: "Tenant owner email for notifications"
                 pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+              registry:
+                type: object
+                description: |
+                  How the application's packages are published. Charts and images
+                  are independent: a private chart gives the management cluster's
+                  GitOps engine a credential for chartRepository, private images a
+                  pull secret in the application's namespace, and a public package
+                  gives nothing.
+                properties:
+                  charts:
+                    type: string
+                    enum: [public, private]
+                    default: public
+                  images:
+                    type: string
+                    enum: [public, private]
+                    default: public
+                  chartRepository:
+                    type: string
+                    description: "The OCI chart repository, e.g. ghcr.io/acme/charts"
               gateway:
                 type: object
                 description: |

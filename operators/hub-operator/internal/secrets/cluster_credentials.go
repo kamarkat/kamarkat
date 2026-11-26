@@ -105,10 +105,9 @@ var FleetCredentials = []FleetCredential{
 	// A spoke pages nobody through Grafana IRM. It delivers its own alerts by email
 	// (above), and its silence is observed by the hub over its VMAuth read route
 	// (add.10 §5), not by a cloud endpoint it would have to be given.
-	{Key: "ghcr-pull-secret", Lifecycle: CentrallyRotated,
-		Why: "one registry credential for the box, read by every tenant workload's imagePullSecrets. " +
-			"Centrally owned: a rotated token must reach every cluster, or image pulls fail " +
-			"everywhere the old copy survived"},
+	// The registry credential is NOT copied to every cluster. It goes into the
+	// OpenBao scope of each application that declares private images, and only
+	// there (EnsureTenantFolderAndCredentials).
 	{Key: "hcloud-token", Lifecycle: CentrallyRotated,
 		Why: "provider-owned DNS, for the cell's cert-manager DNS01 solver and external-dns. " +
 			"One account credential for the box, so a rotation converges"},

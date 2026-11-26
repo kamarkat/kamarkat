@@ -109,15 +109,6 @@ type Spec struct {
 	// resolve it at runtime (ADR-063); it is recorded so a tenant can find the
 	// source of what it runs.
 	PlatformRepoURL string
-	// PrivateRegistry says this tenant runs images the platform cannot pull
-	// anonymously, so a registry credential is part of what the box needs.
-	//
-	// Declared rather than inferred: a tenant running public images must never be
-	// asked for one, and the platform cannot tell from outside which they run.
-	// ADR-066 makes workloads the tenant's, and this is the one credential that
-	// is irreducibly theirs.
-	PrivateRegistry bool
-
 	// BundleRegistry is where published bundles are pulled from, without a
 	// scheme: ArgoCD pulls a scheme-less registry host as an OCI artefact and
 	// passes anything else to `helm pull --repo`, which does not speak OCI.

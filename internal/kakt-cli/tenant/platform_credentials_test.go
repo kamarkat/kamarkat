@@ -6,7 +6,7 @@ import (
 )
 
 func prodSpec() Spec {
-	return Spec{Provider: "hetzner", PrivateRegistry: true}
+	return Spec{Provider: "hetzner"}
 }
 
 func withEverything(spec Spec) Secrets {
@@ -115,24 +115,13 @@ func TestBackupCredentialsAreAskedOfEveryBox(t *testing.T) {
 // A tenant running public images must never be asked for a registry credential:
 // ADR-066 makes workloads theirs, and the platform cannot tell from outside
 // which kind they run. Declared, not inferred.
-func TestRegistryCredentialFollowsTheDeclaration(t *testing.T) {
-	public := Spec{Provider: "hetzner", PrivateRegistry: false}
-	s := Secrets{ProviderToken: "p", GitopsToken: "g"}
-	for _, c := range s.missingInTier(public, tierCapability) {
+func TestBoxInitNeverAsksForARegistryCredential(t *testing.T) {
+	// A registry credential is an application's, asked for by add-app when a
+	// private package needs it; no box is created asking for one.
+	for _, c := range platformCredentials() {
 		if strings.HasPrefix(c.Secret, "GHCR_") {
-			t.Errorf("%s asked of a box running public images", c.Secret)
+			t.Errorf("box init still knows %s", c.Secret)
 		}
-	}
-
-	private := prodSpec()
-	var asked bool
-	for _, c := range s.missingInTier(private, tierCapability) {
-		if strings.HasPrefix(c.Secret, "GHCR_") {
-			asked = true
-		}
-	}
-	if !asked {
-		t.Error("a box declaring private images was not asked for a registry credential")
 	}
 }
 
@@ -143,7 +132,6 @@ func TestSecretNamesMatchWhatDayZeroReads(t *testing.T) {
 		"S3_ACCESS_KEY_ID": true, "S3_SECRET_ACCESS_KEY": true,
 		"GRAFANA_IRM_ALERTMANAGER_URL": true, "GRAFANA_IRM_HEARTBEAT_URL": true,
 		"IDENTITY_PROVIDER_SMTP_URL": true,
-		"GHCR_USERNAME":              true, "GHCR_TOKEN": true,
 		// SECRET_STORE_ADMIN_EMAIL and SECRET_STORE_ADMIN_PASSWORD are deliberately
 		// absent. The administrator of the box's own Infisical is not a
 		// repository secret: it is generated when the box is initialized, kept in

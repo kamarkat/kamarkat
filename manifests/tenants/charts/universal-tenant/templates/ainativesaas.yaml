@@ -122,6 +122,25 @@ spec:
     {{- end }}
   {{- end }}
 
+  {{- /* What the management cluster delivers for this app's packages: a pull
+         secret into its namespace for private images, a GitOps-engine credential
+         for its chart repository for private charts, nothing for public ones. */}}
+  {{- $reg := .Values.registry | default dict }}
+  {{- range $k := list "charts" "images" }}
+  {{- if not (has (index $reg $k | default "public") (list "public" "private")) }}
+  {{- fail (printf "registry.%s must be public or private, got %q" $k (index $reg $k)) }}
+  {{- end }}
+  {{- end }}
+  {{- if and (eq ($reg.charts | default "public") "private") (not $reg.chartRepository) }}
+  {{- fail "registry.charts is private but registry.chartRepository is empty: the management cluster cannot authorize a repository it is not told" }}
+  {{- end }}
+  registry:
+    charts: {{ $reg.charts | default "public" }}
+    images: {{ $reg.images | default "public" }}
+    {{- with $reg.chartRepository }}
+    chartRepository: {{ . | quote }}
+    {{- end }}
+
   {{- with .Values.cache }}
   cache:
     enabled: {{ .enabled | default false }}

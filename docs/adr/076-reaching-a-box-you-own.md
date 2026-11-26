@@ -1040,3 +1040,59 @@ forgotten:
 - **Declared schema fields**, such as `management.infisicalEnvironmentSlug` on a
   box declaration and its CRD property. These are API, so a rename is a CRD
   version change plus an edit to every tenant declaration already committed.
+
+## Amendment 2026-11-26: the registry credential is enrolled when an application needs it
+
+**Supersedes** the `registry-credential` row of the recovery contract ("enrolled
+once ... a first bootstrap pulls the tenant's private images before any store
+exists") and its place among the credentials a box is built with (amendment
+2026-11-17). The artefact, its escrow scope and `kakt escrow
+enroll-registry-credential` are unchanged.
+
+**Principle.** A credential is asked for only when the operation the person
+intends cannot be completed without it. Registry authentication is an
+application distribution requirement, not a platform installation one: the
+platform's own images are public, so no box needs a registry credential to be
+built, bootstrapped or given a managed cluster.
+
+**Enrolment.** `kakt box init` no longer asks for one, and Day-0 no longer
+creates it. `kakt tenant add-app` checks each workload's chart and, when a
+published chart can be read, the images it deploys:
+
+| Registry answer | Meaning | add-app |
+|---|---|---|
+| readable anonymously | public | nothing asked |
+| not found | not published | declared visibility (`--charts`/`--images`) or one question |
+| refused anonymously | private, or not published (the registry does not say which) | declared visibility or one question; if private, the box's credential is tried |
+| refused with the credential | lacks access, or not published | asks whether the package is published; if so, requests a credential |
+| rate limited, server error, no answer | unavailable | stops; asks and writes nothing |
+
+A requested credential is verified against the published private packages
+before it is saved; access to an unpublished package is never reported as
+verified.
+
+**Scope and selection.** One credential per box per registry host (ghcr.io; a
+private package on another registry is refused as unsupported), because a pull
+secret holds one login per host. It is reused when it reads the new
+application's private packages. A replacement must also read every private
+package the box's other applications declare, or it is refused, so replacing
+it cannot break another application. It never leaves the box's escrow scope.
+
+**Delivery.** The application declares `registry.charts` and `registry.images`
+(`public` | `private`) and `registry.chartRepository`. hub-operator converges the
+escrowed credential into OpenBao on every reconcile, so enrolment after Day-0
+takes effect without one, and delivers it only where declared: into the OpenBao
+scope of an application with private images (and so its namespace, through
+its own SecretStore), and as an Argo CD repository credential for exactly the
+chart repository an application with private charts declares. It is no longer
+copied into every cluster's scope or every application's, and nothing on the
+management cluster mounts it for the platform's own public images.
+
+**Maintenance.** Rotation and recovery after revocation are
+`kakt escrow enroll-registry-credential --rotate`; no further command is added.
+`kakt verify` stays read-only.
+
+**Migration.** An application that relied on the unconditional credential and
+has private packages must declare `registry.images: private` and/or
+`registry.charts: private` with its `chartRepository`, or be redeclared with
+`kakt tenant add-app`.
