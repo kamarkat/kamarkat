@@ -786,11 +786,6 @@ spec:
           TS_BIN="${TS_BIN:-$(command -v tailscale 2>/dev/null || echo /opt/bin/tailscale)}"
           FLAGS=/var/lib/kubelet/kubeadm-flags.env
           [ -f "$FLAGS" ] || exit 0
-          [ -x "$TS_BIN" ] || exit 0
-          TS_IP="$($TS_BIN ip -4 2>/dev/null)" || exit 0
-          [ -n "$TS_IP" ] || exit 0
-          sed -i "s/ --node-ip=[0-9.]*//g" "$FLAGS"
-          sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--node-ip=${TS_IP} /g" "$FLAGS"
           # Self-assign providerID from Hetzner metadata.
           #
           # Once --node-ip is a tailnet address the Hetzner CCM refuses to
@@ -812,6 +807,11 @@ spec:
               sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--provider-id=hcloud:\/\/${ID} /g" "$FLAGS"
             fi
           fi
+          [ -x "$TS_BIN" ] || exit 0
+          TS_IP="$($TS_BIN ip -4 2>/dev/null)" || exit 0
+          [ -n "$TS_IP" ] || exit 0
+          sed -i "s/ --node-ip=[0-9.]*//g" "$FLAGS"
+          sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--node-ip=${TS_IP} /g" "$FLAGS"
           exit 0
       - path: /etc/tailscale-authkey
         owner: root
@@ -1024,11 +1024,6 @@ spec:
           TS_BIN="${TS_BIN:-$(command -v tailscale 2>/dev/null || echo /opt/bin/tailscale)}"
           FLAGS=/var/lib/kubelet/kubeadm-flags.env
           [ -f "$FLAGS" ] || exit 0
-          [ -x "$TS_BIN" ] || exit 0
-          TS_IP="$($TS_BIN ip -4 2>/dev/null)" || exit 0
-          [ -n "$TS_IP" ] || exit 0
-          sed -i "s/ --node-ip=[0-9.]*//g" "$FLAGS"
-          sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--node-ip=${TS_IP} /g" "$FLAGS"
           # Self-assign providerID from Hetzner metadata.
           #
           # Once --node-ip is a tailnet address the Hetzner CCM refuses to
@@ -1050,6 +1045,11 @@ spec:
               sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--provider-id=hcloud:\/\/${ID} /g" "$FLAGS"
             fi
           fi
+          [ -x "$TS_BIN" ] || exit 0
+          TS_IP="$($TS_BIN ip -4 2>/dev/null)" || exit 0
+          [ -n "$TS_IP" ] || exit 0
+          sed -i "s/ --node-ip=[0-9.]*//g" "$FLAGS"
+          sed -i "s/KUBELET_KUBEADM_ARGS=\"/KUBELET_KUBEADM_ARGS=\"--node-ip=${TS_IP} /g" "$FLAGS"
           exit 0
       - path: /etc/tailscale-authkey
         owner: root

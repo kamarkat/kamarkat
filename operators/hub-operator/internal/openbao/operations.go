@@ -255,7 +255,7 @@ func (c *Client) EnsureJWTMount(ctx context.Context, mount, maxTTL string) error
 			return fmt.Errorf("enable auth/%s: %w", mount, err)
 		}
 	}
-	return c.Write(ctx, "sys/mounts/auth/"+mount+"/tune", map[string]any{
+	return c.Write(ctx, "sys/auth/"+mount+"/tune", map[string]any{
 		"max_lease_ttl": maxTTL, "default_lease_ttl": maxTTL,
 	}, nil)
 }

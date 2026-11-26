@@ -316,7 +316,7 @@ server:
               path "sys/policies/acl"          { capabilities = ["list"] }
               path "sys/auth"                  { capabilities = ["read"] }
               path "sys/auth/spoke-*"          { capabilities = ["create", "read", "update", "delete", "sudo"] }
-              path "sys/mounts/auth/spoke-*/tune" { capabilities = ["read", "update"] }
+              path "sys/auth/spoke-*/tune"     { capabilities = ["read", "update"] }
               path "auth/spoke-*"              { capabilities = ["create", "read", "update", "delete", "list"] }
               path "pki_int/roles/*"           { capabilities = ["create", "read", "update", "delete", "list"] }
               path "pki_int/issuers"           { capabilities = ["list"] }
