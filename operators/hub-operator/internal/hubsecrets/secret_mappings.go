@@ -329,8 +329,8 @@ var CLISecretMappings = []SecretMapping{
 
 // ApplicationSecretDefinition defines an application secret to create in Infisical
 type ApplicationSecretDefinition struct {
-	UsernameKey string // Infisical key for username (e.g., "control-plane-db-username") - empty for non-DB secrets
-	PasswordKey string // Infisical key for password/secret (e.g., "control-plane-db-password")
+	UsernameKey string // OpenBao key for username (e.g., "control-plane-db-username") - empty for non-DB secrets
+	PasswordKey string // OpenBao key for password/secret (e.g., "control-plane-db-password")
 	Username    string // Username value (e.g., "mcp_server") - empty for non-DB secrets
 	Description string // Human-readable description
 

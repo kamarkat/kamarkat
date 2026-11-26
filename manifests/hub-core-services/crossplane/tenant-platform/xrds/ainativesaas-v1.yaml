@@ -357,7 +357,7 @@ spec:
                 type: object
                 description: |
                   OAuth clients this fleet declares (ADR-053). A confidential client
-                  receives a generated credential in Infisical; a public client holds no
+                  receives a generated credential in OpenBao; a public client holds no
                   secret material and is listed so the set is complete.
 
                   redirectPaths travels WITH the client, and the description here used to

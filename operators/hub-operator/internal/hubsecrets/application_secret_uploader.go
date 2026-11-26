@@ -315,7 +315,7 @@ func (u *ApplicationSecretUploader) UploadApplicationSecrets(ctx context.Context
 					failedKeys = append(failedKeys, secretDef.PrivateKeyKey)
 					continue
 				} else if inUse {
-					logger.Error(fmt.Errorf("%s exists while Infisical holds neither half of the pair",
+					logger.Error(fmt.Errorf("%s exists while OpenBao holds neither half of the pair",
 						secretDef.DeliveredSecret),
 						"Refusing to mint a keypair that is already in use: the delivered Secret is Retained, "+
 							"so the login service is still signing with it and a new pair would be rejected by "+

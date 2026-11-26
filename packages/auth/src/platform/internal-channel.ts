@@ -61,7 +61,7 @@ export class InternalTokenMissingError extends Error {
     super(
       `No internal token for ${appId}, so this call cannot be authenticated.\n\n` +
         `The platform seeds ${appId.toUpperCase().replace(/-/g, "_")}_INTERNAL_TOKEN into this ` +
-        `application's Infisical folder and delivers it by ExternalSecret. A workload ` +
+        `application's OpenBao path and delivers it by ExternalSecret. A workload ` +
         `without it has not received its secret — check the ExternalSecret, rather than ` +
         `making the call without the header.`,
     );

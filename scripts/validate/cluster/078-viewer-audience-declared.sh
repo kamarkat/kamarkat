@@ -71,7 +71,7 @@ for app in apps:
         print("FAIL %s passes no global.observability.viewer.audience, so its viewer "
               "query endpoint is not rendered and nothing on that spoke answers a "
               "viewer's query -- while this box has an observability client "
-              "registered. Read hub-observability-project-id from Infisical and set "
+              "registered. Read hub-observability-project-id from OpenBao (kv/hub) and set "
               "observability.viewer.audience in the box registry" % name)
 PYCHECK
     )

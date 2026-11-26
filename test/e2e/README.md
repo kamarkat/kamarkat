@@ -8,7 +8,6 @@ End-to-end tests using [kubernetes-sigs/e2e-framework](https://github.com/kubern
 test/e2e/
 ├── go.mod                  # Separate test module
 ├── credit-authority/       # ADR-109: the Credit Authority's guarantees and isolation
-├── infisical-eso/
 ├── platform-victoriametrics/
 └── README.md
 ```

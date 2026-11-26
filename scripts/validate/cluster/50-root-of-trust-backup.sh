@@ -138,7 +138,7 @@ validate_root_of_trust_backup() {
     hub_names=$(kc get cluster.postgresql.cnpg.io -A -o json 2>/dev/null \
         | jq -r '.items[]? | .metadata.namespace + "/" + .metadata.name')
     if [[ -z "$hub_names" ]]; then
-        soft_fail "the hub reports NO CNPG clusters — Infisical's database is one of them, so this is either unreachable or broken"
+        soft_fail "the hub reports NO CNPG clusters — OpenBao's database is one of them, so this is either unreachable or broken"
     else
         local hub_entry
         while IFS= read -r hub_entry; do

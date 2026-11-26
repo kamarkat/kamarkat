@@ -77,24 +77,3 @@ func (i *Installer) FixArgoCDGitHubAuth(ctx context.Context, githubToken, orgURL
 	fmt.Println("[bootstrap] Note: ESO will take over credential management after deployment")
 	return nil
 }
-
-// InstallInfisicalSecrets generates and injects Infisical base secrets (Secret Zero)
-// This is called during bootstrap BEFORE ArgoCD syncs Infisical.
-// CRITICAL: These secrets enable Infisical to boot, NEVER store in Git.
-//
-// Generated Secrets:
-// - ENCRYPTION_KEY: Exactly 32-character ASCII string (32 bytes) for AES-256-GCM encryption
-// - AUTH_SECRET: Exactly 32-character ASCII string (32 bytes) for JWT signing
-//
-// IMPORTANT: Infisical's Node.js backend expects ENCRYPTION_KEY as a 32-byte UTF-8 string.
-// We use generateSecurePassword(32) which produces exactly 32 hex characters (32 bytes).
-//
-// IDEMPOTENCY: Returns (true, nil) if secrets were created/modified, (false, nil) if they already exist.
-// This prevents secret drift and unnecessary pod churn from repeated CLI executions.
-//
-// Production Workflow:
-// 1. Developer runs: hub init-secrets
-// 2. This method generates secure random keys using crypto/rand
-// 3. Creates infisical-secrets in platform-core-db namespace
-// 4. ArgoCD syncs Infisical Helm chart (wave 3)
-// 5. Infisical pods start and use these secrets

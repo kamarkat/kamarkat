@@ -8,10 +8,10 @@
 # That delay is the whole problem: whoever changes a duration or a ceiling gets no
 # feedback, and the failure surfaces as unexplained mTLS breakage long after.
 #
-# So: every Certificate issued through an infisical issuer must request no more than
+# So: every Certificate issued through an OpenBao issuer must request no more than
 # its profile allows. Ceilings are read from internal/pki, the single authoritative
 # registry (ADR-035 addendum §2), and the issuer→profile mapping from the
-# ClusterIssuer manifests, so this check follows both as they change.
+# issuers' pki_int/sign/<profile> paths, so this check follows both as they change.
 validate_certificate_ttl_ceiling() {
     section "Certificate durations fit their profile ceiling (ADR-035 §5)"
 
@@ -46,9 +46,25 @@ for f in glob.glob("manifests/**/*.yaml", recursive=True):
             continue
         if d.get("kind") not in ("ClusterIssuer", "Issuer"):
             continue
-        tmpl = (d.get("spec") or {}).get("certificateTemplateName")
-        if tmpl:
-            issuer_profile[d["metadata"]["name"]] = tmpl
+        path = ((d.get("spec") or {}).get("vault") or {}).get("path", "")
+        if path.startswith("pki_int/sign/"):
+            issuer_profile[d["metadata"]["name"]] = path[len("pki_int/sign/"):]
+
+# The hub's two Vault ClusterIssuers are rendered by a Helm range over a dict of
+# names and profile values, which no YAML decoder sees; read both halves.
+tpl = "manifests/hub-core-services/security/templates/openbao-issuers.yaml"
+vals = "manifests/hub-core-services/security/values.yaml"
+if os.path.exists(tpl) and os.path.exists(vals):
+    profiles = (yaml.safe_load(open(vals)) or {}).get("certificateProfile") or {}
+    for name, key in re.findall(r'"(openbao-[a-z-]+)" \.Values\.certificateProfile\.([A-Za-z]+)', open(tpl).read()):
+        if profiles.get(key):
+            issuer_profile[name] = profiles[key]
+
+# Only profiles internal/pki declares carry a ceiling here; per-spoke roles are
+# hub-operator's and capped by it.
+issuer_profile = {k: v for k, v in issuer_profile.items() if v in ceilings}
+if not issuer_profile:
+    print("BAD\t-\tno OpenBao issuer maps to an internal/pki profile; this check would inspect nothing")
 
 def hours(v):
     if not isinstance(v, str):
@@ -106,7 +122,7 @@ PY
     fi
 
     if [[ -z "$out" ]]; then
-        pass "every infisical-issued Certificate fits its profile ceiling"
+        pass "every OpenBao-issued Certificate fits its profile ceiling"
         return 0
     fi
 
