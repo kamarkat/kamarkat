@@ -151,6 +151,25 @@ components:
       requires platform.observer. Gated on capabilities.grafanaMcp.enabled with
       platformMcp and observability.
 
+  # ── Sandboxes (ADR-052) ─────────────────────────────────────────────────
+  - name: agent-vault
+    declared_by: [052-sandbox-compute-and-s3-workspaces.md]
+    status: shipped
+    path: manifests/tenants/charts/universal-tenant/files/agent-vault
+    note: >-
+      Infisical's open-source credential broker (infisical/agent-vault),
+      running standalone as a sidecar in every sandbox pod: a local server with
+      a throwaway account, no Infisical server and no connection to the box's
+      escrow. It is the only channel a sandbox has to outbound credentials. The
+      APPLICATION pins its image (waypoint-sdk values, 0.38.0); the platform
+      owns the entrypoint (universal-tenant, gated on
+      sandbox.agentVault.enabled), the sandbox network policy and admission
+      rules around it, and ephemeral-job-operator's sidecar handling. The
+      entrypoint depends on agent-vault's own API -- /v1/auth/register and
+      /login, /v1/vaults, /v1/credentials, /v1/agents, /v1/mitm/ca.pem and the
+      MITM proxy on 14322 -- so an image bump in the application is checked
+      against that contract before it ships.
+
 # Directories deliberately not applied on their own. Each needs a reason,
 # because a waiver without one is an orphan with paperwork -- and the gate
 # rejects a waiver for something that IS applied, so the list cannot rot into a
