@@ -83,6 +83,10 @@ type Provider interface {
 	// Cloud extracts from CAPI secret.
 	Finalize(ctx context.Context, cfg *FinalizeConfig) (string, error)
 
+	// EnsureTopologyRecorded ensures clusters/<name>/generated/hub-cluster.yaml
+	// exists in the GitOps repo (ADR-045, ADR-075).
+	EnsureTopologyRecorded(gitopsDir string) error
+
 	// ── Webhook validation ────────────────────────────────────────────────
 	// OperatorWebhookPatterns returns additional webhook name substrings that
 	// must be present before data-plane workloads (Phase 11 gating).

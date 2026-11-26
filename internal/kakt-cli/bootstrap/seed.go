@@ -411,6 +411,11 @@ func (o *Orchestrator) applySeedApplication(ctx context.Context, kubeconfig stri
 		if err := o.writeGatewayDNSTarget(ctx, kubeconfig); err != nil {
 			return err
 		}
+		if o.Provider != nil {
+			if err := o.Provider.EnsureTopologyRecorded(o.GitopsDir); err != nil {
+				return err
+			}
+		}
 		return o.applyTenantSeed(ctx, kubeconfig)
 	}
 

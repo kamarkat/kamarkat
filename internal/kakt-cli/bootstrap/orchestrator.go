@@ -2790,6 +2790,11 @@ func (o *Orchestrator) adr045GeneratedDirs() ([]string, error) {
 	}
 	seen := map[string]bool{}
 	var dirs []string
+	if o.GitopsDir != "" && o.ClusterName != "" {
+		d := filepath.Join(tenant.RegistryDir, "clusters", o.ClusterName, "generated") + "/"
+		seen[d] = true
+		dirs = append(dirs, d)
+	}
 	for _, a := range reg.Artifacts {
 		d := filepath.Dir(a.File) + "/"
 		if !seen[d] {
@@ -2809,6 +2814,11 @@ func (o *Orchestrator) adr045Consumers() ([]string, error) {
 	}
 	seen := map[string]bool{}
 	var apps []string
+	if o.GitopsDir != "" && o.ClusterName != "" {
+		app := o.ClusterName + "-generated"
+		seen[app] = true
+		apps = append(apps, app)
+	}
 	for _, a := range reg.Artifacts {
 		if a.ConsumedBy == "" || seen[a.ConsumedBy] {
 			continue
@@ -2950,6 +2960,11 @@ func (o *Orchestrator) validateADR045Artifacts(ctx context.Context) error {
 // commit that never happened.
 func (o *Orchestrator) commitGeneratedArtifacts(ctx context.Context) error {
 	fmt.Println("\n[adr045-commit] Validating and committing ADR-045 artifacts...")
+	if o.GitopsDir != "" && o.Provider != nil {
+		if err := o.Provider.EnsureTopologyRecorded(o.GitopsDir); err != nil {
+			return fmt.Errorf("[adr045-commit] record cluster topology: %w", err)
+		}
+	}
 	if err := o.validateADR045Artifacts(ctx); err != nil {
 		return fmt.Errorf("[adr045-commit] %w", err)
 	}

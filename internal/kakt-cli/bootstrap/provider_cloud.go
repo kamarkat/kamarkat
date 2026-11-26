@@ -300,6 +300,23 @@ func (p *CloudProvider) ProvisionManagementCluster(ctx context.Context, cfg *Pro
 	return nil
 }
 
+// EnsureTopologyRecorded ensures clusters/<name>/generated/hub-cluster.yaml exists in GitOps repo.
+func (p *CloudProvider) EnsureTopologyRecorded(gitopsDir string) error {
+	if gitopsDir == "" || p.clusterName == "" {
+		return nil
+	}
+	clusterCfg := &cluster.Config{}
+	p.driver.PopulateClusterConfig(clusterCfg)
+	clusterCfg.ClusterName = p.clusterName
+	clusterCfg.Namespace = constants.NamespaceCAPI
+	clusterCfg.GitopsDir = gitopsDir
+	provisioner := &cluster.Provisioner{
+		Config: clusterCfg,
+		Debug:  p.debug,
+	}
+	return provisioner.EnsureTopologyRecorded()
+}
+
 // ── Phase 6: Pivot Move ─────────────────────────────────────────────────────
 
 func (p *CloudProvider) PivotMove(ctx context.Context, cfg *PivotConfig) (string, error) {
