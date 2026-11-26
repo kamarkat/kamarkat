@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kamarkat/kamarkat/internal/kakt-cli/hubaccess"
@@ -38,20 +39,30 @@ This is break-glass access. Normal access is through your own identity provider,
 where each person authenticates as themselves. Use this when that is not available:
 the identity provider is down, the cluster is broken, or nobody can log in.
 
-The escrow is the Infisical you supplied when the box is rendered, reached with the same
-four values the cluster uses:
+Run it inside the box's GitOps repository and it needs nothing else: the
+repository names the escrow and the management cluster, and the read is made
+with your own ` + "`kakt login`" + ` session.
 
-  ESCROW_PROVIDER_URL         usually https://app.infisical.com
-  ESCROW_PROVIDER_PROJECT_ID
-  ESCROW_PROVIDER_CLIENT_ID
-  ESCROW_PROVIDER_CLIENT_SECRET
+  kakt kubeconfig --out admin.kubeconfig             the management cluster
+  kakt kubeconfig --cluster acme-01 --out stg.kubeconfig   a managed cluster
+
+Outside a checkout, pass --box and --cluster, with the four ESCROW_PROVIDER_*
+values in the environment.
 
 The credential it returns is cluster-admin and is not scoped to a person. Prefer
 the identity provider wherever it is working, and treat what this prints as
 something to use and discard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(clusterName) == "" {
-				return fmt.Errorf("--cluster is required: the escrow holds one kubeconfig per cluster")
+			// Inside the box's repository, the repository is the default source:
+			// it names the escrow and, with no --cluster, the management cluster.
+			if strings.TrimSpace(gitopsDir) == "" && strings.TrimSpace(boxID) == "" {
+				if _, err := os.Stat(filepath.Join("registry", "box.yaml")); err == nil {
+					gitopsDir = "."
+				}
+			}
+			if strings.TrimSpace(gitopsDir) == "" && strings.TrimSpace(clusterName) == "" {
+				return fmt.Errorf("--cluster is required outside the box's GitOps repository: " +
+					"the escrow holds one kubeconfig per cluster")
 			}
 
 			// Two ways in, both explicit, and the first is the one a developer on a
@@ -80,6 +91,7 @@ something to use and discard.`,
 				if err != nil {
 					return err
 				}
+				clusterName = coords.ClusterName
 				payload, err = access.Kubeconfig(cmd.Context(),
 					hubaccess.Identity{BoxID: coords.BoxID, ClusterName: coords.ClusterName})
 				if err != nil {
@@ -125,11 +137,12 @@ something to use and discard.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&clusterName, "cluster", "", "the cluster whose kubeconfig to retrieve (required)")
+	cmd.Flags().StringVar(&clusterName, "cluster", "",
+		"the cluster whose kubeconfig to retrieve. Inside the box's repository it defaults to the management cluster")
 	cmd.Flags().StringVar(&boxID, "box", "",
 		"the logical hub the escrow is keyed by; required unless --gitops-dir declares it")
 	cmd.Flags().StringVar(&gitopsDir, "gitops-dir", "",
-		"the box's repository, which declares its escrow -- then your own `kakt login` reads it")
+		"the box's repository, which declares its escrow. Defaults to the working directory when it is one")
 	cmd.Flags().StringVar(&out, "out", "", "write to this file instead of stdout")
 	return cmd
 }
