@@ -80,3 +80,6 @@ subjects:
   - kind: ServiceAccount
     name: cert-manager
     namespace: cert-manager
+  - kind: ServiceAccount
+    name: cm-cert-manager
+    namespace: cert-manager
