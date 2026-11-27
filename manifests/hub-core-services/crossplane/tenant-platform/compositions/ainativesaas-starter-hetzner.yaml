@@ -40,7 +40,6 @@ spec:
                       appId: ""          # Patched: the PRODUCT
                       scopeId: ""        # Patched: <tenant>-<app>, what names are built from
                       databaseName: ""   # Patched: database.name
-                      cellId: ""         # Patched: cellId
                       dbRoleName: ""     # Patched: the postgres role, composed by the chart
                       dbOwnerRoleName: "" # Patched: the OWNER role (ADR-093)
                 providerConfigRef:
@@ -60,6 +59,7 @@ spec:
               transforms:
               - type: string
                 string:
+                  type: Format
                   fmt: "%s-tenant-database"
             - type: FromCompositeFieldPath
               fromFieldPath: spec.appId
@@ -187,25 +187,25 @@ spec:
               toFieldPath: metadata.name
               transforms:
               - type: string
-                string: {fmt: "%s-cache-credential"}
+                string: {type: Format, fmt: "%s-cache-credential"}
             - type: FromCompositeFieldPath
               fromFieldPath: spec.appId
               toFieldPath: spec.forProvider.manifest.metadata.name
               transforms:
               - type: string
-                string: {fmt: "%s-cache-auth"}
+                string: {type: Format, fmt: "%s-cache-auth"}
             - type: FromCompositeFieldPath
               fromFieldPath: spec.appId
               toFieldPath: spec.forProvider.manifest.spec.target.name
               transforms:
               - type: string
-                string: {fmt: "%s-cache-auth"}
+                string: {type: Format, fmt: "%s-cache-auth"}
             - type: FromCompositeFieldPath
               fromFieldPath: spec.scopeId
               toFieldPath: spec.forProvider.manifest.metadata.namespace
               transforms:
               - type: string
-                string: {fmt: "tenant-%s"}
+                string: {type: Format, fmt: "tenant-%s"}
             # The ESO template cannot see the tenant, so the host is patched in. The short
             # Service name resolves because the consumer shares the namespace.
             - type: FromCompositeFieldPath
@@ -213,7 +213,7 @@ spec:
               toFieldPath: spec.forProvider.manifest.spec.target.template.data.REDIS_URL
               transforms:
               - type: string
-                string: {fmt: "redis://app:{{ .password }}@%s-cache:6379"}
+                string: {type: Format, fmt: "redis://app:{{ .password }}@%s-cache:6379"}
 
           - name: cache-certificate
             base:
@@ -245,12 +245,12 @@ spec:
                   name: ""
             patches:
             - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-certificate"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.secretName, transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.dnsNames[0]", transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.commonName, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-certificate"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.secretName, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {type: Format, fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.dnsNames[0]", transforms: [{type: string, string: {type: Format, fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.spec.commonName, transforms: [{type: string, string: {type: Format, fmt: "%s-cache"}}]}
 
           - name: cache-service
             base:
@@ -288,9 +288,9 @@ spec:
                   name: ""
             patches:
             - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-service"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-service"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {type: Format, fmt: "tenant-%s"}}]}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.app-id"}
 
@@ -388,16 +388,16 @@ spec:
                   name: ""
             patches:
             - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-deployment"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-deployment"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {type: Format, fmt: "tenant-%s"}}]}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.tenant-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.metadata.labels.app-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.selector.matchLabels.app-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.metadata.labels.app-id"}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[1].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-tls"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[2].secret.secretName", transforms: [{type: string, string: {fmt: "%s-cache-auth"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[1].secret.secretName", transforms: [{type: string, string: {type: Format, fmt: "%s-cache-tls"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.template.spec.volumes[2].secret.secretName", transforms: [{type: string, string: {type: Format, fmt: "%s-cache-auth"}}]}
             # The fleet's only inputs.
             - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.cpu, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.cpu", policy: {fromFieldPath: Optional}}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.cache.resources.requests.memory, toFieldPath: "spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.memory", policy: {fromFieldPath: Optional}}
@@ -458,12 +458,12 @@ spec:
                   name: ""
             patches:
             - {type: FromCompositeFieldPath, fromFieldPath: spec.clusterName, toFieldPath: spec.providerConfigRef.name}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {fmt: "%s-cache-network-policy"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {fmt: "%s-cache"}}]}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache-network-policy"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: spec.forProvider.manifest.metadata.name, transforms: [{type: string, string: {type: Format, fmt: "%s-cache"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: spec.forProvider.manifest.metadata.namespace, transforms: [{type: string, string: {type: Format, fmt: "tenant-%s"}}]}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.tenantId, toFieldPath: "spec.forProvider.manifest.metadata.labels.tenant-id"}
             - {type: FromCompositeFieldPath, fromFieldPath: spec.appId, toFieldPath: "spec.forProvider.manifest.spec.endpointSelector.matchLabels.app-id"}
-            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: "spec.forProvider.manifest.spec.ingress[0].fromEndpoints[0].matchLabels['k8s:io.kubernetes.pod.namespace']", transforms: [{type: string, string: {fmt: "tenant-%s"}}]}
+            - {type: FromCompositeFieldPath, fromFieldPath: spec.scopeId, toFieldPath: "spec.forProvider.manifest.spec.ingress[0].fromEndpoints[0].matchLabels['k8s:io.kubernetes.pod.namespace']", transforms: [{type: string, string: {type: Format, fmt: "tenant-%s"}}]}
 
           - name: pooler
             base:
@@ -513,6 +513,7 @@ spec:
               transforms:
               - type: string
                 string:
+                  type: Format
                   fmt: "%s-pooler"
             - type: FromCompositeFieldPath
               fromFieldPath: spec.appId
@@ -520,6 +521,7 @@ spec:
               transforms:
               - type: string
                 string:
+                  type: Format
                   fmt: "%s-pooler"
             - type: FromCompositeFieldPath
               fromFieldPath: spec.database.name

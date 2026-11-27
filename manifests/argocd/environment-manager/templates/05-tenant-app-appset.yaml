@@ -639,6 +639,8 @@ spec:
         - repoURL: {{ include "environment-manager.instanceRepoURL" . | quote }}
           targetRevision: main
           path: '{{"{{"}} .app.path.path {{"}}"}}'
+          helm:
+            releaseName: '{{"{{"}} .app.path.basename {{"}}"}}'
 
       destination:
         name: '{{"{{"}} .name {{"}}"}}'
